@@ -42,6 +42,15 @@ Put personal workflow skills in `~/.phren/global/skills/` and list them here. Se
 - Before handing work back or stopping, record non-obvious bugs, patterns, tradeoffs, or decisions with `add_finding(...)`.
 - Do not wait for the user to explicitly say "save this as a finding" if the insight will matter next session.
 
+### Spawned agents and subagents
+
+When spawning an Agent() or using team agents, phren context is auto-injected via the UserPromptSubmit hook. Agents have access to all phren MCP tools. Every agent should:
+
+1. **Before starting work:** call `search_knowledge(query)` with the task description to check for existing findings, conventions, and decisions.
+2. **During work:** call `add_finding(project, finding)` for any non-obvious discovery (gotchas, patterns, architectural decisions, tradeoffs).
+3. **When completing a task:** call `complete_task(project, item)` if working on a tracked task.
+4. **At handoff:** summarize what was done and what was learned. Findings persist across sessions; chat does not.
+
 ## Project store
 
 In shared mode, skills and project config live in `~/.phren` (or wherever `PHREN_DIR` points). This is a git repo that syncs across machines using profiles.

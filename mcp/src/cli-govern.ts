@@ -264,6 +264,188 @@ export async function handleConsolidateMemories(args: string[] = []) {
   console.log(`Updated backups (${backups.length}): ${backups.join(", ")}`);
 }
 
+// ── GC (garbage collect) ─────────────────────────────────────────────────────
+
+interface GcReport {
+  gitGcRan: boolean;
+  commitsSquashed: number;
+  sessionsRemoved: number;
+  runtimeLogsRemoved: number;
+}
+
+export async function handleGcMaintain(args: string[] = []): Promise<void> {
+  const dryRun = args.includes("--dry-run");
+  const phrenPath = getPhrenPath();
+  const { execSync } = await import("child_process");
+  const report: GcReport = {
+    gitGcRan: false,
+    commitsSquashed: 0,
+    sessionsRemoved: 0,
+    runtimeLogsRemoved: 0,
+  };
+
+  // 1. Run git gc --aggressive on the ~/.phren repo
+  if (dryRun) {
+    console.log("[dry-run] Would run: git gc --aggressive");
+  } else {
+    try {
+      execSync("git gc --aggressive --quiet", { cwd: phrenPath, stdio: "pipe" });
+      report.gitGcRan = true;
+      console.log("git gc --aggressive: done");
+    } catch (err: unknown) {
+      console.error(`git gc failed: ${errorMessage(err)}`);
+    }
+  }
+
+  // 2. Squash old auto-save commits (older than 7 days) into weekly summaries
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  let oldCommits: string[] = [];
+  try {
+    const raw = execSync(
+      `git log --oneline --before="${sevenDaysAgo}" --format="%H %s"`,
+      { cwd: phrenPath, encoding: "utf8" }
+    ).trim();
+    if (raw) {
+      oldCommits = raw.split("\n").filter((l) => l.includes("auto-save:") || l.includes("[auto]"));
+    }
+  } catch {
+    // Not a git repo or no commits — skip silently
+  }
+
+  if (oldCommits.length === 0) {
+    console.log("Commit squash: no old auto-save commits to squash.");
+  } else if (dryRun) {
+    console.log(`[dry-run] Would squash ${oldCommits.length} auto-save commits older than 7 days into weekly summaries.`);
+    report.commitsSquashed = oldCommits.length;
+  } else {
+    // Group by ISO week (YYYY-Www) based on commit timestamp
+    const commitsByWeek = new Map<string, string[]>();
+    for (const line of oldCommits) {
+      const hash = line.split(" ")[0];
+      try {
+        const dateStr = execSync(
+          `git log -1 --format="%ci" ${hash}`,
+          { cwd: phrenPath, encoding: "utf8" }
+        ).trim();
+        const date = new Date(dateStr);
+        const weekStart = new Date(date);
+        weekStart.setDate(date.getDate() - date.getDay()); // start of week (Sunday)
+        const weekKey = weekStart.toISOString().slice(0, 10);
+        if (!commitsByWeek.has(weekKey)) commitsByWeek.set(weekKey, []);
+        commitsByWeek.get(weekKey)!.push(hash);
+      } catch {
+        // Skip commits we can't resolve
+      }
+    }
+
+    // For each week with multiple commits, soft-reset to oldest and amend into a summary
+    for (const [weekKey, hashes] of commitsByWeek.entries()) {
+      if (hashes.length < 2) continue;
+      try {
+        const oldest = hashes[hashes.length - 1];
+        const newest = hashes[0];
+        // Use git rebase --onto to squash: squash all into the oldest parent
+        const parentOfOldest = execSync(
+          `git rev-parse ${oldest}^`,
+          { cwd: phrenPath, encoding: "utf8" }
+        ).trim();
+        // Build rebase script via env variable to squash all but first to "squash"
+        const rebaseScript = hashes
+          .map((h, i) => `${i === hashes.length - 1 ? "pick" : "squash"} ${h} auto-save`)
+          .reverse()
+          .join("\n");
+        const scriptPath = path.join(phrenPath, ".runtime", `gc-rebase-${weekKey}.sh`);
+        fs.writeFileSync(scriptPath, rebaseScript);
+        // Use GIT_SEQUENCE_EDITOR to feed our script
+        execSync(
+          `GIT_SEQUENCE_EDITOR="cat ${scriptPath} >" git rebase -i ${parentOfOldest}`,
+          { cwd: phrenPath, stdio: "pipe" }
+        );
+        fs.unlinkSync(scriptPath);
+        report.commitsSquashed += hashes.length - 1;
+        console.log(`Squashed ${hashes.length} auto-save commits for week of ${weekKey} (${newest.slice(0, 7)}..${oldest.slice(0, 7)}).`);
+      } catch {
+        // Squashing is best-effort — log and continue
+        console.warn(`  Could not squash auto-save commits for week ${weekKey} (possibly non-linear history). Skipping.`);
+      }
+    }
+
+    if (report.commitsSquashed === 0) {
+      console.log("Commit squash: all old auto-save weeks have only one commit, nothing to squash.");
+    }
+  }
+
+  // 3. Prune stale session markers from ~/.phren/.sessions/ older than 30 days
+  const sessionsDir = path.join(phrenPath, ".sessions");
+  const thirtyDaysAgo = Date.now() - 30 * 86400000;
+  if (fs.existsSync(sessionsDir)) {
+    const entries = fs.readdirSync(sessionsDir);
+    for (const entry of entries) {
+      const fullPath = path.join(sessionsDir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.mtimeMs < thirtyDaysAgo) {
+          if (dryRun) {
+            console.log(`[dry-run] Would remove session marker: .sessions/${entry}`);
+          } else {
+            fs.unlinkSync(fullPath);
+          }
+          report.sessionsRemoved++;
+        }
+      } catch {
+        // Skip unreadable entries
+      }
+    }
+  }
+  const sessionsVerb = dryRun ? "Would remove" : "Removed";
+  console.log(`${sessionsVerb} ${report.sessionsRemoved} stale session marker(s) from .sessions/`);
+
+  // 4. Trim runtime logs from ~/.phren/.runtime/ older than 30 days
+  const runtimeDir = path.join(phrenPath, ".runtime");
+  const logExtensions = new Set([".log", ".jsonl", ".json"]);
+  if (fs.existsSync(runtimeDir)) {
+    const entries = fs.readdirSync(runtimeDir);
+    for (const entry of entries) {
+      const ext = path.extname(entry);
+      if (!logExtensions.has(ext)) continue;
+      // Never trim the active audit log or telemetry config
+      if (entry === "audit.log" || entry === "telemetry.json") continue;
+      const fullPath = path.join(runtimeDir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.mtimeMs < thirtyDaysAgo) {
+          if (dryRun) {
+            console.log(`[dry-run] Would remove runtime log: .runtime/${entry}`);
+          } else {
+            fs.unlinkSync(fullPath);
+          }
+          report.runtimeLogsRemoved++;
+        }
+      } catch {
+        // Skip unreadable entries
+      }
+    }
+  }
+  const logsVerb = dryRun ? "Would remove" : "Removed";
+  console.log(`${logsVerb} ${report.runtimeLogsRemoved} stale runtime log(s) from .runtime/`);
+
+  // 5. Summary
+  if (!dryRun) {
+    appendAuditLog(
+      phrenPath,
+      "maintain_gc",
+      `gitGc=${report.gitGcRan} squashed=${report.commitsSquashed} sessions=${report.sessionsRemoved} logs=${report.runtimeLogsRemoved}`
+    );
+  }
+  console.log(
+    `\nGC complete:${dryRun ? " (dry-run)" : ""}` +
+    ` git_gc=${report.gitGcRan}` +
+    ` commits_squashed=${report.commitsSquashed}` +
+    ` sessions_pruned=${report.sessionsRemoved}` +
+    ` logs_pruned=${report.runtimeLogsRemoved}`
+  );
+}
+
 // ── Maintain router ──────────────────────────────────────────────────────────
 
 export async function handleMaintain(args: string[]) {
@@ -283,6 +465,8 @@ export async function handleMaintain(args: string[]) {
       return handleExtractMemories(rest[0]);
     case "restore":
       return handleRestoreBackup(rest);
+    case "gc":
+      return handleGcMaintain(rest);
     default:
       console.log(`phren maintain - memory maintenance and governance
 
@@ -296,7 +480,9 @@ Subcommands:
                                          Deduplicate FINDINGS.md bullets. Run after a burst of work
                                          when findings feel repetitive, or monthly to keep things clean.
   phren maintain extract [project]      Mine git/GitHub signals into memory candidates
-  phren maintain restore [project]      List and restore from .bak files`);
+  phren maintain restore [project]      List and restore from .bak files
+  phren maintain gc [--dry-run]         Garbage-collect the ~/.phren repo: git gc, squash old
+                                         auto-save commits, prune stale session markers and runtime logs`);
       if (sub) {
         console.error(`\nUnknown maintain subcommand: "${sub}"`);
         process.exit(1);
