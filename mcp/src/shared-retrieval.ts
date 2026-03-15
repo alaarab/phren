@@ -20,7 +20,7 @@ import {
   filterTrustedFindingsDetailed,
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
-import { getHighImpactFindings, getImpactSurfaceCounts } from "./finding-impact.js";
+import { getHighImpactFindings } from "./finding-impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -59,9 +59,8 @@ const LOW_VALUE_BULLET_FRACTION = 0.5;
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
-export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
+export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "general" {
   const p = prompt.toLowerCase();
-  if (/(^|\s)\/[a-z][a-z0-9_-]{1,63}(?=$|\s|[.,:;!?])/.test(p) || /\b(skill|swarm|lineup|slash command)\b/.test(p)) return "skill";
   if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
   if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
   if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
@@ -70,7 +69,6 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
 }
 
 function intentBoost(intent: string, docType: string): number {
-  if (intent === "skill" && docType === "skill") return 4;
   if (intent === "debug" && (docType === "findings" || docType === "reference")) return 3;
   if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
   if (intent === "build" && (docType === "task" || docType === "reference")) return 2;
@@ -410,28 +408,11 @@ export function searchDocuments(
     runScopedFtsQuery(relaxedQuery);
   }
 
-  // Tier 1.5: Fragment graph expansion
-  const fragmentExpansionDocs: DocRow[] = [];
-  const queryLower = (prompt + " " + keywords).toLowerCase();
-  const fragmentBoostDocKeys = getEntityBoostDocs(db, queryLower);
-  for (const docKey of fragmentBoostDocKeys) {
-    if (ftsSeenKeys.has(docKey)) continue;
-    const rows = queryDocRows(
-      db,
-      "SELECT project, filename, type, content, path FROM docs WHERE path = ? LIMIT 1",
-      [docKey]
-    );
-    if (rows?.length) {
-      ftsSeenKeys.add(docKey);
-      fragmentExpansionDocs.push(rows[0]);
-    }
-  }
-
   // Tier 2: Token-overlap semantic — always run, scored independently
   const semanticDocs = semanticFallbackDocs(db, `${prompt}\n${keywords}`, detectedProject);
 
   // Merge with Reciprocal Rank Fusion so documents found by both tiers rank highest
-  const merged = rrfMerge([ftsDocs, fragmentExpansionDocs, semanticDocs]);
+  const merged = rrfMerge([ftsDocs, semanticDocs]);
   if (merged.length === 0) return null;
   return merged.slice(0, 12);
 }
@@ -481,7 +462,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
     return syncResult;
   }
 }
@@ -617,7 +598,7 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) {
+      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
         process.stderr.write(`[phren] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
@@ -646,7 +627,6 @@ export function applyTrustFilter(
   const queueItems: TrustFilterQueueItem[] = [];
   const auditEntries: string[] = [];
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
-  const impactCounts = phrenPath ? getImpactSurfaceCounts(phrenPath, 1) : undefined;
 
   const filtered = rows
     .map((doc) => {
@@ -657,7 +637,6 @@ export function applyTrustFilter(
         decay,
         project: doc.project,
         highImpactFindingIds,
-        impactCounts,
       });
       if (trust.issues.length > 0) {
         const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
@@ -787,7 +766,7 @@ export function rankResults(
   const scored: ScoredDoc[] = ranked.map((doc) => {
     const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
-    const entity = entityBoostPaths.has(doc.path) ? 1.5 : 1;
+    const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
     const date = getRecentDate(doc);
     const fileRel = fileRelevanceBoost(doc.path, changedFiles);
     const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
@@ -802,13 +781,8 @@ export function rankResults(
       && queryOverlap < WEAK_CROSS_PROJECT_OVERLAP_MAX
       ? WEAK_CROSS_PROJECT_OVERLAP_PENALTY
       : 0;
-    // Boost skills whose filename matches a query token (e.g. "swarm" matches swarm.md)
-    const skillNameBoost = doc.type === "skill" && queryTokens.length > 0
-      ? queryTokens.some((t) => doc.filename.replace(/\.md$/i, "").toLowerCase() === t) ? 4 : 0
-      : 0;
     const score = Math.round((
       intentBoost(intent, doc.type) +
-      skillNameBoost +
       fileRel +
       branchMat +
       globBoost +
@@ -924,7 +898,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
               stale = true;
             }
           }
@@ -939,24 +913,6 @@ export function markStaleCitations(snippet: string): string {
     result.push(line);
   }
   return result.join("\n");
-}
-
-function annotateContradictions(snippet: string): string {
-  return snippet.split('\n').map(line => {
-    const conflictMatch = line.match(/<!-- conflicts_with: "(.*?)" -->/);
-    const contradictMatch = line.match(/<!-- phren:contradicts "(.*?)" -->/);
-    const statusMatch = line.match(/phren:status "contradicted"/);
-    if (conflictMatch) {
-      return line.replace(conflictMatch[0], '') + ` [CONTRADICTED — conflicts with: "${conflictMatch[1]}"]`;
-    }
-    if (contradictMatch) {
-      return line.replace(contradictMatch[0], '') + ` [CONTRADICTED — see: "${contradictMatch[1]}"]`;
-    }
-    if (statusMatch) {
-      return line + ' [CONTRADICTED]';
-    }
-    return line;
-  }).join('\n');
 }
 
 export function selectSnippets(
@@ -989,7 +945,6 @@ export function selectSnippets(
     if (TRUST_FILTERED_TYPES.has(doc.type)) {
       snippet = markStaleCitations(snippet);
     }
-    snippet = annotateContradictions(snippet);
     snippet = dedupSnippetBullets(snippet);
     if (!snippet.trim()) continue;
     let focusScore = queryTokens.length > 0

@@ -6,7 +6,7 @@ import { errorMessage, runGitOrThrow } from "./utils.js";
 import type { RetentionPolicy } from "./shared-governance.js";
 import { findingIdFromLine } from "./finding-impact.js";
 import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
-import { FINDING_TYPE_DECAY, extractFindingType, parseFindingLifecycle } from "./finding-lifecycle.js";
+import { FINDING_TYPE_DECAY, extractFindingType } from "./finding-lifecycle.js";
 
 export interface FindingCitation {
   created_at: string;
@@ -57,7 +57,6 @@ export interface TrustFilterOptions {
   decay?: Partial<RetentionPolicy["decay"]>;
   project?: string;
   highImpactFindingIds?: Set<string>;
-  impactCounts?: Map<string, number>;
 }
 
 export function getHeadCommit(cwd: string): string | undefined {
@@ -326,7 +325,6 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     ...(options.decay || {}),
   };
   const highImpactFindingIds = options.highImpactFindingIds;
-  const impactCounts = options.impactCounts;
   const project = options.project;
 
   const lines = content.split("\n");
@@ -448,27 +446,19 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     if (provenance === "extract") confidence *= 0.9;
     if (project && highImpactFindingIds?.size) {
       const findingId = findingIdFromLine(line);
-      if (highImpactFindingIds.has(findingId)) {
-        // Get surface count for graduated boost
-        const surfaceCount = impactCounts?.get(findingId) ?? 3;
-        // Log-scaled: 3→1.15x, 10→1.28x, 30→1.38x, capped at 1.4x
-        const boost = Math.min(1.4, 1 + 0.1 * Math.log2(Math.max(3, surfaceCount)));
-        confidence *= boost;
-        // Decay resistance: confirmed findings decay 3x slower
-        if (effectiveDate) {
-          const realAge = ageDaysForDate(effectiveDate);
-          if (realAge !== null) {
-            const slowedAge = Math.floor(realAge / 3);
-            confidence = Math.max(confidence, confidenceForAge(slowedAge, decay));
-          }
+      if (highImpactFindingIds.has(findingId)) confidence *= 1.15;
+    }
+    // Confirmed findings decay 3x slower — recompute confidence with reduced age
+    {
+      const findingId = findingIdFromLine(line);
+      if (findingId && highImpactFindingIds?.has(findingId) && effectiveDate) {
+        const realAge = ageDaysForDate(effectiveDate);
+        if (realAge !== null) {
+          const slowedAge = Math.floor(realAge / 3);
+          confidence = Math.max(confidence, confidenceForAge(slowedAge, decay));
         }
       }
     }
-    const lifecycle = parseFindingLifecycle(line);
-    if (lifecycle?.status === "superseded") confidence *= 0.25;
-    if (lifecycle?.status === "retracted") confidence *= 0.1;
-    if (lifecycle?.status === "contradicted") confidence *= 0.4;
-
     confidence = Math.max(0, Math.min(1, confidence));
     if (confidence < minConfidence) {
       issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
