@@ -34,6 +34,7 @@ import {
   completeInput as completeInputFn,
   getListItems,
   handleNavigateKey,
+  applyViewShortcut,
   type NavigationHost,
 } from "./shell-input.js";
 import { errorMessage } from "./utils.js";
@@ -44,7 +45,7 @@ export class PhrenShell {
   private state: ShellState;
   private message = `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`;
   healthCache?: { at: number; result: DoctorResultLike };
-  prevHealthView?: ShellView;
+  prevHealthView: ShellView | undefined = undefined;
   showHelp = false;
   private pendingConfirm?: { label: string; action: () => void };
   private undoStack: UndoEntry[] = [];
@@ -268,13 +269,7 @@ export class PhrenShell {
     }
     if (!input) return true;
     if (["q", "quit", ":q", ":quit", ":exit"].includes(input.toLowerCase())) return false;
-    if (input === "p") { this.setView("Projects"); this.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-    if (input === "b") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Tasks"); this.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
-    if (input === "l") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Findings"); this.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
-    if (input === "m") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Review Queue"); this.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
-    if (input === "s") { if (!this.state.project) { this.setMessage(style.dim("  Select a project first (↵)")); return true; } this.setView("Skills"); this.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
-    if (input === "k") { this.setView("Hooks"); this.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
-    if (input === "h") { this.healthCache = undefined; this.setView("Health"); this.setMessage(`  ${TAB_ICONS.Health} Health`); return true; }
+    if (applyViewShortcut(this.asNavigationHost(), input)) return true;
     if (input.startsWith("/")) { this.setFilter(input.slice(1)); return true; }
     if (input.startsWith(":")) { await this.runPalette(input.slice(1)); return true; }
     await this.runPalette(input);

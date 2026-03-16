@@ -256,7 +256,9 @@ export async function handleHookPrompt() {
     for (const kw of keywordEntries) {
       sessionTopics[kw] = (sessionTopics[kw] ?? 0) + 1;
     }
-    fs.writeFileSync(topicFile, JSON.stringify(sessionTopics));
+    const topicTmp = `${topicFile}.tmp-${process.pid}`;
+    fs.writeFileSync(topicTmp, JSON.stringify(sessionTopics));
+    fs.renameSync(topicTmp, topicFile);
 
     // Find hot topics (3+ mentions this session)
     hotTopics = Object.entries(sessionTopics)
@@ -456,7 +458,7 @@ export async function handleHookPrompt() {
         parts.push(`Findings ready for consolidation:`);
         parts.push(notices.join("\n"));
         parts.push(`Run phren-consolidate when ready.`);
-        parts.push(`<phren-notice>`);
+        parts.push(`</phren-notice>`);
       }
 
       if (noticeFile) {
@@ -476,7 +478,7 @@ export async function handleHookPrompt() {
     console.log(parts.join("\n"));
   } catch (err: unknown) {
     const msg = errorMessage(err);
-    process.stdout.write(`\n<phren-error>phren hook failed: ${msg}. Check ~/.phren/.runtime/debug.log for details.<phren-error>\n`);
+    process.stdout.write(`\n<phren-error>phren hook failed: ${msg}. Check ~/.phren/.runtime/debug.log for details.</phren-error>\n`);
     debugLog(`hook-prompt error: ${msg}`);
     process.exit(0);
   }

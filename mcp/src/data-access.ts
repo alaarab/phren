@@ -1,9 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import {
-  appendAuditLog,
   phrenErr,
   PhrenError,
   phrenOk,
@@ -14,12 +12,12 @@ import {
 } from "./shared.js";
 import {
   normalizeQueueEntryText,
-  withFileLock as withFileLockRaw,
 } from "./shared-governance.js";
 import {
   addFindingToFile,
+  type AddFindingResult,
 } from "./shared-content.js";
-import { isValidProjectName, queueFilePath, safeProjectPath, errorMessage } from "./utils.js";
+import { isValidProjectName, queueFilePath, safeProjectPath } from "./utils.js";
 import {
   type FindingCitation,
   type FindingProvenanceSource,
@@ -38,7 +36,9 @@ import {
   parseFindingId,
   parseAllContradictions,
   stripComments,
+  normalizeFindingText,
 } from "./content-metadata.js";
+import { withSafeLock, ensureProject } from "./shared-data-utils.js";
 export type { TaskSection, TaskItem, TaskDoc } from "./data-tasks.js";
 export {
   readTasks,
@@ -78,33 +78,11 @@ export {
 } from "./profile-store.js";
 export {
   loadShellState,
-  readRuntimeHealth,
   resetShellState,
   saveShellState,
   type ShellState,
 } from "./shell-state-store.js";
-
-function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
-  try {
-    return withFileLockRaw(filePath, fn);
-  } catch (err: unknown) {
-    const msg = errorMessage(err);
-    if (msg.includes("could not acquire lock")) {
-      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
-    }
-    throw err;
-  }
-}
-
-function ensureProject(phrenPath: string, project: string): PhrenResult<string> {
-  if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
-  const dir = safeProjectPath(phrenPath, project);
-  if (!dir) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
-  if (!fs.existsSync(dir)) {
-    return phrenErr(`No project "${project}" found. Add it with 'cd ~/your-project && phren add'.`, PhrenError.PROJECT_NOT_FOUND);
-  }
-  return phrenOk(dir);
-}
+export { getRuntimeHealth as readRuntimeHealth } from "./shared-governance.js";
 
 export interface FindingItem {
   id: string;
@@ -229,9 +207,9 @@ function findMatchingFindingBullet(
     : [];
 
   const exactMatches = bulletLines.filter(({ line }) =>
-    line.replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().toLowerCase() === needle
+    normalizeFindingText(line) === needle
   );
-  const partialMatches = bulletLines.filter(({ line }) => line.toLowerCase().includes(needle));
+  const partialMatches = bulletLines.filter(({ line }) => normalizeFindingText(line).includes(needle));
 
   if (fidMatch.length === 1) return { kind: "found", idx: fidMatch[0].i };
   if (exactMatches.length === 1) return { kind: "found", idx: exactMatches[0].i };
@@ -417,7 +395,7 @@ export function readFindingHistory(phrenPath: string, project: string, findingId
   return phrenOk(history);
 }
 
-export function addFinding(phrenPath: string, project: string, learning: string): PhrenResult<string> {
+export function addFinding(phrenPath: string, project: string, learning: string): PhrenResult<AddFindingResult> {
   if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   const resolved = safeProjectPath(phrenPath, project);
   if (!resolved) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
@@ -439,7 +417,7 @@ export function removeFinding(phrenPath: string, project: string, match: string)
 
   return withSafeLock(filePath, () => {
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
-    const needle = match.trim().toLowerCase();
+    const needle = normalizeFindingText(match);
     const bulletLines = collectFindingBulletLines(lines);
     const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match);
     if (activeMatch.kind === "ambiguous") {
@@ -478,7 +456,7 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
 
   return withSafeLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
-    const needle = oldText.trim().toLowerCase();
+    const needle = normalizeFindingText(oldText);
     const bulletLines = collectFindingBulletLines(lines);
     const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, oldText);
     if (activeMatch.kind === "ambiguous") {

@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "./shared.js";
-import { withFileLock } from "./governance-locks.js";
+import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "./shared-governance.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "./project-config.js";
 import { runCustomHooks } from "./hooks.js";
@@ -124,16 +124,8 @@ function govFile(phrenPath: string, schema: GovernanceSchema): string {
   return path.join(governanceDir(phrenPath), GOVERNANCE_REGISTRY[schema].file);
 }
 
-function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
-  return !("schemaVersion" in data) || typeof data.schemaVersion === "number";
-}
-
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 function pickNumber(value: unknown, fallback: number): number {

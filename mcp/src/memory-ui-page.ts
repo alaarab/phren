@@ -3,6 +3,7 @@ import { renderGraphScript } from "./memory-ui-graph.js";
 import { readSyncSnapshot } from "./memory-ui-data.js";
 import { PROJECT_REFERENCE_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./memory-ui-styles.js";
 import {
+  renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
   renderProjectReferenceEnhancementScript,
   renderReviewQueueEditSyncScript,
@@ -346,6 +347,9 @@ ${renderGraphScript()}
 </script>
 <script${nonceAttr}>
 ${renderReviewQueueEditSyncScript()}
+</script>
+<script${nonceAttr}>
+${renderSharedWebUiHelpers(h(authToken || ""))}
 </script>
 <script${nonceAttr}>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}

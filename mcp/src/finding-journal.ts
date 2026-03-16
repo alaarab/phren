@@ -129,7 +129,7 @@ export function compactFindingJournals(phrenPath: string, project?: string): Fin
           result.failed += 1;
           continue;
         }
-        if (typeof write.data === "string" && write.data.includes("Skipped duplicate")) result.skipped += 1;
+        if (write.data.status === "skipped") result.skipped += 1;
         else result.added += 1;
       }
     } finally {

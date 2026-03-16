@@ -5,7 +5,7 @@ import * as yaml from "js-yaml";
 import { readInstallPreferences } from "./init-preferences.js";
 import { debugLog } from "./shared.js";
 import { errorMessage, safeProjectPath } from "./utils.js";
-import { withFileLock } from "./governance-locks.js";
+import { withFileLock } from "./shared-governance.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
 export type ProjectOwnershipMode = typeof PROJECT_OWNERSHIP_MODES[number];

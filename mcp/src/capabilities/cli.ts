@@ -2,7 +2,7 @@ import type { CapabilityManifest } from "./types.js";
 
 export const cliManifest: CapabilityManifest = {
   surface: "cli",
-  version: "1.31.1",
+  version: "0.0.12",
   actions: {
     // Finding management
     "finding.add": { implemented: true, handler: "cli-actions.ts:handleAddFinding" },

@@ -384,7 +384,7 @@ describe("addFindingToFile", () => {
 
     const result = addFindingToFile(phren, "newproj", "Always use parameterized queries");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Created FINDINGS.md");
+    if (result.ok) expect(result.data.status).toBe("created");
     const content = fs.readFileSync(path.join(phren, "newproj", "FINDINGS.md"), "utf8");
     expect(content).toContain("- Always use parameterized queries");
     expect(content).toContain("phren:cite");
@@ -425,7 +425,7 @@ describe("addFindingToFile", () => {
 
     const result = addFindingToFile(phren, "dupeproj", "The auth middleware runs before rate limiting, order matters");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Skipped duplicate");
+    if (result.ok) expect(result.data.status).toBe("skipped");
   });
 
   it("allows non-duplicate findings through", () => {
@@ -438,7 +438,7 @@ describe("addFindingToFile", () => {
 
     const result = addFindingToFile(phren, "dupeproj2", "Database indexes need to be rebuilt after migration");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Added finding");
+    if (result.ok) expect(result.data.status).toBe("added");
   });
 });
 

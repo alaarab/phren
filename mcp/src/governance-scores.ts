@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog, debugLog, isRecord, memoryScoresFile, memoryUsageLogFile, runtimeFile } from "./shared.js";
-import { withFileLock } from "./governance-locks.js";
+import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 
 export interface EntryScore {
@@ -36,14 +36,6 @@ function usageLogFile(phrenPath: string): string {
 
 function scoresJournalFile(phrenPath: string): string {
   return runtimeFile(phrenPath, "scores.jsonl");
-}
-
-function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
-  return !("schemaVersion" in data) || typeof data.schemaVersion === "number";
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
 }
 
 function isEntryScore(value: unknown): value is EntryScore {

@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import { runtimeFile, debugLog } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
+import { withFileLock } from "./shared-governance.js";
 import type { SelectedSnippet } from "./shared-retrieval.js";
 
 export interface CorrelationEntry {
@@ -78,31 +79,33 @@ export function markCorrelationsHelpful(
     const correlationFile = runtimeFile(phrenPath, CORRELATION_FILENAME);
     if (!fs.existsSync(correlationFile)) return;
 
-    const raw = fs.readFileSync(correlationFile, "utf8");
-    const lines = raw.split("\n").filter(Boolean);
-    let modified = false;
+    withFileLock(correlationFile, () => {
+      const raw = fs.readFileSync(correlationFile, "utf8");
+      const lines = raw.split("\n").filter(Boolean);
+      let modified = false;
 
-    const updated = lines.map((line) => {
-      try {
-        const entry: CorrelationEntry = JSON.parse(line);
-        if (
-          entry.sessionId === sessionId &&
-          `${entry.project}/${entry.filename}` === docKey &&
-          !entry.helpful
-        ) {
-          entry.helpful = true;
-          modified = true;
-          return JSON.stringify(entry);
+      const updated = lines.map((line) => {
+        try {
+          const entry: CorrelationEntry = JSON.parse(line);
+          if (
+            entry.sessionId === sessionId &&
+            `${entry.project}/${entry.filename}` === docKey &&
+            !entry.helpful
+          ) {
+            entry.helpful = true;
+            modified = true;
+            return JSON.stringify(entry);
+          }
+        } catch {
+          // keep original line
         }
-      } catch {
-        // keep original line
-      }
-      return line;
-    });
+        return line;
+      });
 
-    if (modified) {
-      fs.writeFileSync(correlationFile, updated.join("\n") + "\n");
-    }
+      if (modified) {
+        fs.writeFileSync(correlationFile, updated.join("\n") + "\n");
+      }
+    });
   } catch (err: unknown) {
     debugLog(`query-correlation mark-helpful failed: ${errorMessage(err)}`);
   }

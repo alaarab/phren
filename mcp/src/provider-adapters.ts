@@ -28,7 +28,7 @@ function homePathForEnv(env: NodeJS.ProcessEnv, ...parts: string[]): string {
 }
 
 function defaultPhrenPath(env: NodeJS.ProcessEnv = process.env): string {
-  return env.PHREN_PATH || env.PHREN_PATH || homePathForEnv(env, ".phren");
+  return env.PHREN_PATH || homePathForEnv(env, ".phren");
 }
 
 function normalizeWindowsPathToWsl(input: string | undefined): string | undefined {

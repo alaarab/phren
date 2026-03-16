@@ -94,3 +94,11 @@ export function withFileLock<T>(filePath: string, fn: () => T): T extends Promis
   releaseFileLock(lockPath);
   return result as T extends Promise<infer U> ? Promise<U> : T;
 }
+
+export function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function hasValidSchemaVersion(data: Record<string, unknown>): boolean {
+  return !("schemaVersion" in data) || typeof data.schemaVersion === "number";
+}

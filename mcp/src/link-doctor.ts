@@ -11,6 +11,7 @@ import {
   hookConfigPath,
   runtimeHealthFile,
 } from "./shared.js";
+import { commandVersion, versionAtLeast, nearestWritableTarget } from "./init-shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 import { buildIndex, queryRows } from "./shared-index.js";
@@ -47,50 +48,6 @@ function isWrapperActive(tool: string): boolean {
     return path.resolve(resolved) === path.resolve(wrapperPath);
   } catch (err: unknown) {
     debugLog(`isWrapperActive: which ${tool} failed: ${errorMessage(err)}`);
-    return false;
-  }
-}
-
-function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
-  try {
-    return execFileSync(cmd, args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: EXEC_TIMEOUT_QUICK_MS,
-    }).trim();
-  } catch (err: unknown) {
-    debugLog(`doctor: commandVersion ${cmd} failed: ${errorMessage(err)}`);
-    return null;
-  }
-}
-
-function parseSemverTriple(raw: string): [number, number, number] | null {
-  const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
-  return [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)];
-}
-
-function versionAtLeast(raw: string | null, major: number, minor: number = 0): boolean {
-  if (!raw) return false;
-  const parsed = parseSemverTriple(raw);
-  if (!parsed) return false;
-  const [m, n] = parsed;
-  if (m !== major) return m > major;
-  return n >= minor;
-}
-
-function nearestWritableTarget(filePath: string): boolean {
-  let probe = fs.existsSync(filePath) ? filePath : path.dirname(filePath);
-  while (!fs.existsSync(probe)) {
-    const parent = path.dirname(probe);
-    if (parent === probe) return false;
-    probe = parent;
-  }
-  try {
-    fs.accessSync(probe, fs.constants.W_OK);
-    return true;
-  } catch (err: unknown) {
-    debugLog(`doctor: writable check failed for ${filePath}: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -408,6 +365,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
     const copilotHooks = hookConfigPath("copilot", phrenPath);
+    const copilotWritable = nearestWritableTarget(copilotHooks);
     checks.push({
       name: "copilot-hooks",
       ok: fs.existsSync(copilotHooks),
@@ -415,12 +373,13 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     });
     checks.push({
       name: "copilot-config-writable",
-      ok: nearestWritableTarget(copilotHooks),
-      detail: nearestWritableTarget(copilotHooks) ? `writable: ${copilotHooks}` : `not writable: ${copilotHooks}`,
+      ok: copilotWritable,
+      detail: copilotWritable ? `writable: ${copilotHooks}` : `not writable: ${copilotHooks}`,
     });
   }
   if (detected.has("cursor")) {
     const cursorHooks = hookConfigPath("cursor", phrenPath);
+    const cursorWritable = nearestWritableTarget(cursorHooks);
     checks.push({
       name: "cursor-hooks",
       ok: fs.existsSync(cursorHooks),
@@ -428,12 +387,13 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     });
     checks.push({
       name: "cursor-config-writable",
-      ok: nearestWritableTarget(cursorHooks),
-      detail: nearestWritableTarget(cursorHooks) ? `writable: ${cursorHooks}` : `not writable: ${cursorHooks}`,
+      ok: cursorWritable,
+      detail: cursorWritable ? `writable: ${cursorHooks}` : `not writable: ${cursorHooks}`,
     });
   }
   if (detected.has("codex")) {
     const codexHooks = hookConfigPath("codex", phrenPath);
+    const codexWritable = nearestWritableTarget(codexHooks);
     checks.push({
       name: "codex-hooks",
       ok: fs.existsSync(codexHooks),
@@ -441,8 +401,8 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     });
     checks.push({
       name: "codex-config-writable",
-      ok: nearestWritableTarget(codexHooks),
-      detail: nearestWritableTarget(codexHooks) ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
+      ok: codexWritable,
+      detail: codexWritable ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
     });
   }
   for (const tool of ["copilot", "cursor", "codex"]) {
@@ -474,7 +434,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
   } else {
     // Read-only mode: just check if hook configs exist, don't write anything
-    const detectedTools = detectInstalledTools();
+    const detectedTools = detected;
     const hookChecks: string[] = [];
     const missing: string[] = [];
     for (const tool of detectedTools) {

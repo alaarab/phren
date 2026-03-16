@@ -28,6 +28,7 @@ export {
   DOC_TYPES,
   type DocType,
   capCache,
+  RESERVED_PROJECT_DIR_NAMES,
 } from "./phren-core.js";
 
 export {
@@ -87,7 +88,6 @@ export {
   shouldAutoCaptureTaskForLevel,
 } from "./proactivity.js";
 
-const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
 const MEMORY_SCOPE_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 
 export function normalizeMemoryScope(scope?: string | null): string | undefined {

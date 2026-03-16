@@ -709,6 +709,23 @@ function showCursorPosition(host: NavigationHost): void {
   host.setMessage(`  ${style.dim(`${cursor + 1} / ${count}`)}${short ? `  ${style.dimItalic(short)}` : ""}`);
 }
 
+// ── View shortcut keys (shared between handleInput text mode and handleNavigateKey) ─
+
+/**
+ * Handle p/b/l/m/s/k/h shortcut keys that switch the active view.
+ * Returns true if the key was handled.
+ */
+export function applyViewShortcut(host: NavigationHost, key: string): boolean {
+  if (key === "p") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
+  if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
+  if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
+  if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
+  if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
+  if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
+  if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
+  return false;
+}
+
 // ── Navigate-mode key handler ─────────────────────────────────────────────────
 
 export async function handleNavigateKey(host: NavigationHost, key: string): Promise<boolean> {
@@ -734,13 +751,7 @@ export async function handleNavigateKey(host: NavigationHost, key: string): Prom
     else { host.setMessage(`  ${style.dim("press")} ${style.boldCyan("q")} ${style.dim("to quit")}`); }
     return true;
   }
-  if (key === "p") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-  if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
-  if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Fragments`); return true; }
-  if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
-  if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
-  if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
-  if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
+  if (applyViewShortcut(host, key)) return true;
   if (key === "i" && host.state.view === "Projects") {
     const next = host.state.introMode === "always" ? "once-per-version" : host.state.introMode === "off" ? "always" : "off";
     host.state.introMode = next;

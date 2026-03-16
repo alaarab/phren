@@ -819,7 +819,7 @@ export async function handleHookStop() {
                 }
               }
             } catch (err: unknown) {
-              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookSessionStart transcriptParse: ${errorMessage(err)}\n`);
+              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookStop transcriptParse: ${errorMessage(err)}\n`);
             }
           }
           captureInput = assistantTexts.join("\n");

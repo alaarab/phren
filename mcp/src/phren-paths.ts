@@ -4,7 +4,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
-import { PhrenError, isRecord } from "./phren-core.js";
+import { PhrenError, isRecord, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 
 bootstrapPhrenDotEnv();
@@ -318,8 +318,6 @@ export function resolveFindingsPath(projectDir: string): string | undefined {
   if (fs.existsSync(findingsPath)) return findingsPath;
   return undefined;
 }
-
-const RESERVED_PROJECT_DIR_NAMES = new Set(["profiles", "templates", "global"]);
 
 function isProjectDirEntry(entry: fs.Dirent): boolean {
   return entry.isDirectory()

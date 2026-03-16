@@ -112,21 +112,21 @@ function resolveProactivityLevel(raw: string | undefined, fallback: ProactivityL
 
 export function getProactivityLevel(explicitPhrenPath?: string): ProactivityLevel {
   bootstrapPhrenDotEnv();
-  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY ?? (process.env.PHREN_PROACTIVITY), getConfiguredProactivityDefault(explicitPhrenPath));
+  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY, getConfiguredProactivityDefault(explicitPhrenPath));
 }
 
 export function getProactivityLevelForFindings(explicitPhrenPath?: string): ProactivityLevel {
   bootstrapPhrenDotEnv();
-  const findingsPreference = parseProactivityLevel(process.env.PHREN_PROACTIVITY_FINDINGS ?? (process.env.PHREN_PROACTIVITY_FINDINGS));
+  const findingsPreference = parseProactivityLevel(process.env.PHREN_PROACTIVITY_FINDINGS);
   if (findingsPreference) return findingsPreference;
-  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY ?? (process.env.PHREN_PROACTIVITY), getConfiguredProactivityLevelForFindingsDefault(explicitPhrenPath));
+  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY, getConfiguredProactivityLevelForFindingsDefault(explicitPhrenPath));
 }
 
 export function getProactivityLevelForTask(explicitPhrenPath?: string): ProactivityLevel {
   bootstrapPhrenDotEnv();
-  const taskPreference = parseProactivityLevel(process.env.PHREN_PROACTIVITY_TASKS ?? (process.env.PHREN_PROACTIVITY_TASKS));
+  const taskPreference = parseProactivityLevel(process.env.PHREN_PROACTIVITY_TASKS);
   if (taskPreference) return taskPreference;
-  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY ?? (process.env.PHREN_PROACTIVITY), getConfiguredProactivityLevelForTaskDefault(explicitPhrenPath));
+  return resolveProactivityLevel(process.env.PHREN_PROACTIVITY, getConfiguredProactivityLevelForTaskDefault(explicitPhrenPath));
 }
 
 export function hasExplicitFindingSignal(...texts: Array<string | undefined | null>): boolean {

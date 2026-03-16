@@ -189,7 +189,7 @@ export async function startShell(phrenPath: string, profile: string): Promise<vo
 
   if (!process.stdin.isTTY) {
     const { createInterface } = await import("readline");
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY ?? false });
     const repaint = async () => { clearScreen(); process.stdout.write(await shell.render()); rl.setPrompt(`\n${style.boldCyan(":phren>")} `); rl.prompt(); };
     const stopPoll = startLiveStatePoller({ phrenPath, shell, repaint });
     await repaint();

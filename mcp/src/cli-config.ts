@@ -321,8 +321,6 @@ function handleConfigSynonyms(args: string[]) {
   process.exit(1);
 }
 
-const proactivityConfigSnapshot = buildProactivitySnapshot;
-
 function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.tasks", args: string[]) {
   const phrenPath = getPhrenPath();
   const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
@@ -343,7 +341,7 @@ function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findin
       }, null, 2));
       return;
     }
-    console.log(JSON.stringify(proactivityConfigSnapshot(phrenPath), null, 2));
+    console.log(JSON.stringify(buildProactivitySnapshot(phrenPath), null, 2));
     return;
   }
 
@@ -390,7 +388,7 @@ function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findin
       break;
   }
 
-  console.log(JSON.stringify(proactivityConfigSnapshot(phrenPath), null, 2));
+  console.log(JSON.stringify(buildProactivitySnapshot(phrenPath), null, 2));
 }
 
 function projectOwnershipConfigSnapshot(phrenPath: string) {
@@ -661,7 +659,7 @@ export async function handleIndexPolicy(args: string[]) {
     }
     const result = updateIndexPolicy(getPhrenPath(), patch);
     if (!result.ok) {
-      console.log(result.error);
+      console.error(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }
@@ -746,7 +744,7 @@ export async function handleRetentionPolicy(args: string[]) {
     }
     const result = updateRetentionPolicy(phrenPath, patch);
     if (!result.ok) {
-      console.log(result.error);
+      console.error(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
       return;
     }

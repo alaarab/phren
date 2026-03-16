@@ -28,6 +28,9 @@ export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, label: "date" },
 ];
 
+/** Union of all directory names reserved by phren infrastructure — not valid project names. */
+export const RESERVED_PROJECT_DIR_NAMES = new Set(["global", ".runtime", ".sessions", ".governance", "profiles", "templates"]);
+
 // Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
 export const EXEC_TIMEOUT_MS = 30_000;
 export const EXEC_TIMEOUT_QUICK_MS = 10_000;

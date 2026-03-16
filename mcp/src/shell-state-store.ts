@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { phrenErr, PhrenError, phrenOk, type PhrenResult, shellStateFile } from "./shared.js";
-import { getRuntimeHealth, withFileLock as withFileLockRaw } from "./shared-governance.js";
+import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 
 function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
@@ -88,8 +88,4 @@ export function resetShellState(phrenPath: string): PhrenResult<string> {
     if (fs.existsSync(file)) fs.unlinkSync(file);
     return phrenOk("Shell state reset.");
   });
-}
-
-export function readRuntimeHealth(phrenPath: string) {
-  return getRuntimeHealth(phrenPath);
 }

@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import { statSync } from "fs";
 import * as path from "path";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "./shared.js";
 import { errorMessage, runGitOrThrow } from "./utils.js";
@@ -202,8 +201,15 @@ function resolveCitationFile(citation: FindingCitation): string | null {
 
 // Session-scoped caches for git I/O during citation validation.
 // Keyed by "repo\0commit" and "repo\0file\0line" respectively.
+const MAX_CACHE_ENTRIES = 500;
 const commitExistsCache = new Map<string, boolean>();
 const blameCache = new Map<string, string | false>();
+
+function evictOldest<K, V>(cache: Map<K, V>): void {
+  if (cache.size <= MAX_CACHE_ENTRIES) return;
+  const first = cache.keys().next().value;
+  if (first !== undefined) cache.delete(first);
+}
 
 function commitExists(repoPath: string, commit: string): boolean {
   const key = `${repoPath}\0${commit}`;
@@ -212,10 +218,12 @@ function commitExists(repoPath: string, commit: string): boolean {
   try {
     runGitOrThrow(repoPath, ["cat-file", "-e", `${commit}^{commit}`], EXEC_TIMEOUT_QUICK_MS);
     commitExistsCache.set(key, true);
+    evictOldest(commitExistsCache);
     return true;
   } catch (err: unknown) {
     debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${errorMessage(err)}`);
     commitExistsCache.set(key, false);
+    evictOldest(commitExistsCache);
     return false;
   }
 }
@@ -228,10 +236,12 @@ function cachedBlame(repoPath: string, relFile: string, line: number): string | 
     const out = runGitOrThrow(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000).trim();
     const first = out.split("\n")[0] || "";
     blameCache.set(key, first);
+    evictOldest(blameCache);
     return first;
   } catch (err: unknown) {
     debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${errorMessage(err)}`);
     blameCache.set(key, false);
+    evictOldest(blameCache);
     return false;
   }
 }
@@ -301,7 +311,7 @@ function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): num
 
 function wasFileModifiedAfter(filePath: string, findingDate: string): boolean {
   try {
-    const stat = statSync(filePath);
+    const stat = fs.statSync(filePath);
     const fileModified = stat.mtime.toISOString().slice(0, 10);
     return fileModified > findingDate;
   } catch {

@@ -139,7 +139,7 @@ export function buildHookOutput(
 
   logImpact(phrenPathLocal, impactEntries);
 
-  parts.push("<phren-context>");
+  parts.push("</phren-context>");
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
   if (gitCtx) {

@@ -19,32 +19,26 @@ import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 import { listAllSessions } from "./mcp-session.js";
 
-export async function handleSearch(opts: SearchOptions, profile: string) {
-  const result = await runSearch(opts, getPhrenPath(), profile);
-  if (result.lines.length > 0) {
-    console.log(result.lines.join("\n"));
-  }
+async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
+  const result = await fn();
+  if (result.lines.length > 0) console.log(result.lines.join("\n"));
   if (result.exitCode !== 0) process.exit(result.exitCode);
+}
+
+export async function handleSearch(opts: SearchOptions, profile: string) {
+  await runAndPrint(() => runSearch(opts, getPhrenPath(), profile));
 }
 
 export async function handleFragmentSearch(args: string[], profile: string) {
   const opts = parseFragmentSearchArgs(args);
   if (!opts) return;
-  const result = await runFragmentSearch(opts.query, getPhrenPath(), profile, opts);
-  if (result.lines.length > 0) {
-    console.log(result.lines.join("\n"));
-  }
-  if (result.exitCode !== 0) process.exit(result.exitCode);
+  await runAndPrint(() => runFragmentSearch(opts.query, getPhrenPath(), profile, opts));
 }
 
 export async function handleRelatedDocs(args: string[], profile: string) {
   const opts = parseRelatedDocsArgs(args);
   if (!opts) return;
-  const result = await runRelatedDocs(opts.entity, getPhrenPath(), profile, opts);
-  if (result.lines.length > 0) {
-    console.log(result.lines.join("\n"));
-  }
-  if (result.exitCode !== 0) process.exit(result.exitCode);
+  await runAndPrint(() => runRelatedDocs(opts.entity, getPhrenPath(), profile, opts));
 }
 
 export async function handleAddFinding(project: string, learning: string) {
@@ -190,37 +184,46 @@ export async function handleDoctor(args: string[]) {
     if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
   }
 
+  const semStatus = await getSemanticSearchStatus(getPhrenPath(), profile || undefined);
+  if (!semStatus.ollamaUrl) {
+    console.log("- ok  semantic-search: disabled (optional; enable for fuzzy/paraphrase-heavy retrieval)");
+  } else if (!semStatus.available) {
+    console.log(`- warn semantic-search: Ollama not running at ${semStatus.ollamaUrl} (start Ollama or set PHREN_OLLAMA_URL=off to disable)`);
+  } else if (!semStatus.modelReady) {
+    console.log(`- warn semantic-search: model ${semStatus.model} not pulled (run: ollama pull ${semStatus.model})`);
+  } else {
+    console.log(`- ok  semantic-search: ${semStatus.model} ready, ${semStatus.coverage}`);
+  }
+
+  process.exit(result.ok ? 0 : 1);
+}
+
+type SemanticSearchStatus =
+  | { ollamaUrl: null; status?: "error"; error?: string }
+  | { ollamaUrl: string; available: false }
+  | { ollamaUrl: string; available: true; modelReady: false; model: string }
+  | { ollamaUrl: string; available: true; modelReady: true; model: string; coverage: string };
+
+async function getSemanticSearchStatus(phrenPath: string, profile: string | undefined): Promise<SemanticSearchStatus> {
   try {
     const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
     const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
     const { listIndexedDocumentPaths } = await import("./shared-index.js");
     const ollamaUrl = getOllamaUrl();
-    if (!ollamaUrl) {
-      console.log("- ok  semantic-search: disabled (optional; enable for fuzzy/paraphrase-heavy retrieval)");
-    } else {
-      const available = await checkOllamaAvailable();
-      if (!available) {
-        console.log(`- warn semantic-search: Ollama not running at ${ollamaUrl} (start Ollama or set PHREN_OLLAMA_URL=off to disable)`);
-      } else {
-        const model = getEmbeddingModel();
-        const modelReady = await checkModelAvailable();
-        if (!modelReady) {
-          console.log(`- warn semantic-search: model ${model} not pulled (run: ollama pull ${model})`);
-        } else {
-          const phrenPath = getPhrenPath();
-          const cache = getEmbeddingCache(phrenPath);
-          await cache.load().catch(() => {});
-          const allPaths = listIndexedDocumentPaths(phrenPath, profile || undefined);
-          const coverage = cache.coverage(allPaths);
-          console.log(`- ok  semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
-        }
-      }
-    }
+    if (!ollamaUrl) return { ollamaUrl: null };
+    const available = await checkOllamaAvailable();
+    if (!available) return { ollamaUrl, available: false };
+    const model = getEmbeddingModel();
+    const modelReady = await checkModelAvailable();
+    if (!modelReady) return { ollamaUrl, available: true, modelReady: false, model };
+    const cache = getEmbeddingCache(phrenPath);
+    await cache.load().catch(() => {});
+    const coverage = formatEmbeddingCoverage(cache.coverage(listIndexedDocumentPaths(phrenPath, profile)));
+    return { ollamaUrl, available: true, modelReady: true, model, coverage };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor ollamaStatus: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getSemanticSearchStatus: ${errorMessage(err)}\n`);
+    return { ollamaUrl: null, status: "error", error: errorMessage(err) };
   }
-
-  process.exit(result.ok ? 0 : 1);
 }
 
 export async function handleStatus() {
@@ -233,32 +236,20 @@ export async function handleStatus() {
   console.log(`last push: ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
   console.log(`unsynced commits: ${runtime.lastSync?.unsyncedCommits ?? 0}`);
   if (runtime.lastSync?.lastPushDetail) console.log(`push detail: ${runtime.lastSync.lastPushDetail}`);
-  try {
-    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
-    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
-    const { listIndexedDocumentPaths } = await import("./shared-index.js");
-    const ollamaUrl = getOllamaUrl();
-    if (!ollamaUrl) {
+  const semStatus = await getSemanticSearchStatus(phrenPath, profile || undefined);
+  if (!semStatus.ollamaUrl) {
+    const errStatus = semStatus as { ollamaUrl: null; status?: string; error?: string };
+    if (errStatus.status === "error") {
+      console.log(`semantic-search: error (${errStatus.error ?? "unknown"})`);
+    } else {
       console.log("semantic-search: disabled (optional)");
-      return;
     }
-    const available = await checkOllamaAvailable();
-    if (!available) {
-      console.log(`semantic-search: offline (${ollamaUrl})`);
-      return;
-    }
-    const model = getEmbeddingModel();
-    const modelReady = await checkModelAvailable();
-    if (!modelReady) {
-      console.log(`semantic-search: model missing (${model})`);
-      return;
-    }
-    const cache = getEmbeddingCache(phrenPath);
-    await cache.load().catch(() => {});
-    const coverage = cache.coverage(listIndexedDocumentPaths(phrenPath, profile || undefined));
-    console.log(`semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
-  } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] handleStatus semanticSearch: ${errorMessage(err)}\n`);
+  } else if (!semStatus.available) {
+    console.log(`semantic-search: offline (${semStatus.ollamaUrl})`);
+  } else if (!semStatus.modelReady) {
+    console.log(`semantic-search: model missing (${semStatus.model})`);
+  } else {
+    console.log(`semantic-search: ${semStatus.model} ready, ${semStatus.coverage}`);
   }
 }
 

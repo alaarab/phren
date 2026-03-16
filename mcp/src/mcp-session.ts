@@ -112,6 +112,7 @@ function extractResumptionHint(
 }
 
 /** Per-connection session map keyed by arbitrary connection ID (if provided). */
+const MAX_SESSION_MAP_ENTRIES = 200;
 const _sessionMap = new Map<string, string>();
 
 function sessionsDir(phrenPath: string): string {
@@ -522,7 +523,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     };
     const newFile = sessionFileForId(phrenPath, sessionId);
     writeSessionStateFile(newFile, next);
-    if (connectionId) _sessionMap.set(connectionId, sessionId);
+    if (connectionId) {
+      _sessionMap.set(connectionId, sessionId);
+      if (_sessionMap.size > MAX_SESSION_MAP_ENTRIES) {
+        const oldest = _sessionMap.keys().next().value;
+        if (oldest !== undefined) _sessionMap.delete(oldest);
+      }
+    }
 
     const parts: string[] = [];
 

@@ -2,7 +2,7 @@ import type { CapabilityManifest } from "./types.js";
 
 export const mcpManifest: CapabilityManifest = {
   surface: "mcp",
-  version: "1.31.1",
+  version: "0.0.12",
   actions: {
     // Finding management
     "finding.add": { implemented: true, handler: "index.ts:add_finding" },

@@ -31,7 +31,7 @@ import {
 } from "./provider-adapters.js";
 
 // Re-export everything consumers need from the helper modules
-export type { McpConfigStatus, McpRootKey, ToolStatus } from "./init-config.js";
+export type { McpConfigStatus, McpRootKey, ToolStatus, HookEntry, HookMap } from "./init-config.js";
 export {
   configureClaude,
   configureVSCode,
@@ -92,7 +92,7 @@ import {
   isPhrenCommand,
   patchJsonFile,
 } from "./init-config.js";
-import type { ToolStatus } from "./init-config.js";
+import type { ToolStatus, HookEntry, HookMap } from "./init-config.js";
 
 import {
   getMcpEnabledPreference,
@@ -139,13 +139,6 @@ export type McpMode = "on" | "off";
 type WorkflowRiskSection = "Review" | "Stale" | "Conflicts";
 type StorageLocationChoice = "global" | "project" | "custom";
 type SkillsScope = "global" | "project";
-
-interface HookEntry {
-  matcher?: string;
-  hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
-}
-
-type HookMap = Partial<Record<"UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse", HookEntry[]>> & Record<string, unknown>;
 
 function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
@@ -1164,13 +1157,15 @@ async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
  * Configure MCP for all detected AI coding tools (Claude, VS Code, Cursor, Copilot, Codex).
  * @param verb - label used in log messages, e.g. "Updated" or "Configured"
  */
-function configureMcpTargets(
+export function configureMcpTargets(
   phrenPath: string,
   opts: { mcpEnabled: boolean; hooksEnabled: boolean },
-  verb: "Configured" | "Updated",
-): void {
+  verb: "Configured" | "Updated" = "Configured",
+): string {
+  let claudeStatus = "no_settings";
   try {
     const status = configureClaude(phrenPath, { mcpEnabled: opts.mcpEnabled, hooksEnabled: opts.hooksEnabled });
+    claudeStatus = status ?? "installed";
     if (status === "disabled" || status === "already_disabled") {
       log(`  ${verb} Claude Code hooks (MCP disabled)`);
     } else {
@@ -1180,30 +1175,42 @@ function configureMcpTargets(
     log(`  Could not configure Claude Code settings (${e}), add manually`);
   }
 
+  let vsStatus = "no_vscode";
   try {
-    const vscodeResult = configureVSCode(phrenPath, { mcpEnabled: opts.mcpEnabled });
-    logMcpTargetStatus("VS Code", vscodeResult, verb);
+    vsStatus = configureVSCode(phrenPath, { mcpEnabled: opts.mcpEnabled }) ?? "no_vscode";
+    logMcpTargetStatus("VS Code", vsStatus, verb);
   } catch (err: unknown) {
     debugLog(`configureVSCode failed: ${errorMessage(err)}`);
   }
 
+  let cursorStatus = "no_cursor";
   try {
-    logMcpTargetStatus("Cursor", configureCursorMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    cursorStatus = configureCursorMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }) ?? "no_cursor";
+    logMcpTargetStatus("Cursor", cursorStatus, verb);
   } catch (err: unknown) {
     debugLog(`configureCursorMcp failed: ${errorMessage(err)}`);
   }
 
+  let copilotStatus = "no_copilot";
   try {
-    logMcpTargetStatus("Copilot CLI", configureCopilotMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    copilotStatus = configureCopilotMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }) ?? "no_copilot";
+    logMcpTargetStatus("Copilot CLI", copilotStatus, verb);
   } catch (err: unknown) {
     debugLog(`configureCopilotMcp failed: ${errorMessage(err)}`);
   }
 
+  let codexStatus = "no_codex";
   try {
-    logMcpTargetStatus("Codex", configureCodexMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }), verb);
+    codexStatus = configureCodexMcp(phrenPath, { mcpEnabled: opts.mcpEnabled }) ?? "no_codex";
+    logMcpTargetStatus("Codex", codexStatus, verb);
   } catch (err: unknown) {
     debugLog(`configureCodexMcp failed: ${errorMessage(err)}`);
   }
+
+  const allStatuses = [claudeStatus, vsStatus, cursorStatus, copilotStatus, codexStatus];
+  if (allStatuses.some((s) => s === "installed" || s === "already_configured")) return "installed";
+  if (allStatuses.some((s) => s === "disabled" || s === "already_disabled")) return "disabled";
+  return claudeStatus;
 }
 
 /**

@@ -27,7 +27,7 @@ import * as path from "path";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
 import type { GitContext } from "./cli-hooks-session.js";
 export type { GitContext } from "./cli-hooks-session.js";
-import { vectorFallback } from "./shared-search-fallback.js";
+import { vectorFallback, deterministicSeed } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { debugLog } from "./shared.js";
@@ -176,15 +176,6 @@ function docOverlapScore(queryTokens: string[], doc: DocRow): number {
   return overlapScore(queryTokens, corpus);
 }
 
-function semanticFallbackSeed(text: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
 function loadSemanticFallbackWindow(
   db: SqlJsDatabase,
   startRowid: number,
@@ -278,7 +269,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
     const windowCount = Math.min(SEMANTIC_FALLBACK_WINDOW_COUNT, cappedLimit);
     const perWindow = Math.max(1, Math.ceil(cappedLimit / windowCount));
     const stride = Math.max(1, Math.floor(span / windowCount));
-    const seed = semanticFallbackSeed(`${project ?? "*"}\n${terms.join(" ")}`);
+    const seed = deterministicSeed(`${project ?? "*"}\n${terms.join(" ")}`);
     for (let i = 0; i < windowCount && docs.length < cappedLimit; i++) {
       const offset = (seed + i * stride) % span;
       const startRowid = minRowid + offset;

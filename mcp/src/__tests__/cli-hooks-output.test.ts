@@ -42,7 +42,7 @@ describe("cli-hooks-output", () => {
       expect(parts[0]).toContain("test-project");
       expect(parts[0]).toContain("1 result");
       expect(parts[1]).toBe("<phren-context>");
-      expect(parts[parts.length - 2]).toBe("<phren-context>");
+      expect(parts[parts.length - 2]).toBe("</phren-context>");
       expect(parts[parts.length - 1]).toContain("trace:");
     });
 

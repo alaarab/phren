@@ -232,6 +232,17 @@ export function stripComments(text: string): string {
   return text.replace(METADATA_REGEX.anyComment, "").trim();
 }
 
+/** Normalize finding text for comparison: strips bullet prefix, HTML comments, confidence tags, normalizes whitespace, lowercases. */
+export function normalizeFindingText(raw: string): string {
+  return raw
+    .replace(/^-\s+/, "")
+    .replace(/<!--.*?-->/g, " ")
+    .replace(/\[confidence\s+[01](?:\.\d+)?\]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // Add helpers — append metadata comments to a line
 // ---------------------------------------------------------------------------
