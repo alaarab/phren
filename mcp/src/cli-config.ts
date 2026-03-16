@@ -7,8 +7,13 @@ import {
   updateRetentionPolicy,
   getWorkflowPolicy,
   updateWorkflowPolicy,
+  mergeConfig,
+  VALID_TASK_MODES,
+  type TaskMode,
+  VALID_FINDING_SENSITIVITY,
+  type FindingSensitivityLevel,
 } from "./shared-governance.js";
-import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "./data-access.js";
+import { listMachines as listMachinesStore, listProfiles as listProfilesStore, listProfiles } from "./data-access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "./telemetry.js";
 import {
   governanceInstallPreferencesFile,
@@ -28,6 +33,7 @@ import {
   PROJECT_OWNERSHIP_MODES,
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
+  updateProjectConfigOverrides,
 } from "./project-config.js";
 import {
   isValidProjectName,
@@ -36,12 +42,150 @@ import {
   loadLearnedSynonyms,
   removeLearnedSynonym,
 } from "./utils.js";
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+export function parseProjectArg(args: string[]): { project?: string; rest: string[] } {
+  const project = args.find((a) => a.startsWith("--project="))?.slice("--project=".length)
+    ?? (args.indexOf("--project") !== -1 ? args[args.indexOf("--project") + 1] : undefined);
+  const rest = args.filter((a, i) =>
+    a !== "--project" && !a.startsWith("--project=") && args[i - 1] !== "--project"
+  );
+  return { project, rest };
+}
+
+export function checkProjectInProfile(phrenPath: string, project: string): string | null {
+  const profiles = listProfiles(phrenPath);
+  if (profiles.ok) {
+    const registered = profiles.data.some((entry) => entry.projects.includes(project));
+    if (!registered) {
+      return `Warning: Project '${project}' not found in active profile. Run 'phren add /path/to/${project}' first.\n  Config was written to ${phrenPath}/${project}/phren.project.yaml but won't be used until the project is registered.`;
+    }
+  }
+  return null;
+}
+
+function warnIfUnregistered(phrenPath: string, project: string): void {
+  const warning = checkProjectInProfile(phrenPath, project);
+  if (warning) console.error(warning);
+}
+
+export function buildProactivitySnapshot(phrenPath: string) {
+  const prefs = readGovernanceInstallPreferences(phrenPath);
+  return {
+    path: governanceInstallPreferencesFile(phrenPath),
+    configured: {
+      proactivity: prefs.proactivity ?? null,
+      proactivityFindings: prefs.proactivityFindings ?? null,
+      proactivityTask: prefs.proactivityTask ?? null,
+    },
+    effective: {
+      proactivity: getProactivityLevel(phrenPath),
+      proactivityFindings: getProactivityLevelForFindings(phrenPath),
+      proactivityTask: getProactivityLevelForTask(phrenPath),
+    },
+  };
+}
+
+// ── Config show ───────────────────────────────────────────────────────────────
+
+function formatConfigAsTable(label: string, rows: [string, string][]): void {
+  const maxKey = Math.max(...rows.map(([k]) => k.length));
+  console.log(`\n${label}`);
+  for (const [k, v] of rows) {
+    console.log(`  ${k.padEnd(maxKey)}  ${v}`);
+  }
+}
+
+export function handleConfigShow(args: string[]): void {
+  const phrenPath = getPhrenPath();
+  const { project: projectArg } = parseProjectArg(args);
+
+  if (projectArg) {
+    if (!isValidProjectName(projectArg)) {
+      console.error(`Invalid project name: "${projectArg}"`);
+      process.exit(1);
+    }
+    const resolved = mergeConfig(phrenPath, projectArg);
+    const inProfile = checkProjectInProfile(phrenPath, projectArg);
+
+    console.log(`\nConfig for project: ${projectArg}${inProfile ? "" : "  (not in active profile)"}`);
+
+    formatConfigAsTable("Finding capture", [
+      ["sensitivity", resolved.findingSensitivity],
+      ["proactivity", resolved.proactivity.base ?? "(global)"],
+      ["proactivity.findings", resolved.proactivity.findings ?? "(global)"],
+      ["proactivity.tasks", resolved.proactivity.tasks ?? "(global)"],
+    ]);
+
+    formatConfigAsTable("Task automation", [
+      ["taskMode", resolved.taskMode],
+    ]);
+
+    formatConfigAsTable("Retention policy", [
+      ["ttlDays", String(resolved.retentionPolicy.ttlDays)],
+      ["retentionDays", String(resolved.retentionPolicy.retentionDays)],
+      ["autoAcceptThreshold", String(resolved.retentionPolicy.autoAcceptThreshold)],
+      ["minInjectConfidence", String(resolved.retentionPolicy.minInjectConfidence)],
+      ["decay.d30", String(resolved.retentionPolicy.decay.d30)],
+      ["decay.d60", String(resolved.retentionPolicy.decay.d60)],
+      ["decay.d90", String(resolved.retentionPolicy.decay.d90)],
+      ["decay.d120", String(resolved.retentionPolicy.decay.d120)],
+    ]);
+
+    formatConfigAsTable("Workflow policy", [
+      ["lowConfidenceThreshold", String(resolved.workflowPolicy.lowConfidenceThreshold)],
+      ["riskySections", resolved.workflowPolicy.riskySections.join(", ")],
+    ]);
+
+    if (!inProfile) {
+      console.error(`\nRun 'phren add /path/to/${projectArg}' to register this project.`);
+    }
+    console.log("");
+    return;
+  }
+
+  // Global config — no project
+  const retention = getRetentionPolicy(phrenPath);
+  const workflow = getWorkflowPolicy(phrenPath);
+
+  console.log("\nGlobal config (applies to all projects unless overridden)");
+
+  formatConfigAsTable("Finding capture", [
+    ["findingSensitivity", workflow.findingSensitivity],
+  ]);
+
+  formatConfigAsTable("Task automation", [
+    ["taskMode", workflow.taskMode],
+  ]);
+
+  formatConfigAsTable("Retention policy", [
+    ["ttlDays", String(retention.ttlDays)],
+    ["retentionDays", String(retention.retentionDays)],
+    ["autoAcceptThreshold", String(retention.autoAcceptThreshold)],
+    ["minInjectConfidence", String(retention.minInjectConfidence)],
+    ["decay.d30", String(retention.decay.d30)],
+    ["decay.d60", String(retention.decay.d60)],
+    ["decay.d90", String(retention.decay.d90)],
+    ["decay.d120", String(retention.decay.d120)],
+  ]);
+
+  formatConfigAsTable("Workflow policy", [
+    ["lowConfidenceThreshold", String(workflow.lowConfidenceThreshold)],
+    ["riskySections", workflow.riskySections.join(", ")],
+  ]);
+
+  console.log(`\nUse '--project <name>' to see merged config for a specific project.`);
+  console.log("");
+}
+
 // ── Config router ────────────────────────────────────────────────────────────
 
 export async function handleConfig(args: string[]) {
   const sub = args[0];
   const rest = args.slice(1);
   switch (sub) {
+    case "show":
+      return handleConfigShow(rest);
     case "policy":
       return handleRetentionPolicy(rest);
     case "workflow":
@@ -72,6 +216,7 @@ export async function handleConfig(args: string[]) {
       console.log(`phren config - manage settings and policies
 
 Subcommands:
+  phren config show [--project <name>]  Full merged config summary (what's actually active)
   phren config policy [get|set ...]     Memory retention, TTL, confidence, decay
   phren config workflow [get|set ...]   Risky-memory thresholds, task automation mode
   phren config index [get|set ...]      Indexer include/exclude globs
@@ -176,33 +321,33 @@ function handleConfigSynonyms(args: string[]) {
   process.exit(1);
 }
 
-function proactivityConfigSnapshot(phrenPath: string) {
-  const prefs = readGovernanceInstallPreferences(phrenPath);
-  return {
-    path: governanceInstallPreferencesFile(phrenPath),
-    configured: {
-      proactivity: prefs.proactivity ?? null,
-      proactivityFindings: prefs.proactivityFindings ?? null,
-      proactivityTask: prefs.proactivityTask ?? null,
-    },
-    effective: {
-      proactivity: getProactivityLevel(phrenPath),
-      proactivityFindings: getProactivityLevelForFindings(phrenPath),
-      proactivityTask: getProactivityLevelForTask(phrenPath),
-    },
-  };
-}
+const proactivityConfigSnapshot = buildProactivitySnapshot;
 
 function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findings" | "proactivity.tasks", args: string[]) {
   const phrenPath = getPhrenPath();
-  const value = args[0];
+  const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
+  const value = filteredArgs[0];
 
   if (value === undefined) {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      const resolved = mergeConfig(phrenPath, projectArg);
+      console.log(JSON.stringify({
+        _project: projectArg,
+        base: resolved.proactivity.base ?? null,
+        findings: resolved.proactivity.findings ?? null,
+        tasks: resolved.proactivity.tasks ?? null,
+      }, null, 2));
+      return;
+    }
     console.log(JSON.stringify(proactivityConfigSnapshot(phrenPath), null, 2));
     return;
   }
 
-  if (args.length !== 1) {
+  if (filteredArgs.length !== 1) {
     printProactivityUsage(subcommand);
     process.exit(1);
   }
@@ -211,6 +356,26 @@ function handleConfigProactivity(subcommand: "proactivity" | "proactivity.findin
   if (!level) {
     printProactivityUsage(subcommand);
     process.exit(1);
+  }
+
+  if (projectArg) {
+    if (!isValidProjectName(projectArg)) {
+      console.error(`Invalid project name: "${projectArg}"`);
+      process.exit(1);
+    }
+    warnIfUnregistered(phrenPath, projectArg);
+    const key = subcommand === "proactivity" ? "proactivity"
+      : subcommand === "proactivity.findings" ? "proactivityFindings"
+      : "proactivityTask";
+    updateProjectConfigOverrides(phrenPath, projectArg, (current) => ({ ...current, [key]: level }));
+    const resolved = mergeConfig(phrenPath, projectArg);
+    console.log(JSON.stringify({
+      _project: projectArg,
+      base: resolved.proactivity.base ?? null,
+      findings: resolved.proactivity.findings ?? null,
+      tasks: resolved.proactivity.tasks ?? null,
+    }, null, 2));
+    return;
   }
 
   switch (subcommand) {
@@ -265,70 +430,7 @@ function handleConfigProjectOwnership(args: string[]) {
   console.log(JSON.stringify(projectOwnershipConfigSnapshot(phrenPath), null, 2));
 }
 
-// ── Task mode ─────────────────────────────────────────────────────────────────
-
-const TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
-type TaskMode = typeof TASK_MODES[number];
-
-function normalizeTaskMode(raw: string | undefined): TaskMode | undefined {
-  if (!raw) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  return TASK_MODES.includes(normalized as TaskMode) ? normalized as TaskMode : undefined;
-}
-
-function taskModeConfigSnapshot(phrenPath: string) {
-  const policy = getWorkflowPolicy(phrenPath);
-  return {
-    taskMode: policy.taskMode,
-  };
-}
-
-function handleConfigTaskMode(args: string[]) {
-  const phrenPath = getPhrenPath();
-  const action = args[0];
-
-  if (!action || action === "get") {
-    console.log(JSON.stringify(taskModeConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  if (action === "set") {
-    const mode = normalizeTaskMode(args[1]);
-    if (!mode) {
-      console.error(`Usage: phren config task-mode set [${TASK_MODES.join("|")}]`);
-      process.exit(1);
-    }
-    const result = updateWorkflowPolicy(phrenPath, { taskMode: mode });
-    if (!result.ok) {
-      console.error(result.error);
-      if (result.code === "PERMISSION_DENIED") process.exit(1);
-      return;
-    }
-    console.log(JSON.stringify(taskModeConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  // Bare value: phren config task-mode auto
-  const mode = normalizeTaskMode(action);
-  if (mode) {
-    const result = updateWorkflowPolicy(phrenPath, { taskMode: mode });
-    if (!result.ok) {
-      console.error(result.error);
-      if (result.code === "PERMISSION_DENIED") process.exit(1);
-      return;
-    }
-    console.log(JSON.stringify(taskModeConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  console.error(`Usage: phren config task-mode [get|set <mode>|<mode>]  — modes: ${TASK_MODES.join("|")}`);
-  process.exit(1);
-}
-
-// ── Finding sensitivity ───────────────────────────────────────────────────────
-
-const FINDING_SENSITIVITY_LEVELS = ["minimal", "conservative", "balanced", "aggressive"] as const;
-type FindingSensitivityLevel = typeof FINDING_SENSITIVITY_LEVELS[number];
+// ── Finding sensitivity config ────────────────────────────────────────────────
 
 export const FINDING_SENSITIVITY_CONFIG: Record<FindingSensitivityLevel, {
   sessionCap: number;
@@ -357,60 +459,111 @@ export const FINDING_SENSITIVITY_CONFIG: Record<FindingSensitivityLevel, {
   },
 };
 
-function normalizeFindingSensitivity(v: string | undefined): FindingSensitivityLevel | null {
-  if (!v) return null;
-  const lower = v.toLowerCase();
-  if (FINDING_SENSITIVITY_LEVELS.includes(lower as FindingSensitivityLevel)) return lower as FindingSensitivityLevel;
-  return null;
+// ── Generic workflow field handler ────────────────────────────────────────────
+
+interface WorkflowFieldHandlerOpts<T extends string> {
+  fieldName: string;
+  validValues: readonly T[];
+  normalize: (raw: string | undefined) => T | null;
+  getSnapshot: (phrenPath: string) => Record<string, unknown>;
+  getProjectValue: (resolved: ReturnType<typeof mergeConfig>) => T;
+  formatProjectOutput: (projectArg: string, value: T) => Record<string, unknown>;
+  workflowPatchKey: string;
+  projectOverrideKey: string;
 }
 
-function findingSensitivityConfigSnapshot(phrenPath: string) {
-  const policy = getWorkflowPolicy(phrenPath);
-  const level = policy.findingSensitivity;
-  const config = FINDING_SENSITIVITY_CONFIG[level];
-  return { level, ...config };
+function handleWorkflowField<T extends string>(args: string[], opts: WorkflowFieldHandlerOpts<T>) {
+  const phrenPath = getPhrenPath();
+  const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
+  const action = filteredArgs[0];
+
+  if (!action || action === "get") {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      const resolved = mergeConfig(phrenPath, projectArg);
+      const value = opts.getProjectValue(resolved);
+      console.log(JSON.stringify(opts.formatProjectOutput(projectArg, value), null, 2));
+      return;
+    }
+    console.log(JSON.stringify(opts.getSnapshot(phrenPath), null, 2));
+    return;
+  }
+
+  const applyValue = (value: T) => {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      warnIfUnregistered(phrenPath, projectArg);
+      updateProjectConfigOverrides(phrenPath, projectArg, (current) => ({ ...current, [opts.projectOverrideKey]: value }));
+      const resolved = mergeConfig(phrenPath, projectArg);
+      const eff = opts.getProjectValue(resolved);
+      console.log(JSON.stringify(opts.formatProjectOutput(projectArg, eff), null, 2));
+      return;
+    }
+    const result = updateWorkflowPolicy(phrenPath, { [opts.workflowPatchKey]: value });
+    if (!result.ok) {
+      console.error(result.error);
+      if (result.code === "PERMISSION_DENIED") process.exit(1);
+      return;
+    }
+    console.log(JSON.stringify(opts.getSnapshot(phrenPath), null, 2));
+  };
+
+  if (action === "set") {
+    const value = opts.normalize(filteredArgs[1]);
+    if (!value) {
+      console.error(`Usage: phren config ${opts.fieldName} set [${opts.validValues.join("|")}]`);
+      process.exit(1);
+    }
+    return applyValue(value);
+  }
+
+  const value = opts.normalize(action);
+  if (value) return applyValue(value);
+
+  console.error(`Usage: phren config ${opts.fieldName} [--project <name>] [get|set <value>|<value>]  — values: ${opts.validValues.join("|")}`);
+  process.exit(1);
+}
+
+function normalizeFromList<T extends string>(raw: string | undefined, validValues: readonly T[]): T | null {
+  if (!raw) return null;
+  const lower = raw.trim().toLowerCase();
+  return validValues.includes(lower as T) ? lower as T : null;
+}
+
+function handleConfigTaskMode(args: string[]) {
+  handleWorkflowField(args, {
+    fieldName: "task-mode",
+    validValues: VALID_TASK_MODES,
+    normalize: (raw) => normalizeFromList(raw, VALID_TASK_MODES),
+    getSnapshot: (phrenPath) => ({ taskMode: getWorkflowPolicy(phrenPath).taskMode }),
+    getProjectValue: (resolved) => resolved.taskMode,
+    formatProjectOutput: (proj, value) => ({ _project: proj, taskMode: value }),
+    workflowPatchKey: "taskMode",
+    projectOverrideKey: "taskMode",
+  });
 }
 
 function handleConfigFindingSensitivity(args: string[]) {
-  const phrenPath = getPhrenPath();
-  const action = args[0];
-
-  if (!action || action === "get") {
-    console.log(JSON.stringify(findingSensitivityConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  if (action === "set") {
-    const level = normalizeFindingSensitivity(args[1]);
-    if (!level) {
-      console.error(`Usage: phren config finding-sensitivity set [${FINDING_SENSITIVITY_LEVELS.join("|")}]`);
-      process.exit(1);
-    }
-    const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: level });
-    if (!result.ok) {
-      console.error(result.error);
-      if (result.code === "PERMISSION_DENIED") process.exit(1);
-      return;
-    }
-    console.log(JSON.stringify(findingSensitivityConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  // Bare value: phren config finding-sensitivity balanced
-  const level = normalizeFindingSensitivity(action);
-  if (level) {
-    const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: level });
-    if (!result.ok) {
-      console.error(result.error);
-      if (result.code === "PERMISSION_DENIED") process.exit(1);
-      return;
-    }
-    console.log(JSON.stringify(findingSensitivityConfigSnapshot(phrenPath), null, 2));
-    return;
-  }
-
-  console.error(`Usage: phren config finding-sensitivity [get|set <level>|<level>]  — levels: ${FINDING_SENSITIVITY_LEVELS.join("|")}`);
-  process.exit(1);
+  handleWorkflowField(args, {
+    fieldName: "finding-sensitivity",
+    validValues: VALID_FINDING_SENSITIVITY,
+    normalize: (raw) => normalizeFromList(raw, VALID_FINDING_SENSITIVITY),
+    getSnapshot: (phrenPath) => {
+      const policy = getWorkflowPolicy(phrenPath);
+      const level = policy.findingSensitivity;
+      return { level, ...FINDING_SENSITIVITY_CONFIG[level] };
+    },
+    getProjectValue: (resolved) => resolved.findingSensitivity,
+    formatProjectOutput: (proj, value) => ({ _project: proj, level: value, ...FINDING_SENSITIVITY_CONFIG[value] }),
+    workflowPatchKey: "findingSensitivity",
+    projectOverrideKey: "findingSensitivity",
+  });
 }
 
 // ── LLM config ───────────────────────────────────────────────────────────────
@@ -522,10 +675,21 @@ export async function handleIndexPolicy(args: string[]) {
 // ── Memory policy ────────────────────────────────────────────────────────────
 
 export async function handleRetentionPolicy(args: string[]) {
-  if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getRetentionPolicy(getPhrenPath()), null, 2));
-    const dedupOn = (process.env.PHREN_FEATURE_SEMANTIC_DEDUP ?? (process.env.PHREN_FEATURE_SEMANTIC_DEDUP || process.env.PHREN_FEATURE_SEMANTIC_DEDUP)) === "1";
-    const conflictOn = (process.env.PHREN_FEATURE_SEMANTIC_CONFLICT ?? (process.env.PHREN_FEATURE_SEMANTIC_CONFLICT || process.env.PHREN_FEATURE_SEMANTIC_CONFLICT)) === "1";
+  const phrenPath = getPhrenPath();
+  const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
+
+  if (!filteredArgs.length || filteredArgs[0] === "get") {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      const resolved = mergeConfig(phrenPath, projectArg);
+      console.log(JSON.stringify({ _project: projectArg, ...resolved.retentionPolicy }, null, 2));
+      return;
+    }
+    console.log(JSON.stringify(getRetentionPolicy(phrenPath), null, 2));
+    const conflictOn = process.env.PHREN_FEATURE_SEMANTIC_CONFLICT === "1";
     process.stderr.write(`\nDedup: free Jaccard similarity scan on every add_finding (no API key needed).\n`);
     process.stderr.write(`  Near-matches (30–55% overlap) are returned in the response for the agent to decide.\n`);
     if (conflictOn) {
@@ -537,9 +701,37 @@ export async function handleRetentionPolicy(args: string[]) {
     }
     return;
   }
-  if (args[0] === "set") {
+  if (filteredArgs[0] === "set") {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      warnIfUnregistered(phrenPath, projectArg);
+      updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
+        const existingRetention = current.retentionPolicy ?? {};
+        const retentionPatch: NonNullable<typeof existingRetention> = { ...existingRetention };
+        for (const arg of filteredArgs.slice(1)) {
+          if (!arg.startsWith("--")) continue;
+          const [k, v] = arg.slice(2).split("=");
+          if (!k || v === undefined) continue;
+          const num = Number(v);
+          const value = Number.isNaN(num) ? v : num;
+          if (k.startsWith("decay.")) {
+            retentionPatch.decay = { ...(retentionPatch.decay ?? {}) };
+            (retentionPatch.decay as Record<string, unknown>)[k.slice("decay.".length)] = value;
+          } else {
+            (retentionPatch as Record<string, unknown>)[k] = value;
+          }
+        }
+        return { ...current, retentionPolicy: retentionPatch };
+      });
+      const resolved = mergeConfig(phrenPath, projectArg);
+      console.log(JSON.stringify({ _project: projectArg, ...resolved.retentionPolicy }, null, 2));
+      return;
+    }
     const patch: Record<string, unknown> = {};
-    for (const arg of args.slice(1)) {
+    for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;
       const [k, v] = arg.slice(2).split("=");
       if (!k || v === undefined) continue;
@@ -552,7 +744,7 @@ export async function handleRetentionPolicy(args: string[]) {
         patch[k] = value;
       }
     }
-    const result = updateRetentionPolicy(getPhrenPath(), patch);
+    const result = updateRetentionPolicy(phrenPath, patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -561,20 +753,66 @@ export async function handleRetentionPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: phren config policy [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
+  console.error("Usage: phren config policy [--project <name>] [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45]");
   process.exit(1);
 }
 
 // ── Memory workflow ──────────────────────────────────────────────────────────
 
 export async function handleWorkflowPolicy(args: string[]) {
-  if (!args.length || args[0] === "get") {
-    console.log(JSON.stringify(getWorkflowPolicy(getPhrenPath()), null, 2));
+  const phrenPath = getPhrenPath();
+  const { project: projectArg, rest: filteredArgs } = parseProjectArg(args);
+
+  if (!filteredArgs.length || filteredArgs[0] === "get") {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      const resolved = mergeConfig(phrenPath, projectArg);
+      console.log(JSON.stringify({ _project: projectArg, ...resolved.workflowPolicy }, null, 2));
+      return;
+    }
+    console.log(JSON.stringify(getWorkflowPolicy(phrenPath), null, 2));
     return;
   }
-  if (args[0] === "set") {
+  if (filteredArgs[0] === "set") {
+    if (projectArg) {
+      if (!isValidProjectName(projectArg)) {
+        console.error(`Invalid project name: "${projectArg}"`);
+        process.exit(1);
+      }
+      warnIfUnregistered(phrenPath, projectArg);
+      updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
+        const nextConfig = { ...current };
+        const existingWorkflow = current.workflowPolicy ?? {};
+        const workflowPatch: Record<string, unknown> = { ...existingWorkflow };
+        for (const arg of filteredArgs.slice(1)) {
+          if (!arg.startsWith("--")) continue;
+          const [k, v] = arg.slice(2).split("=");
+          if (!k || v === undefined) continue;
+          if (k === "riskySections") {
+            workflowPatch.riskySections = v.split(",").map((s) => s.trim()).filter(Boolean);
+          } else if (k === "taskMode") {
+            nextConfig.taskMode = v as typeof nextConfig.taskMode;
+          } else if (k === "findingSensitivity") {
+            nextConfig.findingSensitivity = v as typeof nextConfig.findingSensitivity;
+          } else {
+            const num = Number(v);
+            workflowPatch[k] = Number.isNaN(num) ? v : num;
+          }
+        }
+        if (Object.keys(workflowPatch).length > 0 || existingWorkflow !== current.workflowPolicy) {
+          nextConfig.workflowPolicy = workflowPatch as typeof nextConfig.workflowPolicy;
+        }
+        return nextConfig;
+      });
+      const resolved = mergeConfig(phrenPath, projectArg);
+      console.log(JSON.stringify({ _project: projectArg, ...resolved.workflowPolicy }, null, 2));
+      return;
+    }
     const patch: Record<string, unknown> = {};
-    for (const arg of args.slice(1)) {
+    for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;
       const [k, v] = arg.slice(2).split("=");
       if (!k || v === undefined) continue;
@@ -585,7 +823,7 @@ export async function handleWorkflowPolicy(args: string[]) {
         patch[k] = Number.isNaN(num) ? v : num;
       }
     }
-    const result = updateWorkflowPolicy(getPhrenPath(), patch);
+    const result = updateWorkflowPolicy(phrenPath, patch);
     if (!result.ok) {
       console.log(result.error);
       if (result.code === "PERMISSION_DENIED") process.exit(1);
@@ -594,7 +832,7 @@ export async function handleWorkflowPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: phren config workflow [get|set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts --taskMode=manual]");
+  console.error("Usage: phren config workflow [--project <name>] [get|set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts --taskMode=manual]");
   process.exit(1);
 }
 

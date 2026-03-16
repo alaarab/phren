@@ -12,9 +12,10 @@ import {
   readRootManifest,
 } from "./shared.js";
 import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared-index.js";
+import { mergeConfig, getWorkflowPolicy } from "./shared-governance.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
 import { getTelemetrySummary } from "./telemetry.js";
-import { runGit as runGitShared } from "./utils.js";
+import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
@@ -27,7 +28,7 @@ function readPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${errorMessage(err)}\n`);
     return "unknown";
   }
 }
@@ -87,6 +88,28 @@ export async function runStatus() {
   // Active project
   if (activeProject) {
     console.log(`  ${DIM}project${RESET}  ${activeProject}`);
+    // Effective config for this project
+    try {
+      const resolved = mergeConfig(phrenPath, activeProject);
+      const globalWorkflow = getWorkflowPolicy(phrenPath);
+      const projectSensitivity = resolved.findingSensitivity !== globalWorkflow.findingSensitivity
+        ? `${resolved.findingSensitivity} ${DIM}(project override)${RESET}`
+        : resolved.findingSensitivity;
+      const projectTaskMode = resolved.taskMode !== globalWorkflow.taskMode
+        ? `${resolved.taskMode} ${DIM}(project override)${RESET}`
+        : resolved.taskMode;
+      console.log(`  ${DIM}sensitivity${RESET}  ${projectSensitivity}`);
+      console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
+      if (resolved.proactivity.base || resolved.proactivity.findings || resolved.proactivity.tasks) {
+        const parts: string[] = [];
+        if (resolved.proactivity.base) parts.push(`base:${resolved.proactivity.base}`);
+        if (resolved.proactivity.findings) parts.push(`findings:${resolved.proactivity.findings}`);
+        if (resolved.proactivity.tasks) parts.push(`tasks:${resolved.proactivity.tasks}`);
+        console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
+      }
+    } catch (err: unknown) {
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusConfig: ${errorMessage(err)}\n`);
+    }
   }
 
   // Phren path and config
@@ -120,7 +143,7 @@ export async function runStatus() {
         const servers = isRecord(settings.servers) ? settings.servers : undefined;
         mcpConfigured = Boolean(servers?.phren || servers?.phren);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${errorMessage(err)}\n`);
       }
     }
   } else {
@@ -135,7 +158,7 @@ export async function runStatus() {
         const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
         hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${errorMessage(err)}\n`);
       }
     }
   }
@@ -164,7 +187,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${errorMessage(err)}\n`);
   }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
@@ -195,7 +218,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${errorMessage(err)}\n`);
   }
 
   // Agent integration status
@@ -205,7 +228,7 @@ export async function runStatus() {
       const raw = fs.readFileSync(filePath, "utf8");
       return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${errorMessage(err)}\n`);
       return false;
     }
   }

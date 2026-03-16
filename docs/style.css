@@ -270,6 +270,17 @@ nav.scrolled {
   94%, 100% { transform: scaleX(-1) translateX(0) rotate(0deg) translateY(0); }
 }
 
+/* Lightbulb eureka (child of .hero-phren-actor, above head) */
+.hero-bulb {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  transform: translateX(-50%);
+  z-index: 4;
+  opacity: 0;
+  filter: drop-shadow(0 0 6px rgba(255,224,102,0.6));
+}
+
 /* Document phren carries (child of .hero-phren-actor, moves with him) */
 .hero-doc {
   position: absolute;
@@ -313,10 +324,9 @@ nav.scrolled {
 
 @media (max-width: 768px) {
   .hero-cabinet { display: none; }
-  .hero-cabinet-inline { display: none; }
-  .hero-doc { display: none; }
-  .hero-phren-actor { transform: scaleX(-1); animation: none; }
-  .hero-scene { height: auto; }
+  .hero-cabinet-inline { width: 60px; height: 80px; }
+  .hero-phren-actor img { width: 70px; height: 82px; }
+  .hero-scene { height: 120px; }
 }
 
 .hero-badge {
@@ -925,7 +935,7 @@ section {
 }
 
 .install-path-card {
-  min-height: 148px;
+  min-height: 0;
   padding: 16px;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.06);
@@ -946,7 +956,7 @@ section {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--copper);
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 
 .install-path-title {
@@ -2075,7 +2085,7 @@ a:focus-visible, button:focus-visible {
   white-space: nowrap;
   opacity: 0;
   transform: translateX(-280px);
-  animation: agent-swoop 8.4s ease-in-out infinite;
+  animation: agent-swoop 8.4s linear infinite;
 }
 .agent-pill:nth-child(1) { animation-delay: 0s; }
 .agent-pill:nth-child(2) { animation-delay: 1.4s; }
@@ -2085,12 +2095,12 @@ a:focus-visible, button:focus-visible {
 .agent-pill:nth-child(6) { animation-delay: 7.0s; }
 
 @keyframes agent-swoop {
-  0% { opacity: 0; transform: translateX(-280px) scale(0.9); }
-  3% { opacity: 0.6; transform: translateX(-80px) scale(0.95); }
-  8% { opacity: 1; transform: translateX(0) scale(1); text-shadow: 0 0 12px rgba(0,229,255,0.3); }
-  14% { opacity: 1; transform: translateX(0) scale(1); text-shadow: 0 0 12px rgba(0,229,255,0.3); }
-  20% { opacity: 0.6; transform: translateX(280px) scale(0.9); text-shadow: none; }
-  22%, 100% { opacity: 0; transform: translateX(280px) scale(0.85); }
+  0%       { opacity: 0; transform: translateX(-350px); }
+  5%       { opacity: 1; transform: translateX(-120px); }
+  12%      { opacity: 1; transform: translateX(0); text-shadow: 0 0 12px rgba(0,229,255,0.3); }
+  19%      { opacity: 1; transform: translateX(120px); text-shadow: none; }
+  24%      { opacity: 0; transform: translateX(350px); }
+  25%, 100% { opacity: 0; transform: translateX(350px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

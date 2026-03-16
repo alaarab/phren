@@ -1,18 +1,9 @@
 import * as fs from "fs";
 import * as os from "os";
-import * as path from "path";
-import * as crypto from "crypto";
-import { homePath } from "./shared.js";
+import { homePath, atomicWriteText } from "./shared.js";
 
 function phrenMachineFilePath(): string {
   return homePath(".phren", ".machine-id");
-}
-
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
 }
 
 export function machineFilePath(): string {

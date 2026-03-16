@@ -213,7 +213,7 @@ export async function handleHookPrompt() {
 
   let raw = "";
   try { raw = await readStdin(); } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt stdinRead: ${err instanceof Error ? err.message : String(err)}\n`);
+    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt stdinRead: ${errorMessage(err)}\n`);
     process.exit(0);
   }
 
@@ -420,28 +420,30 @@ export async function handleHookPrompt() {
     const alreadyNoticed = noticeFile ? fs.existsSync(noticeFile) : false;
 
     if (!alreadyNoticed) {
-      // Clean up stale session markers (>24h old) from .sessions/ dir
-      try {
-        const cutoff = Date.now() - 86400000;
-        const sessDir = sessionsDir(getPhrenPath());
-        if (fs.existsSync(sessDir)) {
-          for (const f of fs.readdirSync(sessDir)) {
-            if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
-            const fp = `${sessDir}/${f}`;
-            if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+      // Defer stale session marker cleanup to after output — it's I/O-heavy and not needed for results
+      setImmediate(() => {
+        try {
+          const cutoff = Date.now() - 86400000;
+          const sessDir = sessionsDir(getPhrenPath());
+          if (fs.existsSync(sessDir)) {
+            for (const f of fs.readdirSync(sessDir)) {
+              if (!f.startsWith("noticed-") && !f.startsWith("extracted-")) continue;
+              const fp = `${sessDir}/${f}`;
+              try {
+                if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
+              } catch { /* ignore per-file errors */ }
+            }
           }
-        }
-        // Also clean stale markers from the phren root
-        for (const f of fs.readdirSync(getPhrenPath())) {
-          if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
-          const fp = `${getPhrenPath()}/${f}`;
-          try { fs.unlinkSync(fp); } catch (err: unknown) {
-            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt staleNoticeUnlink: ${errorMessage(err)}\n`);
+          // Also clean stale markers from the phren root
+          for (const f of fs.readdirSync(getPhrenPath())) {
+            if (!f.startsWith(".noticed-") && !f.startsWith(".extracted-")) continue;
+            const fp = `${getPhrenPath()}/${f}`;
+            try { fs.unlinkSync(fp); } catch { /* ignore */ }
           }
+        } catch (err: unknown) {
+          debugLog(`stale notice cleanup failed: ${errorMessage(err)}`);
         }
-      } catch (err: unknown) {
-        debugLog(`stale notice cleanup failed: ${errorMessage(err)}`);
-      }
+      });
 
       const needed = checkConsolidationNeeded(getPhrenPath(), profile);
       if (needed.length > 0) {

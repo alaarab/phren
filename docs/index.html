@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>phren: knowledge layer for AI agents</title>
-  <meta name="description" content="Knowledge layer for AI agents. Claude remembers you. Phren remembers your work. Git-backed, private, works with Claude Code, Copilot, Cursor, and Codex." />
-  <meta property="og:title" content="Your agents forget. Phren doesn't." />
-  <meta property="og:description" content="Knowledge layer for AI agents. Claude remembers you. Phren prepares your context. Git-backed, private, portable." />
+  <meta name="description" content="Knowledge layer for AI agents. Memory that travels with your agents. Git-backed, private, works with Claude Code, Copilot, Cursor, and Codex." />
+  <meta property="og:title" content="phren — memory that travels with your agents" />
+  <meta property="og:description" content="Knowledge layer for AI agents. Findings, decisions, and patterns persist across sessions, projects, and machines. Git-backed, private, portable." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
@@ -26,8 +26,10 @@
       <a href="#demo" class="nav-link">Shell</a>
       <a href="#web-ui" class="nav-link">Graph</a>
       <a href="#skills" class="nav-link">Skills</a>
-      <a href="api-reference.md" class="nav-link">Docs</a>
-      <a href="whitepaper.pdf" class="nav-link" target="_blank" rel="noopener">Whitepaper</a>
+      <a href="getting-started.html" class="nav-link">Docs</a>
+      <a href="configuration.html" class="nav-link">Config</a>
+      <a href="cli.html" class="nav-link">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -54,6 +56,28 @@
           <!-- Phren character — small, cute, right next to cabinet -->
           <div class="hero-phren-actor">
             <img src="phren-hero.svg" alt="phren" width="100" height="116" style="image-rendering: pixelated">
+            <!-- Lightbulb eureka moment (appears after phren grabs the doc) -->
+            <svg class="hero-bulb" viewBox="0 0 9 12" width="16" height="20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <g shape-rendering="crispEdges">
+                <!-- Bulb glass -->
+                <rect x="2" y="0" width="5" height="1" fill="#FFE066"/>
+                <rect x="1" y="1" width="7" height="1" fill="#FFE066"/>
+                <rect x="1" y="2" width="7" height="1" fill="#FFEB99"/>
+                <rect x="1" y="3" width="7" height="1" fill="#FFE066"/>
+                <rect x="2" y="4" width="5" height="1" fill="#FFE066"/>
+                <!-- Bulb base -->
+                <rect x="3" y="5" width="3" height="1" fill="#BBA84F"/>
+                <rect x="3" y="6" width="3" height="1" fill="#A89040"/>
+                <!-- Rays -->
+                <rect x="0" y="2" width="1" height="1" fill="#FFE066" opacity="0.7"/>
+                <rect x="8" y="2" width="1" height="1" fill="#FFE066" opacity="0.7"/>
+                <rect x="4" y="8" width="1" height="1" fill="#FFE066" opacity="0.5"/>
+                <animate attributeName="opacity"
+                  values="0;0;0;0;0;0;0;0;1;1;0.6;0;0"
+                  keyTimes="0;0.10;0.20;0.30;0.40;0.50;0.60;0.68;0.72;0.80;0.86;0.90;1"
+                  dur="16s" repeatCount="indefinite"/>
+              </g>
+            </svg>
             <!-- Document phren carries after picking from cabinet (synced to 16s cabinet cycle) -->
             <svg class="hero-doc" viewBox="0 0 11 14" width="20" height="25" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <g shape-rendering="crispEdges">
@@ -71,7 +95,7 @@
           </div>
 
           <!-- Filing cabinet with full interaction animation (16s cycle) -->
-          <svg class="hero-cabinet-inline" viewBox="0 0 90 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <svg class="hero-cabinet-inline" viewBox="0 0 90 120" overflow="visible" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <g shape-rendering="crispEdges" transform="translate(4, 8) scale(7)">
               <!-- Cabinet frame: top rim -->
               <rect x="0" y="0" width="11" height="1" fill="#2D2255"/>
@@ -125,10 +149,10 @@
                 <rect x="0" y="8" width="11" height="1" fill="#3a3060"/>
               </g>
 
-              <!-- Document 1: pulled out, read, put back -->
+              <!-- Document 1: pulled out toward phren, examined, put back -->
               <g opacity="0">
                 <animateTransform attributeName="transform" type="translate"
-                  values="0,0; 0,0; 0,-3; 0,-6; 0,-6; 0,-3; 0,0; 0,0"
+                  values="0,0; 0,0; -3,-1; -6,-2; -6,-2; -3,-1; 0,0; 0,0"
                   keyTimes="0; 0.18; 0.22; 0.25; 0.32; 0.36; 0.38; 1"
                   dur="16s" repeatCount="indefinite"/>
                 <animate attributeName="opacity"
@@ -141,10 +165,10 @@
                 <rect x="5" y="6" width="2" height="1" fill="#3a3060"/>
               </g>
 
-              <!-- Document 2: pulled out, phren takes it and walks away -->
+              <!-- Document 2: pulled out, phren takes it toward itself -->
               <g opacity="0">
                 <animateTransform attributeName="transform" type="translate"
-                  values="0,0; 0,0; 0,-3; 0,-6; 0,-7; -6,-8; -6,-8; 0,0"
+                  values="0,0; 0,0; -2,-1; -5,-2; -7,-1; -10,0; -10,0; 0,0"
                   keyTimes="0; 0.50; 0.54; 0.56; 0.60; 0.68; 0.78; 0.82"
                   dur="16s" repeatCount="indefinite"/>
                 <animate attributeName="opacity"
@@ -161,7 +185,7 @@
         </div>
       </div>
 
-      <h1 class="hero-title" style="font-size:clamp(28px,4.5vw,48px);margin-bottom:12px;">Claude remembers you.<br>Phren remembers your&nbsp;work.</h1>
+      <h1 class="hero-title" style="font-size:clamp(28px,4.5vw,48px);margin-bottom:12px;">Phren learns and recalls.</h1>
 
       <p class="hero-sub" style="margin-bottom:16px;">
         <span class="hero-sub-line" style="font-size:clamp(14px,1.8vw,17px);"><span class="kw-finding">Findings</span>, <span class="kw-fragment">fragments</span>, <span class="kw-task">tasks</span>, <span class="kw-memory">truths</span>, <span class="kw-skill">skills</span>, and <span class="kw-session">sessions</span> across&nbsp;<span class="kw-machine">machines</span>.</span>
@@ -178,18 +202,16 @@
                   <button class="copy-btn" data-cmd="npx @phren/cli init">copy</button>
                 </div>
                 <div class="install-command-note">
-                  One command. Creates <code style="color:var(--indigo)">~/.phren</code>, wires MCP, installs hooks. Your agents get a knowledge base that actually persists.
+                  One command. Creates <code style="color:var(--indigo)">~/.phren</code>, wires MCP, installs hooks.
                 </div>
                 <div class="install-path-grid" style="grid-template-columns: repeat(2, 1fr);">
-                  <div class="install-path-card install-path-card-primary">
-                    <div class="install-path-kicker">In a repo?</div>
-                    <div class="install-path-title">Auto-detects your&nbsp;project.</div>
-                    <p class="install-path-copy">Run it from your repo. Phren enrolls it&nbsp;automatically.</p>
+                  <div class="install-path-card install-path-card-primary" style="padding:10px 16px !important; min-height:0 !important;">
+                    <div class="install-path-kicker">Add a project</div>
+                    <div class="install-path-title" style="margin:0;"><code style="color:var(--indigo)">phren add</code> from any&nbsp;repo.</div>
                   </div>
-                  <div class="install-path-card">
-                    <div class="install-path-kicker">New machine?</div>
-                    <div class="install-path-title">Same command, full&nbsp;restore.</div>
-                    <p class="install-path-copy">Paste your remote. Everything&nbsp;lands.</p>
+                  <div class="install-path-card" style="padding:10px 16px !important; min-height:0 !important;">
+                    <div class="install-path-kicker">Already have one?</div>
+                    <div class="install-path-title" style="margin:0;"><code style="color:var(--indigo)">phren init</code> picks it&nbsp;up.</div>
                   </div>
                 </div>
               </div>
@@ -227,7 +249,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div class="step-title">Phren listens and learns</div>
-          <p class="step-desc">Phren catches <span class="kw-finding">findings</span>, links <span class="kw-fragment">fragments</span> across projects, and figures out what matters. Gets sharper the longer you use it.</p>
+          <p class="step-desc">Phren catches <span class="kw-finding">findings</span>, links <span class="kw-fragment">fragments</span> across projects, and figures out what matters. Gets sharper over time.</p>
         </div>
         <div class="step reveal reveal-delay-2">
           <div class="step-num">02</div>
@@ -235,15 +257,15 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
           </div>
           <div class="step-title">Follows you everywhere</div>
-          <p class="step-desc">Switch laptops mid-thought. Already there. Git syncs after every response, pulls on open. Your knowledge travels with you, not your machine.</p>
+          <p class="step-desc">Git syncs after every response, pulls on open. Your knowledge travels with you, not your machine.</p>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <div class="step-title">See everything it knows</div>
-          <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects. Nothing hidden.</p>
+          <div class="step-title">Browse it all</div>
+          <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects.</p>
         </div>
       </div>
     </div>
@@ -339,13 +361,13 @@
           <div class="bento-card-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
-          <div class="bento-card-title">One brain, many agents.</div>
-          <p class="bento-card-desc">Any agent, any machine, one knowledge base. What one <span class="kw-session">session</span> discovers, every future session already knows. Patterns solidify. Bad info fades.</p>
+          <div class="bento-card-title">Same brain, every tool.</div>
+          <p class="bento-card-desc">Switch agents, switch machines — phren keeps up. What you figured out in Claude this morning is already there when you open Cursor tonight. Good stuff sticks. Bad stuff fades.</p>
           <div class="bento-tag-row">
-            <div class="bento-tag">laptop</div>
-            <div class="bento-tag">desktop</div>
-            <div class="bento-tag">CI</div>
-            <div class="bento-tag">5 agents</div>
+            <span class="agent-pill">Claude Code</span>
+            <span class="agent-pill">Copilot</span>
+            <span class="agent-pill">Cursor</span>
+            <span class="agent-pill">Codex</span>
           </div>
         </div>
 
@@ -353,7 +375,7 @@
           <div class="fun-card-copy">
             <div class="fun-card-kicker">Claude &#9829; phren</div>
             <h3 class="fun-card-title">Built for each other.</h3>
-            <p class="fun-card-desc">Claude thinks. Phren prepares. When your agent arrives, the right context is already waiting.</p>
+            <p class="fun-card-desc">Claude asks a question. Phren already looked it up. The findings, the gotchas, the thing that broke last time — all there before the first token.</p>
           </div>
           <div class="fun-card-art" aria-hidden="true">
             <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -363,9 +385,9 @@
                   <stop offset="55%" stop-color="#12122a"/>
                   <stop offset="100%" stop-color="#0d0d22"/>
                 </linearGradient>
-                <radialGradient id="fun-heartGlow" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.6"/>
-                  <stop offset="70%" stop-color="#FF6672" stop-opacity="0.15"/>
+                <radialGradient id="fun-heartGlow" cx="50%" cy="50%" r="40%">
+                  <stop offset="0%" stop-color="#FF8A90" stop-opacity="0.7"/>
+                  <stop offset="50%" stop-color="#FF6672" stop-opacity="0.2"/>
                   <stop offset="100%" stop-color="#FF6672" stop-opacity="0"/>
                 </radialGradient>
                 <radialGradient id="fun-claudeGlow" cx="50%" cy="65%" r="55%">
@@ -373,7 +395,8 @@
                   <stop offset="100%" stop-color="#D4692A" stop-opacity="0"/>
                 </radialGradient>
                 <radialGradient id="fun-phrenGlow" cx="50%" cy="65%" r="55%">
-                  <stop offset="0%" stop-color="#9B8DC8" stop-opacity="0.08"/>
+                  <stop offset="0%" stop-color="#9B8DC8" stop-opacity="0.18"/>
+                  <stop offset="60%" stop-color="#9B8DC8" stop-opacity="0.06"/>
                   <stop offset="100%" stop-color="#9B8DC8" stop-opacity="0"/>
                 </radialGradient>
                 <filter id="fun-softGlow" x="-50%" y="-50%" width="200%" height="200%">
@@ -385,16 +408,16 @@
                 <!-- Gentle idle bob for Claude -->
                 <style>
                   @keyframes fun-claudeBob {
-                    0%, 100% { transform: translate(114px, 128px) scale(10); }
-                    50% { transform: translate(114px, 124px) scale(10); }
+                    0%, 100% { transform: translate(114px, 143px) scale(10); }
+                    50% { transform: translate(114px, 139px) scale(10); }
                   }
                   @keyframes fun-heartPulse {
                     0%, 100% { transform: translate(242px, 104px) scale(5); }
                     50% { transform: translate(242px, 105px) scale(5.4); }
                   }
                   @keyframes fun-heartGlowPulse {
-                    0%, 100% { opacity: 0.5; r: 40px; }
-                    50% { opacity: 0.8; r: 48px; }
+                    0%, 100% { opacity: 0.6; r: 30px; }
+                    50% { opacity: 0.9; r: 36px; }
                   }
                   @keyframes fun-phrenBob {
                     0%, 100% { transform: translateY(0px); }
@@ -456,21 +479,21 @@
               <!-- One solid connected shape, no gaps -->
               <!-- ======================== -->
               <g class="fun-claude-group" shape-rendering="crispEdges">
-                <!-- HEAD — 5w × 4h -->
-                <rect x="2" y="0" width="5" height="4" fill="#E8A0A0"/>
+                <!-- HEAD — 7w × 4h -->
+                <rect x="1" y="0" width="7" height="4" fill="#E8A0A0"/>
                 <!-- CLAWS — 1w × 1h nubs on each side -->
-                <rect x="1" y="2" width="1" height="1" fill="#E0A0A0"/>
-                <rect x="7" y="2" width="1" height="1" fill="#E0A0A0"/>
-                <!-- BODY — 7w × 2h, slightly wider, connected -->
-                <rect x="1" y="4" width="7" height="2" fill="#D89090"/>
-                <!-- 4 LEGS — spaced out -->
-                <rect x="1" y="6" width="1" height="1" fill="#D08888"/>
-                <rect x="3" y="6" width="1" height="1" fill="#D08888"/>
-                <rect x="5" y="6" width="1" height="1" fill="#D08888"/>
-                <rect x="7" y="6" width="1" height="1" fill="#D08888"/>
-                <!-- EYES -->
-                <rect x="3" y="1" width="1" height="1" fill="#442222"/>
-                <rect x="5" y="1" width="1" height="1" fill="#442222"/>
+                <rect x="0" y="2" width="1" height="1" fill="#E8A0A0"/>
+                <rect x="8" y="2" width="1" height="1" fill="#E8A0A0"/>
+                <!-- BODY — 7w × 1h (trimmed) -->
+                <rect x="1" y="4" width="7" height="1" fill="#E8A0A0"/>
+                <!-- 4 LEGS -->
+                <rect x="1" y="5" width="1" height="1" fill="#E8A0A0"/>
+                <rect x="3" y="5" width="1" height="1" fill="#E8A0A0"/>
+                <rect x="5" y="5" width="1" height="1" fill="#E8A0A0"/>
+                <rect x="7" y="5" width="1" height="1" fill="#E8A0A0"/>
+                <!-- EYES — spread apart -->
+                <rect x="2" y="1" width="1" height="1" fill="#442222"/>
+                <rect x="6" y="1" width="1" height="1" fill="#442222"/>
               </g>
 
               <!-- ============ -->
@@ -526,8 +549,8 @@
     <div class="container">
       <div class="demo-header reveal">
         <div class="section-label">Phren's shell</div>
-        <h2 class="section-title">Access it directly.</h2>
-        <p class="section-sub" style="margin-top:12px">Browse what it knows. Check on <span class="kw-task">tasks</span>. Review the queue. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> for the command palette.</p>
+        <h2 class="section-title">Access phren directly.</h2>
+        <p class="section-sub" style="margin-top:12px">Browse what phren knows. Check on <span class="kw-task">tasks</span>. Review the queue. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> for the command palette.</p>
       </div>
       <div class="demo-terminal reveal">
         <div class="terminal-bar">
@@ -546,7 +569,7 @@
     <div class="container">
       <div class="web-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
         <div class="section-label">Phren's brain map</div>
-        <h2 class="section-title">See everything it holds.</h2>
+        <h2 class="section-title">See everything phren holds.</h2>
         <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Run <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> to open a visual map of everything phren holds. <span class="kw-finding">Findings</span>, connections, quality scores, and what needs your attention.</p>
       </div>
       <div class="rui-mock reveal">
@@ -789,7 +812,7 @@
       <div class="skills-header reveal">
         <div class="section-label">Phren's tricks</div>
         <h2 class="section-title">67 MCP tools built in.<br>Skills for the bigger stuff.</h2>
-        <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Optional. Drop new ones in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>.</p>
+        <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Global skills live in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>, project skills in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/&lt;project&gt;/skills/</code>. Project skills override global ones with the same name.</p>
       </div>
 
       <div class="skills-grid">
@@ -811,7 +834,7 @@
         </div>
         <div class="skill-card reveal" style="border-style:dashed;opacity:0.7;">
           <div class="skill-name" style="color:var(--text-dim)">+ your own</div>
-          <div class="skill-desc">Drop skills into <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code></div>
+          <div class="skill-desc">Global: <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code><br>Per-project: <code style="font-size:11px;color:var(--text-muted)">~/.phren/&lt;project&gt;/skills/</code></div>
         </div>
       </div>
     </div>
@@ -925,7 +948,7 @@
       <span class="dot-sep">&#9829;</span>
       <span>made with love by <a href="https://github.com/alaarab" style="color:var(--text-muted);text-decoration:none;">@alaarab</a> &amp; claude</span>
       <span class="dot-sep">•</span>
-      <span style="opacity:0.5;font-size:11px">v0.0.9</span>
+      <span style="opacity:0.5;font-size:11px">v0.0.11</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>

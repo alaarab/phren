@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { errorMessage } from "./utils.js";
 
 /**
  * Write JSON to a file atomically using temp-file + rename.
@@ -19,7 +20,7 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 export function debugError(scope: string, err: unknown): void {
   if ((process.env.PHREN_DEBUG)) {
     process.stderr.write(
-      `[phren] ${scope}: ${err instanceof Error ? err.message : String(err)}\n`,
+      `[phren] ${scope}: ${errorMessage(err)}\n`,
     );
   }
 }

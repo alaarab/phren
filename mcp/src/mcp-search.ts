@@ -55,7 +55,7 @@ export function logSearchMiss(phrenPath: string, query: string, project?: string
     const missFile = runtimeFile(phrenPath, "search-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${errorMessage(err)}\n`);
   }
 }
 
@@ -445,7 +445,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           relatedFragments = [...new Set(relatedFragments)].slice(0, 10);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${errorMessage(err)}\n`);
         }
 
         const formatted = results.map((r) =>
@@ -479,7 +479,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                   for (const k of oldest) delete synthCache[k];
                 }
                 try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch (err: unknown) {
-                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
+                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${errorMessage(err)}\n`);
                 }
               }
             }

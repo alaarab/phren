@@ -152,7 +152,7 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${errorMessage(err)}\n`);
         try { onDisk?.close(); } catch (e2: unknown) {
           if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }

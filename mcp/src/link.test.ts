@@ -8,6 +8,7 @@ import { isVersionNewer } from "./init.js";
 import { getMachineName } from "./machine-identity.js";
 import { PACKAGE_NAME } from "./package-metadata.js";
 import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, updateFileChecksums, verifyFileChecksums } from "./link.js";
+import { linkSkillsDir, detectSkillCollisions } from "./link-skills.js";
 
 describe("link", () => {
   describe("isVersionNewer", () => {
@@ -1030,6 +1031,139 @@ hooks:
       const results = verifyFileChecksums(phren);
       const findings = results.find((r) => r.file.includes("FINDINGS"));
       expect(findings?.status).toBe("missing");
+    });
+  });
+
+  describe("skill collision detection", () => {
+    let tmpRoot: string;
+    let srcDir: string;
+    let destDir: string;
+    let managedRoot: string;
+    let tmpCleanup: () => void;
+
+    beforeEach(() => {
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-collision-test-"));
+      srcDir = path.join(tmpRoot, "phren", "myproject", "skills");
+      destDir = path.join(tmpRoot, "project", ".claude", "skills");
+      managedRoot = path.join(tmpRoot, "phren");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.mkdirSync(destDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      tmpCleanup();
+    });
+
+    it("linkSkillsDir skips flat skill when user file exists at destination", () => {
+      fs.writeFileSync(path.join(srcDir, "deploy.md"), "# Deploy");
+      // User's own skill already at dest — not a symlink
+      fs.writeFileSync(path.join(destDir, "deploy.md"), "# My custom deploy");
+
+      const symlinkFile = (src: string, dest: string) => {
+        fs.symlinkSync(src, dest);
+        return true;
+      };
+
+      const collisions = linkSkillsDir(srcDir, destDir, managedRoot, symlinkFile);
+
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].skillName).toBe("deploy");
+      expect(collisions[0].message).toContain("user skill already exists");
+      // User's file must be intact
+      expect(fs.lstatSync(path.join(destDir, "deploy.md")).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(destDir, "deploy.md"), "utf8")).toBe("# My custom deploy");
+    });
+
+    it("linkSkillsDir links skill when destination is free", () => {
+      fs.writeFileSync(path.join(srcDir, "deploy.md"), "# Deploy");
+
+      const symlinkFile = (src: string, dest: string) => {
+        fs.symlinkSync(src, dest);
+        return true;
+      };
+
+      const collisions = linkSkillsDir(srcDir, destDir, managedRoot, symlinkFile);
+
+      expect(collisions).toHaveLength(0);
+      expect(fs.lstatSync(path.join(destDir, "deploy.md")).isSymbolicLink()).toBe(true);
+    });
+
+    it("linkSkillsDir skips folder skill when user directory exists at destination", () => {
+      const skillFolder = path.join(srcDir, "my-skill");
+      fs.mkdirSync(skillFolder, { recursive: true });
+      fs.writeFileSync(path.join(skillFolder, "SKILL.md"), "# My Skill");
+      // User has their own directory there
+      const userDest = path.join(destDir, "my-skill");
+      fs.mkdirSync(userDest, { recursive: true });
+      fs.writeFileSync(path.join(userDest, "SKILL.md"), "# User override");
+
+      const symlinkFile = (src: string, dest: string) => {
+        fs.symlinkSync(src, dest);
+        return true;
+      };
+
+      const collisions = linkSkillsDir(srcDir, destDir, managedRoot, symlinkFile);
+
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].skillName).toBe("my-skill");
+      // User's directory must be intact
+      expect(fs.lstatSync(userDest).isSymbolicLink()).toBe(false);
+    });
+
+    it("linkSkillsDir overwrites existing phren-managed symlink", () => {
+      const oldSrc = path.join(managedRoot, "old-version.md");
+      fs.writeFileSync(oldSrc, "# Old");
+      const newSrc = path.join(srcDir, "deploy.md");
+      fs.writeFileSync(newSrc, "# New Deploy");
+      // Existing symlink points into managedRoot — phren owns it, safe to replace
+      fs.symlinkSync(oldSrc, path.join(destDir, "deploy.md"));
+
+      const symlinkFile = (src: string, dest: string, root: string) => {
+        try {
+          const stat = fs.lstatSync(dest);
+          if (stat.isSymbolicLink()) {
+            const resolved = path.resolve(path.dirname(dest), fs.readlinkSync(dest));
+            if (resolved.startsWith(path.resolve(root) + path.sep)) fs.unlinkSync(dest);
+          }
+        } catch { /* ok */ }
+        fs.symlinkSync(src, dest);
+        return true;
+      };
+
+      const collisions = linkSkillsDir(srcDir, destDir, managedRoot, symlinkFile);
+
+      expect(collisions).toHaveLength(0);
+    });
+
+    it("detectSkillCollisions finds blocked flat skills", () => {
+      fs.writeFileSync(path.join(srcDir, "deploy.md"), "# Deploy");
+      fs.writeFileSync(path.join(destDir, "deploy.md"), "# User skill");
+
+      const collisions = detectSkillCollisions(srcDir, destDir, managedRoot);
+
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].skillName).toBe("deploy");
+      expect(collisions[0].destPath).toBe(path.join(destDir, "deploy.md"));
+    });
+
+    it("detectSkillCollisions returns empty when no collisions", () => {
+      fs.writeFileSync(path.join(srcDir, "deploy.md"), "# Deploy");
+      // destDir is empty — no collision
+
+      const collisions = detectSkillCollisions(srcDir, destDir, managedRoot);
+
+      expect(collisions).toHaveLength(0);
+    });
+
+    it("detectSkillCollisions ignores phren-managed symlinks at destination", () => {
+      const srcSkill = path.join(srcDir, "deploy.md");
+      fs.writeFileSync(srcSkill, "# Deploy");
+      // Destination is already a phren-managed symlink — not a collision
+      fs.symlinkSync(srcSkill, path.join(destDir, "deploy.md"));
+
+      const collisions = detectSkillCollisions(srcDir, destDir, managedRoot);
+
+      expect(collisions).toHaveLength(0);
     });
   });
 });

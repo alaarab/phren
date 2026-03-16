@@ -127,6 +127,9 @@ function getProjectLocalSkills(phrenPath: string, project: string): SkillEntry[]
 }
 
 function skillPriority(skill: SkillEntry): number {
+  // "user" scope (priority 500) reserved for skills the user marks as untouchable —
+  // not yet wired to a scopeType value, but the priority slot is established here
+  // so the ordering is stable when we add it.
   if (skill.scopeType === "project" && skill.sourceKind === "canonical") return 400;
   if (skill.scopeType === "global" && skill.sourceKind === "canonical") return 200;
   return 100;

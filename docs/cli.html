@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CLI Reference | phren docs</title>
+  <meta name="description" content="Complete CLI command reference for phren: all commands organized by category." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="configuration.html" class="nav-link">Configuration</a>
+      <a href="cli.html" class="nav-link active-doc">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">CLI Commands</div>
+        <a href="#general" class="sidebar-link">General</a>
+        <a href="#search" class="sidebar-link">Search</a>
+        <a href="#tasks" class="sidebar-link">Tasks</a>
+        <a href="#findings" class="sidebar-link">Findings</a>
+        <a href="#projects" class="sidebar-link">Projects</a>
+        <a href="#skills" class="sidebar-link">Skills</a>
+        <a href="#hooks" class="sidebar-link">Hooks</a>
+        <a href="#config" class="sidebar-link">Config</a>
+        <a href="#maintenance" class="sidebar-link">Maintenance</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="docs-content">
+      <h1>CLI Reference</h1>
+      <p class="docs-subtitle">All phren CLI commands, organized by category. Run <code>phren --help</code> for a quick summary.</p>
+
+      <!-- Search -->
+      <div class="docs-search-wrap">
+        <svg class="docs-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <input type="text" class="docs-search" id="cli-search" placeholder="Filter commands..." autocomplete="off">
+        <span class="docs-search-count" id="search-count"></span>
+      </div>
+
+      <!-- General -->
+      <h2 id="general">General <a href="#general" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren</div>
+        <div class="ref-card-desc">Launch the interactive shell. Browse findings, run searches, manage tasks interactively.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren quickstart</div>
+        <div class="ref-card-desc">Quick setup: runs init + scaffolds your first project in one step.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren status</div>
+        <div class="ref-card-desc">Health, project, and stats overview. Shows active profile, project count, finding counts.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren doctor [--fix] [--agents]</div>
+        <div class="ref-card-desc">Health check and self-heal. Validates hooks, MCP config, project integrity. Use <code>--fix</code> to auto-repair issues, <code>--agents</code> to check agent tool configs.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren verify</div>
+        <div class="ref-card-desc">Post-init verification checks. Validates that hooks, MCP server, and project wiring are all correctly configured.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren web-ui [--port=3499]</div>
+        <div class="ref-card-desc">Launch the memory web UI. Browse findings, tasks, and the knowledge graph in your browser.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren update [--refresh-starter]</div>
+        <div class="ref-card-desc">Update to the latest version. Use <code>--refresh-starter</code> to also update bundled starter templates.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren uninstall</div>
+        <div class="ref-card-desc">Remove phren config and hooks. Data in <code>~/.phren</code> is preserved unless manually deleted.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren mcp-mode [on|off|status]</div>
+        <div class="ref-card-desc">Toggle MCP integration on or off, or check current status.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks-mode [on|off|status]</div>
+        <div class="ref-card-desc">Toggle hook execution on or off, or check current status.</div>
+      </div>
+
+      <!-- Search -->
+      <h2 id="search">Search <a href="#search" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren search &lt;query&gt; [--project &lt;n&gt;]</div>
+        <div class="ref-card-desc">Search the knowledge base using FTS5 with synonym expansion. Optionally scope to a specific project.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren search --history</div>
+        <div class="ref-card-desc">Show recent search history.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren search --from-history &lt;n&gt;</div>
+        <div class="ref-card-desc">Re-run search #n from the search history.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren graph [--project &lt;n&gt;]</div>
+        <div class="ref-card-desc">Show the fragment knowledge graph. Displays connections between findings, files, and concepts.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren graph link &lt;project&gt; "finding" "fragment"</div>
+        <div class="ref-card-desc">Manually link a finding to a fragment in the knowledge graph.</div>
+      </div>
+
+      <!-- Tasks -->
+      <h2 id="tasks">Tasks <a href="#tasks" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren tasks</div>
+        <div class="ref-card-desc">Cross-project task view. Shows all active and queued tasks across all projects.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task add &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Add a task to a project's queue.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task complete &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Complete a task by matching its text.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task remove &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Remove a task by matching text.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task update &lt;project&gt; "..." [--priority=high|medium|low] [--section=Active|Queue|Done]</div>
+        <div class="ref-card-desc">Update a task's priority or move it to a different section.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task next [project]</div>
+        <div class="ref-card-desc">Pick the next highest-priority task to work on.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task promote &lt;project&gt; "..." [--active]</div>
+        <div class="ref-card-desc">Promote a task to a higher priority section.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task pin &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Pin a task so it stays visible across sessions.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task tidy [project] [--keep=&lt;n&gt;]</div>
+        <div class="ref-card-desc">Archive completed tasks to keep the list clean. Use <code>--keep</code> to retain the most recent N done items.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task link &lt;project&gt; "..." --issue &lt;n&gt;</div>
+        <div class="ref-card-desc">Link a GitHub issue to a task.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task create-issue &lt;project&gt; "..." [--repo &lt;owner/name&gt;] [--done]</div>
+        <div class="ref-card-desc">Create a GitHub issue from a task item and link it back.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren task reorder &lt;project&gt; "..." --rank=&lt;n&gt;</div>
+        <div class="ref-card-desc">Reorder a task within its section by rank number.</div>
+      </div>
+
+      <!-- Findings -->
+      <h2 id="findings">Findings <a href="#findings" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren add-finding &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Save an insight to a project's FINDINGS.md.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren pin &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Pin canonical memory that persists across consolidation.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding add &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Add a finding (same as <code>add-finding</code>).</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding remove &lt;project&gt; "..."</div>
+        <div class="ref-card-desc">Remove a finding by matching its text.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding supersede &lt;project&gt; "..." --by "..."</div>
+        <div class="ref-card-desc">Mark a finding as superseded by a newer one.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding retract &lt;project&gt; "..." --reason "..."</div>
+        <div class="ref-card-desc">Retract a finding with a lifecycle reason.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding contradictions [project]</div>
+        <div class="ref-card-desc">List all unresolved contradicted findings.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren finding resolve &lt;project&gt; "..." "..." &lt;keep_a|keep_b|keep_both|retract_both&gt;</div>
+        <div class="ref-card-desc">Resolve a contradiction between two findings.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren sessions [session-id]</div>
+        <div class="ref-card-desc">Session history. Drill into a specific session to see its findings and tasks.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren review [project]</div>
+        <div class="ref-card-desc">Show review queue items waiting for approval.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren consolidation-status [project]</div>
+        <div class="ref-card-desc">Check if findings need consolidation.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren session-context</div>
+        <div class="ref-card-desc">Show current session state: project, duration, findings added so far.</div>
+      </div>
+
+      <!-- Projects -->
+      <h2 id="projects">Projects <a href="#projects" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren add [path] [--ownership &lt;mode&gt;]</div>
+        <div class="ref-card-desc">Add current or specified directory as a project. Ownership modes: owned, observed, archived.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren projects list</div>
+        <div class="ref-card-desc">List all projects in the active profile.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren projects configure &lt;name&gt; --ownership=&lt;mode&gt;</div>
+        <div class="ref-card-desc">Change a project's ownership mode (owned, observed, archived).</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren projects remove &lt;name&gt;</div>
+        <div class="ref-card-desc">Remove a project (confirmation required). Data is preserved in <code>~/.phren</code>.</div>
+      </div>
+
+      <!-- Skills -->
+      <h2 id="skills">Skills <a href="#skills" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills list</div>
+        <div class="ref-card-desc">List all installed skills with metadata.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skill-list</div>
+        <div class="ref-card-desc">Alias for <code>skills list</code>.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren detect-skills [--import]</div>
+        <div class="ref-card-desc">Find untracked skills in <code>~/.claude/skills/</code>. Use <code>--import</code> to bring them into phren.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills add &lt;project&gt; &lt;path&gt;</div>
+        <div class="ref-card-desc">Add a skill to a project.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills show &lt;name&gt; [--project &lt;name&gt;]</div>
+        <div class="ref-card-desc">Show the full content of a skill.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills edit &lt;name&gt; [--project &lt;name&gt;]</div>
+        <div class="ref-card-desc">Edit a skill in <code>$EDITOR</code>.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills resolve &lt;project|global&gt;</div>
+        <div class="ref-card-desc">Print the resolved skill manifest (effective skills after inheritance).</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills doctor &lt;project|global&gt;</div>
+        <div class="ref-card-desc">Diagnose skill visibility issues.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills sync &lt;project|global&gt;</div>
+        <div class="ref-card-desc">Regenerate skill mirror files.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills enable &lt;project|global&gt; &lt;name&gt;</div>
+        <div class="ref-card-desc">Enable a disabled skill without rewriting it.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills disable &lt;project|global&gt; &lt;name&gt;</div>
+        <div class="ref-card-desc">Disable a skill without deleting it.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren skills remove &lt;project&gt; &lt;name&gt;</div>
+        <div class="ref-card-desc">Remove a skill from a project.</div>
+      </div>
+
+      <!-- Hooks -->
+      <h2 id="hooks">Hooks <a href="#hooks" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks list [--project &lt;name&gt;]</div>
+        <div class="ref-card-desc">Show hook enable/disable status per tool, with optional project overrides.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks show &lt;tool&gt;</div>
+        <div class="ref-card-desc">Show hook config for a specific tool (claude, copilot, cursor, codex).</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks edit &lt;tool&gt;</div>
+        <div class="ref-card-desc">Edit hook config in <code>$EDITOR</code>.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks enable &lt;tool&gt;</div>
+        <div class="ref-card-desc">Enable hooks for a tool.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks disable &lt;tool&gt;</div>
+        <div class="ref-card-desc">Disable hooks for a tool.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks add-custom &lt;event&gt; &lt;cmd&gt;</div>
+        <div class="ref-card-desc">Add a custom integration hook for a lifecycle event.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks remove-custom &lt;event&gt;</div>
+        <div class="ref-card-desc">Remove custom hooks by event match.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren hooks errors [--limit &lt;n&gt;]</div>
+        <div class="ref-card-desc">Show recent hook errors and failures.</div>
+      </div>
+
+      <!-- Config -->
+      <h2 id="config">Config <a href="#config" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config policy [get|set ...]</div>
+        <div class="ref-card-desc">Manage retention policy: TTL, confidence, decay settings.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config workflow [get|set ...]</div>
+        <div class="ref-card-desc">Manage workflow: approval gates, risky thresholds.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config access [get|set ...]</div>
+        <div class="ref-card-desc">Role-based permissions configuration.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config index [get|set ...]</div>
+        <div class="ref-card-desc">Indexer include/exclude globs for FTS5.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config synonyms [list|add|remove] ...</div>
+        <div class="ref-card-desc">Manage learned synonyms for search expansion.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config project-ownership [mode]</div>
+        <div class="ref-card-desc">Set the default ownership mode for new projects.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config telemetry [on|off]</div>
+        <div class="ref-card-desc">Toggle opt-in usage telemetry.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config machines</div>
+        <div class="ref-card-desc">List registered machines.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren config profiles</div>
+        <div class="ref-card-desc">List profiles and their associated projects.</div>
+      </div>
+
+      <!-- Maintenance -->
+      <h2 id="maintenance">Maintenance <a href="#maintenance" class="anchor-link">#</a></h2>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren maintain govern [project]</div>
+        <div class="ref-card-desc">Queue stale memories for review based on retention policy.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren maintain prune [project]</div>
+        <div class="ref-card-desc">Delete expired entries that have passed their TTL.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren maintain consolidate [project]</div>
+        <div class="ref-card-desc">Deduplicate FINDINGS.md: archive old entries, write consolidation markers, promote cross-project patterns.</div>
+      </div>
+
+      <div class="ref-card" data-searchable>
+        <div class="ref-card-name">phren maintain extract [project]</div>
+        <div class="ref-card-desc">Mine git and GitHub signals (PRs, CI, issues) to extract memories automatically.</div>
+      </div>
+
+      <div class="no-results" id="no-results">No commands match your search.</div>
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Search filter
+const searchInput = document.getElementById('cli-search');
+const searchCount = document.getElementById('search-count');
+const noResults = document.getElementById('no-results');
+const cards = document.querySelectorAll('.ref-card[data-searchable]');
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase().trim();
+  let visible = 0;
+
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    const match = !q || text.includes(q);
+    card.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+
+  searchCount.textContent = q ? `${visible} / ${cards.length}` : '';
+  noResults.classList.toggle('visible', q && visible === 0);
+});
+
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h2[id]').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

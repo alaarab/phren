@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>phren: contributing</title>
+  <meta name="description" content="Contributing to phren: dev setup, project structure, code style, making changes, pull requests, and adding MCP tools." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* ---- DOC PAGE LAYOUT ---- */
+    .doc-root {
+      display: flex;
+      min-height: 100vh;
+      padding-top: 60px;
+    }
+
+    /* ---- SIDEBAR ---- */
+    .doc-sidebar {
+      position: fixed;
+      top: 60px;
+      left: 0;
+      bottom: 0;
+      width: 220px;
+      overflow-y: auto;
+      background: var(--bg-1);
+      border-right: 1px solid var(--border);
+      padding: 28px 0 40px;
+      z-index: 50;
+    }
+
+    .doc-sidebar::-webkit-scrollbar { width: 4px; }
+    .doc-sidebar::-webkit-scrollbar-track { background: transparent; }
+    .doc-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sidebar-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 16px 20px 6px;
+    }
+
+    .sidebar-nav {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .sidebar-nav a {
+      display: block;
+      padding: 5px 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    .sidebar-nav a:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .sidebar-nav a.active {
+      color: var(--indigo);
+      border-left-color: var(--indigo);
+      background: rgba(0,229,255,0.04);
+    }
+
+    .sidebar-nav li.sub a {
+      padding-left: 32px;
+      font-size: 12px;
+    }
+
+    /* ---- MAIN CONTENT ---- */
+    .doc-content {
+      margin-left: 220px;
+      flex: 1;
+      padding: 48px 56px 80px;
+      max-width: 960px;
+    }
+
+    /* ---- SECTION ---- */
+    .doc-section {
+      margin-bottom: 72px;
+    }
+
+    .doc-section-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--indigo);
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      padding-top: 8px;
+    }
+
+    .doc-section-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+    }
+
+    .doc-h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 36px 0 12px;
+      letter-spacing: -0.01em;
+    }
+
+    .doc-h3 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--copper);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin: 28px 0 10px;
+    }
+
+    .doc-list {
+      padding-left: 22px;
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.9;
+      margin-bottom: 14px;
+    }
+
+    .doc-list li {
+      margin-bottom: 4px;
+    }
+
+    p {
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.75;
+      margin-bottom: 14px;
+    }
+
+    p.muted {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* ---- CODE ---- */
+    code {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Menlo', monospace;
+      font-size: 13px;
+      background: var(--bg-2);
+      color: var(--indigo);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    pre {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      margin: 14px 0 22px;
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* ---- TABLES ---- */
+    .doc-table-wrap {
+      overflow-x: auto;
+      margin: 14px 0 24px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+
+    th {
+      text-align: left;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: top;
+      color: var(--text);
+    }
+
+    td:first-child code { white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    td .desc { color: var(--text-muted); font-size: 13px; }
+
+    /* ---- CALLOUT ---- */
+    .callout {
+      background: rgba(0,229,255,0.05);
+      border: 1px solid rgba(0,229,255,0.15);
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 16px 0 24px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .callout strong { color: var(--indigo); }
+
+    .callout.warn {
+      background: rgba(155,141,200,0.06);
+      border-color: rgba(155,141,200,0.2);
+    }
+
+    .callout.warn strong { color: var(--copper); }
+
+    /* ---- DIVIDER ---- */
+    .doc-divider {
+      border: none;
+      border-top: 1px solid var(--border-subtle);
+      margin: 40px 0;
+    }
+
+    /* ---- STYLE CARDS ---- */
+    .style-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0 24px;
+    }
+
+    .style-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .style-card-do {
+      border-color: rgba(40,200,64,0.25);
+    }
+
+    .style-card-dont {
+      border-color: rgba(255,95,87,0.25);
+    }
+
+    .style-card-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .style-card-do .style-card-label { color: #28C840; }
+    .style-card-dont .style-card-label { color: #FF5F57; }
+
+    .style-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.5;
+    }
+
+    /* ---- MOBILE ---- */
+    .mobile-toc-btn {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 200;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg-1);
+      color: var(--indigo);
+      font-size: 20px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      transition: background 0.2s, transform 0.2s;
+    }
+    .mobile-toc-btn:hover { background: var(--bg-2); }
+
+    .mobile-toc-drawer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 190;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+    .mobile-toc-drawer.open { opacity: 1; }
+
+    .mobile-toc-panel {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 70vh;
+      overflow-y: auto;
+      background: var(--bg-1);
+      border-top: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      padding: 20px 24px 32px;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+    .mobile-toc-drawer.open .mobile-toc-panel { transform: translateY(0); }
+
+    @media (max-width: 768px) {
+      .doc-sidebar { display: none; }
+      .doc-content { margin-left: 0; padding: 24px 20px 60px; }
+      .style-grid { grid-template-columns: 1fr; }
+      .mobile-toc-btn { display: flex; align-items: center; justify-content: center; }
+      .mobile-toc-drawer { display: block; pointer-events: none; }
+      .mobile-toc-drawer.open { pointer-events: auto; }
+    }
+
+    @media (max-width: 480px) {
+      .doc-content { padding: 20px 16px 60px; }
+      pre { padding: 12px 14px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav id="nav">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon" id="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="documentation.html" class="nav-link">Docs</a>
+      <a href="documentation.html#getting-started" class="nav-link">Getting Started</a>
+      <a href="documentation.html#configuration" class="nav-link">Configuration</a>
+      <a href="documentation.html#cli-reference" class="nav-link">CLI</a>
+      <a href="documentation.html#mcp-tools" class="nav-link">MCP Tools</a>
+      <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="security.html" class="nav-link">Security</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <!-- LAYOUT -->
+  <div class="doc-root">
+
+    <!-- SIDEBAR -->
+    <aside class="doc-sidebar" id="doc-sidebar">
+      <p class="sidebar-section-label">Setup</p>
+      <ul class="sidebar-nav">
+        <li><a href="#dev-setup">Dev Setup</a></li>
+        <li class="sub"><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#project-structure">Project Structure</a></li>
+      </ul>
+
+      <p class="sidebar-section-label">Development</p>
+      <ul class="sidebar-nav">
+        <li><a href="#testing">Testing</a></li>
+        <li><a href="#code-style">Code Style</a></li>
+        <li><a href="#making-changes">Making Changes</a></li>
+      </ul>
+
+      <p class="sidebar-section-label">Contributing</p>
+      <ul class="sidebar-nav">
+        <li><a href="#pull-requests">Pull Requests</a></li>
+        <li><a href="#commits">Commit Conventions</a></li>
+        <li><a href="#adding-mcp-tool">Adding an MCP Tool</a></li>
+        <li><a href="#adding-skill">Adding a Skill</a></li>
+        <li><a href="#reporting-bugs">Reporting Bugs</a></li>
+      </ul>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="doc-content">
+
+      <!-- ============================================================ -->
+      <!--  DEV SETUP                                                    -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="dev-setup">
+        <h1 class="doc-section-title">Dev Setup</h1>
+        <p class="doc-section-subtitle">Clone, build, and test in under a minute.</p>
+
+        <pre><code>git clone https://github.com/alaarab/phren.git
+cd phren
+npm install
+npm run build
+npm test</code></pre>
+
+        <p>The build compiles TypeScript from <code>mcp/src/</code> into <code>mcp/dist/</code> and marks the entry point executable.</p>
+
+        <h2 class="doc-h2" id="prerequisites">Prerequisites</h2>
+        <ul class="doc-list">
+          <li>Node.js 20+</li>
+          <li>npm 9+</li>
+        </ul>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  PROJECT STRUCTURE                                            -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="project-structure">
+        <h1 class="doc-section-title">Project Structure</h1>
+        <p class="doc-section-subtitle">Key files and what they do.</p>
+
+        <div class="doc-table-wrap">
+          <table>
+            <thead>
+              <tr><th>Path</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (67 public tools across 12 modules)</td></tr>
+              <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
+              <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
+              <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
+              <tr><td><code>mcp/src/init.ts</code></td><td><code>npx phren init</code>: configures MCP + hooks</td></tr>
+              <tr><td><code>mcp/src/link.ts</code></td><td>Profile sync, symlinks, hooks, context</td></tr>
+              <tr><td><code>mcp/src/data-access.ts</code></td><td>Task CRUD, machine/profile listing, learning management</td></tr>
+              <tr><td><code>mcp/src/mcp-*.ts</code></td><td>MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config)</td></tr>
+              <tr><td><code>mcp/src/skill-registry.ts</code></td><td>Skill precedence, alias collision handling, visibility gating, manifest generation</td></tr>
+              <tr><td><code>mcp/src/governance-policy.ts</code></td><td>RBAC, policy files, actor resolution</td></tr>
+              <tr><td><code>mcp/src/memory-ui-server.ts</code></td><td>Web UI server, auth/CSRF/CSP/loopback security</td></tr>
+              <tr><td><code>mcp/src/telemetry.ts</code></td><td>Opt-in local telemetry collection and summaries</td></tr>
+              <tr><td><code>starter/</code></td><td>Template files copied to ~/.phren on init</td></tr>
+              <tr><td><code>docs/</code></td><td>GitHub Pages site and documentation</td></tr>
+              <tr><td><code>skills/</code></td><td>Phren slash command definitions</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  TESTING                                                      -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="testing">
+        <h1 class="doc-section-title">Testing</h1>
+        <p class="doc-section-subtitle">Running the test suite and filtering by pattern.</p>
+
+        <pre><code>npm test                              # run all tests
+npm test -- --grep "pattern"          # filter by test name
+npm test -- mcp/src/data-access.test  # run one file
+npx vitest --watch                    # watch mode</code></pre>
+
+        <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  CODE STYLE                                                   -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="code-style">
+        <h1 class="doc-section-title">Code Style</h1>
+        <p class="doc-section-subtitle">Read <code>CLAUDE.md</code> for the full set of conventions. The highlights:</p>
+
+        <div class="style-grid">
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>AI voice: "robust", "seamless", "leverage", "comprehensive"</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Write like a person. Be direct.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Em dashes, filler comments, over-documentation</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Colons, commas, or just rewrite the sentence. Comment only where logic is not self-evident.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Premature abstractions for one-time operations</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Three similar lines beat a premature helper function</p>
+          </div>
+        </div>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  MAKING CHANGES                                               -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="making-changes">
+        <h1 class="doc-section-title">Making Changes</h1>
+        <p class="doc-section-subtitle">The workflow for contributing code.</p>
+
+        <ol class="doc-list">
+          <li>Create a feature branch from <code>main</code></li>
+          <li>Make your changes with tests</li>
+          <li>Run <code>npm run build && npm test</code> and make sure everything passes</li>
+          <li>Keep commits focused: one logical change per commit</li>
+          <li>Write commit messages that explain <em>why</em>, not just <em>what</em></li>
+        </ol>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  PULL REQUESTS                                                -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="pull-requests">
+        <h1 class="doc-section-title">Pull Requests</h1>
+        <p class="doc-section-subtitle">Keep PRs small and focused. One feature or fix per PR.</p>
+
+        <ul class="doc-list">
+          <li>Include a short description of what changed and why</li>
+          <li>If your PR changes user-facing behavior, update the README</li>
+          <li>If your PR adds or changes MCP tools, update:
+            <ul class="doc-list" style="margin-top: 4px;">
+              <li><code>docs/api-reference.md</code></li>
+              <li><code>docs/llms-install.md</code></li>
+              <li><code>docs/llms-full.txt</code></li>
+            </ul>
+          </li>
+          <li>If your PR changes finding lifecycle/provenance, session checkpoints/history, web-ui security, RBAC identity, or telemetry behavior, update the matching docs in the same PR</li>
+          <li>Make sure CI passes before requesting review</li>
+        </ul>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  COMMIT CONVENTIONS                                           -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="commits">
+        <h1 class="doc-section-title">Commit Conventions</h1>
+        <p class="doc-section-subtitle">Use conventional commits.</p>
+
+        <pre><code>feat: add synonym expansion for search queries
+fix: FTS5 sanitizer stripping valid URLs
+docs: update API reference with bulk tools
+test: add coverage for session checkpoint edge cases
+refactor: extract keyword logic from hook-prompt</code></pre>
+
+        <p>Prefixes: <code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>test:</code>, <code>refactor:</code></p>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  ADDING AN MCP TOOL                                           -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="adding-mcp-tool">
+        <h1 class="doc-section-title">Adding a New MCP Tool</h1>
+        <p class="doc-section-subtitle">Five steps to ship a new tool.</p>
+
+        <ol class="doc-list">
+          <li>Add the tool definition in the correct module (<code>mcp/src/mcp-&lt;domain&gt;.ts</code>) following the existing <code>server.registerTool()</code> pattern</li>
+          <li>Implement the handler: call data-access functions, return <code>{ ok, message, data }</code></li>
+          <li>Register/verify the module from <code>mcp/src/index.ts</code> if you created a new module</li>
+          <li>Add tests in the relevant <code>*.test.ts</code> file</li>
+          <li>Update docs:
+            <ul class="doc-list" style="margin-top: 4px;">
+              <li><code>docs/api-reference.md</code> parameters and examples</li>
+              <li><code>docs/llms-install.md</code> / <code>docs/llms-full.txt</code> tool listings</li>
+              <li>Integration/security/governance docs when behavior affects hooks, skills, RBAC, web UI, or telemetry</li>
+            </ul>
+          </li>
+        </ol>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  ADDING A SKILL                                               -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="adding-skill">
+        <h1 class="doc-section-title">Adding a Global Skill</h1>
+        <p class="doc-section-subtitle">Three steps to add a skill.</p>
+
+        <ol class="doc-list">
+          <li>Create a markdown file in <code>global/skills/your-skill.md</code></li>
+          <li>Follow the existing skill format: name, description, steps</li>
+          <li>Test locally by running <code>phren init</code> and invoking <code>/your-skill</code> in a Claude Code session</li>
+        </ol>
+      </section>
+
+      <hr class="doc-divider">
+
+      <!-- ============================================================ -->
+      <!--  REPORTING BUGS                                               -->
+      <!-- ============================================================ -->
+      <section class="doc-section" id="reporting-bugs">
+        <h1 class="doc-section-title">Reporting Bugs</h1>
+        <p class="doc-section-subtitle">Open an issue with the following information.</p>
+
+        <ul class="doc-list">
+          <li>What you expected to happen</li>
+          <li>What actually happened</li>
+          <li>Steps to reproduce</li>
+          <li>Your Node.js version and OS</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Questions?</strong> Open a <a href="https://github.com/alaarab/phren/discussions" style="color: var(--indigo);">discussion</a> or <a href="https://github.com/alaarab/phren/issues" style="color: var(--indigo);">issue</a>.
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MOBILE TOC -->
+  <button class="mobile-toc-btn" id="mobile-toc-btn" aria-label="Table of contents">&#9776;</button>
+  <div class="mobile-toc-drawer" id="mobile-toc-drawer">
+    <div class="mobile-toc-panel">
+      <p class="sidebar-section-label">Setup</p>
+      <ul><li><a href="#dev-setup">Dev Setup</a></li><li><a href="#project-structure">Project Structure</a></li></ul>
+      <p class="sidebar-section-label">Development</p>
+      <ul><li><a href="#testing">Testing</a></li><li><a href="#code-style">Code Style</a></li><li><a href="#making-changes">Making Changes</a></li></ul>
+      <p class="sidebar-section-label">Contributing</p>
+      <ul><li><a href="#pull-requests">Pull Requests</a></li><li><a href="#commits">Commit Conventions</a></li><li><a href="#adding-mcp-tool">Adding an MCP Tool</a></li><li><a href="#adding-skill">Adding a Skill</a></li><li><a href="#reporting-bugs">Reporting Bugs</a></li></ul>
+    </div>
+  </div>
+
+  <script>
+    // Nav scroll effect
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', window.scrollY > 10);
+    });
+    nav.classList.toggle('scrolled', window.scrollY > 10);
+
+    // Sidebar active tracking
+    const sections = document.querySelectorAll('.doc-section');
+    const sidebarLinks = document.querySelectorAll('.doc-sidebar .sidebar-nav a');
+
+    function updateActive() {
+      let current = '';
+      sections.forEach(s => {
+        if (s.getBoundingClientRect().top <= 120) current = s.id;
+      });
+      sidebarLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+      });
+    }
+    window.addEventListener('scroll', updateActive);
+    updateActive();
+
+    // Mobile TOC
+    const tocBtn = document.getElementById('mobile-toc-btn');
+    const tocDrawer = document.getElementById('mobile-toc-drawer');
+    if (tocBtn && tocDrawer) {
+      tocBtn.addEventListener('click', () => tocDrawer.classList.toggle('open'));
+      tocDrawer.addEventListener('click', e => {
+        if (e.target === tocDrawer || e.target.tagName === 'A') tocDrawer.classList.remove('open');
+      });
+    }
+  </script>
+
+</body>
+</html>

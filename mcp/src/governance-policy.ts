@@ -322,8 +322,10 @@ export interface ResolvedConfig {
 }
 
 const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
-const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
-const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
+export const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
+export type TaskMode = typeof VALID_TASK_MODES[number];
+export const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
+export type FindingSensitivityLevel = typeof VALID_FINDING_SENSITIVITY[number];
 const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
 
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
@@ -400,6 +402,10 @@ function readProjectConfigOverrides(phrenPath: string, projectName: string): Pro
   } catch {
     return undefined;
   }
+}
+
+export function getProjectConfigOverrides(phrenPath: string, projectName: string): ProjectConfigOverrides | null {
+  return readProjectConfigOverrides(phrenPath, projectName) ?? null;
 }
 
 export function mergeConfig(phrenPath: string, projectName?: string): ResolvedConfig {

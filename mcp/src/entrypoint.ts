@@ -12,110 +12,127 @@ import {
 } from "./project-config.js";
 
 
-const HELP_TEXT = `phren - He remembers so your agent doesn't have to
+const HELP_TEXT = `phren - persistent knowledge for your agents
+
+  phren                     Interactive shell
+  phren init                Set up phren
+  phren add [path]          Register a project
+  phren search <query>      Search what phren knows
+  phren status              Health check
+  phren doctor [--fix]      Diagnose and repair
+  phren web-ui              Open the knowledge graph
+  phren tasks               Cross-project task view
+  phren graph               Fragment knowledge graph
+
+  phren help <topic>        Detailed help for a topic
+
+Topics: projects, skills, hooks, config, maintain, setup, env, all
+`;
+
+const HELP_TOPICS: Record<string, string> = {
+  projects: `Projects:
+  phren add [path] [--ownership <mode>]   Register a project
+  phren projects list                     List all tracked projects
+  phren projects configure <name> [--ownership <mode>] [--hooks on|off]
+                                           Update per-project settings
+  phren projects remove <name>            Remove a project
+`,
+  skills: `Skills:
+  phren skills list                       List installed skills
+  phren skills add <project> <path>       Link a skill into a project
+  phren skills show <name>                Show skill content
+  phren skills resolve <project|global>   Print resolved skill manifest
+  phren skills doctor <project|global>    Diagnose skill visibility
+  phren skills sync <project|global>      Regenerate skill mirror
+  phren skills remove <project> <name>    Remove a skill
+  phren detect-skills [--import]          Find untracked skills in ~/.claude/skills/
+`,
+  hooks: `Hooks:
+  phren hooks list [--project <name>]     Show hook status per tool
+  phren hooks enable <tool>               Enable hooks for a tool
+  phren hooks disable <tool>              Disable hooks for a tool
+  phren hooks add-custom <event> <cmd>    Add a custom hook
+  phren hooks remove-custom <event>       Remove custom hooks
+  phren hooks errors [--limit <n>]        Show recent hook errors
+`,
+  config: `Configuration:
+  phren config show [--project <name>]    Show current config
+  phren config policy [get|set ...]       Retention, TTL, confidence, decay
+  phren config workflow [get|set ...]     Risky-memory thresholds
+  phren config proactivity [level]        Set proactivity level
+  phren config task-mode [mode]           Set task automation mode
+  phren config finding-sensitivity [lvl]  Set finding capture sensitivity
+  phren config index [get|set ...]        Indexer include/exclude globs
+  phren config synonyms [list|add|remove] Manage learned synonyms
+  phren config project-ownership [mode]   Default ownership for new projects
+  phren config machines                   Registered machines
+  phren config profiles                   Profiles and projects
+  phren config telemetry [on|off]         Opt-in usage telemetry
+
+  All config subcommands accept --project <name> for per-project overrides.
+`,
+  maintain: `Maintenance:
+  phren maintain govern [project]         Queue stale memories for review
+  phren maintain prune [project]          Delete expired entries
+  phren maintain consolidate [project]    Deduplicate findings
+  phren maintain extract [project]        Mine git/GitHub signals
+`,
+  setup: `Setup:
+  phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]
+  phren quickstart                        Quick setup: init + project scaffold
+  phren mcp-mode [on|off|status]          Toggle MCP integration
+  phren hooks-mode [on|off|status]        Toggle hook execution
+  phren verify                            Check init completed OK
+  phren uninstall                         Remove phren config and hooks
+  phren update [--refresh-starter]        Update to latest version
+`,
+  env: `Environment variables:
+  PHREN_PATH                  Override phren directory (default: ~/.phren)
+  PHREN_PROFILE               Active profile name
+  PHREN_DEBUG                 Enable debug logging (set to 1)
+
+  Embeddings:
+  PHREN_OLLAMA_URL            Ollama base URL (default: http://localhost:11434, 'off' to disable)
+  PHREN_EMBEDDING_API_URL     OpenAI-compatible /embeddings endpoint
+  PHREN_EMBEDDING_API_KEY     API key for embedding endpoint
+  PHREN_EMBEDDING_MODEL       Embedding model (default: nomic-embed-text)
+
+  Context injection:
+  PHREN_CONTEXT_TOKEN_BUDGET  Max tokens injected per prompt (default: 550)
+  PHREN_MAX_INJECT_TOKENS     Hard cap on total injected tokens (default: 2000)
+  PHREN_HOOK_TIMEOUT_MS       Hook subprocess timeout in ms (default: 14000)
+
+  Feature flags:
+  PHREN_FEATURE_AUTO_EXTRACT=0       Disable auto memory extraction
+  PHREN_FEATURE_AUTO_CAPTURE=1       Extract insights from conversations
+  PHREN_FEATURE_SEMANTIC_DEDUP=1     LLM-based dedup on add_finding
+  PHREN_FEATURE_HYBRID_SEARCH=0      Disable TF-IDF cosine fallback
+
+  Run 'phren help all' to see everything.
+`,
+};
+
+function buildFullHelp(): string {
+  return `phren - persistent knowledge for your agents
 
 Usage:
-  phren                                 Open interactive shell
-  phren quickstart                      Quick setup: init + project scaffold
-  phren add [path] [--ownership <mode>] Add current directory (or path) as a project
-  phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--mcp on|off] [--template <t>] [--dry-run] [-y]
-                                         Set up phren and offer to add the current project directory
-  phren projects list                   List all tracked projects
-  phren projects configure <name> [--ownership <mode>] [--hooks on|off]
-                                         Update per-project enrollment and hook settings
-  phren projects remove <name>          Remove a project (asks for confirmation)
-  phren detect-skills [--import]        Find untracked skills in ~/.claude/skills/
-  phren skills list                     List installed skills
-  phren skills add <project> <path>    Link or copy a skill file into one project
-  phren skills resolve <project|global> Print the resolved skill manifest for one scope
-  phren skills doctor <project|global> Diagnose resolved skill visibility + mirror state
-  phren skills sync <project|global>   Regenerate the resolved mirror for one scope
-  phren skills remove <project> <name> Remove a project skill by name
-  phren hooks list [--project <name>]   Show hook tool preferences and optional project overrides
-  phren hooks enable <tool>             Enable hooks for one tool
-  phren hooks disable <tool>            Disable hooks for one tool
-  phren status                          Health, active project, stats
-  phren review [project]               Show review queue items with date, confidence, text
-  phren consolidation-status [project] Check if findings need consolidation
-  phren session-context                Show current session state (project, duration, findings)
-  phren search <query> [--project <n>] [--type <t>] [--limit <n>]
-                                         Search what phren remembers
-  phren add-finding <project> "..."     Tell phren what you learned
-  phren pin <project> "..."             Save a truth
-  phren tasks                           Cross-project task view
-  phren skill-list                      List installed skills
-  phren doctor [--fix] [--check-data] [--agents]
-                                         Health check and self-heal (--agents: show agent integrations only)
-  phren web-ui [--port=3499] [--no-open]     Memory web UI
-  phren debug-injection --prompt "..."  Preview hook-prompt injection output
-  phren inspect-index [--project <n>]   Inspect FTS index contents for debugging
-  phren update [--refresh-starter]      Update to latest version
-  phren graph [--project <n>] [--limit <n>]
-                                         Show the fragment knowledge graph
-  phren graph link <project> "finding" "fragment"
-                                         Link a finding to a fragment manually
+  phren                     Interactive shell
+  phren init                Set up phren
+  phren add [path]          Register a project
+  phren search <query>      Search what phren knows
+  phren status              Health check
+  phren doctor [--fix]      Diagnose and repair
+  phren web-ui              Open the knowledge graph
+  phren tasks               Cross-project task view
+  phren graph               Fragment knowledge graph
+  phren add-finding <p> "." Tell phren what you learned
+  phren pin <p> "..."       Save a truth
+  phren review [project]    Show review queue
+  phren session-context     Current session state
 
-Configuration:
-  phren config policy [get|set ...]     Retention, TTL, confidence, decay
-  phren config workflow [get|set ...]   Risky-memory thresholds
-  phren config index [get|set ...]      Indexer include/exclude globs
-  phren config synonyms [list|add|remove] ...
-                                         Manage project learned synonyms
-  phren config project-ownership [mode] Default ownership for future project enrollments
-  phren config machines                 Registered machines
-  phren config profiles                 Profiles and projects
+${Object.values(HELP_TOPICS).join("\n")}`;
+}
 
-Maintenance:
-  phren maintain govern [project]       Queue stale/low-value memories for review
-  phren maintain prune [project]        Delete expired entries
-  phren maintain consolidate [project]  Deduplicate FINDINGS.md
-  phren maintain extract [project]      Mine git/GitHub signals
-
-Setup:
-  phren mcp-mode [on|off|status]        Toggle MCP integration
-  phren hooks-mode [on|off|status]      Toggle hook execution
-  phren verify                          Check init completed OK
-  phren uninstall                       Remove phren config and hooks
-
-Environment:
-  PHREN_PATH                Override phren directory (default: ~/.phren)
-  PHREN_PROFILE             Active profile name (otherwise phren uses machines.yaml when available)
-  PHREN_DEBUG               Enable debug logging (set to 1)
-  PHREN_OLLAMA_URL          Ollama base URL (default: http://localhost:11434; set to 'off' to disable)
-  PHREN_EMBEDDING_API_URL   OpenAI-compatible /embeddings endpoint (cloud alternative to Ollama)
-  PHREN_EMBEDDING_API_KEY   API key for PHREN_EMBEDDING_API_URL
-  PHREN_EMBEDDING_MODEL     Embedding model (default: nomic-embed-text)
-  PHREN_EXTRACT_MODEL       Ollama model for memory extraction (default: llama3.2)
-  PHREN_EMBEDDING_PROVIDER  Set to 'api' to use OpenAI API for search_knowledge embeddings
-  PHREN_FEATURE_AUTO_CAPTURE=1      Extract insights from conversations at session end
-  PHREN_FEATURE_SEMANTIC_DEDUP=1    LLM-based dedup on add_finding
-  PHREN_FEATURE_SEMANTIC_CONFLICT=1 LLM-based conflict detection on add_finding
-  PHREN_FEATURE_HYBRID_SEARCH=0     Disable TF-IDF cosine fallback in search_knowledge
-  PHREN_FEATURE_AUTO_EXTRACT=0      Disable automatic memory extraction on each prompt
-  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1  Compact memory index injection
-  PHREN_LLM_MODEL           LLM model for semantic dedup/conflict (default: gpt-4o-mini)
-  PHREN_LLM_ENDPOINT        OpenAI-compatible /chat/completions base URL for dedup/conflict
-  PHREN_LLM_KEY             API key for PHREN_LLM_ENDPOINT
-  PHREN_CONTEXT_TOKEN_BUDGET    Max tokens injected per hook-prompt (default: 550)
-  PHREN_CONTEXT_SNIPPET_LINES   Max lines per injected snippet (default: 6)
-  PHREN_CONTEXT_SNIPPET_CHARS   Max chars per injected snippet (default: 520)
-  PHREN_MAX_INJECT_TOKENS       Hard cap on total injected tokens (default: 2000)
-  PHREN_TASK_PRIORITY        Priorities to include in task injection: high,medium,low (default: high,medium)
-  PHREN_MEMORY_TTL_DAYS         Override memory TTL for trust filtering
-  PHREN_HOOK_TIMEOUT_MS         Hook subprocess timeout in ms (default: 14000)
-  PHREN_FINDINGS_CAP            Max findings per date section before consolidation (default: 20)
-  PHREN_GH_PR_LIMIT/RUN_LIMIT/ISSUE_LIMIT  GitHub extraction limits (defaults: 40/25/25)
-
-Examples:
-  phren search "rate limiting"          Search across all projects
-  phren search "auth" --project my-api  Search within one project
-  phren add-finding my-app "Redis connections need explicit close in finally blocks"
-  phren doctor --fix                    Fix common config issues
-  phren config policy set --ttlDays=90  Change memory retention to 90 days
-  phren config project-ownership detached
-  phren maintain govern my-app          Queue stale memories for review
-  phren status                          Quick health check
-`;
 
 const CLI_COMMANDS = [
   "search",
@@ -230,7 +247,16 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   const argvCommand = argv[0];
 
   if (argvCommand === "--help" || argvCommand === "-h" || argvCommand === "help") {
-    console.log(HELP_TEXT);
+    const topic = argv[1]?.toLowerCase();
+    if (topic === "all") {
+      console.log(buildFullHelp());
+    } else if (topic && HELP_TOPICS[topic]) {
+      console.log(HELP_TOPICS[topic]);
+    } else if (topic) {
+      console.log(`Unknown topic: ${topic}\nAvailable: ${Object.keys(HELP_TOPICS).join(", ")}, all`);
+    } else {
+      console.log(HELP_TEXT);
+    }
     return finish();
   }
 
@@ -328,7 +354,8 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
 
   if (argvCommand === "uninstall") {
     const { runUninstall } = await import("./init.js");
-    await runUninstall();
+    const skipConfirm = argv.includes("--yes") || argv.includes("-y");
+    await runUninstall({ yes: skipConfirm });
     return finish();
   }
 
@@ -365,7 +392,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       await runMcpMode(argv[1]);
       return finish();
     } catch (err: unknown) {
-      console.error(err instanceof Error ? err.message : String(err));
+      console.error(errorMessage(err));
       return finish(1);
     }
   }
@@ -376,7 +403,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       await runHooksMode(argv[1]);
       return finish();
     } catch (err: unknown) {
-      console.error(err instanceof Error ? err.message : String(err));
+      console.error(errorMessage(err));
       return finish(1);
     }
   }

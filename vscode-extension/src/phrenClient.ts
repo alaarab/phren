@@ -310,6 +310,37 @@ export class PhrenClient {
     return this.callTool("link_task_issue", args);
   }
 
+  async getConfig(project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { domain: "all" };
+    if (project) args.project = project;
+    return this.callTool("get_config", args);
+  }
+
+  async setProactivity(level: string, project?: string, scope?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { level };
+    if (project) args.project = project;
+    if (scope) args.scope = scope;
+    return this.callTool("set_proactivity", args);
+  }
+
+  async setTaskMode(mode: string, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { mode };
+    if (project) args.project = project;
+    return this.callTool("set_task_mode", args);
+  }
+
+  async setFindingSensitivity(level: string, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { level };
+    if (project) args.project = project;
+    return this.callTool("set_finding_sensitivity", args);
+  }
+
+  async setRetentionPolicy(settings: Record<string, unknown>, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { ...settings };
+    if (project) args.project = project;
+    return this.callTool("set_retention_policy", args);
+  }
+
   async promoteTaskToIssue(
     project: string,
     item: string,
