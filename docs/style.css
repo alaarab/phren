@@ -2210,3 +2210,90 @@ a:focus-visible, button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .kw-memory, .kw-finding, .kw-hook { animation: none; }
 }
+
+/* --- DOCS SIDEBAR LAYOUT --- */
+.docs-layout {
+  display: flex;
+  margin-top: 60px; /* below nav */
+  min-height: calc(100vh - 60px);
+}
+
+.docs-sidebar {
+  position: sticky;
+  top: 60px;
+  width: 240px;
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  padding: 24px 16px;
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.docs-sidebar a {
+  display: block;
+  padding: 6px 12px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.docs-sidebar a:hover {
+  color: var(--text);
+  background: var(--bg-1);
+}
+
+.docs-sidebar a.active {
+  color: var(--indigo);
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.docs-content {
+  flex: 1;
+  max-width: 860px;
+  padding: 40px 48px;
+}
+
+.docs-content section {
+  margin-bottom: 64px;
+  padding-bottom: 64px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.docs-content section:last-child {
+  border-bottom: none;
+}
+
+.docs-content h2 {
+  font-size: 1.75rem;
+  margin-bottom: 24px;
+  color: var(--indigo);
+}
+
+.docs-content h3 {
+  font-size: 1.25rem;
+  margin-top: 32px;
+  margin-bottom: 12px;
+}
+
+/* nav active state for docs/community pages */
+.nav-link.active {
+  color: var(--indigo) !important;
+}
+
+@media (max-width: 900px) {
+  .docs-layout { flex-direction: column; }
+  .docs-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 12px 16px;
+  }
+  .docs-content { padding: 24px 16px; }
+}

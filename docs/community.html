@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>phren: community</title>
+  <meta name="description" content="Phren community hub: contributing guide, security model, FAQ, sharing and teams, and full reference documentation." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
+  <style>
+    /* Community page: extra styles for merged content */
+
+    /* Security cards grid */
+    .security-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 20px 0 28px;
+    }
+
+    .security-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+
+    .security-card .card-icon {
+      font-size: 20px;
+      margin-bottom: 8px;
+      display: block;
+      color: var(--indigo);
+    }
+
+    .security-card .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .security-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.6;
+    }
+
+    /* Style do/don't cards */
+    .style-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0 24px;
+    }
+
+    .style-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .style-card-do { border-color: rgba(40,200,64,0.25); }
+    .style-card-dont { border-color: rgba(255,95,87,0.25); }
+
+    .style-card-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .style-card-do .style-card-label { color: #28C840; }
+    .style-card-dont .style-card-label { color: #FF5F57; }
+
+    .style-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.5;
+    }
+
+    /* Tag pills */
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 20px;
+    }
+
+    .tag-pill {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--copper);
+    }
+
+    .tag-pill.special {
+      border-color: rgba(0,229,255,0.2);
+      color: var(--indigo);
+    }
+
+    /* Danger callout */
+    .callout.danger {
+      background: rgba(255,95,87,0.06);
+      border-color: rgba(255,95,87,0.2);
+    }
+
+    .callout.danger strong { color: #FF5F57; }
+
+    /* MCP tool listing rows */
+    .tool-group { margin-bottom: 32px; }
+
+    .tool-group-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--copper);
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .tool-row {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13.5px;
+      align-items: baseline;
+    }
+
+    .tool-row:last-child { border-bottom: none; }
+
+    .tool-name {
+      flex: 0 0 220px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--indigo);
+      font-size: 13px;
+    }
+
+    .tool-desc {
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* Env var groups */
+    .env-group { margin-bottom: 36px; }
+
+    .env-group-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--copper);
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    /* Concept cards */
+    .concept-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 20px 0 28px;
+    }
+
+    .concept-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+
+    .concept-card .concept-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--indigo);
+      margin-bottom: 6px;
+    }
+
+    .concept-card p {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .concept-card p:last-child { margin-bottom: 0; }
+
+    /* Section divider within the content */
+    .section-divider {
+      border: none;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      margin: 64px 0;
+    }
+
+    @media (max-width: 900px) {
+      .security-grid,
+      .style-grid,
+      .concept-grid { grid-template-columns: 1fr; }
+      .tool-name { flex: 0 0 auto; min-width: 140px; }
+    }
+
+    @media (max-width: 480px) {
+      .tool-row { flex-direction: column; gap: 4px; }
+    }
+  </style>
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="docs.html" class="nav-link">Docs</a>
+      <a href="community.html" class="nav-link active">Community</a>
+      <a href="https://github.com/alaarab/phren" class="nav-link" target="_blank">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+
+    <!-- SIDEBAR -->
+    <aside class="docs-sidebar" id="sidebar">
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Contributing</div>
+        <a href="#contributing" class="sidebar-link">Overview</a>
+        <a href="#dev-setup" class="sidebar-link sub">Dev Setup</a>
+        <a href="#project-structure" class="sidebar-link sub">Project Structure</a>
+        <a href="#testing" class="sidebar-link sub">Testing</a>
+        <a href="#code-style" class="sidebar-link sub">Code Style</a>
+        <a href="#pull-requests" class="sidebar-link sub">Pull Requests</a>
+        <a href="#adding-mcp-tool" class="sidebar-link sub">Adding MCP Tools</a>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Security</div>
+        <a href="#security" class="sidebar-link">Security Model</a>
+        <a href="#data-storage" class="sidebar-link sub">Data Storage</a>
+        <a href="#access-control" class="sidebar-link sub">Access Control</a>
+        <a href="#network" class="sidebar-link sub">Network Activity</a>
+        <a href="#reporting" class="sidebar-link sub">Reporting Vulnerabilities</a>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">FAQ</div>
+        <a href="#faq" class="sidebar-link">Overview</a>
+        <a href="#vs-claude-md" class="sidebar-link sub">vs CLAUDE.md</a>
+        <a href="#trust-decay" class="sidebar-link sub">Trust Decay</a>
+        <a href="#multi-agent" class="sidebar-link sub">Multiple Agents</a>
+        <a href="#agents-supported" class="sidebar-link sub">Supported Agents</a>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Sharing</div>
+        <a href="#sharing" class="sidebar-link">Teams & Sync</a>
+        <a href="#profiles" class="sidebar-link sub">Profiles</a>
+        <a href="#syncing" class="sidebar-link sub">Git Sync</a>
+        <a href="#rbac" class="sidebar-link sub">RBAC Roles</a>
+        <a href="#team-workflows" class="sidebar-link sub">Team Workflows</a>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Reference</div>
+        <a href="#reference" class="sidebar-link">Full Reference</a>
+        <a href="#ref-getting-started" class="sidebar-link sub">Getting Started</a>
+        <a href="#ref-concepts" class="sidebar-link sub">Concepts</a>
+        <a href="#ref-configuration" class="sidebar-link sub">Configuration</a>
+        <a href="#ref-cli" class="sidebar-link sub">CLI Reference</a>
+        <a href="#ref-mcp-tools" class="sidebar-link sub">MCP Tools</a>
+      </div>
+
+    </aside>
+
+    <!-- CONTENT -->
+    <main class="docs-content">
+
+      <!-- ================================================================ -->
+      <!--  CONTRIBUTING                                                     -->
+      <!-- ================================================================ -->
+      <section id="contributing">
+        <h1>Contributing</h1>
+        <p class="docs-subtitle">How to set up, build, test, and submit changes to phren.</p>
+
+        <h2 id="dev-setup">Dev Setup <a href="#dev-setup" class="anchor-link">#</a></h2>
+        <p>Clone, build, and test in under a minute.</p>
+        <pre><code>git clone https://github.com/alaarab/phren.git
+cd phren
+npm install
+npm run build
+npm test</code></pre>
+        <p>The build compiles TypeScript from <code>mcp/src/</code> into <code>mcp/dist/</code> and marks the entry point executable.</p>
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Node.js 20+</li>
+          <li>npm 9+</li>
+        </ul>
+
+        <h2 id="project-structure">Project Structure <a href="#project-structure" class="anchor-link">#</a></h2>
+        <p>Key files and what they do.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Path</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (67 public tools across 12 modules)</td></tr>
+            <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
+            <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
+            <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
+            <tr><td><code>mcp/src/init.ts</code></td><td><code>npx phren init</code>: configures MCP + hooks</td></tr>
+            <tr><td><code>mcp/src/link.ts</code></td><td>Profile sync, symlinks, hooks, context</td></tr>
+            <tr><td><code>mcp/src/data-access.ts</code></td><td>Task CRUD, machine/profile listing, learning management</td></tr>
+            <tr><td><code>mcp/src/mcp-*.ts</code></td><td>MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config)</td></tr>
+            <tr><td><code>mcp/src/skill-registry.ts</code></td><td>Skill precedence, alias collision handling, visibility gating</td></tr>
+            <tr><td><code>mcp/src/governance-policy.ts</code></td><td>RBAC, policy files, actor resolution</td></tr>
+            <tr><td><code>mcp/src/memory-ui-server.ts</code></td><td>Web UI server, auth/CSRF/CSP/loopback security</td></tr>
+            <tr><td><code>mcp/src/telemetry.ts</code></td><td>Opt-in local telemetry collection and summaries</td></tr>
+            <tr><td><code>starter/</code></td><td>Template files copied to ~/.phren on init</td></tr>
+            <tr><td><code>docs/</code></td><td>GitHub Pages site and documentation</td></tr>
+            <tr><td><code>skills/</code></td><td>Phren slash command definitions</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="testing">Testing <a href="#testing" class="anchor-link">#</a></h2>
+        <p>Running the test suite and filtering by pattern.</p>
+        <pre><code>npm test                              # run all tests
+npm test -- --grep "pattern"          # filter by test name
+npm test -- mcp/src/data-access.test  # run one file
+npx vitest --watch                    # watch mode</code></pre>
+        <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
+
+        <h2 id="code-style">Code Style <a href="#code-style" class="anchor-link">#</a></h2>
+        <p>Read <code>CLAUDE.md</code> for the full set of conventions. The highlights:</p>
+        <div class="style-grid">
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>AI voice: "robust", "seamless", "leverage", "comprehensive"</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Write like a person. Be direct.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Em dashes, filler comments, over-documentation</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Colons, commas, or just rewrite the sentence. Comment only where logic is not self-evident.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Premature abstractions for one-time operations</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Three similar lines beat a premature helper function</p>
+          </div>
+        </div>
+
+        <h2 id="making-changes">Making Changes <a href="#making-changes" class="anchor-link">#</a></h2>
+        <ol>
+          <li>Create a feature branch from <code>main</code></li>
+          <li>Make your changes with tests</li>
+          <li>Run <code>npm run build && npm test</code> and make sure everything passes</li>
+          <li>Keep commits focused: one logical change per commit</li>
+          <li>Write commit messages that explain <em>why</em>, not just <em>what</em></li>
+        </ol>
+
+        <h2 id="pull-requests">Pull Requests <a href="#pull-requests" class="anchor-link">#</a></h2>
+        <p>Keep PRs small and focused. One feature or fix per PR.</p>
+        <ul>
+          <li>Include a short description of what changed and why</li>
+          <li>If your PR changes user-facing behavior, update the README</li>
+          <li>If your PR adds or changes MCP tools, update <code>docs/api-reference.md</code>, <code>docs/llms-install.md</code>, and <code>docs/llms-full.txt</code></li>
+          <li>If your PR changes finding lifecycle, session checkpoints, web-ui security, RBAC, or telemetry, update the matching docs in the same PR</li>
+          <li>Make sure CI passes before requesting review</li>
+        </ul>
+
+        <h3>Commit Conventions</h3>
+        <p>Use conventional commits.</p>
+        <pre><code>feat: add synonym expansion for search queries
+fix: FTS5 sanitizer stripping valid URLs
+docs: update API reference with bulk tools
+test: add coverage for session checkpoint edge cases
+refactor: extract keyword logic from hook-prompt</code></pre>
+        <p>Prefixes: <code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>test:</code>, <code>refactor:</code></p>
+
+        <h2 id="adding-mcp-tool">Adding a New MCP Tool <a href="#adding-mcp-tool" class="anchor-link">#</a></h2>
+        <p>Five steps to ship a new tool.</p>
+        <ol>
+          <li>Add the tool definition in the correct module (<code>mcp/src/mcp-&lt;domain&gt;.ts</code>) following the existing <code>server.registerTool()</code> pattern</li>
+          <li>Implement the handler: call data-access functions, return <code>{ ok, message, data }</code></li>
+          <li>Register/verify the module from <code>mcp/src/index.ts</code> if you created a new module</li>
+          <li>Add tests in the relevant <code>*.test.ts</code> file</li>
+          <li>Update docs: <code>docs/api-reference.md</code>, <code>docs/llms-install.md</code>, <code>docs/llms-full.txt</code>, and integration/security/governance docs when behavior affects hooks, skills, RBAC, web UI, or telemetry</li>
+        </ol>
+
+        <h3>Adding a Global Skill</h3>
+        <ol>
+          <li>Create a markdown file in <code>global/skills/your-skill.md</code></li>
+          <li>Follow the existing skill format: name, description, steps</li>
+          <li>Test locally by running <code>phren init</code> and invoking <code>/your-skill</code> in a Claude Code session</li>
+        </ol>
+
+        <h3>Reporting Bugs</h3>
+        <p>Open an issue with:</p>
+        <ul>
+          <li>What you expected to happen</li>
+          <li>What actually happened</li>
+          <li>Steps to reproduce</li>
+          <li>Your Node.js version and OS</li>
+        </ul>
+
+        <div class="callout callout-tip">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            Questions?
+          </div>
+          <p>Open a <a href="https://github.com/alaarab/phren/discussions" style="color: var(--indigo);">discussion</a> or <a href="https://github.com/alaarab/phren/issues" style="color: var(--indigo);">issue</a>.</p>
+        </div>
+      </section>
+
+      <hr class="section-divider">
+
+      <!-- ================================================================ -->
+      <!--  SECURITY                                                        -->
+      <!-- ================================================================ -->
+      <section id="security">
+        <h1>Security</h1>
+        <p class="docs-subtitle">Phren is local-first. Your data never leaves your machine unless you push it.</p>
+
+        <div class="security-grid">
+          <div class="security-card">
+            <span class="card-icon">&#x1f512;</span>
+            <div class="card-title">Local-First Storage</div>
+            <p>All data lives in <code>~/.phren</code> as plain markdown and JSON files. No external database, no cloud sync by default.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f511;</span>
+            <div class="card-title">No Credentials Stored</div>
+            <p>Phren never stores API keys, tokens, or passwords. All credentials come from environment variables at runtime.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f6e1;</span>
+            <div class="card-title">Path Traversal Prevention</div>
+            <p>All file operations validate project names and paths to prevent directory traversal attacks.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f50d;</span>
+            <div class="card-title">FTS5 Input Sanitization</div>
+            <p>Search queries are sanitized to prevent FTS5 injection. Known column prefixes are stripped, URLs preserved.</p>
+          </div>
+        </div>
+
+        <h2 id="data-storage">Data Storage <a href="#data-storage" class="anchor-link">#</a></h2>
+        <p>Phren stores all state as local files under <code>~/.phren</code> (shared mode) or <code>&lt;repo&gt;/.phren</code> (project-local mode). The data is:</p>
+        <ul>
+          <li><strong>Plain text:</strong> markdown files for findings, tasks, summaries, and skills</li>
+          <li><strong>Structured JSON:</strong> governance policies, session data, runtime state</li>
+          <li><strong>Git-backed:</strong> changes are committed locally and optionally pushed to a remote you control</li>
+        </ul>
+
+        <div class="callout callout-tip">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            No cloud dependency
+          </div>
+          <p>Phren works entirely offline. Git push is optional and goes to your own remote.</p>
+        </div>
+
+        <h3>Credential Handling</h3>
+        <p>Phren reads credentials exclusively from environment variables. It never writes secrets to disk.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Variable</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>PHREN_EMBEDDING_API_KEY</code></td><td>Bearer token for external embedding endpoint</td></tr>
+            <tr><td><code>PHREN_LLM_KEY</code></td><td>API key for semantic dedup/conflict LLM</td></tr>
+            <tr><td><code>OPENAI_API_KEY</code></td><td>Fallback for embedding and LLM calls</td></tr>
+            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Fallback for LLM calls (Claude models)</td></tr>
+            <tr><td><code>GITHUB_TOKEN</code></td><td>Used by <code>phren maintain extract</code> for GitHub API</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Secret Scanning</h3>
+        <p>The finding quality filter rejects entries that match common secret patterns:</p>
+        <ul>
+          <li>API keys and tokens (common prefixes like <code>sk-</code>, <code>ghp_</code>, <code>Bearer</code>)</li>
+          <li>Connection strings with embedded credentials</li>
+          <li>PII patterns (emails, phone numbers in certain formats)</li>
+        </ul>
+        <div class="callout callout-warning">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            Defense in depth
+          </div>
+          <p>Secret scanning is a heuristic filter, not a guarantee. Do not rely on it as your only protection. Use <code>.gitignore</code> and environment variables.</p>
+        </div>
+
+        <h2 id="access-control">Access Control <a href="#access-control" class="anchor-link">#</a></h2>
+        <p>RBAC and authentication for shared environments and the web UI.</p>
+
+        <h3>Role-Based Access Control</h3>
+        <p>Identity is resolved from <code>PHREN_ACTOR</code> (in trusted/test contexts) or the OS user identity.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Role</th><th>Permissions</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>admin</code></td><td>Full access: read, write, delete, policy changes</td></tr>
+            <tr><td><code>maintainer</code></td><td>Read, write, delete. No policy changes.</td></tr>
+            <tr><td><code>contributor</code></td><td>Read and write. No delete or policy changes.</td></tr>
+            <tr><td><code>viewer</code></td><td>Read only</td></tr>
+          </tbody>
+        </table>
+        <p>All write, policy, and delete operations are checked against RBAC before mutation. Unauthorized attempts are logged in <code>.runtime/audit.log</code>.</p>
+
+        <h3>Web UI Security</h3>
+        <p>The memory web UI (<code>phren web-ui</code>) applies layered security:</p>
+        <ul>
+          <li><strong>Loopback binding:</strong> listens only on <code>127.0.0.1</code>, not on network interfaces</li>
+          <li><strong>Auth token:</strong> random per-run token required for all requests</li>
+          <li><strong>CSRF protection:</strong> mutating routes require a single-use CSRF token with TTL</li>
+          <li><strong>Security headers:</strong> <code>Content-Security-Policy</code>, <code>X-Frame-Options: DENY</code>, <code>X-Content-Type-Options: nosniff</code></li>
+        </ul>
+
+        <h2 id="network">Network Activity <a href="#network" class="anchor-link">#</a></h2>
+        <p>Phren makes no network calls by default. All external calls are opt-in.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Feature</th><th>Network call</th><th>Controlled by</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Core operation</td><td>None</td><td>Always local</td></tr>
+            <tr><td>Git sync</td><td>git push/pull to your remote</td><td>Stop hook (only if remote configured)</td></tr>
+            <tr><td>Embeddings (Ollama)</td><td>localhost:11434</td><td><code>PHREN_OLLAMA_URL</code></td></tr>
+            <tr><td>Embeddings (API)</td><td>Your configured endpoint</td><td><code>PHREN_EMBEDDING_API_URL</code></td></tr>
+            <tr><td>Semantic dedup/conflict</td><td>Your configured LLM endpoint</td><td><code>PHREN_LLM_ENDPOINT</code></td></tr>
+            <tr><td>GitHub extraction</td><td>api.github.com</td><td><code>phren maintain extract</code> (manual)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Auto-Extract Privacy</h3>
+        <p>When <code>PHREN_FEATURE_AUTO_EXTRACT</code> is enabled, phren extracts insights from project context on each prompt. The extraction:</p>
+        <ul>
+          <li>Runs entirely locally using the configured model</li>
+          <li>Respects a per-session cooldown (<code>PHREN_AUTOCAPTURE_COOLDOWN_MS</code>, default 30s)</li>
+          <li>Caps findings per session (<code>PHREN_AUTOCAPTURE_SESSION_CAP</code>, default 10)</li>
+          <li>Applies the same quality filter that rejects secrets and PII</li>
+          <li>Tags extracted findings with <code>source: extract</code> provenance for auditability</li>
+        </ul>
+
+        <h3>Telemetry</h3>
+        <p>Opt-in, local-only usage tracking. Disabled by default. Enable with <code>phren config telemetry on</code>. Data is stored in <code>.runtime/telemetry.json</code> and never sent anywhere.</p>
+
+        <h2 id="reporting">Reporting a Vulnerability <a href="#reporting" class="anchor-link">#</a></h2>
+        <p>If you find a security issue, report it privately. Do not open a public issue.</p>
+        <div class="callout danger" style="border-left: 4px solid #FF5F57;">
+          <strong>Email:</strong> <a href="mailto:security@alaarab.com" style="color: #FF5F57;">security@alaarab.com</a>
+        </div>
+        <p>Include: a description of the vulnerability, steps to reproduce, the impact, and your suggested fix.</p>
+
+        <h3>What Counts as a Security Issue</h3>
+        <ul>
+          <li>Path traversal: reading or writing files outside the phren directory</li>
+          <li>Arbitrary code execution through MCP tool inputs</li>
+          <li>Information disclosure: leaking data from other projects or profiles</li>
+          <li>Injection attacks through FTS5 queries or CLI arguments</li>
+          <li>Bypass of memory access controls or role-based permissions</li>
+        </ul>
+
+        <h3>Response Timeline</h3>
+        <table class="docs-table">
+          <thead><tr><th>Stage</th><th>Timeline</th></tr></thead>
+          <tbody>
+            <tr><td>Acknowledgment</td><td>Within 48 hours</td></tr>
+            <tr><td>Initial assessment</td><td>Within 1 week</td></tr>
+            <tr><td>Fix or mitigation</td><td>30 days for critical issues</td></tr>
+          </tbody>
+        </table>
+        <p>Security fixes are applied to the latest release only. We follow coordinated disclosure and credit reporters in the changelog unless they prefer anonymity.</p>
+      </section>
+
+      <hr class="section-divider">
+
+      <!-- ================================================================ -->
+      <!--  FAQ                                                             -->
+      <!-- ================================================================ -->
+      <section id="faq">
+        <h1>Frequently Asked Questions</h1>
+        <p class="docs-subtitle">Common questions about phren, answered.</p>
+
+        <h2 id="vs-claude-md">How is this different from just using CLAUDE.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
+        <p><code>CLAUDE.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
+        <p>Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>, regardless of how large your knowledge base grows.</p>
+        <p><code>CLAUDE.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
+
+        <h2 id="performance">Does this slow down my prompts? <a href="#performance" class="anchor-link">#</a></h2>
+        <p>Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path.</p>
+        <p>The main exceptions are the first prompt in a session (where SessionStart pulls the repo from git) and very large or slow filesystems. On a fast connection the pull is often under a second.</p>
+
+        <h2 id="multi-agent">What happens when I run multiple agents at the same time? <a href="#multi-agent" class="anchor-link">#</a></h2>
+        <p>They all read and write the same <code>~/.phren</code> directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.</p>
+        <p>In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing, just a shared git repo.</p>
+
+        <h2 id="failure-modes">What failure modes should I expect? <a href="#failure-modes" class="anchor-link">#</a></h2>
+        <ul>
+          <li><strong>No remote configured:</strong> auto-save still commits locally, but nothing syncs across machines until you add a remote.</li>
+          <li><strong>Push failed:</strong> the commit stays local and phren records the error so <code>phren status</code> can show it.</li>
+          <li><strong>Hooks disabled or stale:</strong> retrieval stops, but your files are still there; rerun <code>phren init</code>.</li>
+          <li><strong>Stale index:</strong> search quality drops until the next rebuild; <code>phren doctor</code> will flag index trouble.</li>
+          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.governance/access-control.json</code>.</li>
+        </ul>
+
+        <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
+        <p>Every finding has a confidence score. The score degrades over time:</p>
+        <table class="docs-table">
+          <thead><tr><th>Age</th><th>Cited entry</th><th>Uncited entry</th></tr></thead>
+          <tbody>
+            <tr><td>0-30 days</td><td>1.00</td><td>0.80</td></tr>
+            <tr><td>31-60 days</td><td>1.00</td><td>0.80</td></tr>
+            <tr><td>61-90 days</td><td>0.85</td><td>0.68</td></tr>
+            <tr><td>91-120 days</td><td>0.65</td><td>0.52</td></tr>
+            <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
+          </tbody>
+        </table>
+        <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>pin_memory</code> to make it never decay.</p>
+
+        <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
+        <h3>Automatic</h3>
+        <ul>
+          <li>Findings added via <code>add_finding</code> MCP tool</li>
+          <li>Task items via <code>add_task</code></li>
+          <li>Session state committed and pushed by the Stop hook after every response</li>
+        </ul>
+        <h3>Manual</h3>
+        <ul>
+          <li>Running <code>/phren-consolidate</code> when findings pile up</li>
+          <li>Running <code>phren maintain govern</code> to queue low-value entries for review</li>
+          <li>Pinning findings that should never decay</li>
+        </ul>
+
+        <h2 id="add-project">How do I add a new project? <a href="#add-project" class="anchor-link">#</a></h2>
+        <pre><code>cd ~/code/my-project
+phren add</code></pre>
+        <p>Phren bootstraps <code>~/.phren/my-project/</code> and adds it to your active profile. For a brand-new scaffold: <code>/phren-init my-project</code></p>
+
+        <h2 id="mcp-required">Does phren require MCP? <a href="#mcp-required" class="anchor-link">#</a></h2>
+        <p>No. MCP is recommended for the full 67-tool experience, but phren also works in hooks-only mode where context injection still happens automatically via the prompt hook.</p>
+        <pre><code>phren init --mcp off    # Install without MCP
+phren mcp-mode on       # Toggle anytime</code></pre>
+
+        <h2 id="agents-supported">Which agents are supported? <a href="#agents-supported" class="anchor-link">#</a></h2>
+        <p>Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex. Claude gets full native lifecycle hooks plus MCP. The others get generated hook configs plus session wrappers.</p>
+
+        <h2 id="platforms">Platforms <a href="#platforms" class="anchor-link">#</a></h2>
+        <p>Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts.</p>
+
+        <h2 id="faq-web-ui">Web UI <a href="#faq-web-ui" class="anchor-link">#</a></h2>
+        <pre><code>phren web-ui</code></pre>
+        <p>Opens a browser-based interface at <code>localhost:3499</code>. The review queue is read-only there. Filter by machine, model, and project. Loopback-only bind, random per-run auth token, CSRF protection, and CSP headers.</p>
+
+        <h2 id="faq-telemetry">Telemetry <a href="#faq-telemetry" class="anchor-link">#</a></h2>
+        <p>No, telemetry is not on by default. It is opt-in and local-only. <code>phren config telemetry on</code></p>
+
+        <h2 id="faq-uninstall">Uninstall <a href="#faq-uninstall" class="anchor-link">#</a></h2>
+        <p><code>phren uninstall</code> removes the active install. Shared mode removes config, hooks, and the active phren root. Project-local mode removes <code>&lt;repo&gt;/.phren</code> and workspace MCP entry. Export or back up before uninstalling.</p>
+      </section>
+
+      <hr class="section-divider">
+
+      <!-- ================================================================ -->
+      <!--  SHARING                                                         -->
+      <!-- ================================================================ -->
+      <section id="sharing">
+        <h1>Sharing & Teams</h1>
+        <p class="docs-subtitle">Sync phren knowledge across machines, manage access with RBAC, and collaborate across projects.</p>
+
+        <h2 id="profiles">Profiles <a href="#profiles" class="anchor-link">#</a></h2>
+        <p>A <strong>profile</strong> defines which projects a machine should have access to. Profiles live as YAML files in <code>~/.phren/profiles/</code>.</p>
+        <pre><code># ~/.phren/profiles/work.yaml
+name: work
+projects:
+  - global
+  - web-app
+  - api-server
+  - shared-lib</code></pre>
+        <p>Each profile lists the project directories that should be synced and linked. The <code>global</code> entry is special: it contains skills and config that apply everywhere.</p>
+        <pre><code>phren config profiles                              # List all profiles
+:profile add-project work my-new-project            # Add a project
+:profile remove-project work old-project            # Remove a project</code></pre>
+
+        <h2 id="machines">Machines <a href="#machines" class="anchor-link">#</a></h2>
+        <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren link</code> runs on a new machine, it prompts you to register and picks a profile.</p>
+        <pre><code># ~/.phren/machines.yaml
+work-desktop: work
+home-laptop: personal
+ci-server: minimal</code></pre>
+
+        <h2 id="syncing">Syncing via Git <a href="#syncing" class="anchor-link">#</a></h2>
+        <p>The <code>~/.phren</code> directory is a git repository. Syncing is plain git, automated through hooks:</p>
+        <ul>
+          <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
+          <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
+        </ul>
+        <p>Findings, tasks, and skills sync automatically as you work. <code>phren link</code> configures git sparse checkout so each machine only downloads the projects in its profile.</p>
+
+        <h3>Linking</h3>
+        <p><code>phren link</code> wires everything together on a machine. It identifies the machine, configures sparse checkout, symlinks knowledge files, patches MCP settings for all agents, registers hooks, writes context, and rebuilds memory pointers.</p>
+
+        <h2 id="consolidation">Consolidation <a href="#consolidation" class="anchor-link">#</a></h2>
+        <p>As findings accumulate, phren detects when they need consolidation. Thresholds: 25 entries since last consolidation marker, or 60 days + 10 entries. Consolidation archives old entries, deduplicates, and promotes patterns that appear in 2+ projects to global scope.</p>
+        <pre><code>phren consolidation-status
+phren maintain consolidate my-project</code></pre>
+
+        <h3>Fragment Graph</h3>
+        <p>Fragments are named concepts that connect findings across projects. Use <code>cross_project_fragments</code> to find fragments shared across multiple projects.</p>
+        <pre><code>phren graph
+phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></pre>
+
+        <h3>Cross-Project Search</h3>
+        <p>The <code>search_knowledge</code> MCP tool searches across all indexed projects by default. Cross-project findings from <code>global/FINDINGS.md</code> are included in all searches.</p>
+
+        <h2 id="rbac">RBAC Roles <a href="#rbac" class="anchor-link">#</a></h2>
+        <p>Phren supports four role levels. The actor is identified by <code>PHREN_ACTOR</code> (defaults to <code>$USER</code>).</p>
+        <table class="docs-table">
+          <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+          <tbody>
+            <tr><td><code>admin</code></td><td>Full access. Can modify governance, access control, workflow policies, and all project data.</td></tr>
+            <tr><td><code>maintainer</code></td><td>Can add/edit/remove findings, tasks, and skills. Cannot modify governance or access control.</td></tr>
+            <tr><td><code>contributor</code></td><td>Can add findings and tasks. Cannot remove or edit existing entries.</td></tr>
+            <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
+          </tbody>
+        </table>
+        <p>Access control is configured in <code>~/.phren/.governance/access-control.json</code>. If no file exists, all users have full access.</p>
+
+        <h3>Audit Log</h3>
+        <p>All mutations are recorded in <code>~/.phren/.runtime/audit.log</code>. Each entry includes the actor, action, timestamp, and relevant parameters.</p>
+
+        <h2 id="team-workflows">Team Workflows <a href="#team-workflows" class="anchor-link">#</a></h2>
+        <p>For teams sharing a phren repository:</p>
+        <ol>
+          <li><strong>Create a shared git remote</strong> for <code>~/.phren</code></li>
+          <li><strong>Define profiles</strong> per team role (e.g. <code>frontend.yaml</code>, <code>backend.yaml</code>)</li>
+          <li><strong>Register each machine</strong> with <code>phren link --register</code></li>
+          <li><strong>Set up RBAC</strong> so team leads are admins, developers are maintainers or contributors</li>
+        </ol>
+
+        <h3>Example: Two-Person Team</h3>
+        <pre><code># Alice's laptop
+phren init
+phren link --register   # name: alice-mbp, profile: fullstack
+
+# Bob's desktop
+git clone &lt;phren-remote&gt; ~/.phren
+phren link --register   # name: bob-desktop, profile: fullstack
+
+# Both work independently; Stop hook syncs after each response
+# Weekly: run /phren-consolidate to merge insights</code></pre>
+
+        <h3>Project Ownership</h3>
+        <table class="docs-table">
+          <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
+            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>CLAUDE.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
+            <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <hr class="section-divider">
+
+      <!-- ================================================================ -->
+      <!--  REFERENCE                                                       -->
+      <!-- ================================================================ -->
+      <section id="reference">
+        <h1>Full Reference</h1>
+        <p class="docs-subtitle">Getting started, core concepts, configuration, CLI commands, and MCP tools.</p>
+
+        <h2 id="ref-getting-started">Getting Started <a href="#ref-getting-started" class="anchor-link">#</a></h2>
+        <p>Install phren and get context injection running in your first session.</p>
+
+        <h3>What <code>phren init</code> does</h3>
+        <ol>
+          <li>Creates <code>~/.phren/</code> and initializes it as a git repo.</li>
+          <li>Detects which agents are installed: Claude Code, VS Code Copilot, Cursor, Codex CLI.</li>
+          <li>Registers the phren MCP server in each agent's config file.</li>
+          <li>Wires up lifecycle hooks (SessionStart, UserPromptSubmit, Stop) for Claude. Generates wrapper binaries for the other agents.</li>
+          <li>Creates a <code>machines.yaml</code> entry for the current hostname.</li>
+          <li>Copies starter templates into <code>~/.phren/</code>.</li>
+        </ol>
+
+        <div class="callout callout-tip">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            One command to install
+          </div>
+          <p><code>npm install -g @phren/cli && phren init</code></p>
+        </div>
+
+        <h3>First 10 minutes</h3>
+        <p>After init, open any project directory in your agent and start a prompt:</p>
+        <ol>
+          <li><strong>SessionStart</strong> fires: phren pulls the latest <code>~/.phren</code> changes and runs a health self-check.</li>
+          <li><strong>UserPromptSubmit</strong> fires: phren extracts keywords, searches FTS5, and prepends relevant context.</li>
+          <li>You work. When you call MCP tools like <code>add_finding</code> or <code>add_task</code>, phren writes to markdown files.</li>
+          <li><strong>Stop</strong> fires after every response: phren commits and pushes to its remote.</li>
+        </ol>
+        <p>On your second session, phren injects context from the first. Run <code>phren verify</code> after init to confirm everything is wired correctly.</p>
+
+        <h3>Adding projects</h3>
+        <pre><code>cd ~/my-project
+phren add .</code></pre>
+        <p>Creates <code>~/.phren/my-project/</code> with <code>CLAUDE.md</code>, <code>tasks.md</code>, <code>FINDINGS.md</code>, and <code>summary.md</code>.</p>
+
+        <h2 id="ref-concepts">Concepts <a href="#ref-concepts" class="anchor-link">#</a></h2>
+        <p>The building blocks of how phren stores, ages, and surfaces project knowledge.</p>
+
+        <h3>Findings</h3>
+        <p>A finding is a single unit of knowledge stored in <code>FINDINGS.md</code>. Each has a type tag, lifecycle state, and confidence score that decays over time.</p>
+        <p><strong>Eleven finding types:</strong></p>
+        <div class="tag-list">
+          <span class="tag-pill special">[decision]</span>
+          <span class="tag-pill">[pattern]</span>
+          <span class="tag-pill">[pitfall]</span>
+          <span class="tag-pill">[observation]</span>
+          <span class="tag-pill">[bug]</span>
+          <span class="tag-pill">[workaround]</span>
+          <span class="tag-pill">[tooling]</span>
+          <span class="tag-pill">[context]</span>
+          <span class="tag-pill">[anti-pattern]</span>
+          <span class="tag-pill">[tradeoff]</span>
+          <span class="tag-pill">[architecture]</span>
+        </div>
+        <p><code>[decision]</code> never decays. <code>[observation]</code> expires in 14 days. The rest follow the default decay curve.</p>
+
+        <p><strong>Lifecycle states:</strong> active, superseded, contradicted, retracted, stale, invalid_citation. Tools like <code>supersede_finding</code>, <code>retract_finding</code>, and <code>resolve_contradiction</code> update inline metadata. Auto-tagging detects the right type from content if you skip the prefix.</p>
+
+        <h3>Fragments</h3>
+        <p>A fragment is a named concept that links across findings and docs. Use <code>search_fragments</code> to find them, <code>link_findings</code> to attach a finding to one, and <code>cross_project_fragments</code> to see which span multiple projects.</p>
+
+        <h3>Trust and Decay</h3>
+        <p>Every finding starts at confidence 1.0. The default decay schedule:</p>
+        <table class="docs-table">
+          <thead><tr><th>Age</th><th>Multiplier</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>0-30 days</td><td>1.0</td><td>Full confidence</td></tr>
+            <tr><td>30-60 days</td><td>0.85</td><td>Slightly reduced</td></tr>
+            <tr><td>60-90 days</td><td>0.65</td><td>Moderate reduction</td></tr>
+            <tr><td>90-120 days</td><td>0.45</td><td>Low confidence</td></tr>
+            <tr><td>120+ days</td><td>0.0</td><td>Expired, prunable</td></tr>
+          </tbody>
+        </table>
+        <p>Findings that are frequently confirmed decay 3x slower. Pin a finding to <code>truths.md</code> to prevent decay entirely.</p>
+
+        <h3>Sessions</h3>
+        <p>Sessions track continuity across agent restarts. <code>session_start</code> returns the prior summary, recent findings, and active task. <code>session_end</code> writes a summary and saves task checkpoints. For Claude with native hooks, this runs automatically.</p>
+
+        <h3>Skills</h3>
+        <p>Slash commands defined as markdown files with YAML frontmatter. Global skills live in <code>~/.phren/global/skills/</code>. Project-local skills override globals with the same name.</p>
+
+        <h3>Hooks</h3>
+        <p>Shell commands registered in each agent's config. They run at SessionStart, UserPromptSubmit, Stop, and PostToolUse for context injection, git sync, and persistence. Toggle with <code>phren hooks-mode on|off</code>.</p>
+
+        <h2 id="ref-configuration">Configuration <a href="#ref-configuration" class="anchor-link">#</a></h2>
+        <p>Environment variables control context size, feature flags, semantic search, and governance. Set them in <code>~/.phren/.env</code> or your shell profile.</p>
+
+        <div class="env-group">
+          <p class="env-group-title">Context injection</p>
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td><code>550</code></td><td>Max tokens injected per hook-prompt call (180-10000)</td></tr>
+              <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td><code>6</code></td><td>Max lines per snippet (2-100)</td></tr>
+              <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td><code>2000</code></td><td>Hard cap on total injected tokens (200-20000)</td></tr>
+              <tr><td><code>PHREN_TASK_PRIORITY</code></td><td><code>high,medium</code></td><td>Which task priorities to include in hook context</td></tr>
+              <tr><td><code>PHREN_CROSS_PROJECT_DECAY_DAYS</code></td><td><code>30</code></td><td>Days over which cross-project findings decay</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="env-group">
+          <p class="env-group-title">Feature flags</p>
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>PHREN_FEATURE_AUTO_EXTRACT</code></td><td>enabled</td><td>Automatic memory extraction from project context</td></tr>
+              <tr><td><code>PHREN_FEATURE_AUTO_CAPTURE</code></td><td>disabled</td><td>Extract insights from conversation transcripts at session end</td></tr>
+              <tr><td><code>PHREN_FEATURE_SEMANTIC_DEDUP</code></td><td>disabled</td><td>LLM-based deduplication on <code>add_finding</code></td></tr>
+              <tr><td><code>PHREN_FEATURE_SEMANTIC_CONFLICT</code></td><td>disabled</td><td>LLM-based conflict detection on <code>add_finding</code></td></tr>
+              <tr><td><code>PHREN_FEATURE_GIT_CONTEXT_FILTER</code></td><td>disabled</td><td>Boost docs matching changed files in search</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="env-group">
+          <p class="env-group-title">Performance</p>
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><code>PHREN_HOOK_TIMEOUT_MS</code></td><td><code>14000</code></td><td>Timeout for hook subprocess execution</td></tr>
+              <tr><td><code>PHREN_FILE_LOCK_MAX_WAIT_MS</code></td><td><code>5000</code></td><td>Max time to wait for a file lock</td></tr>
+              <tr><td><code>PHREN_FINDINGS_CAP</code></td><td><code>20</code></td><td>Max findings per date section before consolidation triggers</td></tr>
+              <tr><td><code>PHREN_CONSOLIDATION_CAP</code></td><td><code>150</code></td><td>Max total findings before forced consolidation</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="ref-cli">CLI Reference <a href="#ref-cli" class="anchor-link">#</a></h2>
+        <p>All <code>phren</code> subcommands. Run <code>phren --help</code> for a quick list.</p>
+
+        <h3>Search</h3>
+        <pre><code>phren search &lt;query&gt; [--project &lt;name&gt;] [--history] [--from-history &lt;n&gt;]</code></pre>
+
+        <h3>Findings</h3>
+        <pre><code>phren add-finding &lt;project&gt; "&lt;finding text&gt;"
+phren pin &lt;project&gt; "&lt;truth text&gt;"
+phren finding supersede &lt;project&gt; "..." --by "..."
+phren finding retract &lt;project&gt; "..." --reason "..."
+phren finding contradictions [project]</code></pre>
+
+        <h3>Tasks</h3>
+        <pre><code>phren tasks                                         # Cross-project view
+phren task add &lt;project&gt; "..."
+phren task complete &lt;project&gt; "..."
+phren task next [project]                            # Pick next highest-priority
+phren task promote &lt;project&gt; "..." [--active]
+phren task pin &lt;project&gt; "..."
+phren task create-issue &lt;project&gt; "..." [--repo &lt;owner/name&gt;]</code></pre>
+
+        <h3>Projects</h3>
+        <pre><code>phren add [path] [--ownership &lt;mode&gt;]
+phren projects list
+phren projects configure &lt;name&gt; --ownership=&lt;mode&gt;
+phren projects remove &lt;name&gt;</code></pre>
+
+        <h3>Skills</h3>
+        <pre><code>phren skills list
+phren skills add &lt;project&gt; &lt;path&gt;
+phren skills enable &lt;project|global&gt; &lt;name&gt;
+phren skills disable &lt;project|global&gt; &lt;name&gt;
+phren skills resolve &lt;project|global&gt;</code></pre>
+
+        <h3>Hooks</h3>
+        <pre><code>phren hooks list [--project &lt;name&gt;]
+phren hooks enable &lt;tool&gt;
+phren hooks disable &lt;tool&gt;
+phren mcp-mode on|off|status
+phren hooks-mode on|off|status</code></pre>
+
+        <h3>Config</h3>
+        <pre><code>phren config policy [get|set ...]
+phren config workflow [get|set ...]
+phren config access [get|set ...]
+phren config index [get|set ...]
+phren config telemetry [on|off]
+phren config machines
+phren config profiles</code></pre>
+
+        <h3>Maintenance</h3>
+        <pre><code>phren maintain govern [project]       # Queue stale memories for review
+phren maintain prune [project]        # Delete expired entries
+phren maintain consolidate [project]  # Deduplicate FINDINGS.md
+phren maintain extract [project]      # Mine git/GitHub signals</code></pre>
+        <div class="callout callout-warning">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            Safety note
+          </div>
+          <p>Run <code>prune</code> and <code>consolidate</code> with <code>--dry-run</code> first. Phren creates <code>FINDINGS.md.bak</code> automatically on write paths.</p>
+        </div>
+
+        <h3>Health and diagnostics</h3>
+        <pre><code>phren doctor [--fix]
+phren status
+phren verify
+phren web-ui [--port=3499]</code></pre>
+
+        <h2 id="ref-mcp-tools">MCP Tools <a href="#ref-mcp-tools" class="anchor-link">#</a></h2>
+        <p>67 tools across 12 modules. All return <code>{ ok, message, data?, error? }</code>.</p>
+
+        <div class="tool-group">
+          <p class="tool-group-title">Search and browse</p>
+          <div class="tool-row"><span class="tool-name">search_knowledge</span><span class="tool-desc">FTS5 full-text search with synonym expansion, type/tag/since/status filters, optional LLM synthesis</span></div>
+          <div class="tool-row"><span class="tool-name">get_memory_detail</span><span class="tool-desc">Fetch full content of a memory by ID. Layer 3 of progressive disclosure.</span></div>
+          <div class="tool-row"><span class="tool-name">get_project_summary</span><span class="tool-desc">Project summary card, CLAUDE.md path, indexed files</span></div>
+          <div class="tool-row"><span class="tool-name">list_projects</span><span class="tool-desc">All projects in active profile with doc badges</span></div>
+          <div class="tool-row"><span class="tool-name">get_findings</span><span class="tool-desc">Read recent findings without a search query</span></div>
+        </div>
+
+        <div class="tool-group">
+          <p class="tool-group-title">Task management (13 tools)</p>
+          <div class="tool-row"><span class="tool-name">get_tasks</span><span class="tool-desc">Read tasks, summary mode, pagination, single-item fetch by <code>bid:</code> hash</span></div>
+          <div class="tool-row"><span class="tool-name">add_task / add_tasks</span><span class="tool-desc">Add one or many tasks to a project's Queue</span></div>
+          <div class="tool-row"><span class="tool-name">complete_task / complete_tasks</span><span class="tool-desc">Move tasks to Done, clear checkpoint files</span></div>
+          <div class="tool-row"><span class="tool-name">update_task</span><span class="tool-desc">Update text, priority, context, section, or linked issue</span></div>
+          <div class="tool-row"><span class="tool-name">promote_task_to_issue</span><span class="tool-desc">Create a GitHub issue from a task and link it back</span></div>
+          <div class="tool-row"><span class="tool-name">pin_task / work_next_task / promote_task</span><span class="tool-desc">Pin, auto-select next, or promote priority</span></div>
+          <div class="tool-row"><span class="tool-name">tidy_done_tasks</span><span class="tool-desc">Archive completed tasks</span></div>
+        </div>
+
+        <div class="tool-group">
+          <p class="tool-group-title">Finding capture (11 tools)</p>
+          <div class="tool-row"><span class="tool-name">add_finding / add_findings</span><span class="tool-desc">Append findings with optional citation, type, source, sessionId. Duplicate detection via Jaccard similarity.</span></div>
+          <div class="tool-row"><span class="tool-name">supersede_finding</span><span class="tool-desc">Mark superseded (0.25x retrieval, stripped from FTS)</span></div>
+          <div class="tool-row"><span class="tool-name">retract_finding</span><span class="tool-desc">Retract with reason (0.1x retrieval, stripped from FTS)</span></div>
+          <div class="tool-row"><span class="tool-name">resolve_contradiction</span><span class="tool-desc">Resolve between two findings: keep_a, keep_b, keep_both, retract_both</span></div>
+          <div class="tool-row"><span class="tool-name">edit_finding</span><span class="tool-desc">Edit in place preserving inline metadata</span></div>
+          <div class="tool-row"><span class="tool-name">push_changes</span><span class="tool-desc">Commit and push all phren changes</span></div>
+        </div>
+
+        <div class="tool-group">
+          <p class="tool-group-title">Session, graph, skills, hooks, config</p>
+          <div class="tool-row"><span class="tool-name">session_start / session_end</span><span class="tool-desc">Lifecycle boundaries with summaries and checkpoints</span></div>
+          <div class="tool-row"><span class="tool-name">session_context / session_history</span><span class="tool-desc">Current state and past session drill-down</span></div>
+          <div class="tool-row"><span class="tool-name">search_fragments / read_graph / link_findings</span><span class="tool-desc">Fragment graph operations</span></div>
+          <div class="tool-row"><span class="tool-name">cross_project_fragments</span><span class="tool-desc">Fragments shared across multiple projects</span></div>
+          <div class="tool-row"><span class="tool-name">list_skills / read_skill / write_skill</span><span class="tool-desc">Skill CRUD</span></div>
+          <div class="tool-row"><span class="tool-name">list_hooks / toggle_hooks / add_custom_hook</span><span class="tool-desc">Hook management</span></div>
+          <div class="tool-row"><span class="tool-name">get_config / set_proactivity / set_task_mode</span><span class="tool-desc">Governance configuration</span></div>
+          <div class="tool-row"><span class="tool-name">health_check / doctor_fix / get_review_queue</span><span class="tool-desc">Health, review, and diagnostics</span></div>
+          <div class="tool-row"><span class="tool-name">pin_memory / memory_feedback</span><span class="tool-desc">Memory quality and canonical truths</span></div>
+          <div class="tool-row"><span class="tool-name">export_project / import_project / manage_project</span><span class="tool-desc">Data portability</span></div>
+        </div>
+
+        <h3>Graph Engine API</h3>
+        <p>The fragment graph webview exposes a JS API for host integration (VS Code extension, web UI).</p>
+        <table class="docs-table">
+          <thead><tr><th>Method</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>mount(data)</code></td><td>Initialize graph with node and edge data from <code>read_graph</code></td></tr>
+            <tr><td><code>onNodeSelect(cb)</code></td><td>Callback when a node is selected by click or keyboard</td></tr>
+            <tr><td><code>getNodeAt(x, y)</code></td><td>Hit-test at CSS coordinates</td></tr>
+            <tr><td><code>getCurrentNode()</code></td><td>Node ID where phren character is located</td></tr>
+            <tr><td><code>walkTo(nodeId)</code></td><td>Animate phren character to a node via BFS edge-walking</td></tr>
+          </tbody>
+        </table>
+        <p>Keyboard: arrow keys move focus, Enter selects, Escape clears.</p>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll (IntersectionObserver)
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h1[id], h2[id]').forEach(el => observer.observe(el));
+
+// Nav scroll effect
+const nav = document.getElementById('nav');
+window.addEventListener('scroll', () => {
+  nav.classList.toggle('scrolled', window.scrollY > 10);
+}, { passive: true });
+</script>
+<script src="docs.js"></script>
+</body>
+</html>
