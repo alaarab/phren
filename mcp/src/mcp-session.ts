@@ -186,7 +186,10 @@ function lastSummaryPath(phrenPath: string): string {
 function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
   try {
     const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
-    fs.writeFileSync(lastSummaryPath(phrenPath), JSON.stringify(data, null, 2));
+    const summaryFile = lastSummaryPath(phrenPath);
+    const tmpPath = `${summaryFile}.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tmpPath, summaryFile);
   } catch (err: unknown) {
     debugError("writeLastSummary", err);
   }

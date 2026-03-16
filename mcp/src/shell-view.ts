@@ -121,7 +121,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Tasks: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
     Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
     "Review Queue": [`${k("↵")} ${d("inspect")}`],
-    Skills: [`${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
+    Skills: [`${k("a")} ${d("add")}`, `${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
     Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
   };
@@ -212,10 +212,10 @@ function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntr
   const findingsPreview = scoped
     .filter((entry) => entry.findingCount > 0)
     .slice(0, 3)
-    .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} fragments`)}`);
+    .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
 
   const lines = [
-    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} fragments  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
       ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project tasks")}`
       : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens tasks")}`,
@@ -701,7 +701,7 @@ export interface HookEntry {
 
 const LIFECYCLE_HOOKS: Array<{ event: string; description: string }> = [
   { event: "UserPromptSubmit", description: "inject context before each prompt" },
-  { event: "Stop",             description: "phren saves fragments after each response" },
+  { event: "Stop",             description: "phren saves findings after each response" },
   { event: "SessionStart",     description: "git pull at session start" },
 ];
 

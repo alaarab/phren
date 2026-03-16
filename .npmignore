@@ -2,6 +2,7 @@
 mcp/src/
 *.test.ts
 *.test.js
+test-global-setup*
 
 # Documentation (except README)
 docs/

@@ -39,7 +39,6 @@ export function renderWebUiPage(phrenPath: string, authToken?: string, nonce?: s
   <link rel="preconnect" href="https://fonts.bunny.net" />
   <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
   <title>phren</title>
-  <script${nonceAttr} src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <style>
 ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}

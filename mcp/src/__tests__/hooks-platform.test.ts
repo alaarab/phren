@@ -177,10 +177,13 @@ describe("hooks platform compatibility", () => {
     it("runCustomHooks sets PHREN_PATH and PHREN_HOOK_EVENT env vars", () => {
       if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe treats $VAR as literal
       const envFile = path.join(phrenPath, "env-vars.txt");
+      const helperScript = path.join(phrenPath, "env-helper.sh");
+      fs.writeFileSync(helperScript, `#!/bin/sh\necho "$PHREN_PATH|$PHREN_HOOK_EVENT" > "${envFile}"\n`);
+      fs.chmodSync(helperScript, 0o755);
       writeInstallPrefs(
         JSON.stringify({
           customHooks: [
-            { event: "pre-index", command: `echo "$PHREN_PATH|$PHREN_HOOK_EVENT" > "${envFile}"` },
+            { event: "pre-index", command: helperScript },
           ],
         })
       );
@@ -212,11 +215,17 @@ describe("hooks platform compatibility", () => {
     it("runCustomHooks runs multiple matching hooks in sequence", () => {
       if (process.platform === "win32") return; // shell >> append redirect unreliable in cmd.exe via Node stdio:ignore
       const outputFile = path.join(phrenPath, "multi-hook.txt");
+      const helperScript1 = path.join(phrenPath, "hook1.sh");
+      const helperScript2 = path.join(phrenPath, "hook2.sh");
+      fs.writeFileSync(helperScript1, `#!/bin/sh\necho "first" >> "${outputFile}"\n`);
+      fs.writeFileSync(helperScript2, `#!/bin/sh\necho "second" >> "${outputFile}"\n`);
+      fs.chmodSync(helperScript1, 0o755);
+      fs.chmodSync(helperScript2, 0o755);
       writeInstallPrefs(
         JSON.stringify({
           customHooks: [
-            { event: "post-finding", command: `echo "first" >> "${outputFile}"` },
-            { event: "post-finding", command: `echo "second" >> "${outputFile}"` },
+            { event: "post-finding", command: helperScript1 },
+            { event: "post-finding", command: helperScript2 },
             { event: "pre-save", command: "echo not-this" },
           ],
         })

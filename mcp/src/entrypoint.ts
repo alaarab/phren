@@ -16,6 +16,7 @@ const HELP_TEXT = `phren - persistent knowledge for your agents
 
   phren                     Interactive shell
   phren init                Set up phren
+  phren quickstart          Quick setup: init + project scaffold
   phren add [path]          Register a project
   phren search <query>      Search what phren knows
   phren status              Health check
@@ -44,6 +45,8 @@ const HELP_TOPICS: Record<string, string> = {
   phren skills resolve <project|global>   Print resolved skill manifest
   phren skills doctor <project|global>    Diagnose skill visibility
   phren skills sync <project|global>      Regenerate skill mirror
+  phren skills enable <project|global> <name>  Enable a disabled skill
+  phren skills disable <project|global> <name> Disable a skill without deleting
   phren skills remove <project> <name>    Remove a skill
   phren detect-skills [--import]          Find untracked skills in ~/.claude/skills/
 `,
@@ -118,6 +121,7 @@ function buildFullHelp(): string {
 Usage:
   phren                     Interactive shell
   phren init                Set up phren
+  phren quickstart          Quick setup: init + project scaffold
   phren add [path]          Register a project
   phren search <query>      Search what phren knows
   phren status              Health check

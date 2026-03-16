@@ -181,7 +181,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "session-context":
       return handleSessionContext();
     default:
-      console.error(`Unknown command: ${command}`);
+      console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
       process.exit(1);
   }
 }

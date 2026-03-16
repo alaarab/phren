@@ -368,6 +368,17 @@ export function getHookTarget(h: CustomHookEntry): string {
   return "webhook" in h ? h.webhook : h.command;
 }
 
+/** Re-validate a command hook at execution time (mirrors mcp-hooks.ts validateHookCommand). */
+function validateCommandAtExecution(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return "Command cannot be empty.";
+  if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
+  if (/[`$(){}&|;<>]/.test(trimmed)) return "Command contains disallowed shell characters.";
+  if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
+  if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
+  return null;
+}
+
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
 const HOOK_TIMEOUT_MS = parseInt(process.env.PHREN_HOOK_TIMEOUT_MS || '14000', 10);
 const HOOK_ERROR_LOG_MAX_LINES = 1000;
@@ -448,6 +459,14 @@ export function runCustomHooks(
             if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] runCustomHooks webhookErrorLog: ${errorMessage(logErr)}\n`);
           }
         });
+      continue;
+    }
+    const cmdErr = validateCommandAtExecution(hook.command);
+    if (cmdErr) {
+      const message = `${event}: skipped hook (re-validation failed): ${cmdErr}`;
+      debugLog(`runCustomHooks: ${message}`);
+      errors.push({ code: PhrenError.VALIDATION_ERROR, message });
+      appendHookErrorLog(phrenPath, event, message);
       continue;
     }
     const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];

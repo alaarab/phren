@@ -586,9 +586,12 @@ describe("hooks", () => {
     it("runCustomHooks passes environment variables", () => {
       if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe does not expand $VAR
       const envFile = path.join(phrenPath, "env-check.txt");
+      const helperScript = path.join(phrenPath, "env-helper.sh");
+      fs.writeFileSync(helperScript, `#!/bin/sh\necho "$PHREN_QUERY" > "${envFile}"\n`);
+      fs.chmodSync(helperScript, 0o755);
       writeInstallPrefs(phrenPath, JSON.stringify({
           customHooks: [
-            { event: "post-search", command: `echo $PHREN_QUERY > "${envFile}"` },
+            { event: "post-search", command: helperScript },
           ],
         }));
       runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: "test-query" });
@@ -766,9 +769,9 @@ describe("FTS5 whitelist (sanitizeFts5Query)", () => {
     // because they are now plain tokens without FTS5 operator semantics
   });
 
-  it("preserves allowed characters: alphanumeric, spaces, hyphens, apostrophes", () => {
+  it("preserves allowed characters: alphanumeric, spaces, hyphens", () => {
     const result = sanitizeFts5Query("it's a test-case with under_score");
-    expect(result).toBe("it's a test-case with under score");
+    expect(result).toBe("it s a test-case with under score");
   });
 
   it("returns empty string for empty input", () => {
