@@ -165,7 +165,27 @@ export function renderGraphScript(): string {
     return path;
   }
 
+  /* pin a node so the force simulation skips it (prevents jitter while phren walks) */
+  var phrenPinnedNode = null;
+
+  function phrenPinNode(node) {
+    if (phrenPinnedNode && phrenPinnedNode !== node) {
+      /* unpin previous target — let physics resume on it */
+      phrenPinnedNode._phrenPinned = false;
+      phrenPinnedNode.vx = 0;
+      phrenPinnedNode.vy = 0;
+    }
+    if (node) {
+      node._phrenPinned = true;
+      node.vx = 0;
+      node.vy = 0;
+    }
+    phrenPinnedNode = node;
+  }
+
   function phrenMoveTo(x, y, targetNode) {
+    /* pin the target node so physics doesn't move it while phren walks there */
+    phrenPinNode(targetNode);
     phren.targetX = x;
     phren.targetY = y;
     phren.moving = true;
@@ -753,7 +773,7 @@ export function renderGraphScript(): string {
       /* direct N^2 repulsion for small graphs (cheaper than quadtree overhead) */
       for (var i = 0; i < n; i++) {
         var nd = nodes[i];
-        if (nd === dragging) continue;
+        if (nd === dragging || nd._phrenPinned) continue;
         var fx = 0, fy = 0;
         for (var j = 0; j < n; j++) {
           if (i === j) continue;
@@ -783,7 +803,7 @@ export function renderGraphScript(): string {
       /* repulsion via quadtree */
       for (var i = 0; i < n; i++) {
         var nd = nodes[i];
-        if (nd === dragging) continue;
+        if (nd === dragging || nd._phrenPinned) continue;
         var r = qt.computeForce(nd, THETA, REPULSION, 0, 0);
         nd.vx = (nd.vx || 0) + r.fx * alpha;
         nd.vy = (nd.vy || 0) + r.fy * alpha;
@@ -799,8 +819,8 @@ export function renderGraphScript(): string {
       var dist = Math.sqrt(dx * dx + dy * dy) + 0.1;
       var force = SPRING_K * (dist - REST_LEN) * alpha;
       var fx = force * dx / dist, fy = force * dy / dist;
-      if (s !== dragging) { s.vx += fx; s.vy += fy; }
-      if (t !== dragging) { t.vx -= fx; t.vy -= fy; }
+      if (s !== dragging && !s._phrenPinned) { s.vx += fx; s.vy += fy; }
+      if (t !== dragging && !t._phrenPinned) { t.vx -= fx; t.vy -= fy; }
     }
 
     /* while a node is held, keep pulling its local cluster every frame */
@@ -815,7 +835,7 @@ export function renderGraphScript(): string {
     var gravScale = n > 50 ? 80 / n : 1;
     for (var i = 0; i < n; i++) {
       var nd = nodes[i];
-      if (nd === dragging) continue;
+      if (nd === dragging || nd._phrenPinned) continue;
       var grav = GRAVITY * gravScale;
       nd.vx += (cx - nd.x) * grav * alpha;
       nd.vy += (cy - nd.y) * grav * alpha;
@@ -824,7 +844,7 @@ export function renderGraphScript(): string {
     /* integrate */
     for (var i = 0; i < n; i++) {
       var nd = nodes[i];
-      if (nd === dragging) continue;
+      if (nd === dragging || nd._phrenPinned) continue;
       nd.vx *= DAMPING;
       nd.vy *= DAMPING;
       nd.x += nd.vx;
