@@ -262,7 +262,7 @@ export function sanitizeFts5Query(raw: string): string {
   if (!raw) return "";
   if (raw.length > 500) raw = raw.slice(0, 500);
   // Whitelist approach: only allow alphanumeric, spaces, hyphens, apostrophes, double quotes, asterisks
-  let q = raw.replace(/[^a-zA-Z0-9 \-'"*]/g, " ");
+  let q = raw.replace(/[^a-zA-Z0-9 \-"*]/g, " ");
   q = q.replace(/\s+/g, " ");
   q = q.trim();
   // Q83: FTS5 only accepts * as a prefix operator directly attached to a token

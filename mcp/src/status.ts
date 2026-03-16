@@ -305,7 +305,7 @@ export async function runStatus() {
     totalQueue += countQueueItems(phrenPath, projName);
   }
 
-  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} fragments, ${totalTask} tasks, ${totalQueue} queued`);
+  console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings, ${totalTask} tasks, ${totalQueue} queued`);
 
   const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
   const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"]) === "true";

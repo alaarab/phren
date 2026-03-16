@@ -213,7 +213,7 @@ export function shellHelpText(): string {
     hdr("View-specific keys"),
     `  ${style.bold("Projects")}     ${k("↵")} ${d("open project tasks")}  ${k("i")} ${d("cycle intro mode")}`,
     `  ${style.bold("Tasks")}        ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
-    `  ${style.bold("Fragments")}   ${k("a")} ${d("tell phren")}  ${k("d")} ${d("delete selected")}`,
+    `  ${style.bold("Findings")}    ${k("a")} ${d("tell phren")}  ${k("d")} ${d("delete selected")}`,
     `  ${style.bold("Review Queue")} ${k("↵")} ${d("inspect selected item")}  ${d("(read-only)")}`,
     `  ${style.bold("Skills")}       ${k("t")} ${d("toggle enabled")}  ${k("d")} ${d("remove")}`,
     "",

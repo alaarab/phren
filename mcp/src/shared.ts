@@ -156,7 +156,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
       if (stat.size > 1_000_000) {
         const content = fs.readFileSync(logPath, "utf8");
         const lines = content.split("\n");
-        fs.writeFileSync(logPath, lines.slice(-500).join("\n"));
+        fs.writeFileSync(logPath, lines.slice(-500).join("\n") + "\n");
       }
     } else {
       debugLog(`Audit log skipped (lock timeout): ${event} ${details}`);

@@ -904,7 +904,9 @@ export function tidyDoneTasks(phrenPath: string, project: string, keep: number =
     const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
     const block = `## ${stamp}\n\n${lines.join("\n")}\n\n`;
     const prior = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, "utf8") : `# ${project} tasks archive\n\n`;
-    fs.writeFileSync(archiveFile, prior + block);
+    const tmpPath = `${archiveFile}.tmp-${randomUUID()}`;
+    fs.writeFileSync(tmpPath, prior + block);
+    fs.renameSync(tmpPath, archiveFile);
 
     writeTaskDoc(parsed.data);
     return phrenOk(`Tidied ${project}: archived ${archived.length} done item(s), kept ${safeKeep}.`);

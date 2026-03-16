@@ -277,11 +277,14 @@ describe("custom hooks fault injection", () => {
   it("runCustomHooks handles command that writes to stderr", () => {
     const runtimeDir = path.join(tmpDir, ".runtime");
     fs.mkdirSync(runtimeDir, { recursive: true });
+    const helperScript = path.join(tmpDir, "stderr-helper.sh");
+    fs.writeFileSync(helperScript, "#!/bin/sh\necho 'warning' >&2\n");
+    fs.chmodSync(helperScript, 0o755);
     fs.writeFileSync(
       path.join(runtimeDir, "install-preferences.json"),
       JSON.stringify({
         customHooks: [
-          { event: "post-finding", command: "echo 'warning' >&2" },
+          { event: "post-finding", command: helperScript },
         ],
       })
     );
