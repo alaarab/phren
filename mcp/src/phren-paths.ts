@@ -97,7 +97,7 @@ export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
     const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
     return normalizeManifest(parsed);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readRootManifest: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readRootManifest: ${errorMessage(err)}\n`);
     return null;
   }
 }
@@ -292,7 +292,7 @@ export function sessionMarker(phrenPath: string, name: string): string {
 
 // Debug logging is best-effort and only writes when a phren root already exists.
 export function debugLog(msg: string): void {
-  if (!(process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) return;
+  if (!(process.env.PHREN_DEBUG)) return;
   const phrenPath = findPhrenPath();
   if (!phrenPath) return;
   const logFile = runtimeFile(phrenPath, "debug.log");
@@ -308,7 +308,7 @@ export function appendIndexEvent(phrenPath: string, event: Record<string, unknow
     const file = runtimeFile(phrenPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendIndexEvent: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendIndexEvent: ${errorMessage(err)}\n`);
   }
 }
 
@@ -340,7 +340,7 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
       if (entry.name.toLowerCase() === needle) return entry.name;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
   }
   return null;
 }
@@ -396,7 +396,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
 
       return [...new Set([...listed, ...sharedDirs])];
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
       console.error(`${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
       return [];
     }
@@ -407,7 +407,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       .filter(isProjectDirEntry)
       .map((entry) => path.join(phrenPath, entry.name));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs: ${errorMessage(err)}\n`);
     return [];
   }
 }
@@ -431,7 +431,7 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
   }
   return results;
 }

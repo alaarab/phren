@@ -1271,13 +1271,13 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateMachinesYaml parse: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateMachinesYaml parse: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // Passive init/link refreshes should keep an existing mapping; explicit overrides can remap.
   if (hasExistingMapping && !machine && !profile) return;
   const mapping = setMachineProfile(phrenPath, machineName, profileName);
-  if (!mapping.ok && (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+  if (!mapping.ok && (process.env.PHREN_DEBUG)) {
     process.stderr.write(`[phren] updateMachinesYaml setMachineProfile: ${mapping.error}\n`);
   }
 }
@@ -1474,7 +1474,7 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     const entries = fs.readdirSync(phrenPath, { withFileTypes: true });
     ftsOk = entries.some(d => d.isDirectory() && !d.name.startsWith("."));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPostInitVerify projectScan: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPostInitVerify projectScan: ${err instanceof Error ? err.message : String(err)}\n`);
     ftsOk = false;
   }
   checks.push({

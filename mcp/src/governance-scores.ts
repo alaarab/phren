@@ -142,7 +142,7 @@ function readScoreJournal(phrenPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readScoreJournal parseLine: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -173,7 +173,7 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
           return null;
         }
       })
@@ -187,7 +187,7 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
     try {
       fs.unlinkSync(claimedFile);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
     }
   }
 }

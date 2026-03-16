@@ -155,7 +155,7 @@ function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, m
       if (!resolvedTarget.startsWith(managedPrefix)) continue;
       fs.unlinkSync(destPath);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
     }
   }
 }

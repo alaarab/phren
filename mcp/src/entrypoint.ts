@@ -402,7 +402,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       const { trackCliCommand } = await import("./telemetry.js");
       trackCliCommand(defaultPhrenPath(), argvCommand);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli trackCliCommand: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli trackCliCommand: ${errorMessage(err)}\n`);
     }
     await runCliCommand(argvCommand, argv.slice(1));
     return finish();

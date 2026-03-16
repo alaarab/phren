@@ -346,7 +346,7 @@ function parseSubsections(taskPath: string, project: string, cache: SubsectionsC
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const newCache = { project, map };
   return { map, cache: newCache };

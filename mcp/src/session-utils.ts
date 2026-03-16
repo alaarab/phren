@@ -17,7 +17,7 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
  * Centralises the repeated `if (PHREN_DEBUG) stderr.write(...)` pattern.
  */
 export function debugError(scope: string, err: unknown): void {
-  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+  if ((process.env.PHREN_DEBUG)) {
     process.stderr.write(
       `[phren] ${scope}: ${err instanceof Error ? err.message : String(err)}\n`,
     );

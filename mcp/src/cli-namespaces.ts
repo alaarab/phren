@@ -95,7 +95,7 @@ function openInEditor(filePath: string): void {
   try {
     execFileSync(editor, [filePath], { stdio: "inherit" });
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] openInEditor: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] openInEditor: ${errorMessage(err)}\n`);
     console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
     process.exit(1);
   }
@@ -169,7 +169,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.symlinkSync(source, dest);
       console.log(`Linked skill ${fileName} into ${project}.`);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skill add symlinkFailed: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skill add symlinkFailed: ${errorMessage(err)}\n`);
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
@@ -500,7 +500,7 @@ export function handleDetectSkills(args: string[], profile: string) {
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skillList lstat: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skillList lstat: ${errorMessage(err)}\n`);
     }
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
@@ -901,7 +901,7 @@ function handleProjectsList(profile: string) {
     try {
       dirFiles = new Set(fs.readdirSync(projectDir));
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects list readdir: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects list readdir: ${errorMessage(err)}\n`);
       dirFiles = new Set();
     }
     const tags: string[] = [];
@@ -942,7 +942,7 @@ async function handleProjectsRemove(name: string, profile: string) {
   try {
     countFiles(projectDir);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects remove countFiles: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects remove countFiles: ${errorMessage(err)}\n`);
   }
 
   const readline = await import("readline");

@@ -55,7 +55,7 @@ export function logSearchMiss(phrenPath: string, query: string, project?: string
     const missFile = runtimeFile(phrenPath, "search-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -192,7 +192,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         updatedAt = stat.mtime.toISOString();
         createdAt = stat.birthtime.toISOString();
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge statFile: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge statFile: ${errorMessage(err)}\n`);
       }
 
       // Extract tags from content (e.g. [decision], [pitfall], [pattern])
@@ -445,7 +445,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           relatedFragments = [...new Set(relatedFragments)].slice(0, 10);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${err instanceof Error ? err.message : String(err)}\n`);
         }
 
         const formatted = results.map((r) =>
@@ -460,7 +460,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             const synthCachePath = runtimeFile(phrenPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
             try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
             }
             const cached = synthCache[synthKey];
             const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -479,7 +479,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                   for (const k of oldest) delete synthCache[k];
                 }
                 try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch (err: unknown) {
-                  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
+                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${err instanceof Error ? err.message : String(err)}\n`);
                 }
               }
             }

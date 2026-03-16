@@ -75,7 +75,7 @@ export async function runPhrenUpdate(opts: RunPhrenUpdateOptions = {}): Promise<
           process.stderr.write(`Note: uncommitted changes detected, autostash will preserve them.\n`);
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPhrenUpdate gitStatus: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPhrenUpdate gitStatus: ${errorMessage(err)}\n`);
       }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run(shellCommand("npm"), ["install"], root);

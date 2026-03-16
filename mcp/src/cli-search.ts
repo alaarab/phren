@@ -52,7 +52,7 @@ export function readSearchHistory(phrenPath: string): SearchHistoryEntry[] {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as SearchHistoryEntry);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readSearchHistory: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readSearchHistory: ${errorMessage(err)}\n`);
     return [];
   }
 }
@@ -305,7 +305,7 @@ export async function runSearch(
           const { logSearchMiss } = await import("./mcp-search.js");
           logSearchMiss(phrenPath, opts.query, opts.project);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search logSearchMiss: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search logSearchMiss: ${errorMessage(err)}\n`);
         }
       }
       const scope = [

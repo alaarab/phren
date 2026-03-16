@@ -97,7 +97,7 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isDuplicateInReference: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isDuplicateInReference: ${errorMessage(err)}\n`);
   }
   return false;
 }
@@ -257,7 +257,7 @@ export function autoArchiveToReference(
   });
   } finally {
     try { fs.unlinkSync(lockFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
     }
   }
 }

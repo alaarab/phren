@@ -383,7 +383,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell status gitStatus: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell status gitStatus: ${errorMessage(err)}\n`);
       }
 
       const auditPathNew = runtimeFile(host.phrenPath, "audit.log");

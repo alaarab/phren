@@ -19,7 +19,7 @@ function acquireFileLock(lockPath: string): void {
       hasLock = true;
       break;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
@@ -45,7 +45,7 @@ function acquireFileLock(lockPath: string): void {
           }
         }
       } catch (statErr: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
         sleep(pollInterval);
         waited += pollInterval;
         continue;
@@ -64,7 +64,7 @@ function acquireFileLock(lockPath: string): void {
 
 function releaseFileLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 

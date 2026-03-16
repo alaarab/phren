@@ -154,7 +154,7 @@ function collectCorpus(root: string): string[] {
       try {
         texts.push(fs.readFileSync(fullPath, "utf8").slice(0, MAX_TEXT_BYTES).toLowerCase());
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
       }
       if (filesSeen >= MAX_FILES_PER_ROOT) break;
     }

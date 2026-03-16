@@ -358,7 +358,7 @@ export function createWebUiHttpServer(
   try {
     repairPreexistingInstall(phrenPath);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] web-ui repair: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] web-ui repair: ${errorMessage(err)}\n`);
   }
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;

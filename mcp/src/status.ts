@@ -27,7 +27,7 @@ function readPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${err instanceof Error ? err.message : String(err)}\n`);
     return "unknown";
   }
 }
@@ -120,7 +120,7 @@ export async function runStatus() {
         const servers = isRecord(settings.servers) ? settings.servers : undefined;
         mcpConfigured = Boolean(servers?.phren || servers?.phren);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -135,7 +135,7 @@ export async function runStatus() {
         const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
         hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
@@ -164,7 +164,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
@@ -195,7 +195,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // Agent integration status
@@ -205,7 +205,7 @@ export async function runStatus() {
       const raw = fs.readFileSync(filePath, "utf8");
       return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${err instanceof Error ? err.message : String(err)}\n`);
       return false;
     }
   }

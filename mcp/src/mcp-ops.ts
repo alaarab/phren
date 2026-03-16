@@ -146,7 +146,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck version: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
@@ -154,7 +154,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       try {
         indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck ftsCacheCheck: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       // Hook registration
@@ -163,7 +163,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { getHooksEnabledPreference } = await import("./init-preferences.js");
         hooksEnabled = getHooksEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck hooksEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck hooksEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       let mcpEnabled = false;
@@ -171,7 +171,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { getMcpEnabledPreference } = await import("./init-preferences.js");
         mcpEnabled = getMcpEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck mcpEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck mcpEnabled: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       // Profile/machine info
@@ -179,7 +179,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           return getMachineName();
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck machineName: ${err instanceof Error ? err.message : String(err)}\n`);
         }
         return undefined;
       })();
@@ -194,14 +194,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         const workflowPolicy = getWorkflowPolicy(phrenPath);
         taskMode = workflowPolicy.taskMode;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${err instanceof Error ? err.message : String(err)}\n`);
       }
       try {
         const { readInstallPreferences } = await import("./init-preferences.js");
         const prefs = readInstallPreferences(phrenPath);
         proactivity = prefs.proactivity || "high";
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${err instanceof Error ? err.message : String(err)}\n`);
       }
 
       const lines = [
@@ -308,7 +308,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readErrorLines: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readErrorLines: ${err instanceof Error ? err.message : String(err)}\n`);
           return [];
         }
       }

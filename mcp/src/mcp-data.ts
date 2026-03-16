@@ -89,7 +89,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           decoded = JSON.parse(rawData);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
@@ -257,7 +257,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 }
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
             }
           }
           return mcpResponse({
@@ -276,7 +276,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               }
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
         return mcpResponse({

@@ -58,11 +58,11 @@ function cleanStaleLocks(phrenPath: string): void {
           debugLog(`Cleaned stale lock: ${entry}`);
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
   }
 }
 
@@ -93,7 +93,7 @@ async function main() {
     runCustomHooks(phrenPath, "pre-index");
     indexReady = false;
     try { db?.close(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] rebuildIndex dbClose: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] rebuildIndex dbClose: ${errorMessage(err)}\n`);
     }
     db = await buildIndex(phrenPath, profile);
     indexReady = true;
@@ -163,7 +163,7 @@ async function main() {
         };
       }
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] trackToolCall: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] trackToolCall: ${errorMessage(err)}\n`);
       }
       return handler(...args);
     };
