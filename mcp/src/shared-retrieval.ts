@@ -59,13 +59,20 @@ const LOW_VALUE_BULLET_FRACTION = 0.5;
 
 // ── Intent and scoring helpers ───────────────────────────────────────────────
 
+const INTENT_SKILL_CMD_RE = /(?:^|\s)\/(?!(?:home|usr|var|tmp|etc|opt|api|mnt)\b)[a-z][\w-]*\b/;
+const INTENT_SKILL_KW_RE = /\bskill\b/;
+const INTENT_DEBUG_RE = /(bug|error|fix|broken|regression|fail|stack trace)/;
+const INTENT_REVIEW_RE = /(review|audit|pr|pull request|nit|refactor)/;
+const INTENT_BUILD_RE = /(build|deploy|release|ci|workflow|pipeline|test)/;
+const INTENT_DOCS_RE = /\b(doc|docs|readme|explain|guide|instructions?)\b/;
+
 export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
   const p = prompt.toLowerCase();
-  if (/(?:^|\s)\/(?!(?:home|usr|var|tmp|etc|opt|api|mnt)\b)[a-z][\w-]*\b/.test(p) || /\bskill\b/.test(p)) return "skill";
-  if (/(bug|error|fix|broken|regression|fail|stack trace)/.test(p)) return "debug";
-  if (/(review|audit|pr|pull request|nit|refactor)/.test(p)) return "review";
-  if (/(build|deploy|release|ci|workflow|pipeline|test)/.test(p)) return "build";
-  if (/\b(doc|docs|readme|explain|guide|instructions?)\b/.test(p)) return "docs";
+  if (INTENT_SKILL_CMD_RE.test(p) || INTENT_SKILL_KW_RE.test(p)) return "skill";
+  if (INTENT_DEBUG_RE.test(p)) return "debug";
+  if (INTENT_REVIEW_RE.test(p)) return "review";
+  if (INTENT_BUILD_RE.test(p)) return "build";
+  if (INTENT_DOCS_RE.test(p)) return "docs";
   return "general";
 }
 
