@@ -302,7 +302,7 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
   let oldCommits: string[] = [];
   try {
     const raw = execSync(
-      `git log --oneline --before="${sevenDaysAgo}" --format="%H %s"`,
+      `git log --before="${sevenDaysAgo}" --format="%H %ci %s"`,
       { cwd: phrenPath, encoding: "utf8" }
     ).trim();
     if (raw) {
@@ -318,24 +318,19 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
     console.log(`[dry-run] Would squash ${oldCommits.length} auto-save commits older than 7 days into weekly summaries.`);
     report.commitsSquashed = oldCommits.length;
   } else {
-    // Group by ISO week (YYYY-Www) based on commit timestamp
+    // Group by ISO week based on commit timestamp (already in the log output)
     const commitsByWeek = new Map<string, string[]>();
     for (const line of oldCommits) {
       const hash = line.split(" ")[0];
-      try {
-        const dateStr = execSync(
-          `git log -1 --format="%ci" ${hash}`,
-          { cwd: phrenPath, encoding: "utf8" }
-        ).trim();
-        const date = new Date(dateStr);
-        const weekStart = new Date(date);
-        weekStart.setDate(date.getDate() - date.getDay()); // start of week (Sunday)
-        const weekKey = weekStart.toISOString().slice(0, 10);
-        if (!commitsByWeek.has(weekKey)) commitsByWeek.set(weekKey, []);
-        commitsByWeek.get(weekKey)!.push(hash);
-      } catch {
-        // Skip commits we can't resolve
-      }
+      // Format: "HASH YYYY-MM-DD HH:MM:SS +ZZZZ subject..."
+      const dateMatch = line.match(/^[a-f0-9]+ (\d{4}-\d{2}-\d{2})/);
+      if (!dateMatch) continue;
+      const date = new Date(dateMatch[1]);
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay());
+      const weekKey = weekStart.toISOString().slice(0, 10);
+      if (!commitsByWeek.has(weekKey)) commitsByWeek.set(weekKey, []);
+      commitsByWeek.get(weekKey)!.push(hash);
     }
 
     // For each week with multiple commits, soft-reset to oldest and amend into a summary
@@ -375,59 +370,46 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
     }
   }
 
-  // 3. Prune stale session markers from ~/.phren/.sessions/ older than 30 days
-  const sessionsDir = path.join(phrenPath, ".sessions");
+  // 3–4. Prune stale files from .sessions/ and .runtime/
   const thirtyDaysAgo = Date.now() - 30 * 86400000;
-  if (fs.existsSync(sessionsDir)) {
-    const entries = fs.readdirSync(sessionsDir);
-    for (const entry of entries) {
-      const fullPath = path.join(sessionsDir, entry);
-      try {
-        const stat = fs.statSync(fullPath);
-        if (stat.mtimeMs < thirtyDaysAgo) {
-          if (dryRun) {
-            console.log(`[dry-run] Would remove session marker: .sessions/${entry}`);
-          } else {
-            fs.unlinkSync(fullPath);
-          }
-          report.sessionsRemoved++;
-        }
-      } catch {
-        // Skip unreadable entries
-      }
-    }
-  }
-  const sessionsVerb = dryRun ? "Would remove" : "Removed";
-  console.log(`${sessionsVerb} ${report.sessionsRemoved} stale session marker(s) from .sessions/`);
 
-  // 4. Trim runtime logs from ~/.phren/.runtime/ older than 30 days
-  const runtimeDir = path.join(phrenPath, ".runtime");
-  const logExtensions = new Set([".log", ".jsonl", ".json"]);
-  if (fs.existsSync(runtimeDir)) {
-    const entries = fs.readdirSync(runtimeDir);
-    for (const entry of entries) {
-      const ext = path.extname(entry);
-      if (!logExtensions.has(ext)) continue;
-      // Never trim the active audit log or telemetry config
-      if (entry === "audit.log" || entry === "telemetry.json") continue;
-      const fullPath = path.join(runtimeDir, entry);
+  function pruneStaleFiles(
+    dir: string,
+    label: string,
+    filter?: (entry: string) => boolean,
+  ): number {
+    let removed = 0;
+    if (!fs.existsSync(dir)) return removed;
+    for (const entry of fs.readdirSync(dir)) {
+      if (filter && !filter(entry)) continue;
+      const fullPath = path.join(dir, entry);
       try {
-        const stat = fs.statSync(fullPath);
-        if (stat.mtimeMs < thirtyDaysAgo) {
+        if (fs.statSync(fullPath).mtimeMs < thirtyDaysAgo) {
           if (dryRun) {
-            console.log(`[dry-run] Would remove runtime log: .runtime/${entry}`);
+            console.log(`[dry-run] Would remove: ${label}/${entry}`);
           } else {
             fs.unlinkSync(fullPath);
           }
-          report.runtimeLogsRemoved++;
+          removed++;
         }
-      } catch {
-        // Skip unreadable entries
-      }
+      } catch { /* skip unreadable */ }
     }
+    return removed;
   }
-  const logsVerb = dryRun ? "Would remove" : "Removed";
-  console.log(`${logsVerb} ${report.runtimeLogsRemoved} stale runtime log(s) from .runtime/`);
+
+  const logExtensions = new Set([".log", ".jsonl", ".json"]);
+  const protectedFiles = new Set(["audit.log", "telemetry.json"]);
+
+  report.sessionsRemoved = pruneStaleFiles(path.join(phrenPath, ".sessions"), ".sessions");
+  report.runtimeLogsRemoved = pruneStaleFiles(
+    path.join(phrenPath, ".runtime"),
+    ".runtime",
+    (entry) => logExtensions.has(path.extname(entry)) && !protectedFiles.has(entry),
+  );
+
+  const verb = dryRun ? "Would remove" : "Removed";
+  console.log(`${verb} ${report.sessionsRemoved} stale session marker(s) from .sessions/`);
+  console.log(`${verb} ${report.runtimeLogsRemoved} stale runtime log(s) from .runtime/`);
 
   // 5. Summary
   if (!dryRun) {
