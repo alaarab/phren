@@ -46,25 +46,22 @@ export function renderWebUiScript(authToken: string): string {
     script,
     `\n  window.toggleReviewEdit = function(btn) {\n`,
     `\n\n  window.filterReviewCards = function() {\n`,
-    `\n\n  window.filterReviewCards = function() {\n`,
   );
   script = removeRangeOrThrow(
     script,
     `\n  // ── Review fetch actions ──────────────────────────────────────\n`,
-    `\n\n  // -- Similarity grouping --\n`,
     `\n\n  // -- Similarity grouping --\n`,
   );
   script = removeRangeOrThrow(
     script,
     `\n  window.batchAction = function(action) {\n`,
     `\n\n  function animateCount(el, from, to) {\n`,
-    `\n\n  function animateCount(el, from, to) {\n`,
   );
   script = removeRangeOrThrow(
     script,
     `    } else if (e.key === 'a' && _focusedCard) {\n`,
     `\n  });\n\n  // ── Command palette`,
-    `\n  });\n\n  // ── Command palette`,
+    `    }\n`,
   );
   script = replaceOrThrow(
     script,
@@ -83,7 +80,6 @@ export function renderWebUiScript(authToken: string): string {
   script = removeRangeOrThrow(
     script,
     `\n  document.addEventListener('submit', function(e) {\n`,
-    `\n})();\n`,
     `\n})();\n`,
   );
 
