@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive Shell | phren docs</title>
+  <meta name="description" content="The phren interactive shell: 8 views for browsing projects, tasks, findings, review queue, skills, hooks, machines, and health." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        actorTextColor: '#E8E4D9',
+        actorBorder: '#00E5FF',
+        actorBkg: '#1a1a3e',
+        activationBorderColor: '#00E5FF',
+        activationBkgColor: '#1a1a3e',
+        sequenceNumberColor: '#12122a',
+        signalColor: '#E8E4D9',
+        labelBoxBkgColor: '#1a1a3e',
+        labelBoxBorderColor: '#00E5FF',
+        labelTextColor: '#E8E4D9',
+        loopTextColor: '#E8E4D9',
+        noteBorderColor: '#9B8DC8',
+        noteBkgColor: '#2a1a3e',
+        noteTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
+      <a href="configuration.html" class="nav-link">Config</a>
+      <a href="cli.html" class="nav-link">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
+      <a href="shell.html" class="nav-link active-doc">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link">Sharing</a>
+      <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link">Skills</a>
+      <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout has-toc">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Shell</div>
+        <a href="#launching" class="sidebar-link">Launching</a>
+        <a href="#views" class="sidebar-link">Views</a>
+        <a href="#projects-view" class="sidebar-link sub">Projects</a>
+        <a href="#tasks-view" class="sidebar-link sub">Tasks</a>
+        <a href="#findings-view" class="sidebar-link sub">Findings</a>
+        <a href="#review-view" class="sidebar-link sub">Review Queue</a>
+        <a href="#skills-view" class="sidebar-link sub">Skills</a>
+        <a href="#hooks-view" class="sidebar-link sub">Hooks</a>
+        <a href="#machines-view" class="sidebar-link sub">Machines / Profiles</a>
+        <a href="#health-view" class="sidebar-link sub">Health</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Reference</div>
+        <a href="#keybindings" class="sidebar-link">Keybindings</a>
+        <a href="#palette" class="sidebar-link">Palette Commands</a>
+        <a href="#filtering" class="sidebar-link">Filtering</a>
+        <a href="#state" class="sidebar-link">State Persistence</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="docs-content">
+      <h1>Interactive Shell</h1>
+      <p class="docs-subtitle">A terminal UI for browsing and managing your entire project store. Launch it with <code>phren</code> or <code>phren shell</code>.</p>
+
+      <h2 id="launching">Launching <a href="#launching" class="anchor-link">#</a></h2>
+      <p>The shell starts automatically when you run <code>phren</code> with no arguments in a terminal:</p>
+      <pre><code>phren</code></pre>
+      <p>Or explicitly:</p>
+      <pre><code>phren shell</code></pre>
+
+      <!-- Views -->
+      <h2 id="views">Views <a href="#views" class="anchor-link">#</a></h2>
+      <p>The shell has eight views. Switch between them with single-key shortcuts or the <kbd>:</kbd> palette.</p>
+
+      <h3 id="projects-view">Projects <kbd>p</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>The landing screen. Opens as a dashboard showing profile-wide counts for projects, active tasks, queued tasks, findings, review queue items, sync state, and intro mode.</p>
+          <p>Below the dashboard, all indexed projects in the active profile are listed with per-project workload counts. The currently selected project is marked with a green dot.</p>
+          <ul>
+            <li>Press <kbd>Enter</kbd> or use <code>:open &lt;project&gt;</code> to set the active project context</li>
+            <li>The active project persists across all views</li>
+            <li>Press <kbd>i</kbd> to cycle intro mode on the dashboard</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="tasks-view">Tasks <kbd>b</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Shows the selected project's <code>tasks.md</code> parsed into three sections: <strong>Active</strong>, <strong>Queue</strong>, and <strong>Done</strong>. Each item has an auto-generated ID for easy reference in commands.</p>
+          <ul>
+            <li>Cross-session checkpoint context is reflected through task metadata and lifecycle actions</li>
+            <li>Use <code>:work next</code> to promote the top Queue item to Active</li>
+            <li>Use <code>:complete &lt;id&gt;</code> to mark items done</li>
+            <li>Use <code>:tidy</code> to archive old Done items</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="findings-view">Findings <kbd>l</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Lists entries from the selected project's <code>FINDINGS.md</code> with dates and optional citations. Entries are shown with auto-generated IDs for use with <code>:find remove</code>.</p>
+          <ul>
+            <li>Finding lifecycle states (superseded, retracted, contradicted) are visible here</li>
+            <li>Provenance markers help with cleanup and contradiction resolution</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="review-view">Review Queue <kbd>m</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Shows pending review items from <code>review.md</code>. Each item displays its section (Review, Stale, Conflicts), a risk badge, confidence score, and date.</p>
+          <ul>
+            <li>The shell review queue is <strong>read-only</strong> and meant for inspection</li>
+            <li>Use <code>phren maintain prune</code> or update findings directly for mutations</li>
+            <li>The browser view (<code>phren web-ui</code>) is also read-only for queue items</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="skills-view">Skills <kbd>s</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Shows installed global and project-local skills in the current context.</p>
+          <ul>
+            <li>Press <kbd>t</kbd> to toggle enabled/disabled state</li>
+            <li>Skills have three lifecycle states: <strong>enabled</strong> (active), <strong>disabled</strong> (excluded from use), and <strong>removed</strong> (deleted)</li>
+            <li>Project-local scope overrides global scope</li>
+            <li>Alias/command collisions are flagged and not registered</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="hooks-view">Hooks <kbd>k</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Shows lifecycle hook status and custom hook configuration for the active setup.</p>
+          <ul>
+            <li><strong>Claude</strong>: native <code>SessionStart</code> / <code>UserPromptSubmit</code> / <code>Stop</code> hooks</li>
+            <li><strong>Copilot/Cursor/Codex</strong>: generated hook config + session wrappers</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="machines-view">Machines / Profiles <code>:machines</code></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Shows the <code>machines.yaml</code> mapping (hostname to profile) and all profiles with their project lists. Accessed via palette command rather than a single-key shortcut.</p>
+          <ul>
+            <li>Use <code>:machine map &lt;hostname&gt; &lt;profile&gt;</code> to assign machines to profiles</li>
+            <li>Use <code>:profile add-project</code> / <code>:profile remove-project</code> to manage projects in profiles</li>
+            <li>Safer than editing YAML directly</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 id="health-view">Health <kbd>h</kbd></h3>
+      <div class="shell-view-card">
+        <div class="shell-view-desc">
+          <p>Runs doctor checks and shows results alongside runtime health data: last hook run, last auto-save, last governance run.</p>
+          <ul>
+            <li>Offers remediation commands: <code>:run fix</code>, <code>:relink</code>, <code>:rerun hooks</code>, <code>:update</code></li>
+            <li>Reflects RBAC identity context (<code>PHREN_ACTOR</code> and access-control files)</li>
+            <li>Shows review queue pressure and telemetry status</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Keybindings -->
+      <h2 id="keybindings">Keybindings <a href="#keybindings" class="anchor-link">#</a></h2>
+      <p>Single-key shortcuts for fast navigation. No modifier keys needed.</p>
+
+      <h3>View Switching</h3>
+      <div class="keybind-grid">
+        <div class="keybind-item"><span class="keybind-key"><kbd>p</kbd></span> Projects view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>b</kbd></span> Tasks view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>l</kbd></span> Findings view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>m</kbd></span> Review Queue view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>s</kbd></span> Skills view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>k</kbd></span> Hooks view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>h</kbd></span> Health view</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>q</kbd></span> Quit the shell</div>
+      </div>
+
+      <h3>In-View Actions</h3>
+      <div class="keybind-grid">
+        <div class="keybind-item"><span class="keybind-key"><kbd>Enter</kbd></span> Activate / open selected item</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>i</kbd></span> Cycle intro mode (Projects)</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>t</kbd></span> Toggle enabled/disabled (Skills)</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>/</kbd></span> Set or clear filter</div>
+        <div class="keybind-item"><span class="keybind-key"><kbd>:</kbd></span> Enter palette command</div>
+      </div>
+
+      <!-- Palette Commands -->
+      <h2 id="palette">Palette Commands <a href="#palette" class="anchor-link">#</a></h2>
+      <p>All palette commands start with <kbd>:</kbd>. You can also type them without the colon prefix.</p>
+
+      <h3>Project Context</h3>
+      <table class="docs-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>:open &lt;project&gt;</code></td><td>Set the active project context across all views</td></tr>
+          <tr><td><code>:intro always|once-per-version|off</code></td><td>Tune the startup intro behavior</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Tasks</h3>
+      <table class="docs-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>:add &lt;task&gt;</code></td><td>Add a new item to the task Queue section</td></tr>
+          <tr><td><code>:complete &lt;id|match&gt;</code></td><td>Mark a task item as done</td></tr>
+          <tr><td><code>:move &lt;id|match&gt; &lt;active|queue|done&gt;</code></td><td>Move a task item between sections</td></tr>
+          <tr><td><code>:reprioritize &lt;id|match&gt; &lt;high|medium|low&gt;</code></td><td>Set an item's priority</td></tr>
+          <tr><td><code>:context &lt;id|match&gt; &lt;text&gt;</code></td><td>Append or update context on a task item</td></tr>
+          <tr><td><code>:work next</code></td><td>Move the top Queue item to Active</td></tr>
+          <tr><td><code>:tidy [keep]</code></td><td>Archive old Done items (default: keep last 30)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Findings</h3>
+      <table class="docs-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>:find add &lt;text&gt;</code></td><td>Append a finding to the selected project</td></tr>
+          <tr><td><code>:find remove &lt;id|match&gt;</code></td><td>Remove a finding by ID or text match</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Infrastructure</h3>
+      <table class="docs-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>:machine map &lt;hostname&gt; &lt;profile&gt;</code></td><td>Map a machine hostname to a profile</td></tr>
+          <tr><td><code>:profile add-project &lt;profile&gt; &lt;project&gt;</code></td><td>Add a project to a profile</td></tr>
+          <tr><td><code>:profile remove-project &lt;profile&gt; &lt;project&gt;</code></td><td>Remove a project from a profile</td></tr>
+          <tr><td><code>:run fix</code></td><td>Run <code>doctor --fix</code> to self-heal configuration</td></tr>
+          <tr><td><code>:relink</code></td><td>Refresh generated links, context files, and hook wiring</td></tr>
+          <tr><td><code>:rerun hooks</code></td><td>Execute lifecycle hooks now (session-start + stop)</td></tr>
+          <tr><td><code>:update</code></td><td>Update phren to the latest version</td></tr>
+          <tr><td><code>:reset</code></td><td>Reset shell state to defaults</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Pagination</h3>
+      <table class="docs-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>:page next</code></td><td>Go to the next page</td></tr>
+          <tr><td><code>:page prev</code></td><td>Go to the previous page</td></tr>
+          <tr><td><code>:page &lt;n&gt;</code></td><td>Jump to page number n</td></tr>
+          <tr><td><code>:per-page &lt;n&gt;</code></td><td>Set rows per page (1 to 200)</td></tr>
+          <tr><td><code>:help</code></td><td>Show the full keyboard map and command list</td></tr>
+        </tbody>
+      </table>
+
+      <!-- Filtering -->
+      <h2 id="filtering">Filtering <a href="#filtering" class="anchor-link">#</a></h2>
+      <p>Type <kbd>/</kbd> followed by text to filter the current view. The filter applies as a case-insensitive substring match against item content.</p>
+      <p>Type <kbd>/</kbd> alone to clear the filter. Filters reset the page to 1.</p>
+
+      <!-- State Persistence -->
+      <h2 id="state">State Persistence <a href="#state" class="anchor-link">#</a></h2>
+      <p>The shell saves its state to <code>.runtime/shell-state.json</code>. This includes:</p>
+      <ul>
+        <li>Selected project</li>
+        <li>Active filter</li>
+        <li>Current page and rows per page</li>
+        <li>Intro mode and last-seen intro version</li>
+      </ul>
+      <p>Your context and preferences are preserved between shell sessions. Use <code>:reset</code> to clear saved state.</p>
+
+    </main>
+
+    <!-- Right-side TOC (auto-generated) -->
+    <aside class="docs-toc" id="docs-toc">
+      <div class="docs-toc-heading">On this page</div>
+      <ul class="docs-toc-list" id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+
+// Auto-generate right-side TOC
+(function() {
+  const tocList = document.getElementById('toc-list');
+  if (!tocList) return;
+  const headings = document.querySelectorAll('.docs-content h2[id], .docs-content h3[id]');
+  headings.forEach(h => {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.className = 'docs-toc-link' + (h.tagName === 'H3' ? ' toc-h3' : '');
+    a.textContent = h.textContent.replace(/\s*#\s*$/, '');
+    li.appendChild(a);
+    tocList.appendChild(li);
+  });
+
+  const tocLinks = tocList.querySelectorAll('.docs-toc-link');
+  const tocObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        tocLinks.forEach(l => l.classList.remove('active'));
+        const link = tocList.querySelector('a[href="#' + entry.target.id + '"]');
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-80px 0px -60% 0px' });
+
+  headings.forEach(h => tocObserver.observe(h));
+})();
+</script>
+<script src="docs.js"></script>
+</body>
+</html>

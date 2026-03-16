@@ -8,24 +8,76 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        actorTextColor: '#E8E4D9',
+        actorBorder: '#00E5FF',
+        actorBkg: '#1a1a3e',
+        activationBorderColor: '#00E5FF',
+        activationBkgColor: '#1a1a3e',
+        sequenceNumberColor: '#12122a',
+        signalColor: '#E8E4D9',
+        labelBoxBkgColor: '#1a1a3e',
+        labelBoxBorderColor: '#00E5FF',
+        labelTextColor: '#E8E4D9',
+        loopTextColor: '#E8E4D9',
+        noteBorderColor: '#9B8DC8',
+        noteBkgColor: '#2a1a3e',
+        noteTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
 </head>
 <body class="docs-page">
 
   <!-- NAV -->
   <nav id="nav" class="scrolled">
     <a href="index.html" class="nav-logo">
-      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
       <a href="index.html" class="nav-link">Home</a>
       <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
       <a href="configuration.html" class="nav-link">Config</a>
       <a href="cli.html" class="nav-link active-doc">CLI</a>
       <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
-      <a href="skills.html" class="nav-link">Skills</a>
+      <a href="shell.html" class="nav-link">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link">Sharing</a>
       <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link">Skills</a>
       <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -33,7 +85,7 @@
     </div>
   </nav>
 
-  <div class="docs-layout">
+  <div class="docs-layout has-toc">
     <!-- Sidebar -->
     <aside class="docs-sidebar" id="sidebar">
       <div class="sidebar-section">
@@ -78,11 +130,37 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren status</div>
         <div class="ref-card-desc">Health, project, and stats overview. Shows active profile, project count, finding counts.</div>
+        <pre><code>$ phren status
+Profile:   default (3 projects)
+Machine:   dev-laptop
+Health:    OK (all checks passed)
+Findings:  142 active, 23 archived
+Tasks:     8 active, 4 queued
+Sessions:  Last: 2h ago (my-app)
+Index:     1,247 docs, last built 4m ago</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren doctor [--fix] [--agents]</div>
         <div class="ref-card-desc">Health check and self-heal. Validates hooks, MCP config, project integrity. Use <code>--fix</code> to auto-repair issues, <code>--agents</code> to check agent tool configs.</div>
+        <table class="docs-table" style="margin-top:12px">
+          <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--fix</code></td><td>Auto-repair detected issues (re-link hooks, fix symlinks)</td></tr>
+            <tr><td><code>--agents</code></td><td>Also check agent tool configs (Claude, Copilot, Cursor, Codex)</td></tr>
+          </tbody>
+        </table>
+        <pre><code>$ phren doctor
+[OK] ~/.phren exists
+[OK] Profile "default" loaded (3 projects)
+[OK] Claude hooks registered
+[OK] MCP server configured
+[WARN] Copilot hooks not detected
+[OK] FTS5 index healthy (1,247 docs)
+
+$ phren doctor --fix --agents
+[FIX] Re-registered Copilot hooks
+[OK] All 4 agent configs verified</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -121,11 +199,33 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren search &lt;query&gt; [--project &lt;n&gt;]</div>
         <div class="ref-card-desc">Search the knowledge base using FTS5 with synonym expansion. Optionally scope to a specific project.</div>
+        <table class="docs-table" style="margin-top:12px">
+          <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--project &lt;name&gt;</code></td><td>Filter results to a single project</td></tr>
+            <tr><td><code>--history</code></td><td>Show recent search history</td></tr>
+            <tr><td><code>--from-history &lt;n&gt;</code></td><td>Re-run search entry #n from history</td></tr>
+          </tbody>
+        </table>
+        <pre><code>$ phren search "authentication middleware"
+  [my-app] [pitfall] Auth middleware runs before rate limiting (0.92)
+  [backend] [decision] Use passport.js for all auth flows (0.87)
+  [my-app] [pattern] Middleware stack order matters for error handling (0.74)
+
+$ phren search "redis cache" --project backend
+  [backend] [architecture] Redis used as session store and rate limiter (0.95)
+  [backend] [pitfall] Redis connection pool exhaustion under load (0.81)</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren search --history</div>
         <div class="ref-card-desc">Show recent search history.</div>
+        <pre><code>$ phren search --history
+  1. "authentication middleware" (3 results, 2m ago)
+  2. "redis cache" (2 results, 15m ago)
+  3. "deployment pipeline" (5 results, 1h ago)
+
+$ phren search --from-history 1  # re-run search #1</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -149,16 +249,30 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren tasks</div>
         <div class="ref-card-desc">Cross-project task view. Shows all active and queued tasks across all projects.</div>
+        <pre><code>$ phren tasks
+my-app
+  Active:
+    A1. [high] Fix auth token refresh race condition
+    A2. [medium] Add rate limiting to /api/upload
+  Queue:
+    Q1. Refactor middleware stack ordering
+    Q2. Add integration tests for OAuth flow
+
+backend
+  Active:
+    A1. [high] Migrate Redis from v6 to v7</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren task add &lt;project&gt; "..."</div>
         <div class="ref-card-desc">Add a task to a project's queue.</div>
+        <pre><code>phren task add my-app "Add input validation to all API endpoints"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren task complete &lt;project&gt; "..."</div>
         <div class="ref-card-desc">Complete a task by matching its text.</div>
+        <pre><code>phren task complete my-app "Fix auth token refresh"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -211,12 +325,16 @@
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren add-finding &lt;project&gt; "..."</div>
-        <div class="ref-card-desc">Save an insight to a project's FINDINGS.md.</div>
+        <div class="ref-card-desc">Save an insight to a project's FINDINGS.md. Auto-tags if no type prefix is provided.</div>
+        <pre><code>phren add-finding my-app "[pitfall] Auth middleware runs before rate limiting — always check order"
+phren add-finding backend "[decision] Use Zod for all API input validation — better TS inference than Yup"
+phren add-finding my-app "Always call db.close() in finally blocks"  # auto-tagged as [pattern]</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren pin &lt;project&gt; "..."</div>
-        <div class="ref-card-desc">Pin canonical memory that persists across consolidation.</div>
+        <div class="ref-card-desc">Pin canonical memory to <code>truths.md</code>. Pinned memories are always injected and never decay or get pruned.</div>
+        <pre><code>phren pin my-app "Deploy to staging first, then prod. Never skip staging"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -231,22 +349,26 @@
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren finding supersede &lt;project&gt; "..." --by "..."</div>
-        <div class="ref-card-desc">Mark a finding as superseded by a newer one.</div>
+        <div class="ref-card-desc">Mark a finding as superseded by a newer one. Superseded findings score 0.25x in retrieval.</div>
+        <pre><code>phren finding supersede my-app "Use Express for routing" --by "Migrated to Fastify for better perf"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren finding retract &lt;project&gt; "..." --reason "..."</div>
-        <div class="ref-card-desc">Retract a finding with a lifecycle reason.</div>
+        <div class="ref-card-desc">Retract a finding with a lifecycle reason. Retracted findings score 0.1x in retrieval.</div>
+        <pre><code>phren finding retract my-app "Redis is single-threaded" --reason "Incorrect — Redis 7 has I/O threading"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren finding contradictions [project]</div>
         <div class="ref-card-desc">List all unresolved contradicted findings.</div>
+        <pre><code>phren finding contradictions my-app</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren finding resolve &lt;project&gt; "..." "..." &lt;keep_a|keep_b|keep_both|retract_both&gt;</div>
         <div class="ref-card-desc">Resolve a contradiction between two findings.</div>
+        <pre><code>phren finding resolve my-app "Always use JWT" "Session cookies are safer" keep_b</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -274,17 +396,28 @@
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren add [path] [--ownership &lt;mode&gt;]</div>
-        <div class="ref-card-desc">Add current or specified directory as a project. Ownership modes: owned, observed, archived.</div>
+        <div class="ref-card-desc">Add current or specified directory as a project.</div>
+        <table class="docs-table" style="margin-top:12px">
+          <thead><tr><th>Flag</th><th>Default</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--ownership</code></td><td><code>phren-managed</code></td><td>How phren treats instruction files. Options: <code>phren-managed</code>, <code>detached</code>, <code>repo-managed</code></td></tr>
+          </tbody>
+        </table>
+        <pre><code>phren add                                    # add current directory
+phren add /path/to/repo --ownership=repo-managed</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren projects list</div>
         <div class="ref-card-desc">List all projects in the active profile.</div>
+        <pre><code>phren projects list
+phren projects configure my-app --ownership=repo-managed
+phren projects remove old-project</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren projects configure &lt;name&gt; --ownership=&lt;mode&gt;</div>
-        <div class="ref-card-desc">Change a project's ownership mode (owned, observed, archived).</div>
+        <div class="ref-card-desc">Change a project's ownership mode (phren-managed, detached, repo-managed).</div>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -298,6 +431,14 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren skills list</div>
         <div class="ref-card-desc">List all installed skills with metadata.</div>
+        <pre><code>$ phren skills list
+Global skills:
+  phren-sync        Pull/push ~/.phren across machines
+  phren-init        Scaffold a new project
+  phren-discover    Research gaps and opportunities
+
+my-app skills:
+  deploy-checklist  Pre-deploy verification steps</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -308,6 +449,8 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren detect-skills [--import]</div>
         <div class="ref-card-desc">Find untracked skills in <code>~/.claude/skills/</code>. Use <code>--import</code> to bring them into phren.</div>
+        <pre><code>phren detect-skills           # scan and report
+phren detect-skills --import  # scan and import found skills</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -361,6 +504,8 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren hooks list [--project &lt;name&gt;]</div>
         <div class="ref-card-desc">Show hook enable/disable status per tool, with optional project overrides.</div>
+        <pre><code>phren hooks list
+phren hooks list --project my-app</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -376,16 +521,20 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren hooks enable &lt;tool&gt;</div>
         <div class="ref-card-desc">Enable hooks for a tool.</div>
+        <pre><code>phren hooks enable claude
+phren hooks enable cursor</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren hooks disable &lt;tool&gt;</div>
         <div class="ref-card-desc">Disable hooks for a tool.</div>
+        <pre><code>phren hooks disable codex</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren hooks add-custom &lt;event&gt; &lt;cmd&gt;</div>
         <div class="ref-card-desc">Add a custom integration hook for a lifecycle event.</div>
+        <pre><code>phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -401,14 +550,23 @@
       <!-- Config -->
       <h2 id="config">Config <a href="#config" class="anchor-link">#</a></h2>
 
+      <div class="callout callout-tip" style="margin-bottom:16px">
+        <div class="callout-title">Tip</div>
+        <p>All config commands support <code>get</code> (read current value) and <code>set</code> (update). Run with no args to see current values.</p>
+      </div>
+
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren config policy [get|set ...]</div>
         <div class="ref-card-desc">Manage retention policy: TTL, confidence, decay settings.</div>
+        <pre><code>phren config policy get
+phren config policy set memoryTTLDays=90 decayMultiplier=0.8</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren config workflow [get|set ...]</div>
         <div class="ref-card-desc">Manage workflow: approval gates, risky thresholds.</div>
+        <pre><code>phren config workflow set taskMode=auto
+phren config workflow set findingSensitivity=high</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -424,6 +582,9 @@
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren config synonyms [list|add|remove] ...</div>
         <div class="ref-card-desc">Manage learned synonyms for search expansion.</div>
+        <pre><code>phren config synonyms list
+phren config synonyms add "auth" "authentication,authorization"
+phren config synonyms remove "auth"</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
@@ -449,28 +610,45 @@
       <!-- Maintenance -->
       <h2 id="maintenance">Maintenance <a href="#maintenance" class="anchor-link">#</a></h2>
 
+      <div class="callout callout-warning" style="margin-bottom:16px">
+        <div class="callout-title">Warning</div>
+        <p>Run <code>prune</code> and <code>consolidate</code> with <code>--dry-run</code> first. Phren creates <code>FINDINGS.md.bak</code> automatically on write paths that modify the file.</p>
+      </div>
+
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren maintain govern [project]</div>
         <div class="ref-card-desc">Queue stale memories for review based on retention policy.</div>
+        <pre><code>phren maintain govern my-app</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren maintain prune [project]</div>
         <div class="ref-card-desc">Delete expired entries that have passed their TTL.</div>
+        <pre><code>phren maintain prune              # all projects
+phren maintain prune my-app       # single project</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren maintain consolidate [project]</div>
         <div class="ref-card-desc">Deduplicate FINDINGS.md: archive old entries, write consolidation markers, promote cross-project patterns.</div>
+        <pre><code>phren maintain consolidate my-app
+phren maintain consolidate my-app --dry-run  # preview without writing</code></pre>
       </div>
 
       <div class="ref-card" data-searchable>
         <div class="ref-card-name">phren maintain extract [project]</div>
         <div class="ref-card-desc">Mine git and GitHub signals (PRs, CI, issues) to extract memories automatically.</div>
+        <pre><code>phren maintain extract backend</code></pre>
       </div>
 
       <div class="no-results" id="no-results">No commands match your search.</div>
     </main>
+
+    <!-- Right-side TOC (auto-generated) -->
+    <aside class="docs-toc" id="docs-toc">
+      <div class="docs-toc-heading">On this page</div>
+      <ul class="docs-toc-list" id="toc-list"></ul>
+    </aside>
   </div>
 
   <!-- Mobile sidebar toggle -->
@@ -519,6 +697,36 @@ const observer = new IntersectionObserver(entries => {
 }, { rootMargin: '-80px 0px -60% 0px' });
 
 document.querySelectorAll('h2[id]').forEach(el => observer.observe(el));
+
+// Auto-generate right-side TOC
+(function() {
+  const tocList = document.getElementById('toc-list');
+  if (!tocList) return;
+  const headings = document.querySelectorAll('.docs-content h2[id]');
+  headings.forEach(h => {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.className = 'docs-toc-link';
+    a.textContent = h.textContent.replace(/\s*#\s*$/, '');
+    li.appendChild(a);
+    tocList.appendChild(li);
+  });
+
+  const tocLinks = tocList.querySelectorAll('.docs-toc-link');
+  const tocObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        tocLinks.forEach(l => l.classList.remove('active'));
+        const link = tocList.querySelector('a[href="#' + entry.target.id + '"]');
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-80px 0px -60% 0px' });
+
+  headings.forEach(h => tocObserver.observe(h));
+})();
 </script>
+<script src="docs.js"></script>
 </body>
 </html>

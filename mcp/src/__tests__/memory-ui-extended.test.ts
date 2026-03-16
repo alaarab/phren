@@ -592,8 +592,8 @@ describe.sequential("web-ui removed review queue mutation routes", () => {
     expect(res.body).toContain("phren");
     expect(res.body).toContain("Review");
     expect(res.body).toContain("Graph");
-    expect(res.body).toContain("Read-only in web UI");
-    expect(res.body).not.toContain('data-ui-action="reviewAction"');
+    expect(res.body).toContain("Approve, reject, or edit items directly from this tab.");
+    expect(res.body).toContain('data-ui-action="reviewAction"');
   });
 
   it("GET / page shows no items when queue is empty", async () => {

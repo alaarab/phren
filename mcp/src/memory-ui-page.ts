@@ -121,9 +121,9 @@ ${TASK_UI_STYLES}
         <dt>What is the Review Queue?</dt>
         <dd>Fragments flagged by governance for human review. Items accumulate here when <code>phren maintain govern</code> is run.</dd>
         <dt>Can I approve, reject, or edit items here?</dt>
-        <dd>No. The web UI review queue is read-only and exists for inspection only.</dd>
+        <dd>Yes. Each review card has <strong>Approve</strong>, <strong>Reject</strong>, and <strong>Edit</strong> buttons. Approve accepts the fragment, Reject removes it, and Edit lets you revise the text before accepting. You can also use batch actions to approve or reject multiple items at once.</dd>
         <dt>How do I clear items?</dt>
-        <dd>Use maintenance flows such as <code>phren maintain prune</code>, or update the underlying findings/tasks directly.</dd>
+        <dd>Approve or reject items directly in the UI, or use maintenance flows such as <code>phren maintain prune</code>.</dd>
         <dt>Is this automatic?</dt>
         <dd>No. Agents do not auto-accept review-queue items.</dd>
         <dt>How do items get here?</dt>
@@ -133,7 +133,7 @@ ${TASK_UI_STYLES}
       </dl>
     </details>
 
-    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Fragments flagged for review. Inspect them here; the web UI does not mutate queue items.</p>
+    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Fragments flagged for review. Approve, reject, or edit items directly from this tab.</p>
 
     <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
 

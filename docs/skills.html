@@ -8,24 +8,76 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        actorTextColor: '#E8E4D9',
+        actorBorder: '#00E5FF',
+        actorBkg: '#1a1a3e',
+        activationBorderColor: '#00E5FF',
+        activationBkgColor: '#1a1a3e',
+        sequenceNumberColor: '#12122a',
+        signalColor: '#E8E4D9',
+        labelBoxBkgColor: '#1a1a3e',
+        labelBoxBorderColor: '#00E5FF',
+        labelTextColor: '#E8E4D9',
+        loopTextColor: '#E8E4D9',
+        noteBorderColor: '#9B8DC8',
+        noteBkgColor: '#2a1a3e',
+        noteTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
 </head>
 <body class="docs-page">
 
   <!-- NAV -->
   <nav id="nav" class="scrolled">
     <a href="index.html" class="nav-logo">
-      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
       <a href="index.html" class="nav-link">Home</a>
       <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
       <a href="configuration.html" class="nav-link">Config</a>
       <a href="cli.html" class="nav-link">CLI</a>
       <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
-      <a href="skills.html" class="nav-link active-doc">Skills</a>
+      <a href="shell.html" class="nav-link">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link">Sharing</a>
       <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link active-doc">Skills</a>
       <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -302,5 +354,6 @@ const observer = new IntersectionObserver(entries => {
 
 document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
 </script>
+<script src="docs.js"></script>
 </body>
 </html>

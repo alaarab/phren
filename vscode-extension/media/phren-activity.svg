@@ -1,37 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <g fill="white">
-    <rect x="10" y="6" width="2" height="2"/>
-    <rect x="12" y="6" width="2" height="2"/>
-    <rect x="14" y="6" width="2" height="2"/>
-    <rect x="8" y="8" width="2" height="2"/>
-    <rect x="10" y="8" width="2" height="2"/>
-    <rect x="12" y="8" width="2" height="2"/>
-    <rect x="14" y="8" width="2" height="2"/>
-    <rect x="16" y="8" width="2" height="2"/>
-    <rect x="6" y="10" width="2" height="2"/>
-    <rect x="8" y="10" width="2" height="2"/>
-    <rect x="10" y="10" width="2" height="2"/>
-    <rect x="12" y="10" width="2" height="2"/>
-    <rect x="14" y="10" width="2" height="2"/>
-    <rect x="16" y="10" width="2" height="2"/>
-    <rect x="6" y="12" width="2" height="2"/>
-    <rect x="8" y="12" width="2" height="2"/>
-    <rect x="10" y="12" width="2" height="2"/>
-    <rect x="12" y="12" width="2" height="2"/>
-    <rect x="14" y="12" width="2" height="2"/>
-    <rect x="16" y="12" width="2" height="2"/>
-    <rect x="18" y="12" width="2" height="2"/>
-    <rect x="8" y="14" width="2" height="2"/>
-    <rect x="10" y="14" width="2" height="2"/>
-    <rect x="12" y="14" width="2" height="2"/>
-    <rect x="14" y="14" width="2" height="2"/>
-    <rect x="16" y="14" width="2" height="2"/>
-    <rect x="10" y="16" width="2" height="2"/>
-    <rect x="12" y="16" width="2" height="2"/>
-    <rect x="14" y="16" width="2" height="2"/>
-    <rect x="8" y="18" width="2" height="2"/>
-    <rect x="10" y="18" width="2" height="2"/>
-    <rect x="12" y="18" width="2" height="2"/>
-    <rect x="14" y="18" width="2" height="2"/>
-  </g>
+  <!-- Phren character - blob with eyes, monochrome for VS Code theming -->
+  <!-- Body silhouette with eye holes using fill-rule evenodd -->
+  <path fill="currentColor" fill-rule="evenodd" d="
+    M7 3 h10 v2 h2 v2 h2 v10 h-2 v2 h-2 v2 h-3 v2 h-4 v-2 H7 v-2 H5 v-2 H3 V7 h2 V5 h2 V3z
+    M7 9 h3 v3 H7 V9z
+    M14 9 h3 v3 h-3 V9z
+  "/>
 </svg>

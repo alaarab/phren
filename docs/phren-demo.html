@@ -9,6 +9,51 @@
   body { background: #0d0e0c; overflow: hidden; }
   canvas { display: block; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#12122a',
+      primaryColor: '#1a1a3e',
+      primaryTextColor: '#E8E4D9',
+      primaryBorderColor: '#00E5FF',
+      secondaryColor: '#2a1a3e',
+      secondaryTextColor: '#E8E4D9',
+      secondaryBorderColor: '#9B8DC8',
+      tertiaryColor: '#1a2a3e',
+      tertiaryTextColor: '#E8E4D9',
+      tertiaryBorderColor: '#FF8A90',
+      lineColor: '#00E5FF',
+      textColor: '#E8E4D9',
+      mainBkg: '#1a1a3e',
+      nodeBorder: '#00E5FF',
+      clusterBkg: '#1a1a3e',
+      clusterBorder: '#9B8DC8',
+      titleColor: '#00E5FF',
+      edgeLabelBackground: '#12122a',
+      nodeTextColor: '#E8E4D9',
+      actorTextColor: '#E8E4D9',
+      actorBorder: '#00E5FF',
+      actorBkg: '#1a1a3e',
+      activationBorderColor: '#00E5FF',
+      activationBkgColor: '#1a1a3e',
+      sequenceNumberColor: '#12122a',
+      signalColor: '#E8E4D9',
+      labelBoxBkgColor: '#1a1a3e',
+      labelBoxBorderColor: '#00E5FF',
+      labelTextColor: '#E8E4D9',
+      loopTextColor: '#E8E4D9',
+      noteBorderColor: '#9B8DC8',
+      noteBkgColor: '#2a1a3e',
+      noteTextColor: '#E8E4D9',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontSize: '14px'
+    }
+  });
+</script>
 </head>
 <body>
 <canvas id="c"></canvas>

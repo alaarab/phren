@@ -8,24 +8,157 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        actorTextColor: '#E8E4D9',
+        actorBorder: '#00E5FF',
+        actorBkg: '#1a1a3e',
+        activationBorderColor: '#00E5FF',
+        activationBkgColor: '#1a1a3e',
+        sequenceNumberColor: '#12122a',
+        signalColor: '#E8E4D9',
+        labelBoxBkgColor: '#1a1a3e',
+        labelBoxBorderColor: '#00E5FF',
+        labelTextColor: '#E8E4D9',
+        loopTextColor: '#E8E4D9',
+        noteBorderColor: '#9B8DC8',
+        noteBkgColor: '#2a1a3e',
+        noteTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
+  <style>
+    /* Config page specific styles */
+    .defaults-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 12px;
+      margin: 16px 0 24px;
+    }
+    .default-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 14px 18px;
+      background: var(--bg-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+    }
+    .default-item-name {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--indigo);
+    }
+    .default-item-value {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 12px;
+      color: var(--copper);
+    }
+    .default-item-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      margin: 16px 0 24px;
+    }
+    .scenario-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .scenario-card h4 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      color: var(--indigo);
+    }
+    .scenario-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0 0 12px;
+      line-height: 1.5;
+    }
+    .scenario-card pre {
+      margin: 0;
+      font-size: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+    }
+    .scenario-card code {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      color: var(--text);
+    }
+    .config-card-default {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 12px;
+      color: var(--copper);
+      margin-top: 4px;
+    }
+    .config-card-range {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+  </style>
 </head>
 <body class="docs-page">
 
   <!-- NAV -->
   <nav id="nav" class="scrolled">
     <a href="index.html" class="nav-logo">
-      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
       <a href="index.html" class="nav-link">Home</a>
       <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
       <a href="configuration.html" class="nav-link active-doc">Config</a>
       <a href="cli.html" class="nav-link">CLI</a>
       <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
-      <a href="skills.html" class="nav-link">Skills</a>
+      <a href="shell.html" class="nav-link">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link">Sharing</a>
       <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link">Skills</a>
       <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -33,12 +166,17 @@
     </div>
   </nav>
 
-  <div class="docs-layout">
+  <div class="docs-layout has-toc">
     <!-- Sidebar -->
     <aside class="docs-sidebar" id="sidebar">
       <div class="sidebar-section">
-        <div class="sidebar-heading">Configuration</div>
-        <a href="#env-vars" class="sidebar-link">Environment Variables</a>
+        <div class="sidebar-heading">Quick Start</div>
+        <a href="#recommended-defaults" class="sidebar-link">Recommended Defaults</a>
+        <a href="#scenarios" class="sidebar-link">Scenario Examples</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Environment Variables</div>
+        <a href="#env-vars" class="sidebar-link">Core Settings</a>
         <a href="#semantic" class="sidebar-link sub">Semantic / Embedding</a>
         <a href="#feature-flags" class="sidebar-link sub">Feature Flags</a>
         <a href="#hook-context" class="sidebar-link sub">Hook Context Injection</a>
@@ -70,6 +208,92 @@
       <h1>Configuration</h1>
       <p class="docs-subtitle">Every setting, environment variable, and governance option in phren. Use the search box to filter.</p>
 
+      <!-- Recommended Defaults -->
+      <h2 id="recommended-defaults">Recommended Defaults <a href="#recommended-defaults" class="anchor-link">#</a></h2>
+      <p>New to phren? These are the settings that matter most. The defaults are sensible &mdash; you only need to change what doesn't fit your workflow.</p>
+
+      <div class="defaults-grid">
+        <div class="default-item">
+          <span class="default-item-name">Proactivity</span>
+          <span class="default-item-value">medium (default)</span>
+          <span class="default-item-desc">Balanced context injection and finding capture. Start here; dial up to <code>high</code> once you're comfortable.</span>
+        </div>
+        <div class="default-item">
+          <span class="default-item-name">Finding Sensitivity</span>
+          <span class="default-item-value">medium (default)</span>
+          <span class="default-item-desc">Standard dedup and low-value filtering. Use <code>low</code> if findings feel noisy, <code>high</code> during exploration.</span>
+        </div>
+        <div class="default-item">
+          <span class="default-item-name">Task Mode</span>
+          <span class="default-item-value">suggest (recommended)</span>
+          <span class="default-item-desc">Agent proposes tasks from conversation; you confirm before adding. Good balance of automation and control.</span>
+        </div>
+        <div class="default-item">
+          <span class="default-item-name">PHREN_CONTEXT_TOKEN_BUDGET</span>
+          <span class="default-item-value">550 (default)</span>
+          <span class="default-item-desc">How many tokens of context are injected per prompt. Raise to 800&ndash;1200 if your model has a large context window.</span>
+        </div>
+        <div class="default-item">
+          <span class="default-item-name">PHREN_FEATURE_AUTO_CAPTURE</span>
+          <span class="default-item-value">0 (disabled by default)</span>
+          <span class="default-item-desc">Set to <code>1</code> to auto-extract insights at session end. Enable once your project has enough context to be useful.</span>
+        </div>
+        <div class="default-item">
+          <span class="default-item-name">Retention ttl_days</span>
+          <span class="default-item-value">90 (recommended)</span>
+          <span class="default-item-desc">Days before findings become pruning candidates. 90 days works for most active projects; set higher for slow-moving codebases.</span>
+        </div>
+      </div>
+
+      <!-- Scenario Examples -->
+      <h2 id="scenarios">Scenario Examples <a href="#scenarios" class="anchor-link">#</a></h2>
+      <p>Copy-paste configurations for common use cases.</p>
+
+      <div class="scenario-grid">
+        <div class="scenario-card">
+          <h4>Aggressive Capture</h4>
+          <p>Maximum context and finding extraction. Best for early-stage projects where you want phren to learn fast.</p>
+          <pre><code># ~/.phren/.env
+PHREN_FEATURE_AUTO_CAPTURE=1
+PHREN_CONTEXT_TOKEN_BUDGET=1200
+PHREN_MAX_INJECT_TOKENS=4000
+
+# MCP tools
+set_proactivity(level: "high")
+set_finding_sensitivity(level: "high")
+set_task_mode(mode: "auto")</code></pre>
+        </div>
+        <div class="scenario-card">
+          <h4>Minimal / Quiet</h4>
+          <p>Low overhead, manual control. Good for stable projects or when you want phren to stay out of the way.</p>
+          <pre><code># ~/.phren/.env
+PHREN_FEATURE_AUTO_CAPTURE=0
+PHREN_FEATURE_AUTO_EXTRACT=0
+PHREN_CONTEXT_TOKEN_BUDGET=300
+
+# MCP tools
+set_proactivity(level: "low")
+set_finding_sensitivity(level: "low")
+set_task_mode(mode: "manual")</code></pre>
+        </div>
+        <div class="scenario-card">
+          <h4>Team Setup</h4>
+          <p>Shared phren store across a team with access control and audit logging.</p>
+          <pre><code># ~/.phren/.env
+PHREN_ACTOR=your-username
+
+# MCP tools
+set_workflow_policy({
+  approval_required: true,
+  push_on_stop: true
+})
+
+# Profile: ~/.phren/profiles/team.yaml
+# machines.yaml: map hostnames
+# phren link to connect projects</code></pre>
+        </div>
+      </div>
+
       <!-- Search -->
       <div class="docs-search-wrap">
         <svg class="docs-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -81,128 +305,479 @@
       <h2 id="env-vars">Environment Variables <a href="#env-vars" class="anchor-link">#</a></h2>
       <p>Set these in your shell profile, <code>~/.phren/.env</code>, or per-project <code>.env</code> files. All are optional.</p>
 
-      <table class="docs-table searchable" data-section="env-vars">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_FEATURE_GIT_CONTEXT_FILTER</code></td><td>disabled</td><td>Set to <code>'true'</code> to enable git-context file relevance filtering in search ranking. Docs matching currently-changed files or branch name get a boost.</td></tr>
-          <tr><td><code>PHREN_FEATURE_AUTO_CAPTURE</code></td><td>disabled</td><td>Set to <code>'1'</code> to extract insights from conversation transcripts at session end (written by init walkthrough to <code>~/.phren/.env</code>).</td></tr>
-          <tr><td><code>PHREN_EMBEDDING_API_URL</code></td><td>&mdash;</td><td>OpenAI-compatible <code>/embeddings</code> endpoint (e.g. <code>https://api.openai.com/v1</code>). Takes priority over Ollama when set.</td></tr>
-          <tr><td><code>PHREN_EMBEDDING_API_KEY</code></td><td>&mdash;</td><td>Bearer token for <code>PHREN_EMBEDDING_API_URL</code>.</td></tr>
-          <tr><td><code>PHREN_FEATURE_SEMANTIC_DEDUP</code></td><td>disabled</td><td>Set to <code>'1'</code> to enable LLM-based semantic deduplication on <code>add_finding</code>. Checks whether a new finding is semantically equivalent to existing ones. Requires LLM configured via <code>PHREN_LLM_ENDPOINT</code> or <code>ANTHROPIC_API_KEY</code>/<code>OPENAI_API_KEY</code>.</td></tr>
-          <tr><td><code>PHREN_FEATURE_SEMANTIC_CONFLICT</code></td><td>disabled</td><td>Set to <code>'1'</code> to enable LLM-based conflict detection on <code>add_finding</code>. Detects contradictions between findings. Appends <code>&lt;!-- conflicts_with: "..." --&gt;</code> annotations.</td></tr>
-          <tr><td><code>PHREN_LLM_MODEL</code></td><td><code>gpt-4o-mini</code> / <code>claude-haiku-4-5-20251001</code></td><td>Override the LLM model used for semantic dedup and conflict detection.</td></tr>
-          <tr><td><code>PHREN_LLM_ENDPOINT</code></td><td>&mdash;</td><td>OpenAI-compatible <code>/chat/completions</code> base URL for semantic dedup/conflict. Takes priority over Anthropic fallback.</td></tr>
-          <tr><td><code>PHREN_LLM_KEY</code></td><td>&mdash;</td><td>API key for <code>PHREN_LLM_ENDPOINT</code>. Falls back to <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>.</td></tr>
-        </tbody>
-      </table>
+      <div class="config-cards" data-section="env-vars">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_GIT_CONTEXT_FILTER</span>
+            <span class="ref-card-desc">Enable git-context file relevance filtering in search ranking</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: disabled</div>
+            <p class="ref-card-desc">Set to <code>'true'</code> to enable git-context file relevance filtering in search ranking. Docs matching currently-changed files or branch name get a boost.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_AUTO_CAPTURE</span>
+            <span class="ref-card-desc">Extract insights from conversation transcripts at session end</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: disabled</div>
+            <p class="ref-card-desc">Set to <code>'1'</code> to extract insights from conversation transcripts at session end. Written by init walkthrough to <code>~/.phren/.env</code>.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_EMBEDDING_API_URL</span>
+            <span class="ref-card-desc">OpenAI-compatible embeddings endpoint URL</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">OpenAI-compatible <code>/embeddings</code> endpoint (e.g. <code>https://api.openai.com/v1</code>). Takes priority over Ollama when set.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_EMBEDDING_API_KEY</span>
+            <span class="ref-card-desc">Bearer token for embedding API endpoint</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">Bearer token for <code>PHREN_EMBEDDING_API_URL</code>.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_SEMANTIC_DEDUP</span>
+            <span class="ref-card-desc">LLM-based semantic deduplication on add_finding</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: disabled</div>
+            <p class="ref-card-desc">Set to <code>'1'</code> to enable LLM-based semantic deduplication on <code>add_finding</code>. Checks whether a new finding is semantically equivalent to existing ones. Requires LLM configured via <code>PHREN_LLM_ENDPOINT</code> or <code>ANTHROPIC_API_KEY</code>/<code>OPENAI_API_KEY</code>.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_SEMANTIC_CONFLICT</span>
+            <span class="ref-card-desc">LLM-based conflict detection on add_finding</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: disabled</div>
+            <p class="ref-card-desc">Set to <code>'1'</code> to enable LLM-based conflict detection on <code>add_finding</code>. Detects contradictions between findings. Appends <code>&lt;!-- conflicts_with: "..." --&gt;</code> annotations.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_LLM_MODEL</span>
+            <span class="ref-card-desc">Override LLM model for semantic dedup and conflict detection</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: gpt-4o-mini / claude-haiku-4-5-20251001</div>
+            <p class="ref-card-desc">Override the LLM model used for semantic dedup and conflict detection.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_LLM_ENDPOINT</span>
+            <span class="ref-card-desc">OpenAI-compatible chat completions base URL</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">OpenAI-compatible <code>/chat/completions</code> base URL for semantic dedup/conflict. Takes priority over Anthropic fallback.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_LLM_KEY</span>
+            <span class="ref-card-desc">API key for LLM endpoint</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">API key for <code>PHREN_LLM_ENDPOINT</code>. Falls back to <code>OPENAI_API_KEY</code> or <code>ANTHROPIC_API_KEY</code>.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="semantic">Semantic / Embedding <a href="#semantic" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="semantic">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_OLLAMA_URL</code></td><td><code>http://localhost:11434</code></td><td>Ollama base URL for local embeddings and extraction. Set to <code>off</code> to disable Ollama entirely.</td></tr>
-          <tr><td><code>PHREN_EMBEDDING_MODEL</code></td><td><code>nomic-embed-text</code></td><td>Embedding model used with Ollama or <code>PHREN_EMBEDDING_API_URL</code>.</td></tr>
-          <tr><td><code>PHREN_EXTRACT_MODEL</code></td><td><code>llama3.2</code></td><td>Ollama model used for memory extraction (<code>phren maintain extract</code>).</td></tr>
-          <tr><td><code>PHREN_EMBEDDING_PROVIDER</code></td><td>&mdash;</td><td>Set to <code>api</code> to enable OpenAI API embedding fallback in <code>search_knowledge</code> (requires <code>OPENAI_API_KEY</code>).</td></tr>
-          <tr><td><code>PHREN_FEATURE_HYBRID_SEARCH</code></td><td>enabled</td><td>Set to <code>0</code> to disable TF-IDF cosine fallback in <code>search_knowledge</code>.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="semantic">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_OLLAMA_URL</span>
+            <span class="ref-card-desc">Ollama base URL for local embeddings and extraction</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: http://localhost:11434</div>
+            <p class="ref-card-desc">Ollama base URL for local embeddings and extraction. Set to <code>off</code> to disable Ollama entirely.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_EMBEDDING_MODEL</span>
+            <span class="ref-card-desc">Embedding model for Ollama or API endpoint</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: nomic-embed-text</div>
+            <p class="ref-card-desc">Embedding model used with Ollama or <code>PHREN_EMBEDDING_API_URL</code>.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_EXTRACT_MODEL</span>
+            <span class="ref-card-desc">Ollama model for memory extraction</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: llama3.2</div>
+            <p class="ref-card-desc">Ollama model used for memory extraction (<code>phren maintain extract</code>).</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_EMBEDDING_PROVIDER</span>
+            <span class="ref-card-desc">Enable OpenAI API embedding fallback in search</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">Set to <code>api</code> to enable OpenAI API embedding fallback in <code>search_knowledge</code> (requires <code>OPENAI_API_KEY</code>).</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_HYBRID_SEARCH</span>
+            <span class="ref-card-desc">TF-IDF cosine fallback in search_knowledge</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: enabled</div>
+            <p class="ref-card-desc">Set to <code>0</code> to disable TF-IDF cosine fallback in <code>search_knowledge</code>.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="feature-flags">Feature Flags <a href="#feature-flags" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="feature-flags">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_FEATURE_AUTO_EXTRACT</code></td><td>enabled</td><td>Set to <code>0</code> to disable automatic memory extraction from project context on each prompt.</td></tr>
-          <tr><td><code>PHREN_FEATURE_PROGRESSIVE_DISCLOSURE</code></td><td>disabled</td><td>Set to <code>1</code> to inject a compact memory index instead of full snippets; use <code>get_memory_detail</code> to expand.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="feature-flags">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_AUTO_EXTRACT</span>
+            <span class="ref-card-desc">Automatic memory extraction from project context on each prompt</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: enabled</div>
+            <p class="ref-card-desc">Set to <code>0</code> to disable automatic memory extraction from project context on each prompt.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FEATURE_PROGRESSIVE_DISCLOSURE</span>
+            <span class="ref-card-desc">Inject compact memory index instead of full snippets</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: disabled</div>
+            <p class="ref-card-desc">Set to <code>1</code> to inject a compact memory index instead of full snippets; use <code>get_memory_detail</code> to expand.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="hook-context">Hook Context Injection <a href="#hook-context" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="hook-context">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td><code>550</code></td><td>Max tokens injected per hook-prompt call. Range: 180&ndash;10000.</td></tr>
-          <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td><code>6</code></td><td>Max lines per snippet in injected context. Range: 2&ndash;100.</td></tr>
-          <tr><td><code>PHREN_CONTEXT_SNIPPET_CHARS</code></td><td><code>520</code></td><td>Max characters per snippet in injected context. Range: 120&ndash;10000.</td></tr>
-          <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td><code>2000</code></td><td>Hard cap on total injected tokens across all content. Range: 200&ndash;20000.</td></tr>
-          <tr><td><code>PHREN_TASK_PRIORITY</code></td><td><code>high,medium</code></td><td>Comma-separated priorities to include in hook context task injection (<code>high</code>, <code>medium</code>, <code>low</code>).</td></tr>
-          <tr><td><code>PHREN_LOW_VALUE_PATTERNS</code></td><td>built-in list</td><td>Comma-separated substrings; findings matching these patterns are penalised in ranking.</td></tr>
-          <tr><td><code>PHREN_CROSS_PROJECT_DECAY_DAYS</code></td><td><code>30</code></td><td>Days over which cross-project findings decay in relevance score.</td></tr>
-          <tr><td><code>PHREN_MEMORY_TTL_DAYS</code></td><td>policy value</td><td>Override memory TTL (days) for hook-prompt trust filtering.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="hook-context">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CONTEXT_TOKEN_BUDGET</span>
+            <span class="ref-card-desc">Max tokens injected per hook-prompt call</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 550</div>
+            <div class="config-card-range">Range: 180&ndash;10000</div>
+            <p class="ref-card-desc">Max tokens injected per hook-prompt call.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CONTEXT_SNIPPET_LINES</span>
+            <span class="ref-card-desc">Max lines per snippet in injected context</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 6</div>
+            <div class="config-card-range">Range: 2&ndash;100</div>
+            <p class="ref-card-desc">Max lines per snippet in injected context.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CONTEXT_SNIPPET_CHARS</span>
+            <span class="ref-card-desc">Max characters per snippet in injected context</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 520</div>
+            <div class="config-card-range">Range: 120&ndash;10000</div>
+            <p class="ref-card-desc">Max characters per snippet in injected context.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_MAX_INJECT_TOKENS</span>
+            <span class="ref-card-desc">Hard cap on total injected tokens across all content</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 2000</div>
+            <div class="config-card-range">Range: 200&ndash;20000</div>
+            <p class="ref-card-desc">Hard cap on total injected tokens across all content.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_TASK_PRIORITY</span>
+            <span class="ref-card-desc">Priorities included in hook context task injection</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: high,medium</div>
+            <p class="ref-card-desc">Comma-separated priorities to include in hook context task injection (<code>high</code>, <code>medium</code>, <code>low</code>).</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_LOW_VALUE_PATTERNS</span>
+            <span class="ref-card-desc">Substrings that penalise findings in ranking</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: built-in list</div>
+            <p class="ref-card-desc">Comma-separated substrings; findings matching these patterns are penalised in ranking.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CROSS_PROJECT_DECAY_DAYS</span>
+            <span class="ref-card-desc">Cross-project finding relevance decay period</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 30</div>
+            <p class="ref-card-desc">Days over which cross-project findings decay in relevance score.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_MEMORY_TTL_DAYS</span>
+            <span class="ref-card-desc">Override memory TTL for hook-prompt trust filtering</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: policy value</div>
+            <p class="ref-card-desc">Override memory TTL (days) for hook-prompt trust filtering.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="auto-capture">Auto-Capture <a href="#auto-capture" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="auto-capture">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_AUTOCAPTURE_COOLDOWN_MS</code></td><td><code>30000</code></td><td>Minimum ms between auto-capture runs per session to avoid thrashing.</td></tr>
-          <tr><td><code>PHREN_AUTOCAPTURE_SESSION_CAP</code></td><td><code>10</code></td><td>Maximum findings auto-captured per session.</td></tr>
-          <tr><td><code>PHREN_CONVERSATION_CONTEXT</code></td><td>&mdash;</td><td>Inject additional conversation context for auto-capture heuristics (set by hooks).</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="auto-capture">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_AUTOCAPTURE_COOLDOWN_MS</span>
+            <span class="ref-card-desc">Minimum ms between auto-capture runs per session</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 30000</div>
+            <p class="ref-card-desc">Minimum ms between auto-capture runs per session to avoid thrashing.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_AUTOCAPTURE_SESSION_CAP</span>
+            <span class="ref-card-desc">Maximum findings auto-captured per session</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 10</div>
+            <p class="ref-card-desc">Maximum findings auto-captured per session.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CONVERSATION_CONTEXT</span>
+            <span class="ref-card-desc">Additional conversation context for auto-capture heuristics</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: &mdash;</div>
+            <p class="ref-card-desc">Inject additional conversation context for auto-capture heuristics (set by hooks).</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="github-extraction">GitHub Extraction <a href="#github-extraction" class="anchor-link">#</a></h3>
       <p>Used by <code>phren maintain extract</code> to mine signals from GitHub.</p>
-      <table class="docs-table searchable" data-section="github-extraction">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_GH_PR_LIMIT</code></td><td><code>40</code></td><td>Max PRs fetched per extraction run. Range: 5&ndash;200.</td></tr>
-          <tr><td><code>PHREN_GH_RUN_LIMIT</code></td><td><code>25</code></td><td>Max CI runs fetched per extraction run. Range: 5&ndash;200.</td></tr>
-          <tr><td><code>PHREN_GH_ISSUE_LIMIT</code></td><td><code>25</code></td><td>Max issues fetched per extraction run. Range: 5&ndash;200.</td></tr>
-          <tr><td><code>PHREN_GH_TIMEOUT_MS</code></td><td><code>10000</code></td><td>Timeout per GitHub API call (ms). Range: 1000&ndash;60000.</td></tr>
-          <tr><td><code>PHREN_GH_RETRIES</code></td><td><code>2</code></td><td>Retries per failed GitHub API call. Range: 0&ndash;5.</td></tr>
-          <tr><td><code>PHREN_MEMORY_EXTRACT_WINDOW_DAYS</code></td><td><code>30</code></td><td>Look-back window (days) when extracting memories from git/GitHub.</td></tr>
-          <tr><td><code>PHREN_MEMORY_AUTO_ACCEPT</code></td><td>policy value</td><td>Score threshold (0&ndash;1) above which extracted memories are auto-accepted without review.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="github-extraction">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_GH_PR_LIMIT</span>
+            <span class="ref-card-desc">Max PRs fetched per extraction run</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 40</div>
+            <div class="config-card-range">Range: 5&ndash;200</div>
+            <p class="ref-card-desc">Max PRs fetched per extraction run.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_GH_RUN_LIMIT</span>
+            <span class="ref-card-desc">Max CI runs fetched per extraction run</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 25</div>
+            <div class="config-card-range">Range: 5&ndash;200</div>
+            <p class="ref-card-desc">Max CI runs fetched per extraction run.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_GH_ISSUE_LIMIT</span>
+            <span class="ref-card-desc">Max issues fetched per extraction run</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 25</div>
+            <div class="config-card-range">Range: 5&ndash;200</div>
+            <p class="ref-card-desc">Max issues fetched per extraction run.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_GH_TIMEOUT_MS</span>
+            <span class="ref-card-desc">Timeout per GitHub API call</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 10000</div>
+            <div class="config-card-range">Range: 1000&ndash;60000 ms</div>
+            <p class="ref-card-desc">Timeout per GitHub API call (ms).</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_GH_RETRIES</span>
+            <span class="ref-card-desc">Retries per failed GitHub API call</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 2</div>
+            <div class="config-card-range">Range: 0&ndash;5</div>
+            <p class="ref-card-desc">Retries per failed GitHub API call.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_MEMORY_EXTRACT_WINDOW_DAYS</span>
+            <span class="ref-card-desc">Look-back window for extracting memories from git/GitHub</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 30</div>
+            <p class="ref-card-desc">Look-back window (days) when extracting memories from git/GitHub.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_MEMORY_AUTO_ACCEPT</span>
+            <span class="ref-card-desc">Score threshold for auto-accepting extracted memories</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: policy value</div>
+            <div class="config-card-range">Range: 0&ndash;1</div>
+            <p class="ref-card-desc">Score threshold (0&ndash;1) above which extracted memories are auto-accepted without review.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="content-limits">Content Limits <a href="#content-limits" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="content-limits">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_FINDINGS_CAP</code></td><td><code>20</code></td><td>Max findings kept per date section before triggering consolidation.</td></tr>
-          <tr><td><code>PHREN_CONSOLIDATION_CAP</code></td><td><code>150</code></td><td>Max total findings before forced consolidation.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="content-limits">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FINDINGS_CAP</span>
+            <span class="ref-card-desc">Max findings per date section before consolidation</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 20</div>
+            <p class="ref-card-desc">Max findings kept per date section before triggering consolidation.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_CONSOLIDATION_CAP</span>
+            <span class="ref-card-desc">Max total findings before forced consolidation</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 150</div>
+            <p class="ref-card-desc">Max total findings before forced consolidation.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="performance">Performance &amp; Locking <a href="#performance" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="performance">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_HOOK_TIMEOUT_MS</code></td><td><code>14000</code></td><td>Timeout (ms) for hook subprocess execution. Also controls <code>PHREN_HOOK_TIMEOUT_S</code> in shell.</td></tr>
-          <tr><td><code>PHREN_SLOW_FS_WARN_MS</code></td><td><code>3000</code></td><td>Log a warning when filesystem operations (index build, etc.) exceed this threshold (ms).</td></tr>
-          <tr><td><code>PHREN_FILE_LOCK_MAX_WAIT_MS</code></td><td><code>5000</code></td><td>Max time (ms) to wait for a file lock before aborting.</td></tr>
-          <tr><td><code>PHREN_FILE_LOCK_POLL_MS</code></td><td><code>100</code></td><td>Polling interval (ms) when waiting for a file lock.</td></tr>
-          <tr><td><code>PHREN_FILE_LOCK_STALE_MS</code></td><td><code>30000</code></td><td>Age (ms) after which a file lock is considered stale and forcibly released.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="performance">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_HOOK_TIMEOUT_MS</span>
+            <span class="ref-card-desc">Timeout for hook subprocess execution</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 14000</div>
+            <p class="ref-card-desc">Timeout (ms) for hook subprocess execution. Also controls <code>PHREN_HOOK_TIMEOUT_S</code> in shell.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_SLOW_FS_WARN_MS</span>
+            <span class="ref-card-desc">Warning threshold for slow filesystem operations</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 3000</div>
+            <p class="ref-card-desc">Log a warning when filesystem operations (index build, etc.) exceed this threshold (ms).</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FILE_LOCK_MAX_WAIT_MS</span>
+            <span class="ref-card-desc">Max time to wait for a file lock</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 5000</div>
+            <p class="ref-card-desc">Max time (ms) to wait for a file lock before aborting.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FILE_LOCK_POLL_MS</span>
+            <span class="ref-card-desc">Polling interval when waiting for a file lock</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 100</div>
+            <p class="ref-card-desc">Polling interval (ms) when waiting for a file lock.</p>
+          </div>
+        </details>
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_FILE_LOCK_STALE_MS</span>
+            <span class="ref-card-desc">Age after which a file lock is considered stale</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: 30000</div>
+            <p class="ref-card-desc">Age (ms) after which a file lock is considered stale and forcibly released.</p>
+          </div>
+        </details>
+      </div>
 
       <h3 id="access-control">Access Control <a href="#access-control" class="anchor-link">#</a></h3>
-      <table class="docs-table searchable" data-section="access-control">
-        <thead>
-          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>PHREN_ACTOR</code></td><td><code>$USER</code></td><td>Override the actor name used in governance audit log entries.</td></tr>
-        </tbody>
-      </table>
+
+      <div class="config-cards" data-section="access-control">
+        <details class="ref-card" data-searchable>
+          <summary>
+            <span class="ref-card-name">PHREN_ACTOR</span>
+            <span class="ref-card-desc">Override actor name for governance audit log entries</span>
+          </summary>
+          <div class="ref-card-details">
+            <div class="config-card-default">Default: $USER</div>
+            <p class="ref-card-desc">Override the actor name used in governance audit log entries.</p>
+          </div>
+        </details>
+      </div>
 
       <!-- Governance -->
       <h2 id="retention">Retention Policy <a href="#retention" class="anchor-link">#</a></h2>
@@ -334,6 +909,12 @@
 
       <div class="no-results" id="no-results">No configuration options match your search.</div>
     </main>
+
+    <!-- Right-side TOC (auto-generated) -->
+    <aside class="docs-toc" id="docs-toc">
+      <div class="docs-toc-heading">On this page</div>
+      <ul class="docs-toc-list" id="toc-list"></ul>
+    </aside>
   </div>
 
   <!-- Mobile sidebar toggle -->
@@ -342,16 +923,27 @@
   </button>
 
 <script>
-// Search filter
+// Search filter — works with both ref-cards and table rows
 const searchInput = document.getElementById('config-search');
 const searchCount = document.getElementById('search-count');
 const noResults = document.getElementById('no-results');
+const cards = document.querySelectorAll('.ref-card[data-searchable]');
 const tables = document.querySelectorAll('.docs-table.searchable');
 
 searchInput.addEventListener('input', () => {
   const q = searchInput.value.toLowerCase().trim();
   let visible = 0, total = 0;
 
+  // Filter ref-cards
+  cards.forEach(card => {
+    total++;
+    const text = card.textContent.toLowerCase();
+    const match = !q || text.includes(q);
+    card.hidden = !match;
+    if (match) visible++;
+  });
+
+  // Filter table rows (governance sections)
   tables.forEach(table => {
     const rows = table.querySelectorAll('tbody tr');
     let tableVisible = 0;
@@ -362,9 +954,13 @@ searchInput.addEventListener('input', () => {
       row.style.display = match ? '' : 'none';
       if (match) { visible++; tableVisible++; }
     });
-    // Hide table header if no rows visible
-    const section = table.closest('h2, h3');
     table.style.display = tableVisible === 0 && q ? 'none' : '';
+  });
+
+  // Hide empty card sections
+  document.querySelectorAll('.config-cards').forEach(container => {
+    const visibleCards = container.querySelectorAll('.ref-card[data-searchable]:not([hidden])');
+    container.style.display = visibleCards.length === 0 && q ? 'none' : '';
   });
 
   searchCount.textContent = q ? `${visible} / ${total}` : '';
@@ -391,6 +987,36 @@ const observer = new IntersectionObserver(entries => {
 }, { rootMargin: '-80px 0px -60% 0px' });
 
 document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+
+// Auto-generate right-side TOC
+(function() {
+  const tocList = document.getElementById('toc-list');
+  if (!tocList) return;
+  const headings = document.querySelectorAll('.docs-content h2[id], .docs-content h3[id]');
+  headings.forEach(h => {
+    const li = document.createElement('li');
+    const a = document.createElement('a');
+    a.href = '#' + h.id;
+    a.className = 'docs-toc-link' + (h.tagName === 'H3' ? ' toc-h3' : '');
+    a.textContent = h.textContent.replace(/\s*#\s*$/, '');
+    li.appendChild(a);
+    tocList.appendChild(li);
+  });
+
+  const tocLinks = tocList.querySelectorAll('.docs-toc-link');
+  const tocObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        tocLinks.forEach(l => l.classList.remove('active'));
+        const link = tocList.querySelector('a[href="#' + entry.target.id + '"]');
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-80px 0px -60% 0px' });
+
+  headings.forEach(h => tocObserver.observe(h));
+})();
 </script>
+<script src="docs.js"></script>
 </body>
 </html>
