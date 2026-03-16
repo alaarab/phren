@@ -4,6 +4,7 @@ import * as path from "path";
 import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "./shared.js";
 import { withFileLock } from "./governance-locks.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
+import { readProjectConfig, type ProjectConfigOverrides } from "./project-config.js";
 import { runCustomHooks } from "./hooks.js";
 import {
   METADATA_REGEX,
@@ -70,6 +71,10 @@ export interface RuntimeHealth {
     unsyncedCommits?: number;
   };
 }
+
+export type RetentionPolicyPatch = Partial<Omit<RetentionPolicy, "decay">> & {
+  decay?: Partial<RetentionPolicy["decay"]>;
+};
 
 export const GOVERNANCE_SCHEMA_VERSION = 1;
 
@@ -302,6 +307,174 @@ function normalizeIndexPolicy(data: Record<string, unknown>): IndexPolicy {
   };
 }
 
+// ── Per-project config resolution ────────────────────────────────────────────
+
+export interface ResolvedConfig {
+  findingSensitivity: WorkflowPolicy["findingSensitivity"];
+  proactivity: {
+    base?: "high" | "medium" | "low";
+    findings?: "high" | "medium" | "low";
+    tasks?: "high" | "medium" | "low";
+  };
+  taskMode: WorkflowPolicy["taskMode"];
+  retentionPolicy: RetentionPolicy;
+  workflowPolicy: WorkflowPolicy;
+}
+
+const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
+const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
+const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
+const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
+
+function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
+}
+
+function pickPositiveInt(value: unknown): number | undefined {
+  return Number.isInteger(value) && typeof value === "number" && value > 0 ? value : undefined;
+}
+
+function pickUnitInterval(value: unknown): number | undefined {
+  return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : undefined;
+}
+
+function normalizeProjectConfigOverrides(raw: unknown): ProjectConfigOverrides | undefined {
+  if (!isRecord(raw)) return undefined;
+
+  const retentionRaw = isRecord(raw.retentionPolicy) ? raw.retentionPolicy : undefined;
+  const decayRaw = retentionRaw && isRecord(retentionRaw.decay) ? retentionRaw.decay : undefined;
+  const retentionPolicy: ProjectConfigOverrides["retentionPolicy"] | undefined = retentionRaw
+    ? {
+      ttlDays: pickPositiveInt(retentionRaw.ttlDays),
+      retentionDays: pickPositiveInt(retentionRaw.retentionDays),
+      autoAcceptThreshold: pickUnitInterval(retentionRaw.autoAcceptThreshold),
+      minInjectConfidence: pickUnitInterval(retentionRaw.minInjectConfidence),
+      decay: decayRaw
+        ? {
+          d30: pickUnitInterval(decayRaw.d30),
+          d60: pickUnitInterval(decayRaw.d60),
+          d90: pickUnitInterval(decayRaw.d90),
+          d120: pickUnitInterval(decayRaw.d120),
+        }
+        : undefined,
+    }
+    : undefined;
+  if (retentionPolicy && retentionPolicy.decay && Object.values(retentionPolicy.decay).every((value) => value === undefined)) {
+    delete retentionPolicy.decay;
+  }
+
+  const workflowRaw = isRecord(raw.workflowPolicy) ? raw.workflowPolicy : undefined;
+  const workflowPolicy: ProjectConfigOverrides["workflowPolicy"] | undefined = workflowRaw
+    ? {
+      lowConfidenceThreshold: pickUnitInterval(workflowRaw.lowConfidenceThreshold),
+      riskySections: Array.isArray(workflowRaw.riskySections)
+        ? workflowRaw.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" =>
+          typeof section === "string" && VALID_RISKY_SECTIONS.includes(section as "Review" | "Stale" | "Conflicts"))
+        : undefined,
+    }
+    : undefined;
+  if (workflowPolicy && workflowPolicy.riskySections && workflowPolicy.riskySections.length === 0) {
+    delete workflowPolicy.riskySections;
+  }
+
+  const overrides: ProjectConfigOverrides = {
+    findingSensitivity: pickEnum(raw.findingSensitivity, VALID_FINDING_SENSITIVITY),
+    proactivity: pickEnum(raw.proactivity, VALID_PROACTIVITY_LEVELS),
+    proactivityFindings: pickEnum(raw.proactivityFindings, VALID_PROACTIVITY_LEVELS),
+    proactivityTask: pickEnum(raw.proactivityTask, VALID_PROACTIVITY_LEVELS),
+    taskMode: pickEnum(raw.taskMode, VALID_TASK_MODES),
+    retentionPolicy: retentionPolicy && Object.values(retentionPolicy).some((value) => value !== undefined)
+      ? retentionPolicy
+      : undefined,
+    workflowPolicy: workflowPolicy && Object.values(workflowPolicy).some((value) => value !== undefined)
+      ? workflowPolicy
+      : undefined,
+  };
+  return overrides;
+}
+
+function readProjectConfigOverrides(phrenPath: string, projectName: string): ProjectConfigOverrides | undefined {
+  try {
+    const config = readProjectConfig(phrenPath, projectName);
+    return normalizeProjectConfigOverrides(config.config);
+  } catch {
+    return undefined;
+  }
+}
+
+export function mergeConfig(phrenPath: string, projectName?: string): ResolvedConfig {
+  const globalRetention = getRetentionPolicyGlobal(phrenPath);
+  const globalWorkflow = getWorkflowPolicyGlobal(phrenPath);
+
+  if (projectName && !isValidProjectName(projectName)) {
+    debugLog(`mergeConfig: invalid project name "${projectName}", using global defaults`);
+    projectName = undefined;
+  }
+
+  if (!projectName) {
+    return {
+      findingSensitivity: globalWorkflow.findingSensitivity,
+      proactivity: {},
+      taskMode: globalWorkflow.taskMode,
+      retentionPolicy: globalRetention,
+      workflowPolicy: globalWorkflow,
+    };
+  }
+
+  const overrides = readProjectConfigOverrides(phrenPath, projectName);
+  if (!overrides) {
+    return {
+      findingSensitivity: globalWorkflow.findingSensitivity,
+      proactivity: {},
+      taskMode: globalWorkflow.taskMode,
+      retentionPolicy: globalRetention,
+      workflowPolicy: globalWorkflow,
+    };
+  }
+
+  // Merge retention policy
+  const retentionOverride = overrides.retentionPolicy;
+  const mergedRetention: RetentionPolicy = retentionOverride
+    ? {
+      schemaVersion: globalRetention.schemaVersion,
+      ttlDays: retentionOverride.ttlDays ?? globalRetention.ttlDays,
+      retentionDays: retentionOverride.retentionDays ?? globalRetention.retentionDays,
+      autoAcceptThreshold: retentionOverride.autoAcceptThreshold ?? globalRetention.autoAcceptThreshold,
+      minInjectConfidence: retentionOverride.minInjectConfidence ?? globalRetention.minInjectConfidence,
+      decay: {
+        d30: retentionOverride.decay?.d30 ?? globalRetention.decay.d30,
+        d60: retentionOverride.decay?.d60 ?? globalRetention.decay.d60,
+        d90: retentionOverride.decay?.d90 ?? globalRetention.decay.d90,
+        d120: retentionOverride.decay?.d120 ?? globalRetention.decay.d120,
+      },
+    }
+    : globalRetention;
+
+  // Merge workflow policy
+  const workflowOverride = overrides.workflowPolicy;
+  const mergedWorkflow: WorkflowPolicy = {
+    schemaVersion: globalWorkflow.schemaVersion,
+    lowConfidenceThreshold: workflowOverride?.lowConfidenceThreshold ?? globalWorkflow.lowConfidenceThreshold,
+    riskySections: workflowOverride?.riskySections?.length
+      ? workflowOverride.riskySections
+      : globalWorkflow.riskySections,
+    taskMode: overrides.taskMode ?? globalWorkflow.taskMode,
+    findingSensitivity: overrides.findingSensitivity ?? globalWorkflow.findingSensitivity,
+  };
+
+  return {
+    findingSensitivity: mergedWorkflow.findingSensitivity,
+    proactivity: {
+      base: overrides.proactivity,
+      findings: overrides.proactivityFindings,
+      tasks: overrides.proactivityTask,
+    },
+    taskMode: mergedWorkflow.taskMode,
+    retentionPolicy: mergedRetention,
+    workflowPolicy: mergedWorkflow,
+  };
+}
+
 function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -337,12 +510,17 @@ function writeJsonFile(filePath: string, data: unknown): void {
   });
 }
 
-export function getRetentionPolicy(phrenPath: string): RetentionPolicy {
+function getRetentionPolicyGlobal(phrenPath: string): RetentionPolicy {
   const parsed = readJsonFile<Partial<RetentionPolicy>>(govFile(phrenPath, "retention-policy"), {});
   return withDefaults(parsed, DEFAULT_POLICY);
 }
 
-export function updateRetentionPolicy(phrenPath: string, patch: Partial<RetentionPolicy>): PhrenResult<RetentionPolicy> {
+export function getRetentionPolicy(phrenPath: string, projectName?: string): RetentionPolicy {
+  if (projectName) return mergeConfig(phrenPath, projectName).retentionPolicy;
+  return getRetentionPolicyGlobal(phrenPath);
+}
+
+export function updateRetentionPolicy(phrenPath: string, patch: RetentionPolicyPatch): PhrenResult<RetentionPolicy> {
   const current = getRetentionPolicy(phrenPath);
   const next: RetentionPolicy = {
     ...current,
@@ -357,7 +535,7 @@ export function updateRetentionPolicy(phrenPath: string, patch: Partial<Retentio
   return phrenOk(next);
 }
 
-export function getWorkflowPolicy(phrenPath: string): WorkflowPolicy {
+function getWorkflowPolicyGlobal(phrenPath: string): WorkflowPolicy {
   const parsed = readJsonFile<Partial<WorkflowPolicy>>(govFile(phrenPath, "workflow-policy"), {});
   const merged = withDefaults(parsed, DEFAULT_WORKFLOW_POLICY);
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
@@ -370,6 +548,11 @@ export function getWorkflowPolicy(phrenPath: string): WorkflowPolicy {
     merged.findingSensitivity = DEFAULT_WORKFLOW_POLICY.findingSensitivity;
   }
   return merged;
+}
+
+export function getWorkflowPolicy(phrenPath: string, projectName?: string): WorkflowPolicy {
+  if (projectName) return mergeConfig(phrenPath, projectName).workflowPolicy;
+  return getWorkflowPolicyGlobal(phrenPath);
 }
 
 export function updateWorkflowPolicy(phrenPath: string, patch: Partial<WorkflowPolicy>): PhrenResult<WorkflowPolicy> {

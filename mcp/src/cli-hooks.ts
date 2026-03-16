@@ -12,8 +12,7 @@ import {
   getPhrenPath,
 } from "./shared.js";
 import {
-  getRetentionPolicy,
-  getWorkflowPolicy,
+  mergeConfig,
 } from "./shared-governance.js";
 import {
   buildIndex,
@@ -279,6 +278,8 @@ export async function handleHookPrompt() {
     process.exit(0);
   }
 
+  const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
+
   const safeQuery = buildRobustFtsQuery(keywords, detectedProject, getPhrenPath());
   if (!safeQuery) process.exit(0);
 
@@ -290,7 +291,7 @@ export async function handleHookPrompt() {
     autoLearnQuerySynonyms(getPhrenPath(), detectedProject, keywordEntries, rows);
 
     const tTrust0 = Date.now();
-    const policy = getRetentionPolicy(getPhrenPath());
+    const policy = resolvedConfig.retentionPolicy;
     const memoryTtlDays = Number.parseInt(
       process.env.PHREN_MEMORY_TTL_DAYS || String(policy.ttlDays), 10
     );
@@ -304,7 +305,10 @@ export async function handleHookPrompt() {
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
-    if (isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && getProactivityLevelForFindings(getPhrenPath()) !== "low" && sessionId && detectedProject && cwd) {
+    const findingsProactivity = resolvedConfig.proactivity.findings
+      ?? resolvedConfig.proactivity.base
+      ?? getProactivityLevelForFindings(getPhrenPath());
+    if (isFeatureEnabled("PHREN_FEATURE_AUTO_EXTRACT", true) && findingsProactivity !== "low" && sessionId && detectedProject && cwd) {
       const marker = sessionMarker(getPhrenPath(), `extracted-${sessionId}-${detectedProject}`);
       if (!fs.existsSync(marker)) {
         try {
@@ -366,7 +370,9 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId);
-    const taskLevel = getProactivityLevelForTask(getPhrenPath());
+    const taskLevel = resolvedConfig.proactivity.tasks
+      ?? resolvedConfig.proactivity.base
+      ?? getProactivityLevelForTask(getPhrenPath());
     const taskLifecycle = handleTaskPromptLifecycle({
       phrenPath: getPhrenPath(),
       prompt,
@@ -382,8 +388,7 @@ export async function handleHookPrompt() {
 
     // Inject finding sensitivity agent instruction
     try {
-      const workflowPolicy = getWorkflowPolicy(getPhrenPath());
-      const sensitivity = workflowPolicy.findingSensitivity ?? "balanced";
+      const sensitivity = resolvedConfig.findingSensitivity ?? "balanced";
       const sensitivityConfig = FINDING_SENSITIVITY_CONFIG[sensitivity];
       if (sensitivityConfig) {
         parts.push("");

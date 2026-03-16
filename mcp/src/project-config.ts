@@ -4,7 +4,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { readInstallPreferences } from "./init-preferences.js";
 import { debugLog } from "./shared.js";
-import { errorMessage } from "./utils.js";
+import { errorMessage, safeProjectPath } from "./utils.js";
 import { withFileLock } from "./governance-locks.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
@@ -14,6 +14,30 @@ export interface ProjectMcpServerEntry {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+}
+
+export interface ProjectConfigOverrides {
+  findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
+  proactivity?: "high" | "medium" | "low";
+  proactivityFindings?: "high" | "medium" | "low";
+  proactivityTask?: "high" | "medium" | "low";
+  taskMode?: "off" | "manual" | "suggest" | "auto";
+  retentionPolicy?: {
+    ttlDays?: number;
+    retentionDays?: number;
+    autoAcceptThreshold?: number;
+    minInjectConfidence?: number;
+    decay?: {
+      d30?: number;
+      d60?: number;
+      d90?: number;
+      d120?: number;
+    };
+  };
+  workflowPolicy?: {
+    lowConfidenceThreshold?: number;
+    riskySections?: Array<"Review" | "Stale" | "Conflicts">;
+  };
 }
 
 export interface ProjectConfig {
@@ -28,6 +52,7 @@ export interface ProjectConfig {
     PostToolUse?: boolean;
   };
   mcpServers?: Record<string, ProjectMcpServerEntry>;
+  config?: ProjectConfigOverrides;
 }
 
 export const PROJECT_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const;
@@ -50,8 +75,27 @@ export function projectConfigPath(phrenPath: string, project: string): string {
   return path.join(phrenPath, project, "phren.project.yaml");
 }
 
+function resolveProjectConfigPath(phrenPath: string, project: string): string | null {
+  return safeProjectPath(phrenPath, project, "phren.project.yaml");
+}
+
+function writeProjectConfigFile(configPath: string, next: ProjectConfig): void {
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
+  fs.writeFileSync(tmpPath, yaml.dump(next, { lineWidth: 1000 }));
+  fs.renameSync(tmpPath, configPath);
+}
+
+function normalizeProjectOverrides(raw: unknown): ProjectConfigOverrides {
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as ProjectConfigOverrides : {};
+}
+
 export function readProjectConfig(phrenPath: string, project: string): ProjectConfig {
-  const configPath = projectConfigPath(phrenPath, project);
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) {
+    debugLog(`readProjectConfig: rejected path for project "${project}"`);
+    return {};
+  }
   if (!fs.existsSync(configPath)) return {};
   try {
     const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
@@ -63,8 +107,8 @@ export function readProjectConfig(phrenPath: string, project: string): ProjectCo
 }
 
 export function writeProjectConfig(phrenPath: string, project: string, patch: Partial<ProjectConfig>): ProjectConfig {
-  const configPath = path.resolve(projectConfigPath(phrenPath, project));
-  if (!configPath.startsWith(phrenPath + path.sep) && configPath !== phrenPath) {
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) {
     throw new Error(`Project config path escapes phren store`);
   }
   return withFileLock(configPath, () => {
@@ -73,10 +117,29 @@ export function writeProjectConfig(phrenPath: string, project: string, patch: Pa
       ...current,
       ...patch,
     };
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmpPath, yaml.dump(next, { lineWidth: 1000 }));
-    fs.renameSync(tmpPath, configPath);
+    writeProjectConfigFile(configPath, next);
+    return next;
+  });
+}
+
+export function updateProjectConfigOverrides(
+  phrenPath: string,
+  project: string,
+  updater: (current: ProjectConfigOverrides) => ProjectConfigOverrides,
+): ProjectConfig {
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) {
+    throw new Error(`Project config path escapes phren store`);
+  }
+  return withFileLock(configPath, () => {
+    const current = readProjectConfig(phrenPath, project);
+    const currentConfig = normalizeProjectOverrides(current.config);
+    const nextOverrides = normalizeProjectOverrides(updater(currentConfig));
+    const next: ProjectConfig = {
+      ...current,
+      config: nextOverrides,
+    };
+    writeProjectConfigFile(configPath, next);
     return next;
   });
 }
@@ -119,8 +182,8 @@ export function writeProjectHookConfig(
   patch: Partial<ProjectHookConfig>,
 ): ProjectConfig {
   // Move read+merge inside the lock so concurrent writers cannot clobber each other.
-  const configPath = path.resolve(projectConfigPath(phrenPath, project));
-  if (!configPath.startsWith(phrenPath + path.sep) && configPath !== phrenPath) {
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) {
     throw new Error(`Project config path escapes phren store`);
   }
   return withFileLock(configPath, () => {
@@ -132,10 +195,7 @@ export function writeProjectHookConfig(
         ...patch,
       },
     };
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmpPath, yaml.dump(next, { lineWidth: 1000 }));
-    fs.renameSync(tmpPath, configPath);
+    writeProjectConfigFile(configPath, next);
     return next;
   });
 }

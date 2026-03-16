@@ -8,6 +8,7 @@ import {
   updateWorkflowPolicy,
   getIndexPolicy,
   updateIndexPolicy,
+  mergeConfig,
 } from "./shared-governance.js";
 import {
   PROACTIVITY_LEVELS,
@@ -21,6 +22,12 @@ import {
   writeGovernanceInstallPreferences,
 } from "./init-preferences.js";
 import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
+import {
+  readProjectConfig,
+  type ProjectConfigOverrides,
+  updateProjectConfigOverrides,
+} from "./project-config.js";
+import { isValidProjectName } from "./utils.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -40,8 +47,29 @@ function proactivitySnapshot(phrenPath: string) {
   };
 }
 
+function validateProject(project: string): string | null {
+  if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  return null;
+}
+
+function normalizeProjectOverrides(raw: unknown): ProjectConfigOverrides {
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as ProjectConfigOverrides : {};
+}
+
+function getProjectOverrides(phrenPath: string, project: string): ProjectConfigOverrides {
+  return normalizeProjectOverrides(readProjectConfig(phrenPath, project).config);
+}
+
+function hasOwnOverride(overrides: ProjectConfigOverrides, key: keyof ProjectConfigOverrides): boolean {
+  return Object.prototype.hasOwnProperty.call(overrides, key);
+}
+
 const TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
 const FINDING_SENSITIVITY_LEVELS = ["minimal", "conservative", "balanced", "aggressive"] as const;
+
+const projectParam = z.string().optional().describe(
+  "Project name. When provided, writes to that project's phren.project.yaml instead of global .governance/."
+);
 
 // ── Registration ────────────────────────────────────────────────────────────
 
@@ -57,16 +85,93 @@ export function register(server: McpServer, ctx: McpContext): void {
       description:
         "Read current configuration for one or all config domains: proactivity, taskMode, " +
         "findingSensitivity, retention (policy), workflow, access, index. " +
-        "Returns both configured and effective values.",
+        "Returns both configured and effective values. When project is provided, returns " +
+        "the merged view with project overrides applied and _source annotations.",
       inputSchema: z.object({
         domain: z
           .enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "all"])
           .optional()
           .describe("Config domain to read. Defaults to 'all'."),
+        project: projectParam,
       }),
     },
-    async ({ domain }) => {
+    async ({ domain, project }) => {
       const d = domain ?? "all";
+
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+
+        const resolved = mergeConfig(phrenPath, project);
+        const projectOverrides = getProjectOverrides(phrenPath, project);
+
+        function src(key: keyof ProjectConfigOverrides): "project" | "global" {
+          return hasOwnOverride(projectOverrides, key) ? "project" : "global";
+        }
+
+        const result: Record<string, unknown> = {
+          _project: project,
+          _note: "Values marked _source=project override the global default.",
+        };
+
+        if (d === "all" || d === "findingSensitivity") {
+          const level = resolved.findingSensitivity;
+          result.findingSensitivity = {
+            level,
+            ...FINDING_SENSITIVITY_CONFIG[level],
+            _source: src("findingSensitivity"),
+          };
+        }
+        if (d === "all" || d === "taskMode") {
+          result.taskMode = { taskMode: resolved.taskMode, _source: src("taskMode") };
+        }
+        if (d === "all" || d === "retention") {
+          result.retention = {
+            ...resolved.retentionPolicy,
+            _source: hasOwnOverride(projectOverrides, "retentionPolicy") ? "project" : "global",
+          };
+        }
+        if (d === "all" || d === "workflow") {
+          result.workflow = {
+            ...resolved.workflowPolicy,
+            _source: hasOwnOverride(projectOverrides, "workflowPolicy") ? "project" : "global",
+          };
+        }
+        if (d === "all" || d === "proactivity") {
+          const globalSnapshot = proactivitySnapshot(phrenPath).effective;
+          const base = resolved.proactivity.base ?? globalSnapshot.proactivity;
+          const findings = resolved.proactivity.findings ?? resolved.proactivity.base ?? globalSnapshot.proactivityFindings;
+          const tasks = resolved.proactivity.tasks ?? resolved.proactivity.base ?? globalSnapshot.proactivityTask;
+          result.proactivity = {
+            base,
+            findings,
+            tasks,
+            _source: {
+              base: hasOwnOverride(projectOverrides, "proactivity") ? "project" : "global",
+              findings: hasOwnOverride(projectOverrides, "proactivityFindings")
+                ? "project"
+                : hasOwnOverride(projectOverrides, "proactivity")
+                  ? "project"
+                  : "global",
+              tasks: hasOwnOverride(projectOverrides, "proactivityTask")
+                ? "project"
+                : hasOwnOverride(projectOverrides, "proactivity")
+                  ? "project"
+                  : "global",
+            },
+          };
+        }
+        if (d === "all" || d === "index") {
+          result.index = getIndexPolicy(phrenPath);
+        }
+
+        return mcpResponse({
+          ok: true,
+          message: `Config for ${d === "all" ? "all domains" : d} (project: ${project}).`,
+          data: result,
+        });
+      }
+
       const result: Record<string, unknown> = {};
 
       if (d === "all" || d === "proactivity") {
@@ -108,17 +213,36 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · set proactivity",
       description:
         "Set the proactivity level for auto-capture. Controls how aggressively phren " +
-        "captures findings and tasks. Supports base level, findings-specific, and task-specific overrides.",
+        "captures findings and tasks. Supports base level, findings-specific, and task-specific overrides. " +
+        "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
         level: z.enum(PROACTIVITY_LEVELS).describe("Proactivity level: high, medium, or low."),
         scope: z
           .enum(["base", "findings", "tasks"])
           .optional()
           .describe("Which proactivity to set. Defaults to 'base'."),
+        project: projectParam,
       }),
     },
-    async ({ level, scope }) => {
+    async ({ level, scope, project }) => {
       const s = scope ?? "base";
+
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+
+        const key = s === "base" ? "proactivity" : s === "findings" ? "proactivityFindings" : "proactivityTask";
+        updateProjectConfigOverrides(phrenPath, project, (current) => ({
+          ...current,
+          [key]: level,
+        }));
+        return mcpResponse({
+          ok: true,
+          message: `Proactivity ${s} set to ${level} for project "${project}".`,
+          data: { project, scope: s, level },
+        });
+      }
+
       const patch: Record<string, string> = {};
       if (s === "base") patch.proactivity = level;
       else if (s === "findings") patch.proactivityFindings = level;
@@ -141,12 +265,29 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · set task mode",
       description:
         "Set the task automation mode: off (no auto-tasks), manual (user creates), " +
-        "suggest (phren suggests, user approves), auto (phren creates automatically).",
+        "suggest (phren suggests, user approves), auto (phren creates automatically). " +
+        "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
         mode: z.enum(TASK_MODES).describe("Task mode: off, manual, suggest, or auto."),
+        project: projectParam,
       }),
     },
-    async ({ mode }) => {
+    async ({ mode, project }) => {
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+
+        updateProjectConfigOverrides(phrenPath, project, (current) => ({
+          ...current,
+          taskMode: mode,
+        }));
+        return mcpResponse({
+          ok: true,
+          message: `Task mode set to ${mode} for project "${project}".`,
+          data: { project, taskMode: mode },
+        });
+      }
+
       const result = updateWorkflowPolicy(phrenPath, { taskMode: mode });
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
@@ -168,12 +309,30 @@ export function register(server: McpServer, ctx: McpContext): void {
       description:
         "Set the finding capture sensitivity level. Controls how many findings phren captures per session. " +
         "minimal: only explicit asks. conservative: decisions/pitfalls only. " +
-        "balanced: non-obvious patterns. aggressive: capture everything.",
+        "balanced: non-obvious patterns. aggressive: capture everything. " +
+        "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
         level: z.enum(FINDING_SENSITIVITY_LEVELS).describe("Sensitivity level."),
+        project: projectParam,
       }),
     },
-    async ({ level }) => {
+    async ({ level, project }) => {
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+
+        updateProjectConfigOverrides(phrenPath, project, (current) => ({
+          ...current,
+          findingSensitivity: level,
+        }));
+        const config = FINDING_SENSITIVITY_CONFIG[level];
+        return mcpResponse({
+          ok: true,
+          message: `Finding sensitivity set to ${level} for project "${project}".`,
+          data: { project, level, ...config },
+        });
+      }
+
       const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: level });
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
@@ -195,7 +354,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · set retention policy",
       description:
         "Update memory retention policy: TTL, retention days, auto-accept threshold, " +
-        "minimum injection confidence, and decay curve.",
+        "minimum injection confidence, and decay curve. " +
+        "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
         ttlDays: z.number().int().min(1).optional().describe("Days before a finding is considered for expiry."),
         retentionDays: z.number().int().min(1).optional().describe("Hard retention limit in days."),
@@ -210,17 +370,39 @@ export function register(server: McpServer, ctx: McpContext): void {
           })
           .optional()
           .describe("Decay multipliers at 30/60/90/120 day marks."),
+        project: projectParam,
       }),
     },
-    async ({ ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay }) => {
-      const patch: Record<string, unknown> = {};
-      if (ttlDays !== undefined) patch.ttlDays = ttlDays;
-      if (retentionDays !== undefined) patch.retentionDays = retentionDays;
-      if (autoAcceptThreshold !== undefined) patch.autoAcceptThreshold = autoAcceptThreshold;
-      if (minInjectConfidence !== undefined) patch.minInjectConfidence = minInjectConfidence;
-      if (decay !== undefined) patch.decay = decay;
+    async ({ ttlDays, retentionDays, autoAcceptThreshold, minInjectConfidence, decay, project }) => {
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
 
-      const result = updateRetentionPolicy(phrenPath, patch);
+        const next = updateProjectConfigOverrides(phrenPath, project, (current) => {
+          const existingRetention = current.retentionPolicy ?? {};
+          const retentionPatch: NonNullable<ProjectConfigOverrides["retentionPolicy"]> = { ...existingRetention };
+          if (ttlDays !== undefined) retentionPatch.ttlDays = ttlDays;
+          if (retentionDays !== undefined) retentionPatch.retentionDays = retentionDays;
+          if (autoAcceptThreshold !== undefined) retentionPatch.autoAcceptThreshold = autoAcceptThreshold;
+          if (minInjectConfidence !== undefined) retentionPatch.minInjectConfidence = minInjectConfidence;
+          if (decay !== undefined) retentionPatch.decay = { ...(existingRetention.decay ?? {}), ...decay };
+          return { ...current, retentionPolicy: retentionPatch };
+        });
+        return mcpResponse({
+          ok: true,
+          message: `Retention policy updated for project "${project}".`,
+          data: { project, retentionPolicy: next.config?.retentionPolicy ?? {} },
+        });
+      }
+
+      const globalPatch: Parameters<typeof updateRetentionPolicy>[1] = {};
+      if (ttlDays !== undefined) globalPatch.ttlDays = ttlDays;
+      if (retentionDays !== undefined) globalPatch.retentionDays = retentionDays;
+      if (autoAcceptThreshold !== undefined) globalPatch.autoAcceptThreshold = autoAcceptThreshold;
+      if (minInjectConfidence !== undefined) globalPatch.minInjectConfidence = minInjectConfidence;
+      if (decay !== undefined) globalPatch.decay = decay;
+
+      const result = updateRetentionPolicy(phrenPath, globalPatch);
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
       }
@@ -240,7 +422,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · set workflow policy",
       description:
         "Update workflow policy: low-confidence threshold, " +
-        "risky sections list, task mode, and finding sensitivity.",
+        "risky sections list, task mode, and finding sensitivity. " +
+        "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
         lowConfidenceThreshold: z.number().min(0).max(1).optional()
           .describe("Confidence below which items are flagged as low-confidence."),
@@ -250,10 +433,41 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Task automation mode."),
         findingSensitivity: z.enum(FINDING_SENSITIVITY_LEVELS).optional()
           .describe("Finding capture sensitivity."),
+        project: projectParam,
       }),
     },
-    async ({ lowConfidenceThreshold, riskySections, taskMode, findingSensitivity }) => {
-      const patch: Record<string, unknown> = {};
+    async ({ lowConfidenceThreshold, riskySections, taskMode, findingSensitivity, project }) => {
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+
+        const next = updateProjectConfigOverrides(phrenPath, project, (current) => {
+          const nextConfig: ProjectConfigOverrides = { ...current };
+          const shouldUpdateWorkflowPolicy = (
+            lowConfidenceThreshold !== undefined
+            || riskySections !== undefined
+            || current.workflowPolicy !== undefined
+          );
+          if (shouldUpdateWorkflowPolicy) {
+            const existingWorkflow = current.workflowPolicy ?? {};
+            nextConfig.workflowPolicy = {
+              ...existingWorkflow,
+              ...(lowConfidenceThreshold !== undefined ? { lowConfidenceThreshold } : {}),
+              ...(riskySections !== undefined ? { riskySections } : {}),
+            };
+          }
+          if (taskMode !== undefined) nextConfig.taskMode = taskMode;
+          if (findingSensitivity !== undefined) nextConfig.findingSensitivity = findingSensitivity;
+          return nextConfig;
+        });
+        return mcpResponse({
+          ok: true,
+          message: `Workflow policy updated for project "${project}".`,
+          data: { project, config: next.config ?? {} },
+        });
+      }
+
+      const patch: Parameters<typeof updateWorkflowPolicy>[1] = {};
       if (lowConfidenceThreshold !== undefined) patch.lowConfidenceThreshold = lowConfidenceThreshold;
       if (riskySections !== undefined) patch.riskySections = riskySections;
       if (taskMode !== undefined) patch.taskMode = taskMode;
@@ -289,7 +503,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ includeGlobs, excludeGlobs, includeHidden }) => {
-      const patch: Record<string, unknown> = {};
+      const patch: Parameters<typeof updateIndexPolicy>[1] = {};
       if (includeGlobs !== undefined) patch.includeGlobs = includeGlobs;
       if (excludeGlobs !== undefined) patch.excludeGlobs = excludeGlobs;
       if (includeHidden !== undefined) patch.includeHidden = includeHidden;
