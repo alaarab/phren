@@ -888,7 +888,7 @@ phren search --from-history 3</code></pre>
         <h3 class="doc-h3"><code>phren pin</code></h3>
         <p>Write a canonical truth to <code>truths.md</code>. Truths are always injected and never decay.</p>
         <pre><code>phren pin &lt;project&gt; "&lt;truth text&gt;"</code></pre>
-        <pre><code>phren pin my-app "Deploy to staging first, then prod — never skip staging"</code></pre>
+        <pre><code>phren pin my-app "Deploy to staging first, then prod. Never skip staging"</code></pre>
 
         <!-- TASKS -->
         <h2 class="doc-h2">Tasks</h2>
@@ -1156,7 +1156,7 @@ phren skills enable global review-pr</code></pre>
         <h1 class="doc-section-title">Hooks</h1>
         <p class="doc-section-subtitle">What fires, when, and how to add your own integrations.</p>
 
-        <p>Phren hooks are shell commands registered in each AI agent's config file. They run automatically at lifecycle events: injecting context before each prompt, committing changes after each response, and syncing state at session boundaries. Hooks fire independently per tool — Claude, Codex, Copilot CLI, and Cursor each use their own config format.</p>
+        <p>Phren hooks are shell commands registered in each AI agent's config file. They run automatically at lifecycle events: injecting context before each prompt, committing changes after each response, and syncing state at session boundaries. Hooks fire independently per tool. Claude, Codex, Copilot CLI, and Cursor each use their own config format.</p>
 
         <p>Hooks run as <code>node &lt;entry&gt; &lt;command&gt;</code> when a local install exists, which avoids the cold-start delay of <code>npx</code>.</p>
 
@@ -1431,7 +1431,7 @@ push_changes("sync: manual push from home machine")</code></pre>
         <!-- FINDINGS -->
         <div class="tool-group">
           <p class="tool-group-title">Finding capture (11 tools)</p>
-          <div class="tool-row"><span class="tool-name">add_finding</span><span class="tool-desc">Append an insight to FINDINGS.md. Optional: <code>citation</code> (file/line/repo/commit/task_item), <code>findingType</code> (decision/pitfall/pattern/…), <code>source</code> (human/agent/hook/extract/consolidation/unknown), <code>sessionId</code>. Returns potential duplicates via Jaccard similarity for the agent to evaluate — no extra API call.</span></div>
+          <div class="tool-row"><span class="tool-name">add_finding</span><span class="tool-desc">Append an insight to FINDINGS.md. Optional: <code>citation</code> (file/line/repo/commit/task_item), <code>findingType</code> (decision/pitfall/pattern/…), <code>source</code> (human/agent/hook/extract/consolidation/unknown), <code>sessionId</code>. Returns potential duplicates via Jaccard similarity for the agent to evaluate. No extra API call.</span></div>
           <div class="tool-row"><span class="tool-name">add_findings</span><span class="tool-desc">Bulk add multiple findings in one call.</span></div>
           <div class="tool-row"><span class="tool-name">supersede_finding</span><span class="tool-desc">Mark a finding as superseded by a newer one. Superseded findings score 0.25x in retrieval and are stripped from the FTS index.</span></div>
           <div class="tool-row"><span class="tool-name">retract_finding</span><span class="tool-desc">Retract a finding with a reason. Retracted findings score 0.1x in retrieval and are stripped from the FTS index.</span></div>
@@ -1528,7 +1528,7 @@ push_changes("sync: manual push from home machine")</code></pre>
       <!-- ============================================================ -->
       <section class="doc-section" id="graph-engine">
         <h1 class="doc-section-title">Graph Engine API</h1>
-        <p class="doc-section-subtitle">The fragment graph webview exposes a small JS API for host integration — used by the VS Code extension and the phren web UI.</p>
+        <p class="doc-section-subtitle">The fragment graph webview exposes a small JS API for host integration, used by the VS Code extension and the phren web UI.</p>
 
         <p>The graph engine is mounted into a container element and communicates back to the host via a callback. All coordinates use CSS pixel space.</p>
 

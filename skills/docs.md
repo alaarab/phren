@@ -74,10 +74,10 @@ These numbers appear in multiple files and must all agree:
 
 | Item | Where to verify |
 |------|----------------|
-| MCP tool count | `mcp/src/index.ts` — count `server.tool(` calls |
-| CLI subcommand count | `mcp/src/cli.ts` — count `program.command(` calls |
+| MCP tool count | `mcp/src/index.ts`: count `server.tool(` calls |
+| CLI subcommand count | `mcp/src/cli.ts`: count `program.command(` calls |
 | Version | `package.json` → `version` field |
-| Hook events | `mcp/src/init.ts` — look for hook registration |
+| Hook events | `mcp/src/init.ts`: look for hook registration |
 
 Run `/parity` if it is installed to automate numeric cross-checking across surfaces.
 
@@ -95,7 +95,7 @@ Sections to verify and update:
 - **Tool count** in any summary sentence (e.g. "65 MCP tools")
 
 When updating the HTML:
-- Keep existing structure and CSS classes — do not restructure the page
+- Keep existing structure and CSS classes. Do not restructure the page
 - Update text content only; do not rewrite layout
 - Preserve the `<details>` blocks for env var categories if they exist
 
@@ -103,12 +103,12 @@ When updating the HTML:
 
 These files are consumed by LLMs directly. Keep them plain text with no HTML.
 
-`llms.txt` — short summary (under 60 lines):
+`llms.txt`, short summary (under 60 lines):
 - Tool count
 - Install command
 - One-line description of what phren does
 
-`llms-full.txt` — comprehensive reference:
+`llms-full.txt`, comprehensive reference:
 - All MCP tool signatures with descriptions
 - All CLI commands
 - All environment variables
@@ -122,7 +122,7 @@ The CLI commands block must list every top-level command. Add or remove lines to
 
 ### 7. Sync version references
 
-`CHANGELOG.md`: the top entry's version must match `package.json`. If a new version was bumped but the changelog has no entry yet, note it — do not fabricate one.
+`CHANGELOG.md`: the top entry's version must match `package.json`. If a new version was bumped but the changelog has no entry yet, note it. Do not fabricate one.
 
 `README.md` and `docs/index.html`: update any hardcoded version strings (badges, `npm install @phren/cli@X.Y.Z`, etc.).
 
@@ -150,18 +150,18 @@ No changes needed:
   - mcp/README.md: tool count correct
 
 Warnings:
-  - docs/faq.md: references `phren init` — command was renamed to `phren link` in v0.0.7
+  - docs/faq.md: references `phren init`, command was renamed to `phren link` in v0.0.7
 ```
 
 List every file checked. Be specific about what changed and what line/section.
 
 ## What not to do
 
-- Do not restructure or reformat documentation for style — only fix accuracy
+- Do not restructure or reformat documentation for style. Only fix accuracy
 - Do not add new sections or features to the docs without user direction
 - Do not fabricate changelog entries for unreleased versions
-- Do not silently skip a surface because it looks "probably fine" — check all of them
-- Do not guess tool counts — always derive from `grep` on the source file
+- Do not silently skip a surface because it looks "probably fine". Check all of them
+- Do not guess tool counts. Always derive from `grep` on the source file
 
 ## Related skills
 

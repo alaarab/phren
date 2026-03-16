@@ -2,7 +2,7 @@
 
 ## How is this different from just using CLAUDE.md?
 
-`CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time — whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
+`CLAUDE.md` loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that's 10,000 tokens of context before anyone types a word.
 
 Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with `PHREN_CONTEXT_TOKEN_BUDGET`, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they're not reading noise.
 
@@ -12,13 +12,13 @@ Phren searches what you wrote and injects only what matches the current prompt. 
 
 Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path. On a healthy warm cache it is often fast enough that you will barely notice it, but the exact latency depends on corpus size, filesystem speed, and whether semantic retrieval is enabled.
 
-The main exceptions are the first prompt in a session, where `SessionStart` pulls the phren repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable — you can disable the auto-pull if you prefer to sync manually.
+The main exceptions are the first prompt in a session, where `SessionStart` pulls the phren repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable. You can disable the auto-pull if you prefer to sync manually.
 
 ## What happens when I run multiple agents at the same time?
 
 They all read and write the same `~/.phren` directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.
 
-In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing — it's just a shared git repo.
+In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing. It's just a shared git repo.
 
 The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.
 
@@ -147,7 +147,7 @@ Project setup note:
 
 ## Does phren require MCP?
 
-No. MCP is recommended — it gives agents 66 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended. It gives agents 66 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 phren init --mcp off

@@ -1,6 +1,6 @@
 # My Phren
 
-Your personal project store for [phren](https://github.com/alaarab/phren). Phren is your project's memory keeper — he holds what your agents learn and surfaces it when it matters, across sessions and machines.
+Your personal project store for [phren](https://github.com/alaarab/phren). Phren is your project's memory keeper. He holds what your agents learn and surfaces it when it matters, across sessions and machines.
 
 ## Structure
 

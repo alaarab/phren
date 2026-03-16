@@ -89,7 +89,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `pin_memory` | `project`, `memory` | Write a truth into truths.md — never decays, always injected. |
+| `pin_memory` | `project`, `memory` | Write a truth into truths.md. Never decays, always injected. |
 | `memory_feedback` | `key`, `feedback` | Record whether an injected memory was `helpful`, a `reprompt`, or a `regression`. |
 
 ### Data Management
