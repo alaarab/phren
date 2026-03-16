@@ -84,10 +84,18 @@ function writeProjectConfigFile(configPath: string, next: ProjectConfig): void {
   const tmpPath = `${configPath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, yaml.dump(next, { lineWidth: 1000 }));
   fs.renameSync(tmpPath, configPath);
+  _projectConfigCache.delete(configPath);
 }
 
 function normalizeProjectOverrides(raw: unknown): ProjectConfigOverrides {
   return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as ProjectConfigOverrides : {};
+}
+
+// ── mtime-based config cache ─────────────────────────────────────────────────
+const _projectConfigCache = new Map<string, { mtimeMs: number; config: ProjectConfig }>();
+
+export function clearProjectConfigCache(): void {
+  _projectConfigCache.clear();
 }
 
 export function readProjectConfig(phrenPath: string, project: string): ProjectConfig {
@@ -96,12 +104,26 @@ export function readProjectConfig(phrenPath: string, project: string): ProjectCo
     debugLog(`readProjectConfig: rejected path for project "${project}"`);
     return {};
   }
-  if (!fs.existsSync(configPath)) return {};
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(configPath).mtimeMs;
+  } catch {
+    // File doesn't exist or can't be stat'd
+    _projectConfigCache.delete(configPath);
+    return {};
+  }
+  const cached = _projectConfigCache.get(configPath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.config;
+  }
   try {
     const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
+    const config = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
+    _projectConfigCache.set(configPath, { mtimeMs, config });
+    return config;
   } catch (err: unknown) {
     debugLog(`readProjectConfig: failed to parse ${configPath}: ${errorMessage(err)}`);
+    _projectConfigCache.delete(configPath);
     return {};
   }
 }

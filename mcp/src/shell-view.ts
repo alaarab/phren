@@ -47,6 +47,7 @@ import {
 import { readInstallPreferences } from "./init-preferences.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "./project-config.js";
 import { getScopedSkills } from "./skill-registry.js";
+import { errorMessage } from "./utils.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -346,7 +347,7 @@ function parseSubsections(taskPath: string, project: string, cache: SubsectionsC
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${errorMessage(err)}\n`);
   }
   const newCache = { project, map };
   return { map, cache: newCache };

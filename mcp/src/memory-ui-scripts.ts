@@ -842,12 +842,93 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
     }
 
+    function getSettingsProject() {
+      var sel = document.getElementById('settings-project-select');
+      return sel ? sel.value : '';
+    }
+
+    function postProjectOverride(project, field, value, clearField) {
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var payload = { project: project, field: field, value: value || '', clear: clearField ? 'true' : 'false' };
+        var body = new URLSearchParams(payload);
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl('/api/settings/project-overrides') : '/api/settings/project-overrides';
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Failed to update project override', 'err');
+          return;
+        }
+        _settingsLoaded = false;
+        loadSettings();
+        setSettingsStatus('Project override updated', 'ok');
+      }).catch(function(err) {
+        setSettingsStatus('Failed: ' + String(err), 'err');
+      });
+    }
+
     function loadSettings() {
-      var url = _tsAuthToken ? tsAuthUrl('/api/settings') : '/api/settings';
+      var selectedProject = getSettingsProject();
+      var baseUrl = '/api/settings';
+      if (selectedProject) baseUrl += '?project=' + encodeURIComponent(selectedProject);
+      var url = _tsAuthToken ? tsAuthUrl(baseUrl) : baseUrl;
+
+      // Populate project selector on first load
+      var sel = document.getElementById('settings-project-select');
+      if (sel && sel.querySelectorAll('option[data-proj]').length === 0) {
+        var configUrl = _tsAuthToken ? tsAuthUrl('/api/config') : '/api/config';
+        fetch(configUrl).then(function(r) { return r.json(); }).then(function(d) {
+          if (d.ok && d.projects && d.projects.length && sel) {
+            d.projects.forEach(function(p) {
+              var opt = document.createElement('option');
+              opt.value = p; opt.textContent = p;
+              opt.setAttribute('data-proj', '1');
+              sel.appendChild(opt);
+            });
+            if (selectedProject) sel.value = selectedProject;
+          }
+        }).catch(function() {});
+      }
+
+      var scopeNote = document.getElementById('settings-scope-note');
+      if (scopeNote) {
+        scopeNote.textContent = selectedProject
+          ? 'Showing effective config for "' + selectedProject + '". Overrides are saved to that project\'s phren.project.yaml.'
+          : 'Showing global settings. Select a project to view and edit per-project overrides.';
+      }
+
+      // Wire onChange once
+      if (sel && !sel.getAttribute('data-onchange-wired')) {
+        sel.setAttribute('data-onchange-wired', '1');
+        sel.addEventListener('change', function() {
+          _settingsLoaded = false;
+          loadSettings();
+        });
+      }
+
       fetch(url).then(function(r) { return r.json(); }).then(function(data) {
         if (!data.ok) {
           setSettingsStatus(data.error || 'Failed to load settings', 'err');
           return;
+        }
+
+        // Use merged config when a project is selected, else global
+        var effective = (selectedProject && data.merged) ? data.merged : null;
+        var rawOverrides = (selectedProject && data.overrides) ? data.overrides : null;
+        var effectiveSensitivity = effective ? effective.findingSensitivity : (data.findingSensitivity || 'balanced');
+        var effectiveTaskMode = effective ? effective.taskMode : (data.taskMode || 'auto');
+        var effectiveProactivity = data.proactivity || 'high';
+        var effectiveRetention = (effective && effective.retentionPolicy) ? effective.retentionPolicy : (data.retentionPolicy || {});
+        var effectiveWorkflow = (effective && effective.workflowPolicy) ? effective.workflowPolicy : (data.workflowPolicy || {});
+
+        var isProject = Boolean(selectedProject);
+
+        function sourceBadge(isOverride) {
+          if (!isProject) return '';
+          return isOverride
+            ? '<span style="font-size:10px;font-weight:600;color:var(--warning);margin-left:6px;padding:1px 6px;border:1px solid color-mix(in srgb,var(--warning) 40%,transparent);border-radius:var(--radius-sm)">project override</span>'
+            : '<span style="font-size:10px;color:var(--text-muted);margin-left:6px;padding:1px 6px;border:1px solid var(--border);border-radius:var(--radius-sm)">global default</span>';
         }
 
         var findingDescriptions = {
@@ -859,56 +940,129 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
         var findingsEl = document.getElementById('settings-findings');
         if (findingsEl) {
-          var fsUi = findingStorageToUi(data.findingSensitivity || 'balanced');
+          var fsUi = findingStorageToUi(effectiveSensitivity);
           var findingsHtml = '';
+          var fsSensOverride = rawOverrides && rawOverrides.findingSensitivity != null;
           findingsHtml += '<div class="settings-control">';
-          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Finding sensitivity</span></div>';
+          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Finding sensitivity</span>' + sourceBadge(fsSensOverride);
+          if (isProject && fsSensOverride) {
+            findingsHtml += '<button data-ts-action="clearProjectOverride" data-field="findingSensitivity" class="settings-chip" style="font-size:11px;margin-left:auto">Clear override</button>';
+          }
+          findingsHtml += '</div>';
           findingsHtml += '<div class="settings-chip-row">';
           ['high', 'medium', 'low', 'minimal'].forEach(function(level) {
             var active = level === fsUi ? ' active' : '';
-            findingsHtml += '<button data-ts-action="setFindingSensitivity" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
+            var action = isProject ? 'setProjectFindingSensitivity' : 'setFindingSensitivity';
+            findingsHtml += '<button data-ts-action="' + action + '" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
           });
           findingsHtml += '</div>';
           findingsHtml += '<div class="settings-control-note" id="settings-fs-desc">' + esc(findingDescriptions[fsUi] || '') + '</div>';
           findingsHtml += '</div>';
-          findingsHtml += '<div class="settings-control">';
-          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Auto-capture</span>';
-          findingsHtml += '<button data-ts-action="toggleAutoCapture" data-enabled="' + (data.autoCaptureEnabled ? 'true' : 'false') + '" class="settings-chip' + (data.autoCaptureEnabled ? ' active' : '') + '">' + (data.autoCaptureEnabled ? 'On' : 'Off') + '</button></div>';
-          findingsHtml += '<div class="settings-control-note">Turn automatic finding capture on or off.</div>';
-          findingsHtml += '</div>';
-          findingsHtml += '<div class="settings-control">';
-          findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Consolidation threshold</span><span class="badge">' + esc(String(data.consolidationEntryThreshold || 25)) + ' entries</span></div>';
-          findingsHtml += '<div class="settings-control-note">Consolidation is also recommended after 60+ days with at least 10 new entries.</div>';
-          findingsHtml += '</div>';
+          if (!isProject) {
+            findingsHtml += '<div class="settings-control">';
+            findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Auto-capture</span>';
+            findingsHtml += '<button data-ts-action="toggleAutoCapture" data-enabled="' + (data.autoCaptureEnabled ? 'true' : 'false') + '" class="settings-chip' + (data.autoCaptureEnabled ? ' active' : '') + '">' + (data.autoCaptureEnabled ? 'On' : 'Off') + '</button></div>';
+            findingsHtml += '<div class="settings-control-note">Turn automatic finding capture on or off.</div>';
+            findingsHtml += '</div>';
+            findingsHtml += '<div class="settings-control">';
+            findingsHtml += '<div class="settings-control-header"><span class="settings-control-label">Consolidation threshold</span><span class="badge">' + esc(String(data.consolidationEntryThreshold || 25)) + ' entries</span></div>';
+            findingsHtml += '<div class="settings-control-note">Consolidation is also recommended after 60+ days with at least 10 new entries.</div>';
+            findingsHtml += '</div>';
+          }
           findingsEl.innerHTML = findingsHtml;
         }
 
         var behaviorEl = document.getElementById('settings-behavior');
         if (behaviorEl) {
-          var taskMode = data.taskMode === 'suggest' ? 'manual' : (data.taskMode || 'auto');
-          var proactivity = data.proactivity || 'high';
+          var taskMode = effectiveTaskMode || 'auto';
+          var proactivity = effectiveProactivity;
           var behaviorHtml = '';
+          var taskModeOverride = rawOverrides && rawOverrides.taskMode != null;
           behaviorHtml += '<div class="settings-control">';
-          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Task mode</span></div>';
+          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Task mode</span>' + sourceBadge(taskModeOverride);
+          if (isProject && taskModeOverride) {
+            behaviorHtml += '<button data-ts-action="clearProjectOverride" data-field="taskMode" class="settings-chip" style="font-size:11px;margin-left:auto">Clear override</button>';
+          }
+          behaviorHtml += '</div>';
           behaviorHtml += '<div class="settings-chip-row">';
-          ['auto', 'manual', 'off'].forEach(function(mode) {
+          ['auto', 'suggest', 'manual', 'off'].forEach(function(mode) {
             var active = mode === taskMode ? ' active' : '';
-            behaviorHtml += '<button data-ts-action="setTaskMode" data-mode="' + esc(mode) + '" class="settings-chip' + active + '">' + esc(mode) + '</button>';
+            var action = isProject ? 'setProjectTaskMode' : 'setTaskMode';
+            behaviorHtml += '<button data-ts-action="' + action + '" data-mode="' + esc(mode) + '" class="settings-chip' + active + '">' + esc(mode) + '</button>';
           });
           behaviorHtml += '</div></div>';
-          behaviorHtml += '<div class="settings-control">';
-          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Proactivity level</span></div>';
-          behaviorHtml += '<div class="settings-chip-row">';
-          ['high', 'medium', 'low'].forEach(function(level) {
-            var active = level === proactivity ? ' active' : '';
-            behaviorHtml += '<button data-ts-action="setProactivity" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
-          });
-          behaviorHtml += '</div></div>';
+          if (!isProject) {
+            behaviorHtml += '<div class="settings-control">';
+            behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Proactivity level</span></div>';
+            behaviorHtml += '<div class="settings-chip-row">';
+            ['high', 'medium', 'low'].forEach(function(level) {
+              var active = level === proactivity ? ' active' : '';
+              behaviorHtml += '<button data-ts-action="setProactivity" data-level="' + esc(level) + '" class="settings-chip' + active + '">' + esc(level) + '</button>';
+            });
+            behaviorHtml += '</div></div>';
+          }
           behaviorEl.innerHTML = behaviorHtml;
         }
 
+        var retentionEl = document.getElementById('settings-retention');
+        if (retentionEl) {
+          var ret = effectiveRetention;
+          var retHtml = '';
+          function retRow(label, field, value, note) {
+            var isOverride = isProject && rawOverrides && rawOverrides.retentionPolicy && rawOverrides.retentionPolicy[field] !== undefined;
+            retHtml += '<div class="settings-control">';
+            retHtml += '<div class="settings-control-header"><span class="settings-control-label">' + esc(label) + '</span>' + sourceBadge(isOverride);
+            retHtml += '<span class="settings-control-value" style="margin-left:auto">' + esc(String(value != null ? value : '—')) + '</span>';
+            if (isProject && isOverride) {
+              retHtml += '<button data-ts-action="clearProjectOverride" data-field="' + esc(field) + '" class="settings-chip" style="font-size:11px">Clear</button>';
+            }
+            retHtml += '</div>';
+            if (note) retHtml += '<div class="settings-control-note">' + esc(note) + '</div>';
+            if (isProject) {
+              retHtml += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+                '<input type="number" id="ret-input-' + esc(field) + '" value="' + esc(String(value != null ? value : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+                '<button data-ts-action="setProjectRetention" data-field="' + esc(field) + '" class="settings-chip active" style="font-size:11px">Set</button>' +
+                '</div>';
+            }
+            retHtml += '</div>';
+          }
+          retRow('TTL days', 'ttlDays', ret.ttlDays, 'Memories older than this are eligible for pruning.');
+          retRow('Retention days', 'retentionDays', ret.retentionDays, 'Hard cutoff — memories past this age are removed.');
+          retRow('Auto-accept threshold', 'autoAcceptThreshold', ret.autoAcceptThreshold, 'Confidence score (0–1) above which memories are auto-accepted.');
+          retRow('Min inject confidence', 'minInjectConfidence', ret.minInjectConfidence, 'Minimum confidence score to inject a memory into context.');
+          retentionEl.innerHTML = retHtml;
+        }
+
+        var workflowEl = document.getElementById('settings-workflow');
+        if (workflowEl) {
+          var wf = effectiveWorkflow;
+          var wfHtml = '';
+          var lctOverride = isProject && rawOverrides && rawOverrides.workflowPolicy && rawOverrides.workflowPolicy.lowConfidenceThreshold !== undefined;
+          var riskySectionsOverride = isProject && rawOverrides && rawOverrides.workflowPolicy && Array.isArray(rawOverrides.workflowPolicy.riskySections) && rawOverrides.workflowPolicy.riskySections.length > 0;
+          wfHtml += '<div class="settings-control">';
+          wfHtml += '<div class="settings-control-header"><span class="settings-control-label">Low confidence threshold</span>' + sourceBadge(lctOverride);
+          wfHtml += '<span class="settings-control-value" style="margin-left:auto">' + esc(String(wf.lowConfidenceThreshold != null ? wf.lowConfidenceThreshold : '—')) + '</span>';
+          if (isProject && lctOverride) {
+            wfHtml += '<button data-ts-action="clearProjectOverride" data-field="lowConfidenceThreshold" class="settings-chip" style="font-size:11px">Clear</button>';
+          }
+          if (isProject) {
+            wfHtml += '</div><div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+              '<input type="number" id="wf-input-lowConfidenceThreshold" min="0" max="1" step="0.05" value="' + esc(String(wf.lowConfidenceThreshold != null ? wf.lowConfidenceThreshold : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+              '<button data-ts-action="setProjectWorkflow" data-field="lowConfidenceThreshold" class="settings-chip active" style="font-size:11px">Set</button>' +
+              '</div>';
+          } else {
+            wfHtml += '</div>';
+          }
+          wfHtml += '<div class="settings-control-note">Memories below this confidence score are flagged for review.</div></div>';
+          wfHtml += '<div class="settings-control">';
+          wfHtml += '<div class="settings-control-header"><span class="settings-control-label">Risky sections</span>' + sourceBadge(riskySectionsOverride);
+          wfHtml += '<span class="settings-control-value" style="margin-left:auto">' + esc(Array.isArray(wf.riskySections) ? wf.riskySections.join(', ') : '—') + '</span></div>';
+          wfHtml += '<div class="settings-control-note">Sections that trigger approval gates when memories are written.</div></div>';
+          workflowEl.innerHTML = wfHtml;
+        }
+
         var integrationsEl = document.getElementById('settings-integrations');
-        if (integrationsEl) {
+        if (integrationsEl && !isProject) {
           var tools = Array.isArray(data.hookTools) ? data.hookTools : [];
           var html = '';
           html += '<div class="settings-control-header" style="margin-bottom:10px"><span class="settings-control-label">Global MCP</span>';
@@ -926,6 +1080,8 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           });
           html += '</tbody></table>';
           integrationsEl.innerHTML = html;
+        } else if (integrationsEl && isProject) {
+          integrationsEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">Integration settings are global — switch to Global scope to edit them.</div>';
         }
       }).catch(function(err) {
         setSettingsStatus('Failed to load settings: ' + String(err), 'err');
@@ -1066,6 +1222,33 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       else if (action === 'toggleIntegrationTool') { toggleIntegrationTool(actionEl.getAttribute('data-tool')); }
       else if (action === 'showSessionDetail') { showSessionDetail(actionEl.getAttribute('data-session-id')); }
       else if (action === 'backToSessionsList') { backToSessionsList(); }
+      else if (action === 'setProjectFindingSensitivity') {
+        var proj = getSettingsProject();
+        var level = actionEl.getAttribute('data-level');
+        postProjectOverride(proj, 'findingSensitivity', findingUiToStorage(level || 'medium'), false);
+      }
+      else if (action === 'setProjectTaskMode') {
+        var proj = getSettingsProject();
+        postProjectOverride(proj, 'taskMode', actionEl.getAttribute('data-mode') || 'auto', false);
+      }
+      else if (action === 'clearProjectOverride') {
+        var proj = getSettingsProject();
+        postProjectOverride(proj, actionEl.getAttribute('data-field') || '', '', true);
+      }
+      else if (action === 'setProjectRetention') {
+        var proj = getSettingsProject();
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('ret-input-' + field);
+        var val = inputEl ? inputEl.value : '';
+        postProjectOverride(proj, field, val, false);
+      }
+      else if (action === 'setProjectWorkflow') {
+        var proj = getSettingsProject();
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('wf-input-' + field);
+        var val = inputEl ? inputEl.value : '';
+        postProjectOverride(proj, field, val, false);
+      }
     });
 
     window.setFindingSensitivity = function(level) {
@@ -1288,3 +1471,4 @@ export function renderEventWiringScript(): string {
   }
 })();`;
 }
+

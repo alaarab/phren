@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import { createHmac, randomUUID } from "crypto";
+import { createHmac } from "crypto";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
-import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, installPreferencesFile, type PhrenErrorCode } from "./shared.js";
+import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, installPreferencesFile, atomicWriteText, type PhrenErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
@@ -11,13 +11,6 @@ import { PACKAGE_SPEC } from "./package-metadata.js";
 export interface HookError {
   code: PhrenErrorCode;
   message: string;
-}
-
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
 }
 
 export function commandExists(cmd: string): boolean {
@@ -285,13 +278,38 @@ export interface HookToolPreferences {
   codex?: boolean;
 }
 
+// ── mtime-based install-preferences cache (shared by readHookPreferences + readCustomHooks) ──
+const _installPrefsJsonCache = new Map<string, { mtimeMs: number; parsed: Record<string, unknown> }>();
+
+export function clearHookPrefsCache(): void {
+  _installPrefsJsonCache.clear();
+}
+
+function cachedReadInstallPrefsJson(phrenPath: string): Record<string, unknown> | null {
+  const prefsPath = installPreferencesFile(phrenPath);
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(prefsPath).mtimeMs;
+  } catch {
+    _installPrefsJsonCache.delete(prefsPath);
+    return null;
+  }
+  const cached = _installPrefsJsonCache.get(prefsPath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.parsed;
+  }
+  const parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as Record<string, unknown>;
+  _installPrefsJsonCache.set(prefsPath, { mtimeMs, parsed });
+  return parsed;
+}
+
 function readHookPreferences(phrenPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
   try {
-    const prefsPath = installPreferencesFile(phrenPath);
-    const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
+    const prefs = cachedReadInstallPrefsJson(phrenPath);
+    if (!prefs) return { enabled: true, toolPrefs: {} };
     const enabled = prefs.hooksEnabled !== false;
     const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
-      ? prefs.hookTools
+      ? prefs.hookTools as HookToolPreferences
       : {};
     return { enabled, toolPrefs };
   } catch (err: unknown) {
@@ -356,18 +374,21 @@ const HOOK_ERROR_LOG_MAX_LINES = 1000;
 
 export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
   try {
-    const prefsPath = installPreferencesFile(phrenPath);
-    const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8"));
-    if (!Array.isArray(prefs.customHooks)) return [];
-    return prefs.customHooks.filter(
-      (h: Record<string, unknown>) =>
-        h &&
-        typeof h.event === "string" &&
-        VALID_HOOK_EVENTS.has(h.event) &&
-        (
-          (typeof h.command === "string" && h.command.trim().length > 0) ||
-          (typeof h.webhook === "string" && h.webhook.trim().length > 0)
-        )
+    const prefs = cachedReadInstallPrefsJson(phrenPath);
+    if (!prefs || !Array.isArray(prefs.customHooks)) return [];
+    return (prefs.customHooks as unknown[]).filter(
+      (h): h is CustomHookEntry => {
+        if (!h || typeof h !== "object") return false;
+        const rec = h as Record<string, unknown>;
+        return (
+          typeof rec.event === "string" &&
+          VALID_HOOK_EVENTS.has(rec.event) &&
+          (
+            (typeof rec.command === "string" && rec.command.trim().length > 0) ||
+            (typeof rec.webhook === "string" && rec.webhook.trim().length > 0)
+          )
+        );
+      }
     );
   } catch (err: unknown) {
     debugLog(`readCustomHooks: ${errorMessage(err)}`);

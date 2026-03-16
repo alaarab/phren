@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, errorMessage } from "./utils.js";
 import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
 import { debugLog, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
 
@@ -89,7 +89,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           decoded = JSON.parse(rawData);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${errorMessage(err)}\n`);
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
@@ -257,7 +257,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 }
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${errorMessage(err)}\n`);
             }
           }
           return mcpResponse({
@@ -276,7 +276,7 @@ export function register(server: McpServer, ctx: McpContext): void {
               }
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${errorMessage(err)}\n`);
           }
         }
         return mcpResponse({
@@ -318,7 +318,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           await rebuildIndex();
         } catch (err: unknown) {
           fs.renameSync(archiveDir, projectDir);
-          return mcpResponse({ ok: false, error: `Index rebuild failed after archive rename, rolled back: ${err instanceof Error ? err.message : String(err)}` });
+          return mcpResponse({ ok: false, error: `Index rebuild failed after archive rename, rolled back: ${errorMessage(err)}` });
         }
         return mcpResponse({
           ok: true,
@@ -342,7 +342,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         await rebuildIndex();
       } catch (err: unknown) {
         fs.renameSync(projectDir, archiveDir);
-        return mcpResponse({ ok: false, error: `Index rebuild failed after unarchive rename, rolled back: ${err instanceof Error ? err.message : String(err)}` });
+        return mcpResponse({ ok: false, error: `Index rebuild failed after unarchive rename, rolled back: ${errorMessage(err)}` });
       }
       return mcpResponse({
         ok: true,

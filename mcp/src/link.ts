@@ -1,10 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
-import { fileURLToPath } from "url";
+import { ROOT } from "./package-metadata.js";
 import {
   configureClaude,
   configureCodexMcp,
@@ -30,14 +29,16 @@ import {
   homePath,
   hookConfigPath,
   installPreferencesFile,
+  atomicWriteText,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { log } from "./init-shared.js";
 import {
   listMachines as listMachinesShared,
   listProfiles as listProfilesShared,
   setMachineProfile,
 } from "./profile-store.js";
-import { writeSkillMd } from "./link-skills.js";
+import { writeSkillMd, isManagedSymlink } from "./link-skills.js";
 import { syncScopeSkillsToDir } from "./skill-files.js";
 import { renderSkillInstructionsSection } from "./skill-registry.js";
 import { findProjectDir } from "./project-locator.js";
@@ -97,15 +98,6 @@ export interface DoctorResult {
 
 // ── Helpers (exported for link-doctor) ──────────────────────────────────────
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-
-function log(msg: string) { process.stdout.write(msg + "\n"); }
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
-}
 export { getMachineName } from "./machine-identity.js";
 
 export function lookupProfile(phrenPath: string, machine: string): string {
@@ -255,9 +247,8 @@ function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
     if (stat.isSymbolicLink()) {
       const currentTarget = fs.readlinkSync(dest);
       const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
-      const managedPrefix = path.resolve(managedRoot) + path.sep;
       if (resolvedTarget === path.resolve(src)) return true;
-      if (!resolvedTarget.startsWith(managedPrefix)) {
+      if (!isManagedSymlink(dest, managedRoot)) {
         log(`  preserve existing symlink: ${dest}`);
         return false;
       }
@@ -304,8 +295,7 @@ function writeManagedAgentsFile(src: string, dest: string, content: string, mana
     if (stat.isSymbolicLink()) {
       const currentTarget = fs.readlinkSync(dest);
       const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
-      const managedPrefix = path.resolve(managedRoot) + path.sep;
-      if (resolvedTarget === path.resolve(src) || resolvedTarget.startsWith(managedPrefix)) {
+      if (resolvedTarget === path.resolve(src) || isManagedSymlink(dest, managedRoot)) {
         fs.unlinkSync(dest);
       } else {
         log(`  preserve existing file: ${dest}`);

@@ -4,15 +4,13 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { randomUUID } from "crypto";
-import { execFileSync } from "child_process";
-import { buildLifecycleCommands } from "./hooks.js";
+import { buildLifecycleCommands, commandExists } from "./hooks.js";
 import {
-  EXEC_TIMEOUT_QUICK_MS,
   isRecord,
   hookConfigPath,
   homePath,
   readRootManifest,
+  atomicWriteText,
 } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
 import {
@@ -23,7 +21,7 @@ import {
 } from "./provider-adapters.js";
 
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-preferences.js";
-import { resolveEntryScript, VERSION } from "./init-shared.js";
+import { resolveEntryScript, log, VERSION } from "./init-shared.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
 export type McpRootKey = "mcpServers" | "servers";
@@ -42,20 +40,9 @@ type JsonObject = Record<string, unknown> & {
   servers?: Record<string, unknown>;
 };
 
-function log(msg: string) {
-  process.stdout.write(msg + "\n");
-}
-
 function getObjectProp(value: JsonObject, key: string): JsonObject | undefined {
   const candidate = value[key];
   return isRecord(candidate) ? candidate : undefined;
-}
-
-function atomicWriteText(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp-${randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
 }
 
 export function patchJsonFile(filePath: string, patch: (data: JsonObject) => void) {
@@ -73,16 +60,6 @@ export function patchJsonFile(filePath: string, patch: (data: JsonObject) => voi
   }
   patch(data);
   atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n");
-}
-
-function commandExists(cmd: string): boolean {
-  try {
-    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
-    execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function buildMcpServerConfig(phrenPath: string) {

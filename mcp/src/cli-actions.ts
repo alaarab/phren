@@ -61,7 +61,7 @@ export async function handleAddFinding(project: string, learning: string) {
     }
     console.log(result.message);
   } catch (err: unknown) {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error(errorMessage(err));
     process.exit(1);
   }
 }

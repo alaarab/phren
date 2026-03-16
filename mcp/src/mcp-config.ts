@@ -9,46 +9,40 @@ import {
   getIndexPolicy,
   updateIndexPolicy,
   mergeConfig,
+  VALID_TASK_MODES,
+  VALID_FINDING_SENSITIVITY,
 } from "./shared-governance.js";
 import {
   PROACTIVITY_LEVELS,
-  getProactivityLevel,
-  getProactivityLevelForFindings,
-  getProactivityLevelForTask,
   type ProactivityLevel,
 } from "./proactivity.js";
 import {
-  readGovernanceInstallPreferences,
   writeGovernanceInstallPreferences,
 } from "./init-preferences.js";
-import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
+import { FINDING_SENSITIVITY_CONFIG, buildProactivitySnapshot, checkProjectInProfile } from "./cli-config.js";
 import {
   readProjectConfig,
   type ProjectConfigOverrides,
   updateProjectConfigOverrides,
 } from "./project-config.js";
 import { isValidProjectName } from "./utils.js";
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function proactivitySnapshot(phrenPath: string) {
-  const prefs = readGovernanceInstallPreferences(phrenPath);
-  return {
-    configured: {
-      proactivity: prefs.proactivity ?? null,
-      proactivityFindings: prefs.proactivityFindings ?? null,
-      proactivityTask: prefs.proactivityTask ?? null,
-    },
-    effective: {
-      proactivity: getProactivityLevel(phrenPath),
-      proactivityFindings: getProactivityLevelForFindings(phrenPath),
-      proactivityTask: getProactivityLevelForTask(phrenPath),
-    },
-  };
+  const snap = buildProactivitySnapshot(phrenPath);
+  return { configured: snap.configured, effective: snap.effective };
 }
 
 function validateProject(project: string): string | null {
   if (!isValidProjectName(project)) return `Invalid project name: "${project}".`;
+  return null;
+}
+
+function checkProjectRegistered(phrenPath: string, project: string): string | null {
+  const warning = checkProjectInProfile(phrenPath, project);
+  if (warning) {
+    return `Project '${project}' is not registered in your active profile. Config was written but won't take effect until you run 'phren add' to register the project.`;
+  }
   return null;
 }
 
@@ -64,8 +58,6 @@ function hasOwnOverride(overrides: ProjectConfigOverrides, key: keyof ProjectCon
   return Object.prototype.hasOwnProperty.call(overrides, key);
 }
 
-const TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
-const FINDING_SENSITIVITY_LEVELS = ["minimal", "conservative", "balanced", "aggressive"] as const;
 
 const projectParam = z.string().optional().describe(
   "Project name. When provided, writes to that project's phren.project.yaml instead of global .governance/."
@@ -231,6 +223,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
+        const warning = checkProjectRegistered(phrenPath, project);
         const key = s === "base" ? "proactivity" : s === "findings" ? "proactivityFindings" : "proactivityTask";
         updateProjectConfigOverrides(phrenPath, project, (current) => ({
           ...current,
@@ -238,8 +231,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         }));
         return mcpResponse({
           ok: true,
-          message: `Proactivity ${s} set to ${level} for project "${project}".`,
-          data: { project, scope: s, level },
+          message: warning
+            ? `Proactivity ${s} set to ${level} for project "${project}". WARNING: ${warning}`
+            : `Proactivity ${s} set to ${level} for project "${project}".`,
+          data: { project, scope: s, level, ...(warning ? { warning } : {}) },
         });
       }
 
@@ -268,7 +263,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "suggest (phren suggests, user approves), auto (phren creates automatically). " +
         "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
-        mode: z.enum(TASK_MODES).describe("Task mode: off, manual, suggest, or auto."),
+        mode: z.enum(VALID_TASK_MODES).describe("Task mode: off, manual, suggest, or auto."),
         project: projectParam,
       }),
     },
@@ -277,14 +272,17 @@ export function register(server: McpServer, ctx: McpContext): void {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
+        const warning = checkProjectRegistered(phrenPath, project);
         updateProjectConfigOverrides(phrenPath, project, (current) => ({
           ...current,
           taskMode: mode,
         }));
         return mcpResponse({
           ok: true,
-          message: `Task mode set to ${mode} for project "${project}".`,
-          data: { project, taskMode: mode },
+          message: warning
+            ? `Task mode set to ${mode} for project "${project}". WARNING: ${warning}`
+            : `Task mode set to ${mode} for project "${project}".`,
+          data: { project, taskMode: mode, ...(warning ? { warning } : {}) },
         });
       }
 
@@ -312,7 +310,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "balanced: non-obvious patterns. aggressive: capture everything. " +
         "When project is provided, writes to that project's phren.project.yaml.",
       inputSchema: z.object({
-        level: z.enum(FINDING_SENSITIVITY_LEVELS).describe("Sensitivity level."),
+        level: z.enum(VALID_FINDING_SENSITIVITY).describe("Sensitivity level."),
         project: projectParam,
       }),
     },
@@ -321,6 +319,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
+        const warning = checkProjectRegistered(phrenPath, project);
         updateProjectConfigOverrides(phrenPath, project, (current) => ({
           ...current,
           findingSensitivity: level,
@@ -328,8 +327,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         const config = FINDING_SENSITIVITY_CONFIG[level];
         return mcpResponse({
           ok: true,
-          message: `Finding sensitivity set to ${level} for project "${project}".`,
-          data: { project, level, ...config },
+          message: warning
+            ? `Finding sensitivity set to ${level} for project "${project}". WARNING: ${warning}`
+            : `Finding sensitivity set to ${level} for project "${project}".`,
+          data: { project, level, ...config, ...(warning ? { warning } : {}) },
         });
       }
 
@@ -378,6 +379,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
+        const warning = checkProjectRegistered(phrenPath, project);
         const next = updateProjectConfigOverrides(phrenPath, project, (current) => {
           const existingRetention = current.retentionPolicy ?? {};
           const retentionPatch: NonNullable<ProjectConfigOverrides["retentionPolicy"]> = { ...existingRetention };
@@ -390,8 +392,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
         return mcpResponse({
           ok: true,
-          message: `Retention policy updated for project "${project}".`,
-          data: { project, retentionPolicy: next.config?.retentionPolicy ?? {} },
+          message: warning
+            ? `Retention policy updated for project "${project}". WARNING: ${warning}`
+            : `Retention policy updated for project "${project}".`,
+          data: { project, retentionPolicy: next.config?.retentionPolicy ?? {}, ...(warning ? { warning } : {}) },
         });
       }
 
@@ -429,9 +433,9 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Confidence below which items are flagged as low-confidence."),
         riskySections: z.array(z.enum(["Review", "Stale", "Conflicts"])).optional()
           .describe("Which queue sections are considered risky."),
-        taskMode: z.enum(TASK_MODES).optional()
+        taskMode: z.enum(VALID_TASK_MODES).optional()
           .describe("Task automation mode."),
-        findingSensitivity: z.enum(FINDING_SENSITIVITY_LEVELS).optional()
+        findingSensitivity: z.enum(VALID_FINDING_SENSITIVITY).optional()
           .describe("Finding capture sensitivity."),
         project: projectParam,
       }),
@@ -441,6 +445,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
+        const warning = checkProjectRegistered(phrenPath, project);
         const next = updateProjectConfigOverrides(phrenPath, project, (current) => {
           const nextConfig: ProjectConfigOverrides = { ...current };
           const shouldUpdateWorkflowPolicy = (
@@ -462,8 +467,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
         return mcpResponse({
           ok: true,
-          message: `Workflow policy updated for project "${project}".`,
-          data: { project, config: next.config ?? {} },
+          message: warning
+            ? `Workflow policy updated for project "${project}". WARNING: ${warning}`
+            : `Workflow policy updated for project "${project}".`,
+          data: { project, config: next.config ?? {}, ...(warning ? { warning } : {}) },
         });
       }
 

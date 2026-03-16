@@ -44,7 +44,8 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "./project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy } from "./governance-policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides } from "./governance-policy.js";
+import { updateProjectConfigOverrides } from "./project-config.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
@@ -438,7 +439,7 @@ export function createWebUiHttpServer(
           res.end(JSON.stringify({ ok: true, message: `Synced ${changedFiles} file(s).${pushed ? " Pushed to remote." : " No remote, saved locally."}` }));
         } catch (err: unknown) {
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
         }
       });
       return;
@@ -916,8 +917,13 @@ export function createWebUiHttpServer(
       try {
         const prefs = readInstallPreferences(phrenPath);
         const workflowPolicy = getWorkflowPolicy(phrenPath);
+        const retentionPolicy = getRetentionPolicy(phrenPath);
         const hooksData = getHooksData(phrenPath);
         const proactivityFindings = prefs.proactivityFindings || prefs.proactivity || "high";
+        const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+        const settingsProject = String(qs.project || "");
+        const merged = settingsProject && isValidProjectName(settingsProject) ? mergeConfig(phrenPath, settingsProject) : null;
+        const overrides = settingsProject && isValidProjectName(settingsProject) ? getProjectConfigOverrides(phrenPath, settingsProject) : null;
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({
           ok: true,
@@ -931,6 +937,10 @@ export function createWebUiHttpServer(
           hooksEnabled: hooksData.globalEnabled,
           mcpEnabled: prefs.mcpEnabled !== false,
           hookTools: hooksData.tools,
+          retentionPolicy,
+          workflowPolicy,
+          merged,
+          overrides,
         }));
       } catch (err: unknown) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
@@ -1022,6 +1032,94 @@ export function createWebUiHttpServer(
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: true, mcpEnabled: enabled }));
       });
+      return;
+    }
+
+    // POST /api/settings/project-overrides — write per-project config overrides
+    if (req.method === "POST" && pathname === "/api/settings/project-overrides") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const field = String(parsed.field || "");
+        const value = String(parsed.value || "");
+        const clearField = String(parsed.clear || "") === "true";
+        if (!project || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+          return;
+        }
+        const registeredProjects = getProjectDirs(phrenPath, profile).map((d) => path.basename(d)).filter((p) => p !== "global");
+        const isRegistered = registeredProjects.includes(project);
+        const registrationWarning = isRegistered ? undefined : `Project '${project}' is not registered in the active profile. Config was saved but it will have no effect until the project is added with 'phren add'.`;
+        const VALID_FIELDS: Record<string, string[]> = {
+          findingSensitivity: ["minimal", "conservative", "balanced", "aggressive"],
+          proactivity: ["high", "medium", "low"],
+          proactivityFindings: ["high", "medium", "low"],
+          proactivityTask: ["high", "medium", "low"],
+          taskMode: ["off", "manual", "suggest", "auto"],
+        };
+        const NUMERIC_RETENTION_FIELDS = ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"];
+        const NUMERIC_WORKFLOW_FIELDS = ["lowConfidenceThreshold"];
+        try {
+          updateProjectConfigOverrides(phrenPath, project, (current) => {
+            const next = { ...current };
+            if (clearField) {
+              if (field in VALID_FIELDS) delete (next as Record<string, unknown>)[field];
+              else if (NUMERIC_RETENTION_FIELDS.includes(field)) {
+                if (next.retentionPolicy) delete (next.retentionPolicy as Record<string, unknown>)[field];
+              } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
+                if (next.workflowPolicy) delete (next.workflowPolicy as Record<string, unknown>)[field];
+              }
+              return next;
+            }
+            if (field in VALID_FIELDS) {
+              const allowed = VALID_FIELDS[field];
+              if (!allowed.includes(value)) throw new Error(`Invalid value "${value}" for ${field}`);
+              (next as Record<string, unknown>)[field] = value;
+            } else if (NUMERIC_RETENTION_FIELDS.includes(field)) {
+              const num = parseFloat(value);
+              if (!Number.isFinite(num) || num < 0) throw new Error(`Invalid numeric value for ${field}`);
+              next.retentionPolicy = { ...next.retentionPolicy, [field]: num };
+            } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
+              const num = parseFloat(value);
+              if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error(`Invalid value for ${field} (must be 0–1)`);
+              next.workflowPolicy = { ...next.workflowPolicy, [field]: num };
+            } else {
+              throw new Error(`Unknown config field: ${field}`);
+            }
+            return next;
+          });
+          const merged = mergeConfig(phrenPath, project);
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: true, config: merged }));
+        } catch (err: unknown) {
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/config") {
+      if (!requireGetAuth(req, res, url, authToken, true)) return;
+      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+      const project = String(qs.project || "");
+      if (project && !isValidProjectName(project)) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
+        return;
+      }
+      try {
+        const config = mergeConfig(phrenPath, project || undefined);
+        const projects = getProjectDirs(phrenPath, profile).map((d) => path.basename(d)).filter((p) => p !== "global");
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, config, projects }));
+      } catch (err: unknown) {
+        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+      }
       return;
     }
 

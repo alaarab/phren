@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
-import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { addFindingsToFile } from "./shared-content.js";
 import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "./shared-ollama.js";
 import { debugLog } from "./shared.js";
@@ -36,7 +36,7 @@ function parseFindings(raw: string): string[] {
         .slice(0, 10);
     }
   } catch (err: unknown) {
-    debugLog(`auto_extract: failed to parse LLM output as JSON: ${cleaned.slice(0, 200)} (${err instanceof Error ? err.message : String(err)})`);
+    debugLog(`auto_extract: failed to parse LLM output as JSON: ${cleaned.slice(0, 200)} (${errorMessage(err)})`);
   }
   return [];
 }

@@ -21,7 +21,7 @@ import {
 } from "./shared-content.js";
 import { parseCitationComment } from "./content-citation.js";
 import { getHighImpactFindings } from "./finding-impact.js";
-import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS } from "./utils.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "./utils.js";
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectGlobBoost } from "./cli-hooks-globs.js";
@@ -470,7 +470,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${errorMessage(err)}\n`);
     return syncResult;
   }
 }
@@ -557,7 +557,7 @@ export async function searchKnowledgeRows(
         }
       }
     } catch (err: unknown) {
-      debugLog(`rowid dedup query failed: ${err instanceof Error ? err.message : String(err)}`);
+      debugLog(`rowid dedup query failed: ${errorMessage(err)}`);
     }
 
     const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length)
@@ -607,7 +607,7 @@ export async function searchKnowledgeRows(
       }
     } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) {
-        process.stderr.write(`[phren] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.stderr.write(`[phren] vectorFallback: ${errorMessage(err)}\n`);
       }
     }
   }
@@ -906,7 +906,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${errorMessage(err)}\n`);
               stale = true;
             }
           }

@@ -141,18 +141,90 @@ export function readSkillManifestHooks(phrenPath: string): ManifestHooks | null 
 
 // ── Skill linking helpers ───────────────────────────────────────────────────
 
+export interface SkillCollision {
+  skillName: string;
+  destPath: string;
+  message: string;
+}
+
+/**
+ * Returns true if `destPath` is a symlink whose resolved target lives under
+ * `managedRoot`.  Used to decide whether phren owns a symlink.
+ */
+export function isManagedSymlink(destPath: string, managedRoot: string): boolean {
+  try {
+    const stat = fs.lstatSync(destPath);
+    if (!stat.isSymbolicLink()) return false;
+    const target = fs.readlinkSync(destPath);
+    const resolvedTarget = path.resolve(path.dirname(destPath), target);
+    const managedPrefix = path.resolve(managedRoot) + path.sep;
+    return resolvedTarget.startsWith(managedPrefix);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true if `destPath` exists and is NOT a symlink that points into
+ * managedRoot — i.e. it's a file/dir the user owns.
+ */
+function isUserOwnedFile(destPath: string, managedRoot: string): boolean {
+  try {
+    fs.lstatSync(destPath);
+  } catch {
+    return false; // doesn't exist
+  }
+
+  return !isManagedSymlink(destPath, managedRoot);
+}
+
+/**
+ * Scan destDir for files that phren would want to link (based on srcDir) but
+ * can't because a user-owned file already occupies the destination slot.
+ */
+export function detectSkillCollisions(srcDir: string, destDir: string, managedRoot: string): SkillCollision[] {
+  if (!fs.existsSync(srcDir) || !fs.existsSync(destDir)) return [];
+  const collisions: SkillCollision[] = [];
+
+  for (const entry of fs.readdirSync(srcDir)) {
+    const srcPath = path.join(srcDir, entry);
+    const stat = fs.statSync(srcPath);
+
+    if (stat.isFile() && entry.endsWith(".md")) {
+      const destPath = path.join(destDir, entry);
+      if (isUserOwnedFile(destPath, managedRoot)) {
+        const skillName = entry.replace(/\.md$/, "");
+        collisions.push({
+          skillName,
+          destPath,
+          message: `Skill '${skillName}' — user file already exists at ${destPath}. Rename or remove it to use phren's version.`,
+        });
+      }
+    } else if (stat.isDirectory()) {
+      const skillFile = path.join(srcPath, "SKILL.md");
+      if (fs.existsSync(skillFile)) {
+        const destPath = path.join(destDir, entry);
+        if (isUserOwnedFile(destPath, managedRoot)) {
+          collisions.push({
+            skillName: entry,
+            destPath,
+            message: `Skill '${entry}' — user directory already exists at ${destPath}. Rename or remove it to use phren's version.`,
+          });
+        }
+      }
+    }
+  }
+
+  return collisions;
+}
+
 function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, managedRoot: string): void {
   if (!fs.existsSync(destDir)) return;
   for (const entry of fs.readdirSync(destDir)) {
     if (expectedNames.has(entry)) continue;
     const destPath = path.join(destDir, entry);
     try {
-      const stat = fs.lstatSync(destPath);
-      if (!stat.isSymbolicLink()) continue;
-      const target = fs.readlinkSync(destPath);
-      const resolvedTarget = path.resolve(path.dirname(destPath), target);
-      const managedPrefix = path.resolve(managedRoot) + path.sep;
-      if (!resolvedTarget.startsWith(managedPrefix)) continue;
+      if (!isManagedSymlink(destPath, managedRoot)) continue;
       fs.unlinkSync(destPath);
     } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
@@ -166,10 +238,11 @@ export function linkSkillsDir(
   managedRoot: string,
   symlinkFile: (src: string, dest: string, managedRoot: string) => boolean,
   opts?: { phrenPath?: string; scope?: string },
-) {
-  if (!fs.existsSync(srcDir)) return;
+): SkillCollision[] {
+  if (!fs.existsSync(srcDir)) return [];
   fs.mkdirSync(destDir, { recursive: true });
   const expectedNames = new Set<string>();
+  const collisions: SkillCollision[] = [];
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
@@ -180,20 +253,43 @@ export function linkSkillsDir(
     }
 
     if (stat.isFile() && entry.endsWith(".md")) {
+      const destPath = path.join(destDir, entry);
+      if (isUserOwnedFile(destPath, managedRoot)) {
+        const collision: SkillCollision = {
+          skillName,
+          destPath,
+          message: `Skipping skill '${skillName}' — user skill already exists at ${destPath}. To use phren's version, rename or remove your skill first.`,
+        };
+        collisions.push(collision);
+        process.stderr.write(`[phren] ${collision.message}\n`);
+        continue;
+      }
       expectedNames.add(entry);
-      symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
+      symlinkFile(srcPath, destPath, managedRoot);
     } else if (stat.isDirectory()) {
       const skillFile = path.join(srcPath, "SKILL.md");
       if (fs.existsSync(skillFile)) {
+        const destPath = path.join(destDir, entry);
+        if (isUserOwnedFile(destPath, managedRoot)) {
+          const collision: SkillCollision = {
+            skillName,
+            destPath,
+            message: `Skipping skill '${skillName}' — user skill already exists at ${destPath}. To use phren's version, rename or remove your skill first.`,
+          };
+          collisions.push(collision);
+          process.stderr.write(`[phren] ${collision.message}\n`);
+          continue;
+        }
         expectedNames.add(entry);
         // Symlink the entire skill directory so bundled scripts and assets are accessible.
         // Relative paths in the skill body remain valid because the directory structure is preserved.
-        symlinkFile(srcPath, path.join(destDir, entry), managedRoot);
+        symlinkFile(srcPath, destPath, managedRoot);
       }
     }
   }
 
   cleanupManagedSkillLinks(destDir, expectedNames, managedRoot);
+  return collisions;
 }
 
 export function writeSkillMd(phrenPath: string) {

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Getting Started | phren docs</title>
+  <meta name="description" content="Install phren, set up your first project, and configure multi-repo workflows." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="getting-started.html" class="nav-link active-doc">Getting Started</a>
+      <a href="configuration.html" class="nav-link">Configuration</a>
+      <a href="cli.html" class="nav-link">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Getting Started</div>
+        <a href="#installation" class="sidebar-link">Installation</a>
+        <a href="#quickstart" class="sidebar-link">Quickstart</a>
+        <a href="#first-project" class="sidebar-link">Your First Project</a>
+        <a href="#how-it-works" class="sidebar-link">How It Works</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Multi-Repo</div>
+        <a href="#adding-projects" class="sidebar-link">Adding Projects</a>
+        <a href="#profiles" class="sidebar-link">Profiles &amp; Machines</a>
+        <a href="#syncing" class="sidebar-link">Syncing Across Machines</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Agents</div>
+        <a href="#claude-code" class="sidebar-link">Claude Code</a>
+        <a href="#copilot" class="sidebar-link">Copilot</a>
+        <a href="#cursor" class="sidebar-link">Cursor</a>
+        <a href="#codex" class="sidebar-link">Codex</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="docs-content">
+      <h1>Getting Started</h1>
+      <p class="docs-subtitle">Install phren, create your first project, and start building persistent memory for your AI agents.</p>
+
+      <h2 id="installation">Installation <a href="#installation" class="anchor-link">#</a></h2>
+      <p>phren is published as <code>@phren/cli</code> on npm. Install it globally:</p>
+      <pre><code>npm install -g @phren/cli</code></pre>
+      <p>Then run init to configure hooks and MCP for your agents:</p>
+      <pre><code>phren init</code></pre>
+      <p>Init is idempotent: re-running it updates MCP config and hooks without clobbering your data. It detects which AI tools you have installed (Claude Code, Copilot, Cursor, Codex) and configures each one.</p>
+
+      <h3>Templates</h3>
+      <p>Init supports project templates for common setups:</p>
+      <pre><code>phren init --template python-project
+phren init --template monorepo
+phren init --template library
+phren init --template frontend</code></pre>
+
+      <h2 id="quickstart">Quickstart <a href="#quickstart" class="anchor-link">#</a></h2>
+      <p>The fastest path from zero to working memory:</p>
+      <pre><code># Install + init + scaffold your first project
+phren quickstart</code></pre>
+      <p>This runs <code>phren init</code> followed by an interactive project scaffolding wizard. It creates the <code>~/.phren</code> directory, sets up git tracking, and registers your first project.</p>
+
+      <h2 id="first-project">Your First Project <a href="#first-project" class="anchor-link">#</a></h2>
+      <p>After init, add your project directory:</p>
+      <pre><code># From inside your project directory
+phren add
+
+# Or specify a path
+phren add ~/my-project</code></pre>
+      <p>This creates <code>~/.phren/my-project/</code> with:</p>
+      <ul>
+        <li><code>CLAUDE.md</code> &mdash; project-specific agent instructions</li>
+        <li><code>FINDINGS.md</code> &mdash; captured insights and patterns</li>
+        <li><code>TASKS.md</code> &mdash; task queue (active, queued, done)</li>
+        <li><code>summary.md</code> &mdash; project summary for context injection</li>
+      </ul>
+      <p>Verify everything is wired up:</p>
+      <pre><code>phren verify
+phren status</code></pre>
+
+      <h2 id="how-it-works">How It Works <a href="#how-it-works" class="anchor-link">#</a></h2>
+      <p>phren operates on three paths during every prompt cycle:</p>
+      <ol>
+        <li><strong>Retrieval</strong> &mdash; keyword extraction from your prompt, synonym expansion, FTS5 search, and snippet injection into agent context.</li>
+        <li><strong>Governance</strong> &mdash; citation validity checks, confidence decay, policy thresholds to filter low-quality memories.</li>
+        <li><strong>Persistence</strong> &mdash; MCP tools write findings/tasks, the Stop hook auto-commits and pushes to git.</li>
+      </ol>
+      <p>Hooks run at lifecycle points:</p>
+      <ul>
+        <li><code>SessionStart</code> &mdash; git pull on <code>~/.phren</code>, project context injection</li>
+        <li><code>UserPromptSubmit</code> &mdash; search + inject relevant context on every prompt</li>
+        <li><code>Stop</code> &mdash; auto-commit and push after every response</li>
+      </ul>
+
+      <h2 id="adding-projects">Adding Projects <a href="#adding-projects" class="anchor-link">#</a></h2>
+      <p>Add as many projects as you want. Each gets its own findings, tasks, and config:</p>
+      <pre><code>phren add ~/frontend-app
+phren add ~/backend-api
+phren add ~/shared-lib</code></pre>
+      <p>Projects support ownership modes:</p>
+      <ul>
+        <li><code>owned</code> &mdash; full read/write, hooks active (default)</li>
+        <li><code>observed</code> &mdash; read-only context injection, no writes</li>
+        <li><code>archived</code> &mdash; excluded from active profile, data preserved</li>
+      </ul>
+      <pre><code>phren add ~/legacy-app --ownership observed
+phren projects configure legacy-app --ownership=archived</code></pre>
+
+      <h2 id="profiles">Profiles &amp; Machines <a href="#profiles" class="anchor-link">#</a></h2>
+      <p>Profiles map sets of projects to machine roles. Useful when you work on different projects on different machines.</p>
+      <pre><code># ~/.phren/profiles/work.yaml
+projects:
+  - frontend-app
+  - backend-api
+  - shared-lib
+
+# ~/.phren/profiles/personal.yaml
+projects:
+  - side-project
+  - dotfiles</code></pre>
+      <p>Map machines to profiles in <code>~/.phren/machines.yaml</code>:</p>
+      <pre><code>machines:
+  work-laptop: work
+  home-desktop: personal
+  server: work</code></pre>
+      <p>List machines and profiles:</p>
+      <pre><code>phren config machines
+phren config profiles</code></pre>
+
+      <h2 id="syncing">Syncing Across Machines <a href="#syncing" class="anchor-link">#</a></h2>
+      <p><code>~/.phren</code> is a git repo. Sync it across machines by pushing/pulling:</p>
+      <pre><code># On your current machine
+phren push_changes "sync from laptop"
+
+# On a new machine
+phren init  # pulls from remote</code></pre>
+      <p>Or use the <code>/phren-sync</code> skill for a guided sync experience. The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session, so you always have the latest data.</p>
+
+      <h2 id="claude-code">Claude Code <a href="#claude-code" class="anchor-link">#</a></h2>
+      <p>phren init automatically configures Claude Code. It registers:</p>
+      <ul>
+        <li>MCP server in <code>~/.claude/settings.json</code></li>
+        <li>Hooks for <code>SessionStart</code>, <code>UserPromptSubmit</code>, and <code>Stop</code> events</li>
+      </ul>
+      <p>After init, phren works automatically. Every prompt gets relevant context injected, and every finding is persisted to git.</p>
+
+      <h2 id="copilot">Copilot <a href="#copilot" class="anchor-link">#</a></h2>
+      <p>phren detects GitHub Copilot during init and configures the MCP server. Copilot accesses phren via MCP tools in chat mode.</p>
+
+      <h2 id="cursor">Cursor <a href="#cursor" class="anchor-link">#</a></h2>
+      <p>Cursor is configured via its MCP settings. phren init writes the config to the correct location. Use MCP tools in Cursor's agent/composer mode.</p>
+
+      <h2 id="codex">Codex <a href="#codex" class="anchor-link">#</a></h2>
+      <p>OpenAI Codex CLI is supported via MCP. phren init detects it and registers the server.</p>
+
+      <p>For all agents, verify the setup with:</p>
+      <pre><code>phren doctor --agents</code></pre>
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

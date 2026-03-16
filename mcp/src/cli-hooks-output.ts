@@ -9,7 +9,7 @@ import {
   logImpact,
   extractFindingIdsFromSnippet,
 } from "./finding-impact.js";
-import { isFeatureEnabled } from "./utils.js";
+import { isFeatureEnabled, errorMessage } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "./shared-retrieval.js";
 import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "./shared-retrieval.js";
@@ -79,7 +79,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrieval: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrieval: ${errorMessage(err)}\n`);
       }
     }
   } else {
@@ -129,7 +129,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, doc.path ?? doc.filename, doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrievalOrdered: ${err instanceof Error ? err.message : String(err)}\n`);
+        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrievalOrdered: ${errorMessage(err)}\n`);
       }
       parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));

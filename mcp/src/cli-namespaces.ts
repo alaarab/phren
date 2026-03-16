@@ -14,6 +14,7 @@ import {
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
+import { detectSkillCollisions } from "./link-skills.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill-files.js";
 import { findProjectDir } from "./project-locator.js";
 import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "./data-tasks.js";
@@ -598,6 +599,16 @@ function printSkillDoctor(scope: string, manifest: ReturnType<typeof buildSkillM
       } catch {
         problems.push(`Mirror drift for ${skill.name}: expected ${dest} -> ${skill.root}`);
       }
+    }
+
+    // Check for user-owned files blocking phren skill links
+    const phrenPath = getPhrenPath();
+    const srcDir = scope.toLowerCase() === "global"
+      ? path.join(phrenPath, "global", "skills")
+      : path.join(phrenPath, scope, "skills");
+    const collisions = detectSkillCollisions(srcDir, destDir, phrenPath);
+    for (const collision of collisions) {
+      problems.push(`Skill collision: ${collision.message}`);
     }
   }
 

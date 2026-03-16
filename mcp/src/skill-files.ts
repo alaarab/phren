@@ -5,6 +5,7 @@ import { findProjectDir } from "./project-locator.js";
 import { buildSkillManifest, type SkillManifest } from "./skill-registry.js";
 import { setSkillEnabled } from "./skill-state.js";
 import { errorMessage } from "./utils.js";
+import { isManagedSymlink } from "./link-skills.js";
 
 function normalizeSkillRemovalTarget(skillPath: string): string {
   if (!skillPath) return skillPath;
@@ -20,9 +21,8 @@ function symlinkManagedSkill(src: string, dest: string, managedRoot: string): vo
     if (stat.isSymbolicLink()) {
       const currentTarget = fs.readlinkSync(dest);
       const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
-      const managedPrefix = path.resolve(managedRoot) + path.sep;
       if (resolvedTarget === path.resolve(src)) return;
-      if (!resolvedTarget.startsWith(managedPrefix)) return;
+      if (!isManagedSymlink(dest, managedRoot)) return;
       fs.unlinkSync(dest);
     } else {
       return;
@@ -37,12 +37,7 @@ function symlinkManagedSkill(src: string, dest: string, managedRoot: string): vo
 
 function removeManagedSkillLink(dest: string, managedRoot: string): void {
   try {
-    const stat = fs.lstatSync(dest);
-    if (!stat.isSymbolicLink()) return;
-    const currentTarget = fs.readlinkSync(dest);
-    const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
-    const managedPrefix = path.resolve(managedRoot) + path.sep;
-    if (!resolvedTarget.startsWith(managedPrefix)) return;
+    if (!isManagedSymlink(dest, managedRoot)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (process.env.PHREN_DEBUG)) {

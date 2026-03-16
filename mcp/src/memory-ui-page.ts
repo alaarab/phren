@@ -285,6 +285,17 @@ ${TASK_UI_STYLES}
   <div id="tab-settings" class="tab-content">
     <div class="settings-shell">
       <div id="settings-status-inline" class="settings-status-inline" aria-live="polite"></div>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--cyan) 45%, var(--border))">
+        <div class="settings-section-header" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <span>Scope</span>
+          <select id="settings-project-select" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm);font-family:var(--font)">
+            <option value="">Global (all projects)</option>
+          </select>
+        </div>
+        <div class="settings-section-body" style="padding:12px 18px">
+          <div id="settings-scope-note" style="font-size:var(--text-sm);color:var(--muted)">Showing global settings. Select a project to view and edit per-project overrides.</div>
+        </div>
+      </section>
       <section class="settings-section settings-section-findings">
         <div class="settings-section-header">Findings</div>
         <div class="settings-section-body">
@@ -295,6 +306,18 @@ ${TASK_UI_STYLES}
         <div class="settings-section-header">Behavior</div>
         <div class="settings-section-body">
           <div id="settings-behavior" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--warning) 45%, var(--border))">
+        <div class="settings-section-header">Retention Policy</div>
+        <div class="settings-section-body">
+          <div id="settings-retention" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--success) 45%, var(--border))">
+        <div class="settings-section-header">Workflow Policy</div>
+        <div class="settings-section-body">
+          <div id="settings-workflow" style="color:var(--muted)">Loading...</div>
         </div>
       </section>
       <section class="settings-section settings-section-integrations">

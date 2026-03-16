@@ -1,6 +1,7 @@
 import { getPhrenPath } from "./shared.js";
 import { buildIndex, queryRows, queryFragmentLinks } from "./shared-index.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { errorMessage } from "./utils.js";
 
 /**
  * CLI: phren graph [--project <name>] [--limit <n>]
@@ -135,7 +136,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
       [sourceId, targetId, "mentions", sourceDoc],
     );
   } catch (err: unknown) {
-    console.error(`Failed to link: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`Failed to link: ${errorMessage(err)}`);
     process.exit(1);
   }
 
@@ -164,7 +165,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
       }
     });
   } catch (err: unknown) {
-    console.error(`Failed to persist manual link: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`Failed to persist manual link: ${errorMessage(err)}`);
     process.exit(1);
   }
 

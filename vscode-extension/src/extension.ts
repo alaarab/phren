@@ -14,6 +14,7 @@ import { showSkillEditor } from "./skillEditor";
 import { showTaskDetail } from "./taskViewer";
 import { showQueueItemDetail, type QueueItemData } from "./queueViewer";
 import { showSessionOverview } from "./sessionViewer";
+import { showProjectConfigPanel } from "./configPanel";
 import { pathExists, resolveRuntimeConfig } from "./runtimeConfig";
 import {
   listProfileConfigs,
@@ -1047,6 +1048,37 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
+  // --- Project Config command ---
+  const projectConfigDisposable = vscode.commands.registerCommand("phren.projectConfig", async () => {
+    try {
+      const projectsRaw = await phrenClient.listProjects();
+      const projectsData = asRecord(asRecord(projectsRaw)?.data);
+      const projects = asArraySafe(projectsData?.projects);
+      const projectNames: string[] = [];
+      for (const p of projects) {
+        const rec = asRecord(p);
+        const name = typeof rec?.name === "string" ? rec.name : undefined;
+        if (name) projectNames.push(name);
+      }
+      if (projectNames.length === 0) {
+        await vscode.window.showWarningMessage("No Phren projects found.");
+        return;
+      }
+      const active = statusBar.getActiveProjectName();
+      const sorted = active && projectNames.includes(active)
+        ? [active, ...projectNames.filter((n) => n !== active)]
+        : projectNames;
+      const project = await vscode.window.showQuickPick(sorted, {
+        title: "Phren: Project Config",
+        placeHolder: "Select a project to view or edit config",
+      });
+      if (!project) return;
+      await showProjectConfigPanel(phrenClient, project);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to open project config: ${toErrorMessage(error)}`);
+    }
+  });
+
   const filterFindingsByDateDisposable = vscode.commands.registerCommand(
     "phren.filterFindingsByDate",
     async () => {
@@ -1142,6 +1174,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     resolveContradictionDisposable,
     linkTaskIssueDisposable,
     createTaskIssueDisposable,
+    projectConfigDisposable,
   );
 
   // --- Sync VS Code settings to phren preference files ---

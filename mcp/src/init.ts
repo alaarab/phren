@@ -17,6 +17,7 @@ import {
   homePath,
   expandHomePath,
   findPhrenPath,
+  getProjectDirs,
   readRootManifest,
   writeRootManifest,
   type InstallMode,
@@ -1885,7 +1886,118 @@ export async function runHooksMode(modeArg?: string) {
   log(`Restart your agent to apply changes.`);
 }
 
-export async function runUninstall() {
+// Agent skill directories to sweep for symlinks during uninstall
+function agentSkillDirs(): string[] {
+  const home = homeDir();
+  return [
+    homePath(".claude", "skills"),
+    path.join(home, ".cursor", "skills"),
+    path.join(home, ".copilot", "skills"),
+    path.join(home, ".codex", "skills"),
+  ];
+}
+
+// Remove skill symlinks that resolve inside phrenPath. Only touches symlinks, never regular files.
+function sweepSkillSymlinks(phrenPath: string): void {
+  const resolvedPhren = path.resolve(phrenPath);
+  for (const dir of agentSkillDirs()) {
+    if (!fs.existsSync(dir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err: unknown) {
+      debugLog(`sweepSkillSymlinks: readdirSync failed for ${dir}: ${errorMessage(err)}`);
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isSymbolicLink()) continue;
+      const fullPath = path.join(dir, entry.name);
+      try {
+        const target = fs.realpathSync(fullPath);
+        if (target.startsWith(resolvedPhren + path.sep) || target === resolvedPhren) {
+          fs.unlinkSync(fullPath);
+          log(`  Removed skill symlink: ${fullPath}`);
+        }
+      } catch (err: unknown) {
+        debugLog(`sweepSkillSymlinks: could not check/remove ${fullPath}: ${errorMessage(err)}`);
+      }
+    }
+  }
+}
+
+// Filter phren hook entries from an agent hooks file. Returns true if the file was changed.
+// Deletes the file if no hooks remain. `commandField` is the JSON key holding the command
+// string in each hook entry (e.g. "bash" for Copilot, "command" for Codex).
+function filterAgentHooks(filePath: string, commandField: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!isRecord(raw) || !isRecord(raw.hooks)) return false;
+    const hooks = raw.hooks as Record<string, unknown>;
+    let changed = false;
+    for (const event of Object.keys(hooks)) {
+      const entries = hooks[event];
+      if (!Array.isArray(entries)) continue;
+      const filtered = entries.filter(
+        (e: unknown) => !(isRecord(e) && typeof e[commandField] === "string" && isPhrenCommand(e[commandField] as string))
+      );
+      if (filtered.length !== entries.length) {
+        hooks[event] = filtered;
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    // Remove empty hook event keys
+    for (const event of Object.keys(hooks)) {
+      if (Array.isArray(hooks[event]) && (hooks[event] as unknown[]).length === 0) {
+        delete hooks[event];
+      }
+    }
+    if (Object.keys(hooks).length === 0) {
+      fs.unlinkSync(filePath);
+    } else {
+      atomicWriteText(filePath, JSON.stringify(raw, null, 2));
+    }
+    return true;
+  } catch (err: unknown) {
+    debugLog(`filterAgentHooks: failed for ${filePath}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+async function promptUninstallConfirm(phrenPath: string): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return true;
+
+  // Show summary of what will be deleted
+  try {
+    const projectDirs = getProjectDirs(phrenPath);
+    const projectCount = projectDirs.length;
+    let findingCount = 0;
+    for (const dir of projectDirs) {
+      const findingsFile = path.join(dir, "FINDINGS.md");
+      if (fs.existsSync(findingsFile)) {
+        const content = fs.readFileSync(findingsFile, "utf8");
+        findingCount += content.split("\n").filter((l) => l.startsWith("- ")).length;
+      }
+    }
+    log(`\n  Will delete: ${phrenPath}`);
+    log(`  Contains: ${projectCount} project(s), ~${findingCount} finding(s)`);
+  } catch (err: unknown) {
+    debugLog(`promptUninstallConfirm: summary failed: ${errorMessage(err)}`);
+    log(`\n  Will delete: ${phrenPath}`);
+  }
+
+  const readline = await import("readline");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(`\nThis will permanently delete ${phrenPath} and all phren data. Type 'yes' to confirm: `, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase() === "yes");
+    });
+  });
+}
+
+export async function runUninstall(opts: { yes?: boolean } = {}) {
   const phrenPath = findPhrenPath();
   const manifest = phrenPath ? readRootManifest(phrenPath) : null;
   if (manifest?.installMode === "project-local" && phrenPath) {
@@ -1906,6 +2018,28 @@ export async function runUninstall() {
   }
 
   log("\nUninstalling phren...\n");
+
+  // Confirmation prompt (shared-mode only — project-local is low-stakes)
+  if (!opts.yes) {
+    const confirmed = phrenPath
+      ? await promptUninstallConfirm(phrenPath)
+      : (process.stdin.isTTY && process.stdout.isTTY
+        ? await (async () => {
+          const readline = await import("readline");
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          return new Promise<boolean>((resolve) => {
+            rl.question("This will remove all phren config and hooks. Type 'yes' to confirm: ", (answer) => {
+              rl.close();
+              resolve(answer.trim().toLowerCase() === "yes");
+            });
+          });
+        })()
+        : true);
+    if (!confirmed) {
+      log("Uninstall cancelled.");
+      return;
+    }
+  }
 
   const home = homeDir();
   const machineFile = machineFilePath();
@@ -2002,12 +2136,11 @@ export async function runUninstall() {
     } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${mcpFile}: ${errorMessage(err)}`); }
   }
 
-  // Remove Copilot hooks file (written by configureAllHooks)
+  // Remove phren entries from Copilot hooks file (filter, don't bulk-delete)
   const copilotHooksFile = hookConfigPath("copilot", (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
   try {
-    if (fs.existsSync(copilotHooksFile)) {
-      fs.unlinkSync(copilotHooksFile);
-      log(`  Removed Copilot hooks file (${copilotHooksFile})`);
+    if (filterAgentHooks(copilotHooksFile, "bash")) {
+      log(`  Removed phren entries from Copilot hooks (${copilotHooksFile})`);
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`); }
 
@@ -2030,13 +2163,12 @@ export async function runUninstall() {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`); }
 
-  // Remove Codex hooks file in phren path
+  // Remove phren entries from Codex hooks file (filter, don't bulk-delete)
   const uninstallPhrenPath = (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
   const codexHooksFile = hookConfigPath("codex", uninstallPhrenPath);
   try {
-    if (fs.existsSync(codexHooksFile)) {
-      fs.unlinkSync(codexHooksFile);
-      log(`  Removed Codex hooks file (${codexHooksFile})`);
+    if (filterAgentHooks(codexHooksFile, "command")) {
+      log(`  Removed phren entries from Codex hooks (${codexHooksFile})`);
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexHooksFile}: ${errorMessage(err)}`); }
 
@@ -2062,6 +2194,15 @@ export async function runUninstall() {
       log(`  Removed machine alias (${machineFile})`);
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${machineFile}: ${errorMessage(err)}`); }
+
+  // Sweep agent skill directories for symlinks pointing into the phren store
+  if (phrenPath) {
+    try {
+      sweepSkillSymlinks(phrenPath);
+    } catch (err: unknown) {
+      debugLog(`uninstall: skill symlink sweep failed: ${errorMessage(err)}`);
+    }
+  }
 
   if (phrenPath && fs.existsSync(phrenPath)) {
     try {

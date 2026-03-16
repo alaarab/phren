@@ -5,6 +5,8 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@phren/cli"><img src="https://img.shields.io/npm/v/%40phren%2Fcli?style=flat&labelColor=0D0D0D&color=7C3AED" alt="npm version"></a>
   <a href="https://github.com/alaarab/phren/blob/main/LICENSE"><img src="https://img.shields.io/github/license/alaarab/phren?style=flat&labelColor=0D0D0D&color=7C3AED" alt="license"></a>
+  <a href="https://alaarab.github.io/phren/"><img src="https://img.shields.io/badge/docs-alaarab.github.io%2Fphren-7C3AED?style=flat&labelColor=0D0D0D" alt="docs"></a>
+  <a href="https://alaarab.github.io/phren/whitepaper.pdf"><img src="https://img.shields.io/badge/whitepaper-PDF-7C3AED?style=flat&labelColor=0D0D0D" alt="whitepaper"></a>
 </p>
 
 <p align="center">
@@ -46,14 +48,6 @@ npx @phren/cli init          # set up phren (interactive walkthrough)
 Init detects your tools, registers MCP servers, and installs lifecycle hooks. After it finishes, open a prompt in any tracked project — phren is already injecting context.
 
 To add a project later, run `phren add` from that directory. To browse what phren knows, run `phren` to open the interactive shell.
-
-## Learn more
-
-- [Documentation site](https://alaarab.github.io/phren/)
-- [Whitepaper (PDF)](https://alaarab.github.io/phren/whitepaper.pdf)
-- [Architecture](docs/architecture.md) — how retrieval, governance, and persistence fit together
-- [Contributing](CONTRIBUTING.md) — how to add tools, skills, and tests
-- [Security](SECURITY.md)
 
 ---
 

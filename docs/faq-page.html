@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FAQ | phren docs</title>
+  <meta name="description" content="Frequently asked questions about phren: performance, trust decay, multi-agent workflows, web UI, telemetry, and more." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="configuration.html" class="nav-link">Configuration</a>
+      <a href="cli.html" class="nav-link">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">General</div>
+        <a href="#vs-claude-md" class="sidebar-link">vs CLAUDE.md</a>
+        <a href="#performance" class="sidebar-link">Performance</a>
+        <a href="#multi-agent" class="sidebar-link">Multiple Agents</a>
+        <a href="#failure-modes" class="sidebar-link">Failure Modes</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Memory</div>
+        <a href="#trust-decay" class="sidebar-link">Trust Decay</a>
+        <a href="#auto-vs-manual" class="sidebar-link">Auto vs Manual</a>
+        <a href="#lifecycle" class="sidebar-link">Finding Lifecycle</a>
+        <a href="#provenance" class="sidebar-link">Provenance</a>
+        <a href="#cross-session" class="sidebar-link">Cross-Session Resume</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Setup</div>
+        <a href="#add-project" class="sidebar-link">Adding a Project</a>
+        <a href="#mcp-required" class="sidebar-link">MCP Required?</a>
+        <a href="#dry-run" class="sidebar-link">Dry Run</a>
+        <a href="#agents-supported" class="sidebar-link">Supported Agents</a>
+        <a href="#platforms" class="sidebar-link">Platforms</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Usage</div>
+        <a href="#web-ui" class="sidebar-link">Web UI</a>
+        <a href="#shell" class="sidebar-link">Interactive Shell</a>
+        <a href="#skill-collisions" class="sidebar-link">Skill Collisions</a>
+        <a href="#telemetry" class="sidebar-link">Telemetry</a>
+        <a href="#data-storage" class="sidebar-link">Data Storage</a>
+        <a href="#uninstall" class="sidebar-link">Uninstall</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="docs-content">
+      <h1>Frequently Asked Questions</h1>
+      <p class="docs-subtitle">Common questions about phren, answered.</p>
+
+      <h2 id="vs-claude-md">How is this different from just using CLAUDE.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
+      <p><code>CLAUDE.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time &mdash; whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
+      <p>Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>, regardless of how large your knowledge base grows. You can run more agents in parallel for the same cost, and they are not reading noise.</p>
+      <p><code>CLAUDE.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
+
+      <h2 id="performance">Does this slow down my prompts? <a href="#performance" class="anchor-link">#</a></h2>
+      <p>Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path. On a healthy warm cache it is often fast enough that you will barely notice it, but the exact latency depends on corpus size, filesystem speed, and whether semantic retrieval is enabled.</p>
+      <p>The main exceptions are the first prompt in a session, where <code>SessionStart</code> pulls the phren repo from git, and very large or slow filesystems, where index work can become noticeable. On a fast connection the pull is often under a second; on a slow connection it can be a few seconds. This is configurable &mdash; you can disable the auto-pull if you prefer to sync manually.</p>
+
+      <h2 id="multi-agent">What happens when I run multiple agents at the same time? <a href="#multi-agent" class="anchor-link">#</a></h2>
+      <p>They all read and write the same <code>~/.phren</code> directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.</p>
+      <p>In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing &mdash; it is just a shared git repo.</p>
+      <p>The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.</p>
+
+      <h2 id="failure-modes">What failure modes should I expect? <a href="#failure-modes" class="anchor-link">#</a></h2>
+      <p>The common ones are boring infrastructure issues, not mystery behavior:</p>
+      <ul>
+        <li><strong>No remote configured:</strong> auto-save still commits locally, but nothing syncs across machines until you add a remote.</li>
+        <li><strong>Push failed:</strong> the commit stays local and Phren records the last sync error so <code>phren status</code>, shell, and web UI can show it.</li>
+        <li><strong>Hooks disabled or stale:</strong> retrieval stops, but your files are still there; rerun <code>phren init</code> or re-enable hooks with <code>phren hooks-mode on</code>.</li>
+        <li><strong>Stale index:</strong> search quality drops until the next rebuild; <code>phren doctor</code> and <code>phren status</code> will flag index trouble.</li>
+        <li><strong>Review queue growth:</strong> trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.</li>
+        <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.governance/access-control.json</code>, <code>.runtime/access-control.local.json</code>, and actor identity (<code>PHREN_ACTOR</code> / OS user).</li>
+      </ul>
+
+      <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
+      <p>Every finding has a confidence score. The score degrades over time in four steps:</p>
+      <table class="docs-table">
+        <thead>
+          <tr>
+            <th>Age</th>
+            <th>Cited entry</th>
+            <th>Uncited entry</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>0&ndash;30 days</td><td>1.00</td><td>0.80</td></tr>
+          <tr><td>31&ndash;60 days</td><td>1.00</td><td>0.80</td></tr>
+          <tr><td>61&ndash;90 days</td><td>0.85</td><td>0.68</td></tr>
+          <tr><td>91&ndash;120 days</td><td>0.65</td><td>0.52</td></tr>
+          <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
+        </tbody>
+      </table>
+      <p>Entries below 0.35 are suppressed entirely and move to the review queue instead of being injected. Entries with file/line/commit citations hold their score longer than uncited ones.</p>
+      <p>You can save a truth with <code>pin_memory</code> to make it never decay. Truths live in <code>truths.md</code> and always inject regardless of age. All thresholds are configurable via <code>phren config policy</code>.</p>
+
+      <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
+      <h3>Automatic</h3>
+      <ul>
+        <li>Findings added via <code>add_finding</code> MCP tool (agents call this when they discover something worth saving)</li>
+        <li>Task items via <code>add_task</code></li>
+        <li>Session state committed and pushed by the Stop hook after every response</li>
+      </ul>
+      <h3>Manual</h3>
+      <ul>
+        <li>Running <code>/phren-consolidate</code> when findings pile up and you want patterns surfaced</li>
+        <li>Running <code>phren maintain govern</code> to queue low-value or stale entries for review</li>
+        <li>Pinning findings that should never decay</li>
+      </ul>
+      <p>In practice, well-configured agents save findings automatically as they work. You review the queue periodically to keep quality high, and run consolidation intentionally when the findings file starts to get repetitive.</p>
+
+      <h2 id="lifecycle">How do finding lifecycle and contradictions work? <a href="#lifecycle" class="anchor-link">#</a></h2>
+      <p>Findings have explicit lifecycle and editing operations:</p>
+      <ul>
+        <li><code>supersede_finding</code> &mdash; mark older guidance replaced by newer guidance</li>
+        <li><code>retract_finding</code> &mdash; invalidate a finding with a reason</li>
+        <li><code>resolve_contradiction</code> &mdash; resolve status between conflicting findings</li>
+        <li><code>get_contradictions</code> &mdash; list unresolved contradicted findings</li>
+        <li><code>edit_finding</code> &mdash; edit a finding in place while preserving inline metadata</li>
+      </ul>
+      <p>Lifecycle metadata stays attached to finding entries, so history remains auditable instead of being silently deleted.</p>
+
+      <h2 id="provenance">What is finding provenance and impact scoring? <a href="#provenance" class="anchor-link">#</a></h2>
+      <p><code>add_finding</code> accepts a <code>source</code> field (<code>human</code>, <code>agent</code>, <code>hook</code>, <code>extract</code>, <code>consolidation</code>, <code>unknown</code>) so origin is explicit.</p>
+      <p>Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost.</p>
+
+      <h2 id="cross-session">How does cross-session resume work? <a href="#cross-session" class="anchor-link">#</a></h2>
+      <p><code>session_end</code> writes task checkpoints (task ID/text, edited files, failing tests, last attempt, next step). <code>session_start</code> surfaces those checkpoints so agents can resume quickly. <code>session_history</code> gives list/drill-down access to prior sessions and artifacts.</p>
+
+      <h2 id="add-project">How do I add a new project? <a href="#add-project" class="anchor-link">#</a></h2>
+      <p>For an existing repo:</p>
+      <pre><code>cd ~/code/my-project
+phren add</code></pre>
+      <p>Phren bootstraps <code>~/.phren/my-project/</code> and adds it to your active profile. If you just open a session in an untracked repo, phren tells the agent to ask whether you want to add it.</p>
+      <p>For a brand-new project scaffold inside Claude:</p>
+      <pre><code>/phren-init my-project</code></pre>
+
+      <h2 id="mcp-required">Does phren require MCP? <a href="#mcp-required" class="anchor-link">#</a></h2>
+      <p>No. MCP is recommended &mdash; it gives agents 67 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook.</p>
+      <pre><code># Install without MCP
+phren init --mcp off
+
+# Toggle anytime
+phren mcp-mode on
+phren mcp-mode off</code></pre>
+
+      <h2 id="dry-run">How do I preview init changes without writing files? <a href="#dry-run" class="anchor-link">#</a></h2>
+      <pre><code>phren init --dry-run</code></pre>
+      <p>Prints what would be created or updated and exits without touching anything.</p>
+
+      <h2 id="agents-supported">Which agents are supported? <a href="#agents-supported" class="anchor-link">#</a></h2>
+      <p>Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex.</p>
+      <ul>
+        <li>Shared mode configures user-scoped integrations for Claude Code, VS Code, Copilot CLI, Cursor, and Codex.</li>
+        <li>Project-local mode configures VS Code workspace MCP only.</li>
+        <li>Claude gets full native lifecycle hooks (<code>SessionStart</code>, <code>UserPromptSubmit</code>, <code>Stop</code>) plus MCP.</li>
+        <li>Copilot CLI, Cursor, and Codex get generated hook configs plus session wrappers, in addition to MCP config.</li>
+      </ul>
+
+      <h2 id="platforms">Which platforms are supported? <a href="#platforms" class="anchor-link">#</a></h2>
+      <p>Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts and MCP config locations.</p>
+
+      <h2 id="web-ui">How do I use the web UI? <a href="#web-ui" class="anchor-link">#</a></h2>
+      <pre><code>phren web-ui</code></pre>
+      <p>Opens a browser-based interface at <code>localhost:3499</code> (configurable with <code>--port</code>). The review queue is read-only there: use it to inspect flagged entries and inspect project memory without starting an agent session.</p>
+      <p>You can filter by machine, model, and project. Useful when you are running agents across multiple machines and want to triage what each one produced.</p>
+      <p>Inside a project, the Reference tab shows three buckets side by side: project topics from <code>topic-config.json</code>, suggested topics inferred from project language, and other hand-written docs under <code>reference/</code>.</p>
+      <h3>Security defaults</h3>
+      <ul>
+        <li>Loopback-only bind (<code>127.0.0.1</code>)</li>
+        <li>Random per-run auth token</li>
+        <li>CSRF token required for mutating routes</li>
+        <li>CSP and anti-framing headers enabled</li>
+      </ul>
+
+      <h2 id="shell">How do I navigate the shell? <a href="#shell" class="anchor-link">#</a></h2>
+      <pre><code>phren</code></pre>
+      <p>Opens the interactive shell. Single-key navigation:</p>
+      <table class="docs-table">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>View</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>p</code></td><td>Projects</td></tr>
+          <tr><td><code>b</code></td><td>Task</td></tr>
+          <tr><td><code>l</code></td><td>Findings</td></tr>
+          <tr><td><code>m</code></td><td>Review Queue</td></tr>
+          <tr><td><code>s</code></td><td>Skills</td></tr>
+          <tr><td><code>k</code></td><td>Hooks</td></tr>
+          <tr><td><code>h</code></td><td>Health</td></tr>
+          <tr><td><code>/</code></td><td>Filter current view</td></tr>
+          <tr><td><code>:</code></td><td>Command palette</td></tr>
+          <tr><td><code>?</code></td><td>Help</td></tr>
+          <tr><td><code>q</code></td><td>Quit</td></tr>
+        </tbody>
+      </table>
+      <p>Press <code>?</code> for the full keybinding reference inside the shell.</p>
+
+      <h2 id="skill-collisions">How are skills resolved when names collide? <a href="#skill-collisions" class="anchor-link">#</a></h2>
+      <p>Skill resolution precedence is project scope over global scope. Disabled skills remain on disk but are hidden from active mirrors. Alias/command collisions are flagged and left unregistered in generated command outputs.</p>
+      <p>Generated skill artifacts:</p>
+      <ul>
+        <li><code>.claude/skill-manifest.json</code></li>
+        <li><code>.claude/skill-commands.json</code></li>
+      </ul>
+
+      <h2 id="telemetry">Is telemetry on by default? <a href="#telemetry" class="anchor-link">#</a></h2>
+      <p>No. Telemetry is opt-in and local-only.</p>
+      <pre><code>phren config telemetry on</code></pre>
+      <p>Stats are stored in <code>.runtime/telemetry.json</code>. No external reporting is sent by default.</p>
+
+      <h2 id="data-storage">Where does phren store data? <a href="#data-storage" class="anchor-link">#</a></h2>
+      <p>Shared mode stores data in <code>~/.phren</code> by default. Set <code>PHREN_PATH</code> to use a custom shared root.</p>
+      <pre><code>PHREN_PATH=/path/to/my-phren phren init</code></pre>
+      <p>Project-local mode stores data inside the repo:</p>
+      <pre><code>cd /path/to/repo
+phren init --mode project-local</code></pre>
+      <p>That creates <code>&lt;repo&gt;/.phren</code> and keeps the install repo-local.</p>
+
+      <h2 id="uninstall">What does uninstall remove? <a href="#uninstall" class="anchor-link">#</a></h2>
+      <p><code>phren uninstall</code> removes the active install, not just the agent config.</p>
+      <ul>
+        <li><strong>Shared mode:</strong> removes Phren MCP/hooks/config plus the active Phren root and machine alias.</li>
+        <li><strong>Project-local mode:</strong> removes <code>&lt;repo&gt;/.phren</code> and the workspace MCP entry from <code>.vscode/mcp.json</code>.</li>
+      </ul>
+      <p>If you want to preserve data, export or back up the root before uninstalling.</p>
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

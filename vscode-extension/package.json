@@ -197,6 +197,11 @@
         "command": "phren.createTaskIssue",
         "title": "Phren: Create GitHub Issue",
         "icon": "$(github)"
+      },
+      {
+        "command": "phren.projectConfig",
+        "title": "Phren: Project Config",
+        "icon": "$(settings-gear)"
       }
     ],
     "keybindings": [

@@ -1,7 +1,7 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.10",
-  "description": "Knowledge layer for AI agents. Claude remembers you. Phren remembers your work.",
+  "version": "0.0.11",
+  "description": "Knowledge layer for AI agents. Phren learns and recalls.",
   "type": "module",
   "bin": {
     "phren": "mcp/dist/index.js"

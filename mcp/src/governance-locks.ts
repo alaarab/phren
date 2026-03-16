@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
+import { errorMessage } from "./utils.js";
 
 // Acquire the file lock, returning true on success or throwing on timeout.
 function acquireFileLock(lockPath: string): void {
@@ -19,7 +20,7 @@ function acquireFileLock(lockPath: string): void {
       hasLock = true;
       break;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${errorMessage(err)}\n`);
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
@@ -64,7 +65,7 @@ function acquireFileLock(lockPath: string): void {
 
 function releaseFileLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${errorMessage(err)}\n`);
   }
 }
 
