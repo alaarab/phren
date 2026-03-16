@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-Every time you start a new session, your AI agent forgets everything it learned. Phren fixes that — findings, decisions, and patterns persist as markdown in a git repo you control. No database, no hosted service, no vendor lock-in. Works across sessions, projects, and machines.
+Every time you start a new session, your AI agent forgets everything it learned. Phren fixes that. Findings, decisions, and patterns persist as markdown in a git repo you control. No database, no hosted service, no vendor lock-in.
 </p>
 
 ---
@@ -25,18 +25,18 @@ That single command creates `~/.phren`, wires up MCP, installs hooks, and gives 
 
 ## What phren tracks
 
-- **Findings** — bugs hit, patterns discovered, decisions and their reasoning. Tagged by type (`[pattern]`, `[decision]`, `[pitfall]`, `[observation]`) with per-type decay rates
-- **Fragments** — named concepts (auth, build, React) that connect findings across projects. When you search for a topic, phren pulls in everything linked to that fragment
-- **Tasks** — work items that persist across sessions with priority, pinning, and GitHub issue linking
-- **Sessions** — conversation boundaries with summaries and checkpoints, so the next session picks up where this one left off
-- **Skills** — reusable slash commands you teach phren. Drop them in `~/.phren/global/skills/` and they work everywhere
+- **Findings**: bugs hit, patterns discovered, decisions and their reasoning. Tagged by type (`[pattern]`, `[decision]`, `[pitfall]`, `[observation]`) with per-type decay rates
+- **Fragments**: named concepts (auth, build, React) that connect findings across projects. Search for a topic and phren pulls in everything linked to that fragment
+- **Tasks**: work items that persist across sessions with priority, pinning, and GitHub issue linking
+- **Sessions**: conversation boundaries with summaries and checkpoints, so the next session picks up where the last one left off
+- **Skills**: reusable slash commands you teach phren. Drop them in `~/.phren/global/skills/` and they work everywhere
 
 ## How it works
 
 - **Surfaces relevant context on every prompt** via hooks. Agents build on what they know instead of starting fresh
-- **Trust scores decay over time** — old findings lose confidence. Decisions never decay. Observations expire in 14 days
+- **Trust scores decay over time.** Old findings lose confidence. Decisions never decay. Observations expire in 14 days
 - **Syncs across machines** through git push/pull. No coordination service
-- **Works with Claude Code, Copilot, Cursor, and Codex** — one memory, every agent
+- **Works with Claude Code, Copilot, Cursor, and Codex.** One store, every agent
 - **Shell and web UI** for browsing, searching, and triaging (`phren` or `phren web-ui`)
 
 ## Quick start
@@ -45,7 +45,7 @@ That single command creates `~/.phren`, wires up MCP, installs hooks, and gives 
 npx @phren/cli init          # set up phren (interactive walkthrough)
 ```
 
-Init detects your tools, registers MCP servers, and installs lifecycle hooks. After it finishes, open a prompt in any tracked project — phren is already injecting context.
+Init detects your tools, registers MCP servers, and installs lifecycle hooks. After it finishes, open a prompt in any tracked project. Phren is already injecting context.
 
 To add a project later, run `phren add` from that directory. To browse what phren knows, run `phren` to open the interactive shell.
 

@@ -4,7 +4,7 @@
 
 ## Why AI memory governance matters
 
-Unmanaged AI memory degrades over time. A finding written in January about an API that no longer exists will still inject into context in July — confidently and wrongly. Without an audit trail, you cannot see what your AI knows, who taught it, or when. Without access control, any agent can overwrite shared memory. Without a human review interface, you cannot inspect what the AI will consume before it does.
+Unmanaged AI memory degrades over time. A finding written in January about an API that no longer exists will still inject into context in July, confidently and wrongly. Without an audit trail, you cannot see what your AI knows, who taught it, or when. Without access control, any agent can overwrite shared memory. Without a human review interface, you cannot inspect what the AI will consume before it does.
 
 These are not theoretical problems. They are operational realities for any team using AI memory at scale.
 
@@ -44,7 +44,7 @@ Each finding has a confidence score that decays over time:
 
 A finding with no source file citation gets an additional 0.8× penalty. Findings whose cited `file:line` no longer exists in the codebase are penalized further.
 
-The threshold `minInjectConfidence=0.35` suppresses low-confidence findings from being injected into context automatically. They remain in storage — they just stop contaminating your AI's working knowledge.
+The threshold `minInjectConfidence=0.35` suppresses low-confidence findings from being injected into context automatically. They remain in storage. They just stop contaminating your AI's working knowledge.
 
 Configure via `phren config policy`.
 
@@ -87,7 +87,7 @@ Configure via `phren config policy`.
 
 `phren shell` is a model-free terminal interface for reviewing, approving, and cleaning memories before any agent consumes them. 8 views, 30+ commands, single-key navigation.
 
-A human can inspect every finding, see its confidence score, view its git history, and delete or pin it — all without an AI in the loop. This is operationally essential at team scale: you do not want agents writing to shared memory without a human review step available.
+A human can inspect every finding, see its confidence score, view its git history, and delete or pin it, all without an AI in the loop. This is operationally essential at team scale: you do not want agents writing to shared memory without a human review step available.
 
 ## Comparison
 

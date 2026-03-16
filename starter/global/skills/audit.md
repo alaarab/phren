@@ -1,6 +1,6 @@
 ---
 name: audit
-description: Full codebase audit — dead code, security, dependencies, performance, optimization. Not a diff review — scans everything.
+description: Full codebase audit. Dead code, security, dependencies, performance, optimization. Not a diff review, scans everything.
 ---
 # /audit - Full Codebase Audit
 
@@ -15,7 +15,7 @@ Launch 5 parallel agents. Each one scans the full codebase for a different class
 Before launching agents, understand the project:
 
 ```
-1. Read package.json (or pyproject.toml, Cargo.toml, go.mod — whatever applies)
+1. Read package.json (or pyproject.toml, Cargo.toml, go.mod, whatever applies)
 2. Find the source directories (src/, lib/, app/, etc.)
 3. Count files by extension to understand the stack
 4. Check for existing lint/test configs
@@ -32,7 +32,7 @@ Use the Agent tool to launch all five concurrently in a single message. Give eac
 Find code that exists but isn't used:
 
 1. **Unused exports.** For every `export` in the codebase, check if it's imported anywhere. Flag exports that are only used in their own file or not used at all. Exclude entry points and public API surfaces.
-2. **Unused dependencies.** Cross-reference `package.json` dependencies against actual imports in source files. Flag packages that are installed but never imported. Check devDependencies too — are test utilities actually used in tests?
+2. **Unused dependencies.** Cross-reference `package.json` dependencies against actual imports in source files. Flag packages that are installed but never imported. Check devDependencies too. Are test utilities actually used in tests?
 3. **Dead functions.** Functions defined but never called. Methods on classes that nothing invokes. Event handlers registered but for events that are never emitted.
 4. **Orphan files.** Files that nothing imports. Test files for source files that no longer exist. Config files for tools that aren't in the project.
 5. **Feature flags that resolved.** Environment variable checks where one branch is clearly dead. TODO/FIXME/HACK comments older than 6 months.
@@ -91,16 +91,16 @@ Wait for all agents. Then:
 
 1. **Deduplicate.** Multiple agents may flag the same issue from different angles. Merge them.
 2. **Prioritize.** Security issues first. Then dead code (easy wins). Then performance. Then quality.
-3. **Fix directly.** Don't just report — fix what you can. For things that need the user's input (like removing a dependency that might be used in a way you can't see), ask.
+3. **Fix directly.** Don't just report. Fix what you can. For things that need the user's input (like removing a dependency that might be used in a way you can't see), ask.
 4. **Summarize.** Report what was found, what was fixed, and what needs the user's decision.
 
 ## Options
 
 The user can scope the audit:
 
-- `/audit` — full audit, all 5 agents
-- `/audit security` — just the security agent
-- `/audit dead-code` — just dead code detection
-- `/audit performance` — just performance
-- `/audit deps` — just dependency health
-- `/audit quality` — just code quality
+- `/audit`: full audit, all 5 agents
+- `/audit security`: just the security agent
+- `/audit dead-code`: just dead code detection
+- `/audit performance`: just performance
+- `/audit deps`: just dependency health
+- `/audit quality`: just code quality

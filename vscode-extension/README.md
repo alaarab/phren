@@ -8,10 +8,10 @@ This extension connects VS Code to your local Phren store and MCP server so you 
 
 - Adds a dedicated **Phren** view in the activity bar.
 - Lists tracked Phren projects with drill-down sections for findings, tasks, sessions, review queue, and reference docs.
-- Shows **priority, pinned, and GitHub issue badges** on task tree items — at a glance you can see task priority (`high`/`medium`/`low`), whether a task is pinned, and which tasks are linked to a GitHub issue.
-- Shows **type and confidence badges** on finding tree items — each finding displays its type tag (`[decision]`, `[pitfall]`, etc.) and a confidence indicator when confidence is below threshold.
+- Shows **priority, pinned, and GitHub issue badges** on task tree items. At a glance you can see task priority (`high`/`medium`/`low`), whether a task is pinned, and which tasks are linked to a GitHub issue.
+- Shows **type and confidence badges** on finding tree items. Each finding displays its type tag (`[decision]`, `[pitfall]`, etc.) and a confidence indicator when confidence is below threshold.
 - Theme-aware **status bar** that uses VS Code color tokens for seamless integration with any installed theme.
-- Fragment graph webview with **animated characters and keyboard navigation** — arrow keys move between nodes, Enter selects a node, Escape clears focus.
+- Fragment graph webview with **animated characters and keyboard navigation**: arrow keys move between nodes, Enter selects a node, Escape clears focus.
 - Updated **review queue viewer** with a contextual notice explaining what each queue section contains.
 - Opens findings, skills, reference files, queue items, and sessions in read-only or editable panels directly in VS Code.
 - Lets you add a finding from the editor context menu by selecting text and running **Phren: Add Finding**.
@@ -106,7 +106,7 @@ These commands fire from the Phren sidebar or editor context menu. They are not 
 The sidebar is structured around real Phren objects:
 
 - **Projects**: expands into Findings (with date groups), Tasks (Queue/Active/Done), Sessions, Review Queue, and Reference.
-- **Skills**: grouped by scope — project-local and global skills shown separately.
+- **Skills**: grouped by scope, project-local and global skills shown separately.
 - **Hooks**: current hook state for each registered tool.
 - **Fragment Graph**: one-click entry into the graph view.
 
@@ -120,7 +120,7 @@ Tasks in the sidebar show priority badges, a pin indicator for pinned tasks, and
 
 ### Edit Skills
 
-Skills open in an editor-like webview with inline save and enable/disable controls — useful for iterating on prompt instructions without dropping into the Phren store manually.
+Skills open in an editor-like webview with inline save and enable/disable controls, useful for iterating on prompt instructions without dropping into the Phren store manually.
 
 ## Notes
 

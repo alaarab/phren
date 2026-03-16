@@ -56,7 +56,7 @@ Run `/phren-sync` to pull everything down or push changes back.
 
 ## MCP tools
 
-The phren MCP server is running. Phren already knows a lot — ask him before asking the user to repeat themselves.
+The phren MCP server is running. Phren already knows a lot. Ask him before asking the user to repeat themselves.
 
 - **At session start:** ask phren what's active: `list_projects()`, then `get_project_summary(name)` for the relevant project
 - **When the user mentions a project, codebase, or task:** ask phren first: `search_knowledge(query)` before asking questions
@@ -86,4 +86,4 @@ Read `~/.phren-context.md` at the start of every session for machine-specific co
 
 ## Without MCP server
 
-If the MCP server isn't available, phren still helps. Claude reads `~/.phren-context.md` and per-project memory files from `~/.claude/projects/` for context, then fetches details directly from `~/.phren/project-name/` as needed. No MCP required — phren just works a bit more quietly.
+If the MCP server isn't available, phren still helps. Claude reads `~/.phren-context.md` and per-project memory files from `~/.claude/projects/` for context, then fetches details directly from `~/.phren/project-name/` as needed. No MCP required, phren just works a bit more quietly.

@@ -345,7 +345,7 @@ Finding lifecycle and impact scoring notes:
 
 ### `pin_memory`
 
-Write a truth into truths.md — a high-confidence entry that never decays and always injects.
+Write a truth into truths.md, a high-confidence entry that never decays and always injects.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

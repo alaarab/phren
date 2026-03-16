@@ -10,16 +10,16 @@
 
 ### 1.1 Name and Etymology
 
-**phren** (lowercase, always). From Greek *phren* — the mind, the seat of thought. One syllable. Starts hard (ph), ends soft (n). Say it once and move on.
+**phren** (lowercase, always). From Greek *phren*, the mind, the seat of thought. One syllable. Starts hard (ph), ends soft (n). Say it once and move on.
 
 ### 1.2 Character
 
-Phren is a quiet memory keeper. It does not do the work — it holds the context so you can. Think of a well-organized journal that opens to the right page when you sit down.
+Phren is a quiet memory keeper. It does not do the work. It holds the context so you can. Think of a well-organized journal that opens to the right page when you sit down.
 
 **Phren is:**
-- Quiet — speaks only when surfacing something relevant
-- Steady — always present, never urgent
-- Warm but restrained — knowledge at the core, structure around it
+- Quiet: speaks only when surfacing something relevant
+- Steady: always present, never urgent
+- Warm but restrained: knowledge at the core, structure around it
 
 **Phren is not:**
 - An assistant (it doesn't act, it remembers)
@@ -45,15 +45,15 @@ Phren is a quiet memory keeper. It does not do the work — it holds the context
 Phren has a specific set of verbs that define how it speaks and how users speak to it. These verbs drive all UI labels, CLI output, and documentation.
 
 **Phren's verbs (what phren does):**
-- **remembers** — when phren saves something: "phren will remember this"
-- **surfaces** — when phren injects context: "surfaced 3 times this week"
-- **holds** — what phren contains: "phren holds 47 fragments"
-- **carries** — continuity: "phren carries context forward"
-- **noticed** — proactive detection: "phren noticed this is a git project"
+- **remembers**: when phren saves something: "phren will remember this"
+- **surfaces**: when phren injects context: "surfaced 3 times this week"
+- **holds**: what phren contains: "phren holds 47 fragments"
+- **carries**: continuity: "phren carries context forward"
+- **noticed**: proactive detection: "phren noticed this is a git project"
 
 **User's verbs (what you do with phren):**
-- **tell** — adding knowledge: "tell phren what you learned"
-- **ask** — searching: "ask phren about rate limiting"
+- **tell**: adding knowledge: "tell phren what you learned"
+- **ask**: searching: "ask phren about rate limiting"
 
 **Never use:** stores, manages, processes, retrieves, indexes, persists
 
@@ -61,7 +61,7 @@ Phren has a specific set of verbs that define how it speaks and how users speak 
 
 - Always lowercase: **phren**
 - Letterspacing: +0.04em for display sizes, normal for body
-- Weight: 500 (medium) for wordmark, not bold — quiet confidence
+- Weight: 500 (medium) for wordmark, not bold. Quiet confidence
 - In CLI: plain `phren`, no special formatting on the name itself
 
 ---
@@ -70,13 +70,13 @@ Phren has a specific set of verbs that define how it speaks and how users speak 
 
 ### 2.1 What Phren Looks Like
 
-Phren is a small glowing orb — an ember of awareness. He is geometric, warm, and simple enough to animate smoothly. He matches the amber/copper center of the main icon: the knowledge at the heart of the network.
+Phren is a small glowing orb, an ember of awareness. He is geometric, warm, and simple enough to animate smoothly. He matches the amber/copper center of the main icon: the knowledge at the heart of the network.
 
 **Visual description:**
 - A radial gradient orb: bright warm center (#FDE89A -> #F5C840 -> #D4892E -> #8B4A12)
 - A soft pulsing ambient glow around him (#D4892E at low opacity)
-- A faint dashed orbit ring that rotates slowly — hints at the connections he maintains
-- A small bright inner spot — his "awareness," the center of attention
+- A faint dashed orbit ring that rotates slowly, hinting at the connections he maintains
+- A small bright inner spot , his "awareness," the center of attention
 
 **Size:** 64x64 SVG at full resolution. Scales down to 20px for status bar, 32px for inline UI, 48px for graph explorer.
 
@@ -99,7 +99,7 @@ This is phren's showcase moment. When the user clicks a fragment node in the kno
 
 1. Phren's orb (positioned at center or last location) begins moving toward the clicked node
 2. The movement follows a gentle ease-in-out curve (CSS `cubic-bezier(0.4, 0, 0.2, 1)`, ~600ms)
-3. A faint warm trail follows him — a line from previous position to current, fading over 1s
+3. A faint warm trail follows him, a line from previous position to current, fading over 1s
 4. When he arrives at the node, he enters "retrieving" state (brighter pulse)
 5. The detail panel opens with the node's content
 6. Phren settles into idle at the node's position
@@ -119,16 +119,16 @@ This is phren's showcase moment. When the user clicks a fragment node in the kno
 | **Web UI empty states** | Idle phren with message below ("Nothing here yet") | 48px |
 | **Web UI loading** | Retrieving-state phren while data loads | 32px |
 | **VS Code status bar** | Simplified: just the colored dot (amber/green/red), phren-derived | 8px dot |
-| **CLI** | Not visual — personality only through text | n/a |
+| **CLI** | Not visual, personality only through text | n/a |
 | **Docs site hero** | Large animated phren with orbit ring, idle state | 80px |
 | **README** | Static icon (existing icon.svg, not the character) | 100px |
 
 ### 2.5 Design Principles for the Character
 
-- **Never cute.** Phren is not a mascot. He's a presence — closer to a firefly than a cartoon.
+- **Never cute.** Phren is not a mascot. He's a presence, closer to a firefly than a cartoon.
 - **Never in the way.** His animations are subtle. If you're not looking for him, you might not notice. That's fine.
 - **Warm, not flashy.** The amber glow should feel like candlelight, not neon. Opacity stays low on the ambient effects.
-- **Purposeful movement.** He only moves when there's a reason — retrieving a fragment, acknowledging an action. No idle wandering.
+- **Purposeful movement.** He only moves when there's a reason: retrieving a fragment, acknowledging an action. No idle wandering.
 - **Scale gracefully.** At 20px he's just a glowing dot. At 80px you see the full gradient, orbit ring, and inner highlight. Both should feel like the same character.
 
 ---
@@ -160,7 +160,7 @@ The current phren icon already tells the story: a warm copper ember at center (y
 | `--surface` | `#ffffff` | `#15160f` | Cards, panels |
 | `--surface-raised` | `#fdfcfa` | `#1c1d16` | Elevated surfaces |
 | `--surface-sunken` | `#f2f1ed` | `#0a0b08` | Inset areas |
-| `--ink` | `#1a1a18` | `#e8e4d9` | Primary text — warm off-white in dark |
+| `--ink` | `#1a1a18` | `#e8e4d9` | Primary text, warm off-white in dark |
 | `--ink-secondary` | `#3d3d3a` | `#b5b0a3` | Secondary text |
 | `--muted` | `#7a7872` | `#6b6860` | Tertiary text, timestamps |
 
@@ -169,7 +169,7 @@ The current phren icon already tells the story: a warm copper ember at center (y
 | Token | Value | Usage |
 |---|---|---|
 | `--success` | `#10b981` | Healthy, synced, complete |
-| `--warning` | `#d4892e` | Matches amber — phren's notices |
+| `--warning` | `#d4892e` | Matches amber, phren's notices |
 | `--danger` | `#c45a4a` | Warmer red, errors |
 
 ### 2.3 Graph Visualization Colors
@@ -178,9 +178,9 @@ The knowledge graph is phren's signature visual. Fragment nodes use topic-hashed
 
 | Node Type | Old Color | New Color | Why |
 |---|---|---|---|
-| project | `#7c3aed` (purple) | `#d4892e` (amber) | Projects are central knowledge — warm |
+| project | `#7c3aed` (purple) | `#d4892e` (amber) | Projects are central knowledge, warm |
 | fragment (was entity) | `#06b6d4` (cyan) | `#3a7bae` (indigo) | Fragments are structural connections |
-| task-active | `#10b981` (green) | `#10b981` (green) | Keep — universally understood |
+| task-active | `#10b981` (green) | `#10b981` (green) | Keep, universally understood |
 | task-queue | `#eab308` (yellow) | `#b8860b` (dark gold) | Align with amber family |
 | reference | `#14b8a6` (teal) | `#6b8e7a` (sage) | Quieter, natural tone |
 
@@ -199,24 +199,24 @@ phren
 
 ---
 
-[What phren does — 3 short paragraphs, no bullets]
+[What phren does, 3 short paragraphs, no bullets]
 
 ---
 
 ## Getting started
 [4-line install + init]
-[Scenario table — same as current but reworded]
+[Scenario table, same as current but reworded]
 
 ---
 
 ## How it works
 [3 paragraphs: before each prompt / after each response / when context resets]
-[No "three things happen" preamble — just describe them]
+[No "three things happen" preamble, just describe them]
 
 ---
 
 ## Reference
-[<details> blocks — same progressive disclosure pattern as current]
+[<details> blocks, same progressive disclosure pattern as current]
 [But each summary line is a question: "What lives in your phren?"]
 ```
 
@@ -232,7 +232,7 @@ phren
 
 # phren
 
-**[tagline — pending from copy]**
+**[tagline, pending from copy]**
 
 [![npm](badge)](link) [![Docs](badge)](link)
 
@@ -245,7 +245,7 @@ phren
 ```
 
 Key changes from current:
-- Icon slightly smaller (100px vs 120px) — quieter
+- Icon slightly smaller (100px vs 120px), quieter
 - Single tagline, not subtitle + description
 - Fewer badges (drop whitepaper badge for now)
 - Description is about the user, not the architecture
@@ -253,13 +253,13 @@ Key changes from current:
 ### 3.3 Details Block Summaries
 
 Current: "What lives in your phren"
-New: "What lives in your phren" (or whatever copy says — keep the question format)
+New: "What lives in your phren" (or whatever copy says, keep the question format)
 
 Current: "Memory across your machines"
 New: "Phren across machines"
 
 Current: "The MCP server (60 tools)"
-New: "The MCP server" (drop the number — it changes and sounds like bragging)
+New: "The MCP server" (drop the number, it changes and sounds like bragging)
 
 ---
 
@@ -305,7 +305,7 @@ phren v2.0.0
 ```
 
 Changes:
-- No colons after labels — cleaner scan
+- No colons after labels, cleaner scan
 - Indented values, not right-aligned
 - Parenthetical details instead of separate descriptions
 - Double-dash separator for inline grouping
@@ -356,7 +356,7 @@ Header line: `phren` (not `phren`) with project name and sync status.
 
 ### 5.1 Overall Feel
 
-Move from "admin dashboard" to "knowledge workspace." The Web UI is where you see phren's understanding of your projects — fragments connecting, patterns forming.
+Move from "admin dashboard" to "knowledge workspace." The Web UI is where you see phren's understanding of your projects: fragments connecting, patterns forming.
 
 ### 5.2 Layout Changes
 
@@ -371,7 +371,7 @@ Move from "admin dashboard" to "knowledge workspace." The Web UI is where you se
 - Left: phren icon (small, 20px) + "phren" wordmark
 - Right: project selector + theme toggle + sync indicator
 
-**Sync indicator:** A small amber dot that pulses gently when syncing, solid when synced, hollow when disconnected. Not a badge with text — just a dot.
+**Sync indicator:** A small amber dot that pulses gently when syncing, solid when synced, hollow when disconnected. Not a badge with text. Just a dot.
 
 ### 5.3 Color System Update
 
@@ -405,7 +405,7 @@ Replace the current cyan accent throughout with amber:
 
 ### 5.4 Graph Page
 
-The graph is phren's showcase — and the home of his signature interaction (see section 2.3). Changes:
+The graph is phren's showcase, and the home of his signature interaction (see section 2.3). Changes:
 - Rename "entity" to "fragment" everywhere in labels, tooltips, legend
 - Project nodes use amber (`#d4892e`), fragment nodes use indigo (`#3a7bae`)
 - Connection lines between fragments use warm copper tones (from the icon: `#8B5A1A`)
@@ -459,7 +459,7 @@ Click opens the phren sidebar.
 
 VS Code has its own theming. Phren's extension should:
 - Use `ThemeColor` API for icons (amber accent where possible)
-- Not fight the user's theme — adapt to it
+- Not fight the user's theme. Adapt to it
 - Use standard VS Code tree view patterns, not custom webviews (for the sidebar)
 
 ---
@@ -487,7 +487,7 @@ phren
 [2 sentences about what phren does. Not technical. Human.]
 ```
 
-The animated graph in the hero stays — it visually communicates fragments linking together.
+The animated graph in the hero stays. It visually communicates fragments linking together.
 
 ---
 
@@ -498,7 +498,7 @@ The animated graph in the hero stays — it visually communicates fragments link
 ```
 phren
 
-  Phren keeps what your agents learn — across sessions,
+  Phren keeps what your agents learn, across sessions,
   projects, and machines.
 
   Where should phren keep its memory?
@@ -566,16 +566,16 @@ phren
 
 ### 9.2 What Stays
 
-- The icon SVG — it already embodies phren's visual language
-- The graph visualization engine — just color/label updates
-- The overall UI layout — sidebar + content pattern works
-- The TUI shell structure — 7 views, single-key nav
+- The icon SVG. It already embodies phren's visual language
+- The graph visualization engine, just color/label updates
+- The overall UI layout. Sidebar + content pattern works
+- The TUI shell structure: 7 views, single-key nav
 - Inter as the UI font
 - The light/dark theme toggle
 
 ### 9.3 Migration Markers
 
-All references to "phren" in user-facing strings become "phren". All references to "entity" in user-facing strings become "fragment". Internal variable names and file structure are handled by the rewording agent — this spec covers the UX layer only.
+All references to "phren" in user-facing strings become "phren". All references to "entity" in user-facing strings become "fragment". Internal variable names and file structure are handled by the rewording agent. This spec covers the UX layer only.
 
 ---
 
@@ -584,13 +584,13 @@ All references to "phren" in user-facing strings become "phren". All references 
 ### Resolved (aligned with copy)
 
 - **Phren's verbs:** remembers, surfaces, holds, carries, noticed. User verbs: tell, ask. (See section 1.5)
-- **Error voice:** Phren-as-character for recoverable issues ("phren couldn't sync — check your remote"). Neutral for hard errors ("permission denied: ~/.phren").
-- **Fragments:** Used everywhere — UI labels, docs, CLI, graph. Not just a graph concept.
+- **Error voice:** Phren-as-character for recoverable issues ("phren couldn't sync, check your remote"). Neutral for hard errors ("permission denied: ~/.phren").
+- **Fragments:** Used everywhere: UI labels, docs, CLI, graph. Not just a graph concept.
 - **Action phrasing:** "Tell phren" for adding. "phren will remember this" for confirmation. "surfaced" for retrieval.
 
 ### Still Open (waiting on copy)
 
-1. **Tagline** — need a short (under 6 words) tagline for the README hero. Candidates: "Your project's memory." / "What your agents remember." Waiting on reworder's pick.
-2. **Details block summaries** — question format or statement? "What lives in your phren?" vs "Your phren" vs something else.
-3. **Empty state** — when phren has nothing to surface, does it say something or stay silent? Proposal: silence in CLI (no output = nothing to say), gentle "nothing yet" in Web UI empty states.
-4. **Fragment counter** — should the Web UI header show a growing count ("247 fragments") to reinforce the accumulation metaphor?
+1. **Tagline**: need a short (under 6 words) tagline for the README hero. Candidates: "Your project's memory." / "What your agents remember." Waiting on reworder's pick.
+2. **Details block summaries**: question format or statement? "What lives in your phren?" vs "Your phren" vs something else.
+3. **Empty state**: when phren has nothing to surface, does it say something or stay silent? Proposal: silence in CLI (no output = nothing to say), gentle "nothing yet" in Web UI empty states.
+4. **Fragment counter**: should the Web UI header show a growing count ("247 fragments") to reinforce the accumulation metaphor?

@@ -88,7 +88,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - **Docs site hero**: CTA restructured; "Private markdown. Git-backed. No database." promoted to hero subtitle. "How it works" step 3 rewritten for clarity.
 - **Docs site layout**: agent carousel replaced with static grid; skills grid expanded; hero filing cabinet animation added (phren interacts with cabinet).
-- **Docs site bookshelf animation**: personality pass — confused tilt on idle, reading glow, happy wiggle on completion.
+- **Docs site bookshelf animation**: personality pass, confused tilt on idle, reading glow, happy wiggle on completion.
 - **Docs site nav icon**: breathing idle animation, wobble on hover, pop on click.
 - **Docs site character direction**: phren faces right in all three placement contexts (hero, how-it-works, footer).
 - **Web UI color palette**: amber CSS tokens applied across all web UI surfaces.
@@ -193,7 +193,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Phren captures findings and auto-captures session insights. Configurable via `phren config finding-sensitivity`, VS Code settings (`phren.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
-- **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection — the active agent evaluates candidates directly.
+- **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection. The active agent evaluates candidates directly.
 - **Domain-neutral fragment detection**: fragment extraction now learns fragment patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
 - **Stack-ranked task priorities with gravity**: tasks now carry a numeric rank instead of `high`/`medium`/`low`. Inactive tasks sink over time via a gravity function so the top of the list stays actionable without manual triage.
 - **Progressive task model**: tasks are created as execution happens rather than planned upfront. Findings auto-link to the currently active task so context is preserved without extra MCP calls.
@@ -207,14 +207,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Task negation pattern detection**: phrases like "don't add a task" or "no task needed" suppress automatic task creation in `auto` mode.
 
 ### Changed
-- **Semantic dedup and conflict settings are batch-only**: `phren.semanticDedup` and `phren.semanticConflict` now explicitly apply only to offline maintenance commands (`phren maintain consolidate`, `phren maintain extract`). Live dedup during `add_finding` uses the active agent — no extra API call. VS Code notifications and setting descriptions updated to reflect this.
+- **Semantic dedup and conflict settings are batch-only**: `phren.semanticDedup` and `phren.semanticConflict` now explicitly apply only to offline maintenance commands (`phren maintain consolidate`, `phren maintain extract`). Live dedup during `add_finding` uses the active agent, no extra API call. VS Code notifications and setting descriptions updated to reflect this.
 - **`phren.llmModel` description clarified**: model selector now says "Model for offline phren operations. Live dedup uses the active agent instead."
 - VS Code cost-warning notifications for expensive models now say "for offline batch operations" instead of "for yes/no dedup."
 
 ### Fixed
 - **Renamed `review-ui` to `web-ui`** in all user-facing docs, source comments, and CLI references. No backward-compat alias. Affected files: `AGENTS.md`, `docs/faq.md`, `README.md`, `docs/governance.md`, `mcp/src/memory-ui-assets.ts`, `vscode-extension/src/graphWebview.ts`.
 - Removed all remaining backward-compatibility aliases from prior renames.
-- Fixed test suite race condition via vitest `globalSetup` — parallel test files no longer share mutable global state across workers.
+- Fixed test suite race condition via vitest `globalSetup`. Parallel test files no longer share mutable global state across workers.
 - VS Code: dead settings (`proactivity`, `autoExtract`, `autoCapture`, `taskMode`, `hooksEnabled`, `semanticDedup`, `semanticConflict`, `llmModel`) now correctly write to preference files via `syncSettingsToPreferences` on every change.
 
 ### Internal
@@ -238,7 +238,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Renamed "Review UI" to "Web UI" across all surfaces: types, functions, filenames, docs, and tests.
 
 ### Fixed
-- `task` and `finding` CLI namespaces were registered in `CLI_COMMANDS` — they were reachable by name but not listed, so help output and shell tab-completion missed them.
+- `task` and `finding` CLI namespaces were registered in `CLI_COMMANDS` but not listed, so help output and shell tab-completion missed them.
 
 ## [1.29.1] - 2026-03-11
 
@@ -372,8 +372,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Synonym search**: user-extensible YAML synonym maps at `~/.phren/global/synonyms.yaml` and per-project. Type "throttling", find "rate limit" and "429"
 - **Cross-project age decay**: findings from non-active projects scored lower in retrieval to surface current-project context first
 - **Per-project skill injection controls**: `phren.project.yaml` lets projects opt out of global skill injection (`skills: false`)
-- **Skills CLI**: `phren skills list/add/remove` — manage project-scoped skills from the terminal
-- **Hooks CLI**: `phren hooks list/enable/disable` — toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
+- **Skills CLI**: `phren skills list/add/remove`, manage project-scoped skills from the terminal
+- **Hooks CLI**: `phren hooks list/enable/disable`, toggle hook execution per tool (claude/copilot/cursor/codex) from the terminal
 - **Skills shell view** (`s`): browse and remove per-project skills from the interactive shell
 - **Hooks shell view** (`k`): enable/disable hooks per tool from the interactive shell
 - **Per-project MCP servers**: declare extra MCP servers in `phren.project.yaml` under `mcpServers`. `phren link` merges them into agent config using namespaced keys (`phren__<project>__<name>`)
