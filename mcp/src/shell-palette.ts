@@ -11,7 +11,11 @@ import {
 
 export function resultMsg(r: PhrenResult<unknown>): string {
   if (!r.ok) return r.error;
-  return typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+  if (typeof r.data === "string") return r.data;
+  if (r.data && typeof r.data === "object" && "message" in r.data && typeof (r.data as Record<string, unknown>).message === "string") {
+    return (r.data as Record<string, unknown>).message as string;
+  }
+  return JSON.stringify(r.data);
 }
 
 export function editDistance(a: string, b: string): number {

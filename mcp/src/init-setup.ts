@@ -23,7 +23,7 @@ import {
   GOVERNANCE_SCHEMA_VERSION,
 } from "./shared-governance.js";
 import { STOP_WORDS, errorMessage } from "./utils.js";
-import { ROOT, STARTER_DIR, VERSION, resolveEntryScript } from "./init-shared.js";
+import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
 import { TASKS_FILENAME } from "./data-tasks.js";
 import {
@@ -395,21 +395,6 @@ interface HookEntrypointCheckDeps {
   versionReader?: typeof commandVersion;
 }
 
-function commandVersion(cmd: string, args: string[] = ["--version"]): string | null {
-  const effectiveCmd = process.platform === "win32" && (cmd === "npm" || cmd === "npx") ? `${cmd}.cmd` : cmd;
-  try {
-    return execFileSync(effectiveCmd, args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      shell: process.platform === "win32" && effectiveCmd.endsWith(".cmd"),
-      timeout: EXEC_TIMEOUT_QUICK_MS,
-    }).trim();
-  } catch (err: unknown) {
-    debugLog(`commandVersion ${effectiveCmd} failed: ${errorMessage(err)}`);
-    return null;
-  }
-}
-
 export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
   const pathExists = deps.pathExists ?? fs.existsSync;
   const versionReader = deps.versionReader ?? commandVersion;
@@ -427,37 +412,6 @@ export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): Post
     detail,
     fix: hookEntrypointOk ? undefined : "Rebuild phren: `npm run build` or reinstall the package, and ensure npm/npx is available for hook fallbacks",
   };
-}
-
-function parseSemverTriple(raw: string): [number, number, number] | null {
-  const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
-  return [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)];
-}
-
-function versionAtLeast(raw: string | null, major: number, minor: number = 0): boolean {
-  if (!raw) return false;
-  const parsed = parseSemverTriple(raw);
-  if (!parsed) return false;
-  const [m, n] = parsed;
-  if (m !== major) return m > major;
-  return n >= minor;
-}
-
-function nearestWritableTarget(filePath: string): boolean {
-  let probe = fs.existsSync(filePath) ? filePath : path.dirname(filePath);
-  while (!fs.existsSync(probe)) {
-    const parent = path.dirname(probe);
-    if (parent === probe) return false;
-    probe = parent;
-  }
-  try {
-    fs.accessSync(probe, fs.constants.W_OK);
-    return true;
-  } catch (err: unknown) {
-    debugLog(`nearestWritableTarget failed for ${filePath}: ${errorMessage(err)}`);
-    return false;
-  }
 }
 
 function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {

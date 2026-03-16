@@ -68,7 +68,7 @@ describe("addFinding duplicate", () => {
     const r2 = addFindingToFile(tmp.path, PROJECT, text);
     expect(r2.ok).toBe(true);
     if (r2.ok) {
-      expect(r2.data).toContain("Skipped duplicate");
+      expect(r2.data.status).toBe("skipped");
     }
   });
 });

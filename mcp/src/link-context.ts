@@ -40,7 +40,7 @@ function writeContextFile(managedContent: string) {
     const existing = fs.readFileSync(contextFile, "utf8");
     if (existing.includes("<!-- phren-managed -->")) {
       const startIdx = existing.indexOf("<!-- phren-managed -->");
-      const endIdx = existing.indexOf("<!-- phren-managed -->");
+      const endIdx = existing.indexOf("<!-- phren-managed -->", startIdx + "<!-- phren-managed -->".length);
       const before = startIdx > 0 ? existing.slice(0, startIdx).trimEnd() : "";
       const after = endIdx !== -1 ? existing.slice(endIdx + "<!-- phren-managed -->".length).trimStart() : "";
       const parts = [before, wrapped, after].filter(Boolean);

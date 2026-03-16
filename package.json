@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "description": "Knowledge layer for AI agents. Phren learns and recalls.",
   "type": "module",
   "bin": {

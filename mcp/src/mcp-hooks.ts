@@ -26,7 +26,7 @@ function validateHookCommand(command: string): string | null {
   if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
   // Reject shell metacharacters that allow injection or arbitrary execution
   // when the command is later run via `sh -c`.
-  if (/[`$(){}&|;<>]/.test(trimmed)) {
+  if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
     return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
   }
   // eval and source can execute arbitrary code

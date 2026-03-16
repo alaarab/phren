@@ -38,6 +38,7 @@ export {
   addFindingToFile,
   addFindingsToFile,
   autoDetectFindingType,
+  type AddFindingResult,
 } from "./content-learning.js";
 
 export {

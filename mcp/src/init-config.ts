@@ -27,13 +27,13 @@ export type McpConfigStatus = "installed" | "already_configured" | "disabled" | 
 export type McpRootKey = "mcpServers" | "servers";
 export type ToolStatus = McpConfigStatus | "no_settings" | "no_vscode" | "no_cursor" | "no_copilot" | "no_codex";
 
-interface HookEntry {
+export interface HookEntry {
   matcher?: string;
   hooks?: Array<{ type?: string; command?: string; timeout?: number }>;
 }
 
-type HookEventName = "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse";
-type HookMap = Partial<Record<HookEventName, HookEntry[]>> & Record<string, unknown>;
+export type HookEventName = "UserPromptSubmit" | "Stop" | "SessionStart" | "PostToolUse";
+export type HookMap = Partial<Record<HookEventName, HookEntry[]>> & Record<string, unknown>;
 type JsonObject = Record<string, unknown> & {
   hooks?: HookMap;
   mcpServers?: Record<string, unknown>;
@@ -262,7 +262,7 @@ export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean;
       }
     };
 
-    const toolHookEnabled = hooksEnabled && (isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false) || isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false));
+    const toolHookEnabled = hooksEnabled && isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false);
 
     if (hooksEnabled) {
       upsertPhrenHook("UserPromptSubmit", {

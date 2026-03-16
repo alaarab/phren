@@ -13,6 +13,7 @@ import {
   EXEC_TIMEOUT_MS,
   FINDING_TYPES,
   normalizeMemoryScope,
+  RESERVED_PROJECT_DIR_NAMES,
 } from "./shared.js";
 import {
   addFindingToFile,
@@ -40,7 +41,6 @@ import {
 
 const JACCARD_MAYBE_LOW = 0.30;
 const JACCARD_MAYBE_HIGH = 0.55; // above this isDuplicateFinding already catches it
-const RESERVED_PROJECT_DIRS = new Set(["global", ".runtime", ".sessions", ".governance"]);
 
 interface PotentialDuplicate {
   existing: string;
@@ -172,16 +172,12 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!result.ok) {
             return mcpResponse({ ok: false, error: result.error });
           }
-          // Determine status from the returned message string
-          const isSkipped = result.data.startsWith("Skipped duplicate");
-          const isAdded = !isSkipped;
-
-          if (isSkipped) {
-            return mcpResponse({ ok: true, message: result.data, data: { project, finding: taggedFinding, status: "skipped" } });
+          if (result.data.status === "skipped") {
+            return mcpResponse({ ok: true, message: result.data.message, data: { project, finding: taggedFinding, status: "skipped" } });
           }
 
           updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
-          if (isAdded) {
+          if (result.data.status === "added" || result.data.status === "created") {
             runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
             incrementSessionFindings(phrenPath, 1, sessionId, project);
             extractFactFromFinding(phrenPath, project, taggedFinding);
@@ -216,7 +212,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           const conflictsWithList = semanticConflicts.checked
             ? extractConflictsWith(semanticConflicts.annotations)
-            : (result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1] ? [result.data.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)![1]] : []);
+            : (result.data.message.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)?.[1] ? [result.data.message.match(/<!--\s*conflicts_with:\s*"([^"]+)"/)![1]] : []);
           const conflictsWith = conflictsWithList[0];
 
           // Extract fragment hints synchronously from the finding text (regex only, no DB).
@@ -226,11 +222,11 @@ export function register(server: McpServer, ctx: McpContext): void {
 
           return mcpResponse({
             ok: true,
-            message: result.data,
+            message: result.data.message,
             data: {
               project,
               finding: taggedFinding,
-              status: "added",
+              status: result.data.status,
               ...(conflictsWith ? { conflictsWith } : {}),
               ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
               ...(detectedFragments.length > 0 ? { detectedFragments } : {}),
@@ -427,7 +423,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const projects = project
         ? [project]
         : fs.readdirSync(phrenPath, { withFileTypes: true })
-          .filter((entry) => entry.isDirectory() && !RESERVED_PROJECT_DIRS.has(entry.name) && isValidProjectName(entry.name))
+          .filter((entry) => entry.isDirectory() && !RESERVED_PROJECT_DIR_NAMES.has(entry.name) && isValidProjectName(entry.name))
           .map((entry) => entry.name);
 
       const contradictions: Array<{
@@ -592,8 +588,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           const commitMsg = message || `phren: save ${files.length} file(s) across ${projectNames.length} project(s)`;
 
           runCustomHooks(phrenPath, "pre-save");
-          // Restrict to known phren file types to avoid staging .env or credential files
-          runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
+          // Stage all files including untracked (new project dirs, first FINDINGS.md, etc.)
+          runGit(["add", "-A"]);
           runGit(["commit", "-m", commitMsg]);
 
           let hasRemote = false;

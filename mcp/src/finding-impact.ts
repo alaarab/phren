@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import { impactLogFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
+import { normalizeFindingText } from "./content-metadata.js";
 
 export interface FindingImpactEntry {
   findingId: string;
@@ -34,16 +35,6 @@ let highImpactCache:
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function normalizeFindingText(raw: string): string {
-  return raw
-    .replace(/^-\s+/, "")
-    .replace(/<!--.*?-->/g, " ")
-    .replace(/\[confidence\s+[01](?:\.\d+)?\]/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
 }
 
 export function findingIdFromLine(line: string): string {
@@ -184,26 +175,6 @@ export function getHighImpactFindings(phrenPath: string, minSurfaceCount = 3): S
   return new Set(ids);
 }
 
-export function getImpactSurfaceCounts(phrenPath: string, minSurfaces: number = 1): Map<string, number> {
-  const file = impactLogFile(phrenPath);
-  if (!fs.existsSync(file)) return new Map();
-  const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
-  const counts = new Map<string, number>();
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line);
-      if (entry.findingId) {
-        counts.set(entry.findingId, (counts.get(entry.findingId) ?? 0) + 1);
-      }
-    } catch {}
-  }
-  // Filter by minimum
-  const filtered = new Map<string, number>();
-  for (const [id, count] of counts) {
-    if (count >= minSurfaces) filtered.set(id, count);
-  }
-  return filtered;
-}
 
 export function markImpactEntriesCompletedForSession(phrenPath: string, sessionId: string, project?: string): number {
   if (!sessionId) return 0;

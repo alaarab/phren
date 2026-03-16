@@ -82,7 +82,7 @@ function cachedTokenize(text: string): string[] {
   return tokens;
 }
 
-function deterministicSeed(text: string): number {
+export function deterministicSeed(text: string): number {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i);
@@ -175,19 +175,8 @@ function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] 
     });
   }
 
-  function cosine(a: number[], b: number[]): number {
-    let dot = 0, normA = 0, normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dot += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    return denom === 0 ? 0 : dot / denom;
-  }
-
   const queryVec = buildVector(queryTokens);
-  return docTokenLists.map(docTokens => cosine(queryVec, buildVector(docTokens)));
+  return docTokenLists.map(docTokens => cosineSimilarity(queryVec, buildVector(docTokens)));
 }
 
 /**

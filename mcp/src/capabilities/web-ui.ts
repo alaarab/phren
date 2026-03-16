@@ -2,7 +2,7 @@ import type { CapabilityManifest } from "./types.js";
 
 export const webUiManifest: CapabilityManifest = {
   surface: "web-ui",
-  version: "1.31.1",
+  version: "0.0.12",
   actions: {
     // Finding management
     "finding.add": { implemented: false, reason: "Web UI is read-only for findings (review queue only)" },

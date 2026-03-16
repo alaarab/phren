@@ -36,7 +36,7 @@ export function addFinding(
   if (!result.ok) {
     return { ok: false, message: result.error };
   }
-  return { ok: true, message: result.data, data: { project, finding: taggedFinding } };
+  return { ok: true, message: result.data.message, data: { project, finding: taggedFinding } };
 }
 
 

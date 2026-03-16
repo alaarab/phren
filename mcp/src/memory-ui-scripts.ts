@@ -1,22 +1,42 @@
-export function renderSkillUiEnhancementScript(authToken: string): string {
+/**
+ * Returns a <script> block with shared browser helpers used across all UI IIFEs:
+ *   window._phrenEsc(s)          — HTML-escape a value
+ *   window._phrenAuthToken       — the current auth token
+ *   window._phrenAuthUrl(base)   — append _auth param to a URL
+ *   window._phrenAuthBody(body)  — append _auth param to a form body
+ *   window._phrenFetchCsrfToken(cb) — fetch the CSRF token and call cb(token)
+ */
+export function renderSharedWebUiHelpers(authToken: string): string {
   return `(function() {
-    var _skillAuthToken = '${authToken}';
+  window._phrenAuthToken = '${authToken}';
+  window._phrenEsc = function(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  };
+  window._phrenAuthUrl = function(base) {
+    var tok = window._phrenAuthToken;
+    return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(tok);
+  };
+  window._phrenAuthBody = function(body) {
+    var tok = window._phrenAuthToken;
+    return body + (tok ? '&_auth=' + encodeURIComponent(tok) : '');
+  };
+  window._phrenFetchCsrfToken = function(cb) {
+    var tok = window._phrenAuthToken;
+    var url = '/api/csrf-token' + (tok ? '?_auth=' + encodeURIComponent(tok) : '');
+    fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
+  };
+})();`;
+}
+
+export function renderSkillUiEnhancementScript(_authToken: string): string {
+  return `(function() {
     var _skillCurrent = null;
     var _skillEditing = false;
+    var esc = window._phrenEsc;
+    var authUrl = window._phrenAuthUrl;
+    var authBody = window._phrenAuthBody;
+    var fetchCsrfToken = window._phrenFetchCsrfToken;
 
-    function esc(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    function authUrl(base) {
-      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_skillAuthToken);
-    }
-    function authBody(body) {
-      return body + (_skillAuthToken ? '&_auth=' + encodeURIComponent(_skillAuthToken) : '');
-    }
-    function fetchCsrfToken(cb) {
-      var url = '/api/csrf-token' + (_skillAuthToken ? '?_auth=' + encodeURIComponent(_skillAuthToken) : '');
-      fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
-    }
     function renderSkillReader(content) {
       var reader = document.getElementById('skills-reader');
       if (!_skillCurrent || !reader) return;
@@ -167,9 +187,8 @@ export function renderSkillUiEnhancementScript(authToken: string): string {
   })();`;
 }
 
-export function renderProjectReferenceEnhancementScript(authToken: string): string {
+export function renderProjectReferenceEnhancementScript(_authToken: string): string {
   return `(function() {
-    var _referenceAuthToken = '${authToken}';
     var _referenceState = {
       project: '',
       topicsData: null,
@@ -178,20 +197,11 @@ export function renderProjectReferenceEnhancementScript(authToken: string): stri
       selectedKey: '',
       editor: null
     };
+    var esc = window._phrenEsc;
+    var authUrl = window._phrenAuthUrl;
+    var authBody = window._phrenAuthBody;
+    var fetchCsrfToken = window._phrenFetchCsrfToken;
 
-    function esc(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    function authUrl(base) {
-      return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_referenceAuthToken);
-    }
-    function authBody(body) {
-      return body + (_referenceAuthToken ? '&_auth=' + encodeURIComponent(_referenceAuthToken) : '');
-    }
-    function fetchCsrfToken(cb) {
-      var url = '/api/csrf-token' + (_referenceAuthToken ? '?_auth=' + encodeURIComponent(_referenceAuthToken) : '');
-      fetch(url).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || null); }).catch(function() { cb(null); });
-    }
     function currentProject() {
       var selected = document.querySelector('.project-card.selected');
       return selected ? (selected.getAttribute('data-project') || '') : '';
@@ -588,13 +598,10 @@ export function renderTasksAndSettingsScript(authToken: string): string {
   return `(function() {
     var _tsAuthToken = '${authToken}';
     var _allTasks = [];
+    var esc = window._phrenEsc;
 
     function tsAuthUrl(base) {
       return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_tsAuthToken);
-    }
-
-    function esc(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function priorityBadge(p) {
@@ -1291,10 +1298,10 @@ export function renderSearchScript(authToken: string): string {
   var _searchProjectsLoaded = false;
 
   function searchAuthUrl(path) {
-    return _searchAuthToken ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(_searchAuthToken) : path;
+    return window._phrenAuthUrl ? window._phrenAuthUrl(path) : (_searchAuthToken ? path + (path.includes('?') ? '&' : '?') + '_auth=' + encodeURIComponent(_searchAuthToken) : path);
   }
 
-  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  var esc = window._phrenEsc;
 
   function doSearch() {
     var q = document.getElementById('search-query').value.trim();

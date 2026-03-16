@@ -294,9 +294,10 @@ export async function handleExtractMemories(
     return;
   }
 
-  const days = Number.parseInt((process.env.PHREN_MEMORY_EXTRACT_WINDOW_DAYS) || "30", 10);
+  const rawDays = Number.parseInt((process.env.PHREN_MEMORY_EXTRACT_WINDOW_DAYS) || "30", 10);
+  const days = Number.isNaN(rawDays) ? 30 : Math.max(1, rawDays);
   const threshold = Number.parseFloat((process.env.PHREN_MEMORY_AUTO_ACCEPT) || String(getRetentionPolicy(getPhrenPath()).autoAcceptThreshold));
-  const records = parseGitLogRecords(repoRoot, Number.isNaN(days) ? 30 : days);
+  const records = parseGitLogRecords(repoRoot, days);
   const ghCandidates = isFeatureEnabled("PHREN_FEATURE_GH_MINING", false)
     ? await mineGithubCandidates(repoRoot)
     : [];

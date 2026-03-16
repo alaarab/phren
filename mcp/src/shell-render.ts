@@ -1,7 +1,13 @@
 // ── ANSI utilities ──────────────────────────────────────────────────────────
 
 const ESC = "\x1b[";
-export const RESET = `${ESC}0m`;
+export const RESET  = `${ESC}0m`;
+export const BOLD   = `${ESC}1m`;
+export const DIM    = `${ESC}2m`;
+export const GREEN  = `${ESC}32m`;
+export const YELLOW = `${ESC}33m`;
+export const RED    = `${ESC}31m`;
+export const CYAN   = `${ESC}36m`;
 
 export const style = {
   bold:        (s: string) => `${ESC}1m${s}${RESET}`,
@@ -166,9 +172,7 @@ const PHREN_LOGO = [
   "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
 ];
 
-// Compact phren character for startup (uses PHREN_ART from phren-art.ts via import)
 import { PHREN_ART as PHREN_STARTUP_ART } from "./phren-art.js";
-const PHREN_STARTUP = PHREN_STARTUP_ART;
 
 // ── Line-based viewport: edge-triggered scroll (stable, no jumpiness) ─────────
 
@@ -258,7 +262,7 @@ export function shellStartupFrames(version: string): string[] {
 
   if (cols >= 72) {
     // Side-by-side: phren character on left, logo text on right
-    const phrenLines = PHREN_STARTUP;
+    const phrenLines = PHREN_STARTUP_ART;
     const logoLines = PHREN_LOGO.map(line => gradient(line));
     const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
 
@@ -295,7 +299,7 @@ export function shellStartupFrames(version: string): string[] {
   }
 
   // Narrow terminal: progressive text reveal with gradient
-  const stages = ["c", "cor", "phren"];
+  const stages = ["p", "phr", "phren"];
   const spinners = ["◜", "◠", "◝"];
   return stages.map((stage, i) => [
     "",

@@ -132,19 +132,19 @@ export function clearTaskCheckpoint(phrenPath: string, args: {
     }
   }
 
-  const allProjectCheckpoints = listTaskCheckpoints(phrenPath, args.project);
-  for (const checkpoint of allProjectCheckpoints) {
-    const idMatch = ids.size > 0 && ids.has(checkpoint.taskId);
-    const lineMatch = args.taskLine && checkpoint.taskLine === args.taskLine;
-    if (!idMatch && !lineMatch) continue;
-    const filePath = checkpointPath(phrenPath, checkpoint.project, checkpoint.taskId);
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        removed++;
+  if (args.taskLine) {
+    const allProjectCheckpoints = listTaskCheckpoints(phrenPath, args.project);
+    for (const checkpoint of allProjectCheckpoints) {
+      if (checkpoint.taskLine !== args.taskLine) continue;
+      const filePath = checkpointPath(phrenPath, checkpoint.project, checkpoint.taskId);
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          removed++;
+        }
+      } catch (err: unknown) {
+        debugLog(`checkpoint clear scan ${filePath}: ${errorMessage(err)}`);
       }
-    } catch (err: unknown) {
-      debugLog(`checkpoint clear scan ${filePath}: ${errorMessage(err)}`);
     }
   }
 

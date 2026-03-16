@@ -73,10 +73,10 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 /**
  * Check whether a bullet already exists in a reference file (already archived).
  */
-function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
-  if (!fs.existsSync(referenceDir)) return false;
-  const normalizedBullet = stripComments(bullet).replace(/^-\s+/, "").trim().toLowerCase();
-  if (!normalizedBullet) return false;
+/** Build a Set of normalized bullet strings from all .md files in referenceDir. */
+function buildArchivedBulletSet(referenceDir: string): Set<string> {
+  const bulletSet = new Set<string>();
+  if (!fs.existsSync(referenceDir)) return bulletSet;
   try {
     const stack = [referenceDir];
     while (stack.length > 0) {
@@ -92,14 +92,20 @@ function isAlreadyArchived(referenceDir: string, bullet: string): boolean {
         for (const line of content.split("\n")) {
           if (!line.startsWith("- ")) continue;
           const normalizedLine = stripComments(line).replace(/^-\s+/, "").trim().toLowerCase();
-          if (normalizedLine === normalizedBullet) return true;
+          if (normalizedLine) bulletSet.add(normalizedLine);
         }
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isDuplicateInReference: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildArchivedBulletSet: ${errorMessage(err)}\n`);
   }
-  return false;
+  return bulletSet;
+}
+
+function isAlreadyArchived(archivedSet: Set<string>, bullet: string): boolean {
+  const normalizedBullet = stripComments(bullet).replace(/^-\s+/, "").trim().toLowerCase();
+  if (!normalizedBullet) return false;
+  return archivedSet.has(normalizedBullet);
 }
 
 /**
@@ -140,7 +146,12 @@ export function autoArchiveToReference(
           if ((wxErr as NodeJS.ErrnoException).code === "EEXIST") return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT);
           throw wxErr;
         }
-      } catch { return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT); }
+      } catch (innerErr: unknown) {
+        if ((innerErr as NodeJS.ErrnoException).code === "EEXIST" || (innerErr as NodeJS.ErrnoException).code === "ENOENT") {
+          return phrenErr("Consolidation already running", PhrenError.LOCK_TIMEOUT);
+        }
+        throw innerErr;
+      }
     } else { throw e; }
   }
 
@@ -158,9 +169,10 @@ export function autoArchiveToReference(
   const referenceDir = path.join(resolvedDir, "reference");
   const { topics } = readProjectTopics(phrenPath, project);
   const today = new Date().toISOString().slice(0, 10);
+  const archivedSet = buildArchivedBulletSet(referenceDir);
   const actuallyArchived: ParsedEntry[] = [];
   for (const entry of toArchive) {
-    if (isAlreadyArchived(referenceDir, entry.bullet)) {
+    if (isAlreadyArchived(archivedSet, entry.bullet)) {
       debugLog(`auto_archive: skipping already-archived entry: "${entry.bullet.slice(0, 60)}"`);
       continue;
     }

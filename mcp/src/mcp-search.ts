@@ -631,16 +631,11 @@ export function register(server: McpServer, ctx: McpContext): void {
     async ({ project, limit, include_superseded, include_history, status }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const includeHistory = include_history ?? include_superseded ?? false;
-      const result = readFindings(phrenPath, project, { includeArchived: includeHistory });
+      // Always read with archive so we can compute historyCount without a second read
+      const result = readFindings(phrenPath, project, { includeArchived: true });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
       const allItems = result.data;
-      let historyCount = allItems.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
-      if (!includeHistory) {
-        const withArchive = readFindings(phrenPath, project, { includeArchived: true });
-        if (withArchive.ok) {
-          historyCount = withArchive.data.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
-        }
-      }
+      const historyCount = allItems.filter(f => f.tier === "archived" || HISTORY_FINDING_STATUSES.has(f.status)).length;
       const visibleItems = includeHistory
         ? allItems
         : allItems.filter(f => f.tier !== "archived" && !HISTORY_FINDING_STATUSES.has(f.status));

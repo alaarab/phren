@@ -10,6 +10,7 @@ import * as path from "path";
 import { debugLog } from "./shared.js";
 import { safeProjectPath, isFeatureEnabled, errorMessage } from "./utils.js";
 import { callLlm } from "./content-dedup.js";
+import { withFileLock } from "./shared-governance.js";
 
 const FACT_EXTRACT_FLAG = "PHREN_FEATURE_FACT_EXTRACT";
 const MAX_FACTS = 50;
@@ -70,12 +71,15 @@ export function extractFactFromFinding(phrenPath: string, project: string, findi
       // cap and strip newlines before storing
       const fact = raw.replace(/[\r\n]+/g, " ").trim().slice(0, 200);
       if (!fact) return;
-      // Re-read inside the callback to minimize race window (best-effort; not locked)
-      const existing = readExtractedFacts(phrenPath, project);
-      const normalized = fact.toLowerCase();
-      if (existing.some(f => f.fact.toLowerCase() === normalized)) return;
-      existing.push({ fact, source: finding.slice(0, 120), at: new Date().toISOString() });
-      writeExtractedFacts(phrenPath, project, existing);
+      const p = preferencesPath(phrenPath, project);
+      if (!p) return;
+      withFileLock(p, () => {
+        const existing = readExtractedFacts(phrenPath, project);
+        const normalized = fact.toLowerCase();
+        if (existing.some(f => f.fact.toLowerCase() === normalized)) return;
+        existing.push({ fact, source: finding.slice(0, 120), at: new Date().toISOString() });
+        writeExtractedFacts(phrenPath, project, existing);
+      });
     })
     .catch((err: unknown) => {
       debugLog(`extractFactFromFinding: ${errorMessage(err)}`);

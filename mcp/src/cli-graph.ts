@@ -1,7 +1,7 @@
 import { getPhrenPath } from "./shared.js";
 import { buildIndex, queryRows, queryFragmentLinks } from "./shared-index.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
-import { errorMessage } from "./utils.js";
+import { isValidProjectName, errorMessage } from "./utils.js";
 
 /**
  * CLI: phren graph [--project <name>] [--limit <n>]
@@ -20,6 +20,11 @@ export async function handleGraphRead(args: string[]): Promise<void> {
     } else if ((args[i] === "--limit" || args[i] === "-n") && args[i + 1]) {
       limit = Math.min(Math.max(parseInt(args[++i], 10) || 20, 1), 200);
     }
+  }
+
+  if (project && !isValidProjectName(project)) {
+    console.error(`Invalid project name: "${project}".`);
+    process.exit(1);
   }
 
   const db = await buildIndex(phrenPath, profile);
@@ -87,6 +92,10 @@ export async function handleGraphLink(args: string[]): Promise<void> {
   }
 
   const [project, findingText, fragmentName] = args;
+  if (!isValidProjectName(project)) {
+    console.error(`Invalid project name: "${project}".`);
+    process.exit(1);
+  }
   const phrenPath = getPhrenPath();
   const profile = resolveRuntimeProfile(phrenPath);
 
@@ -110,7 +119,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
 
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [normalizedFragment, "fragment", new Date().toISOString().slice(0, 10)]);
-  } catch { /* best effort */ }
+  } catch (err: unknown) { if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] graph link insert fragment: ${errorMessage(err)}\n`); }
 
   const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [normalizedFragment, "fragment"]);
   if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) {
@@ -121,7 +130,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
 
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
-  } catch { /* best effort */ }
+  } catch (err: unknown) { if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] graph link insert document: ${errorMessage(err)}\n`); }
 
   const docResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
   if (!docResult?.length || !docResult[0]?.values?.length) {

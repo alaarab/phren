@@ -583,7 +583,7 @@ describe("addFindingToFile", () => {
       commit: "abc123",
     });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("added insight");
+    if (result.ok) expect(result.data.status).toBe("created");
 
     const findings = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(findings).toContain("<!-- phren:cite");

@@ -4,7 +4,7 @@ import { PhrenError, phrenErr, phrenOk, type PhrenResult } from "./phren-core.js
 
 // Phren lifecycle comment prefix. No backward compat.
 const LIFECYCLE_PREFIX = "phren";
-import { withFileLock } from "./governance-locks.js";
+import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
   METADATA_REGEX,
@@ -18,6 +18,7 @@ import {
   parseFindingId as parseFindingIdMeta,
   stripLifecycleMetadata,
   stripRelationMetadata,
+  normalizeFindingText,
 } from "./content-metadata.js";
 
 export const FINDING_TYPE_DECAY: Record<string, { maxAgeDays: number; decayMultiplier: number }> = {
@@ -152,12 +153,6 @@ function findingTextFromLine(line: string): string {
     .replace(/^-\s+/, "")
     .replace(/<!--.*?-->/g, "")
     .trim();
-}
-
-function normalizeFindingText(value: string): string {
-  return findingTextFromLine(value)
-    .replace(/\s+/g, " ")
-    .toLowerCase();
 }
 
 function removeRelationComments(line: string): string {

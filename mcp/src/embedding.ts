@@ -8,17 +8,11 @@ import {
 import { withFileLock } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
 import { bootstrapSqlJs } from "./shared-sqljs.js";
+import type { SqlJsDatabase } from "./index-query.js";
 
 // ---------------------------------------------------------------------------
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
 // ---------------------------------------------------------------------------
-
-export interface SqlJsDatabase {
-  run(sql: string, params?: (string | number | null | Uint8Array)[]): void;
-  exec(sql: string, params?: (string | number | null | Uint8Array)[]): { columns: string[]; values: (string | number | null | Uint8Array)[][] }[];
-  export(): Uint8Array;
-  close(): void;
-}
 
 interface SqlJsStatic {
   Database: new (data?: ArrayLike<number>) => SqlJsDatabase;
@@ -384,4 +378,5 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // Export helpers for testing
+export type { SqlJsDatabase } from "./index-query.js";
 export { encodeEmbedding, decodeEmbedding, openCacheDb };

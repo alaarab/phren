@@ -19,6 +19,7 @@ import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
+import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell-render.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,14 +33,6 @@ function readPackageVersion(): string {
     return "unknown";
   }
 }
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
-const CYAN = "\x1b[36m";
 
 function check(ok: boolean): string {
   return ok ? `${GREEN}ok${RESET}` : `${RED}missing${RESET}`;

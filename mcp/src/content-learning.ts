@@ -56,6 +56,11 @@ interface AddFindingOptions {
   scope?: string;
 }
 
+export interface AddFindingResult {
+  message: string;
+  status: "added" | "created" | "skipped";
+}
+
 interface AddFindingWriteResult {
   content: string;
   citation: FindingCitation;
@@ -332,7 +337,7 @@ export function addFindingToFile(
   learning: string,
   citationInput?: Partial<FindingCitation>,
   opts?: AddFindingOptions
-): PhrenResult<string> {
+): PhrenResult<AddFindingResult> {
   const findingError = validateFinding(learning);
   if (findingError) return phrenErr(findingError, PhrenError.EMPTY_INPUT);
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
@@ -458,7 +463,7 @@ export function addFindingToFile(
   });
 
   if (!result.ok) return result;
-  if (typeof result.data === "string") return phrenOk(result.data);
+  if (typeof result.data === "string") return phrenOk({ message: result.data, status: "skipped" as const });
 
   appendAuditLog(
     phrenPath,
@@ -477,11 +482,13 @@ export function addFindingToFile(
 
   if (result.data.created) {
     const createdMsg = `Created FINDINGS.md for "${project}" and added insight.`;
-    return phrenOk(result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg);
+    const message = result.data.tagWarning ? `${createdMsg} Warning: ${result.data.tagWarning}` : createdMsg;
+    return phrenOk({ message, status: "created" as const });
   }
 
   const addedMsg = `Added finding to ${project}: ${result.data.bullet} (with citation metadata)`;
-  return phrenOk(result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg);
+  const message = result.data.tagWarning ? `${addedMsg} Warning: ${result.data.tagWarning}` : addedMsg;
+  return phrenOk({ message, status: "added" as const });
 }
 
 export function addFindingsToFile(
@@ -495,8 +502,8 @@ export function addFindingsToFile(
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, "FINDINGS.md");
 
-  const today = new Date().toISOString().slice(0, 10);
   const nowIso = new Date().toISOString();
+  const today = nowIso.slice(0, 10);
   const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;

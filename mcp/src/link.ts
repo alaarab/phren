@@ -5,16 +5,11 @@ import * as yaml from "js-yaml";
 import { execFileSync } from "child_process";
 import { ROOT } from "./package-metadata.js";
 import {
-  configureClaude,
-  configureCodexMcp,
-  configureCopilotMcp,
-  configureCursorMcp,
-  configureVSCode,
+  configureMcpTargets,
   ensureGovernanceFiles,
   getHooksEnabledPreference,
   getMcpEnabledPreference,
   isVersionNewer,
-  logMcpTargetStatus,
   patchJsonFile,
   setMcpEnabledPreference,
   type McpMode,
@@ -106,10 +101,10 @@ export function lookupProfile(phrenPath: string, machine: string): string {
   return listed.data[machine] || "";
 }
 
-function listProfiles(phrenPath: string): Array<{ name: string; description: string }> {
+function listProfiles(phrenPath: string): Array<{ name: string }> {
   const listed = listProfilesShared(phrenPath);
   if (!listed.ok) return [];
-  return listed.data.map((profile) => ({ name: profile.name, description: "" }));
+  return listed.data.map((profile) => ({ name: profile.name }));
 }
 
 export function findProfileFile(phrenPath: string, profileName: string): string | null {
@@ -166,7 +161,7 @@ async function registerMachine(phrenPath: string): Promise<{ machine: string; pr
   if (!machine) { rl.close(); throw new Error("Machine name can't be empty."); }
 
   log("\nAvailable profiles:");
-  for (const p of listProfiles(phrenPath)) log(`  ${p.name}  (${p.description})`);
+  for (const p of listProfiles(phrenPath)) log(`  ${p.name}`);
   log("");
 
   const profile = (await ask("Which profile? ")).trim();
@@ -547,44 +542,7 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
   log(`  Hooks mode: ${hooksEnabled ? "ON (active)" : "OFF (disabled)"}`);
   maybeOfferStarterTemplateUpdate(phrenPath);
-  let mcpStatus = "no_settings";
-  try { mcpStatus = configureClaude(phrenPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureClaude: ${errorMessage(err)}\n`);
-  }
-  logMcpTargetStatus("Claude", mcpStatus);
-
-  let vsStatus = "no_vscode";
-  try { vsStatus = configureVSCode(phrenPath, { mcpEnabled }) ?? "no_vscode"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureVSCode: ${errorMessage(err)}\n`);
-  }
-  logMcpTargetStatus("VS Code", vsStatus);
-
-  let cursorStatus = "no_cursor";
-  try { cursorStatus = configureCursorMcp(phrenPath, { mcpEnabled }) ?? "no_cursor"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCursorMcp: ${errorMessage(err)}\n`);
-  }
-  logMcpTargetStatus("Cursor", cursorStatus);
-
-  let copilotStatus = "no_copilot";
-  try { copilotStatus = configureCopilotMcp(phrenPath, { mcpEnabled }) ?? "no_copilot"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCopilotMcp: ${errorMessage(err)}\n`);
-  }
-  logMcpTargetStatus("Copilot CLI", copilotStatus);
-
-  let codexStatus = "no_codex";
-  try { codexStatus = configureCodexMcp(phrenPath, { mcpEnabled }) ?? "no_codex"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCodexMcp: ${errorMessage(err)}\n`);
-  }
-  logMcpTargetStatus("Codex", codexStatus);
-  const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
-    (s) => s === "installed" || s === "already_configured"
-  )
-    ? "installed"
-    : [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
-      (s) => s === "disabled" || s === "already_disabled"
-    )
-      ? "disabled"
-      : mcpStatus;
+  const mcpStatusForContext = configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled });
 
   // Register hooks for Copilot CLI, Cursor, Codex
   if (hooksEnabled) {
