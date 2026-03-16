@@ -377,22 +377,15 @@ describe("web-ui HTML rendering", () => {
     }
   });
 
-  it("renders the review queue as read-only and escapes queue item text", () => {
+  it("renders the review queue with approve/reject/edit actions and escapes queue item text", () => {
     const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-review-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain("Read-only in web UI. Inspect flagged fragments here, then resolve them through maintenance or direct finding updates.");
+      expect(body).toContain("Approve, reject, or edit items directly from this tab.");
       expect(body).toContain("var cardText = esc(item.text);");
       expect(body).toContain("textEl.innerHTML = esc(item.text).replace(/\\n/g, '<br>');");
-      expect(body).not.toContain("window.reviewActionFromEl = function(btn, action)");
-      expect(body).not.toContain("window.reviewEditSubmitFromEl = function(e, form)");
-      expect(body).not.toContain('data-ui-action="reviewAction" data-review-type="approve"');
-      expect(body).not.toContain('data-ui-action="reviewAction" data-review-type="reject"');
-      expect(body).not.toContain('data-ui-action="reviewEditSubmit"');
-      expect(body).not.toContain("/api/approve");
-      expect(body).not.toContain("/api/reject");
-      expect(body).not.toContain("/api/edit");
+      expect(body).toContain('data-ui-action="reviewAction"');
       expect(body).not.toContain("marked.parse(item.text)");
       expect(body).not.toContain("JSON.stringify(item.line)");
     } finally {

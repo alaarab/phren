@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sharing &amp; Teams | phren docs</title>
+  <meta name="description" content="Multi-machine sync, profiles, RBAC access control, cross-project features, and team workflows in phren." />
+  <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+
+  <!-- NAV -->
+  <nav id="nav" class="scrolled">
+    <a href="index.html" class="nav-logo">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
+      <span class="nav-wordmark">phren</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">Home</a>
+      <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
+      <a href="configuration.html" class="nav-link">Config</a>
+      <a href="cli.html" class="nav-link">CLI</a>
+      <a href="mcp-tools.html" class="nav-link">MCP Tools</a>
+      <a href="shell.html" class="nav-link">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link active-doc">Sharing</a>
+      <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link">Skills</a>
+      <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </nav>
+
+  <div class="docs-layout">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Sharing</div>
+        <a href="#profiles" class="sidebar-link">Profiles</a>
+        <a href="#machines" class="sidebar-link">Machines</a>
+        <a href="#syncing" class="sidebar-link">Syncing via Git</a>
+        <a href="#linking" class="sidebar-link">Linking</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Cross-Project</div>
+        <a href="#consolidation" class="sidebar-link">Consolidation</a>
+        <a href="#fragments" class="sidebar-link">Fragment Graph</a>
+        <a href="#cross-search" class="sidebar-link">Cross-Project Search</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Access Control</div>
+        <a href="#rbac" class="sidebar-link">RBAC Roles</a>
+        <a href="#access-config" class="sidebar-link">Configuration</a>
+        <a href="#audit" class="sidebar-link">Audit Log</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-heading">Teams</div>
+        <a href="#team-workflows" class="sidebar-link">Team Workflows</a>
+        <a href="#ownership" class="sidebar-link">Project Ownership</a>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="docs-content">
+      <h1>Sharing &amp; Teams</h1>
+      <p class="docs-subtitle">Sync phren knowledge across machines, manage access with RBAC, and collaborate across projects.</p>
+
+      <!-- Profiles -->
+      <h2 id="profiles">Profiles <a href="#profiles" class="anchor-link">#</a></h2>
+      <p>A <strong>profile</strong> defines which projects a machine should have access to. Profiles live as YAML files in <code>~/.phren/profiles/</code>.</p>
+      <pre><code># ~/.phren/profiles/work.yaml
+name: work
+projects:
+  - global
+  - web-app
+  - api-server
+  - shared-lib</code></pre>
+      <p>Each profile lists the project directories that should be synced and linked on machines assigned to that profile. The <code>global</code> entry is special: it contains skills and config that apply everywhere.</p>
+      <p>Manage profiles via CLI:</p>
+      <pre><code>phren config profiles                              # List all profiles
+phren shell                                         # Use :profile commands
+:profile add-project work my-new-project            # Add a project
+:profile remove-project work old-project            # Remove a project</code></pre>
+
+      <!-- Machines -->
+      <h2 id="machines">Machines <a href="#machines" class="anchor-link">#</a></h2>
+      <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren link</code> runs on a new machine, it prompts you to register and picks a profile.</p>
+      <pre><code># ~/.phren/machines.yaml
+work-desktop: work
+home-laptop: personal
+ci-server: minimal</code></pre>
+      <p>Each machine stores its identity in <code>~/.phren/.machine-id</code>. On first run, <code>phren link</code> asks for a machine name and profile, then writes both files.</p>
+      <p>Manage machines via CLI:</p>
+      <pre><code>phren config machines                               # List registered machines
+phren link --register                               # Re-register this machine
+phren link --profile work                           # Override profile for this run
+:machine map ci-runner minimal                      # Map a machine in shell</code></pre>
+
+      <!-- Syncing via Git -->
+      <h2 id="syncing">Syncing via Git <a href="#syncing" class="anchor-link">#</a></h2>
+      <p>The <code>~/.phren</code> directory is a git repository. Syncing across machines is plain git:</p>
+      <pre><code># Push knowledge from this machine
+cd ~/.phren && git add -A && git commit -m "sync" && git push
+
+# Pull on another machine
+cd ~/.phren && git pull --ff-only</code></pre>
+      <p>phren automates this through hooks:</p>
+      <ul>
+        <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
+        <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
+      </ul>
+      <p>This means findings, tasks, and skills sync automatically as you work. No manual push/pull needed.</p>
+
+      <h3>Sparse Checkout</h3>
+      <p><code>phren link</code> configures git sparse checkout so each machine only downloads the projects in its profile. This keeps large shared repos fast:</p>
+      <pre><code># Always included (regardless of profile)
+profiles/
+machines.yaml
+global/
+link.sh
+
+# Plus each project in the active profile
+web-app/
+api-server/</code></pre>
+
+      <!-- Linking -->
+      <h2 id="linking">Linking <a href="#linking" class="anchor-link">#</a></h2>
+      <p><code>phren link</code> is the orchestrator that wires everything together on a machine. It runs automatically during <code>phren init</code> and can be re-run at any time.</p>
+      <p>What it does:</p>
+      <ol>
+        <li><strong>Identify machine</strong> &mdash; reads <code>.machine-id</code>, looks up profile in <code>machines.yaml</code></li>
+        <li><strong>Sparse checkout</strong> &mdash; configures git to only fetch profile projects</li>
+        <li><strong>Symlink knowledge</strong> &mdash; links <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, <code>REFERENCE.md</code>, and skills from <code>~/.phren/&lt;project&gt;/</code> into each project directory on disk</li>
+        <li><strong>Configure MCP</strong> &mdash; patches settings for Claude, VS Code, Cursor, Copilot, and Codex</li>
+        <li><strong>Register hooks</strong> &mdash; sets up lifecycle hooks for all detected AI tools</li>
+        <li><strong>Write context</strong> &mdash; generates <code>~/.phren-context.md</code> with machine, profile, and project info</li>
+        <li><strong>Rebuild memory</strong> &mdash; updates Claude's memory files with project pointers</li>
+      </ol>
+      <p>Task-mode linking focuses the context file on a specific workflow:</p>
+      <pre><code>phren link --task debugging    # Include LEARNINGS.md from each project
+phren link --task planning     # Include summaries + tasks
+phren link --task clean        # Minimal one-line context</code></pre>
+
+      <!-- Consolidation -->
+      <h2 id="consolidation">Consolidation <a href="#consolidation" class="anchor-link">#</a></h2>
+      <p>As findings accumulate, phren detects when they need consolidation and prompts you to run the <code>/phren-consolidate</code> skill.</p>
+      <p>Thresholds:</p>
+      <ul>
+        <li><strong>25 entries</strong> since the last <code>&lt;!-- consolidated: YYYY-MM-DD --&gt;</code> marker</li>
+        <li>Or <strong>60 days + 10 entries</strong> since last consolidation</li>
+      </ul>
+      <p>Consolidation archives old entries in <code>&lt;details&gt;</code> blocks, writes a date marker, and &mdash; critically &mdash; <strong>promotes patterns that appear in 2+ projects to the global scope</strong>. This is how cross-project knowledge emerges.</p>
+      <pre><code># Check consolidation status
+phren consolidation-status
+phren consolidation-status my-project
+
+# Run consolidation
+phren maintain consolidate my-project</code></pre>
+
+      <!-- Fragment Graph -->
+      <h2 id="fragments">Fragment Graph <a href="#fragments" class="anchor-link">#</a></h2>
+      <p>Fragments are named concepts that connect findings across projects. When you link a finding to a fragment, it creates a node in the knowledge graph.</p>
+      <pre><code># View the graph
+phren graph
+phren graph --project web-app
+
+# Link a finding to a fragment
+phren graph link web-app "Turbo builds avoid dist races" "build-system"
+
+# Find cross-project fragments (MCP)
+cross_project_fragments()</code></pre>
+      <p>The <code>cross_project_fragments</code> MCP tool finds fragments shared across multiple projects, surfacing patterns like "both web-app and api-server have findings about caching."</p>
+
+      <!-- Cross-Project Search -->
+      <h2 id="cross-search">Cross-Project Search <a href="#cross-search" class="anchor-link">#</a></h2>
+      <p>The <code>search_knowledge</code> MCP tool searches across all indexed projects by default. You can scope to a single project with the <code>project</code> parameter.</p>
+      <pre><code># Search everything
+search_knowledge(query: "build cache")
+
+# Search one project
+search_knowledge(query: "build cache", project: "web-app")
+
+# CLI search
+phren search "build cache"
+phren search "build cache" --project web-app</code></pre>
+      <p>Cross-project findings from <code>global/FINDINGS.md</code> (promoted during consolidation) are included in all searches and receive a relevance decay based on <code>PHREN_CROSS_PROJECT_DECAY_DAYS</code> (default: 30 days).</p>
+
+      <!-- RBAC Roles -->
+      <h2 id="rbac">RBAC Roles <a href="#rbac" class="anchor-link">#</a></h2>
+      <p>phren supports four role levels for access control. The actor is identified by <code>PHREN_ACTOR</code> (defaults to <code>$USER</code>).</p>
+      <table class="docs-table">
+        <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>admin</code></td>
+            <td>Full access. Can modify governance config, access control, workflow policies, and all project data. Can approve/reject review queue items.</td>
+          </tr>
+          <tr>
+            <td><code>maintainer</code></td>
+            <td>Can add/edit/remove findings, tasks, and skills. Can run consolidation and pruning. Cannot modify governance or access control.</td>
+          </tr>
+          <tr>
+            <td><code>contributor</code></td>
+            <td>Can add findings and tasks. Cannot remove or edit existing entries. Cannot run maintenance operations.</td>
+          </tr>
+          <tr>
+            <td><code>viewer</code></td>
+            <td>Read-only access. Can search, browse, and inspect all data. Cannot make any changes.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>If no access control file exists, all users have full access (equivalent to admin).</p>
+
+      <!-- Access Configuration -->
+      <h2 id="access-config">Configuration <a href="#access-config" class="anchor-link">#</a></h2>
+      <p>Access control is configured in <code>~/.phren/.governance/access-control.json</code>:</p>
+      <pre><code>{
+  "admins": ["alice", "bob"],
+  "maintainers": ["charlie"],
+  "contributors": ["dev-intern"],
+  "viewers": []
+}</code></pre>
+      <p>Manage access via CLI:</p>
+      <pre><code>phren config access get              # Show current access control
+phren config access set admins alice bob
+phren config access set contributors dev-intern</code></pre>
+      <p>The actor identity is set by the <code>PHREN_ACTOR</code> environment variable. If unset, it defaults to <code>$USER</code>.</p>
+
+      <!-- Audit Log -->
+      <h2 id="audit">Audit Log <a href="#audit" class="anchor-link">#</a></h2>
+      <p>All mutations are recorded in <code>~/.phren/.runtime/audit.log</code>. Each entry includes the actor, action, timestamp, and relevant parameters.</p>
+      <p>Actions logged include: finding additions/removals, task mutations, consolidation runs, governance changes, and review queue operations.</p>
+
+      <!-- Team Workflows -->
+      <h2 id="team-workflows">Team Workflows <a href="#team-workflows" class="anchor-link">#</a></h2>
+      <p>For teams sharing a phren repository:</p>
+      <ol>
+        <li><strong>Create a shared git remote</strong> for <code>~/.phren</code></li>
+        <li><strong>Define profiles</strong> per team role (e.g. <code>frontend.yaml</code>, <code>backend.yaml</code>, <code>devops.yaml</code>)</li>
+        <li><strong>Register each machine</strong> with <code>phren link --register</code></li>
+        <li><strong>Set up RBAC</strong> so team leads are admins, developers are maintainers or contributors</li>
+      </ol>
+      <p>The typical flow:</p>
+      <ul>
+        <li>Developers work in their projects; findings and tasks auto-sync via the Stop hook</li>
+        <li>Consolidation runs promote shared patterns to <code>global/FINDINGS.md</code></li>
+        <li>The review queue (<code>phren review</code>) surfaces stale or conflicting findings</li>
+        <li>Admins/maintainers prune and resolve via <code>phren maintain prune</code> and <code>phren maintain govern</code></li>
+      </ul>
+
+      <h3>Example: Two-Person Team</h3>
+      <pre><code># Alice's laptop
+phren init
+phren link --register   # name: alice-mbp, profile: fullstack
+
+# Bob's desktop
+git clone &lt;phren-remote&gt; ~/.phren
+phren link --register   # name: bob-desktop, profile: fullstack
+
+# Both work independently; Stop hook syncs after each response
+# Weekly: run /phren-consolidate to merge insights</code></pre>
+
+      <!-- Project Ownership -->
+      <h2 id="ownership">Project Ownership <a href="#ownership" class="anchor-link">#</a></h2>
+      <p>Each project has an ownership mode that controls how phren manages its files:</p>
+      <table class="docs-table">
+        <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>phren-managed</code></td>
+            <td>Default. phren symlinks <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, skills into the project directory. Full sync.</td>
+          </tr>
+          <tr>
+            <td><code>repo-owned</code></td>
+            <td>The project's repo owns its own <code>CLAUDE.md</code>. phren stores findings and tasks but does not symlink files into the project directory.</td>
+          </tr>
+          <tr>
+            <td><code>read-only</code></td>
+            <td>phren indexes and searches the project but does not write to it.</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre><code>phren projects configure my-project --ownership=repo-owned
+phren config project-ownership repo-owned   # Set default for new projects</code></pre>
+
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+  </button>
+
+<script>
+// Sidebar toggle (mobile)
+const sidebar = document.getElementById('sidebar');
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+  sidebar.classList.toggle('open');
+});
+
+// Active sidebar link on scroll
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      sidebarLinks.forEach(l => l.classList.remove('active'));
+      const link = document.querySelector(`.sidebar-link[href="#${entry.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+document.querySelectorAll('h2[id], h3[id]').forEach(el => observer.observe(el));
+</script>
+<script src="docs.js"></script>
+</body>
+</html>

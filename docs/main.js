@@ -1,3 +1,8 @@
+// --- Mermaid.js re-init (for dynamically inserted diagrams) ---
+if (typeof mermaid !== 'undefined') {
+  mermaid.run();
+}
+
 // --- NAV scroll state ---
 const nav = document.getElementById('nav');
 window.addEventListener('scroll', () => {

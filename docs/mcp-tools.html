@@ -8,24 +8,76 @@
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#12122a',
+        primaryColor: '#1a1a3e',
+        primaryTextColor: '#E8E4D9',
+        primaryBorderColor: '#00E5FF',
+        secondaryColor: '#2a1a3e',
+        secondaryTextColor: '#E8E4D9',
+        secondaryBorderColor: '#9B8DC8',
+        tertiaryColor: '#1a2a3e',
+        tertiaryTextColor: '#E8E4D9',
+        tertiaryBorderColor: '#FF8A90',
+        lineColor: '#00E5FF',
+        textColor: '#E8E4D9',
+        mainBkg: '#1a1a3e',
+        nodeBorder: '#00E5FF',
+        clusterBkg: '#1a1a3e',
+        clusterBorder: '#9B8DC8',
+        titleColor: '#00E5FF',
+        edgeLabelBackground: '#12122a',
+        nodeTextColor: '#E8E4D9',
+        actorTextColor: '#E8E4D9',
+        actorBorder: '#00E5FF',
+        actorBkg: '#1a1a3e',
+        activationBorderColor: '#00E5FF',
+        activationBkgColor: '#1a1a3e',
+        sequenceNumberColor: '#12122a',
+        signalColor: '#E8E4D9',
+        labelBoxBkgColor: '#1a1a3e',
+        labelBoxBorderColor: '#00E5FF',
+        labelTextColor: '#E8E4D9',
+        loopTextColor: '#E8E4D9',
+        noteBorderColor: '#9B8DC8',
+        noteBkgColor: '#2a1a3e',
+        noteTextColor: '#E8E4D9',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: '14px'
+      }
+    });
+  </script>
 </head>
 <body class="docs-page">
 
   <!-- NAV -->
   <nav id="nav" class="scrolled">
     <a href="index.html" class="nav-logo">
-      <img src="phren-icon-64.svg" alt="phren" width="26" height="26" style="image-rendering: pixelated" class="nav-icon">
+      <img src="phren-hero.svg" alt="phren" width="30" height="35" style="image-rendering: pixelated" class="nav-icon">
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
       <a href="index.html" class="nav-link">Home</a>
       <a href="getting-started.html" class="nav-link">Getting Started</a>
+      <a href="concepts.html" class="nav-link">Concepts</a>
       <a href="configuration.html" class="nav-link">Config</a>
       <a href="cli.html" class="nav-link">CLI</a>
       <a href="mcp-tools.html" class="nav-link active-doc">MCP Tools</a>
-      <a href="skills.html" class="nav-link">Skills</a>
+      <a href="shell.html" class="nav-link">Shell</a>
+      <a href="vscode.html" class="nav-link">VS Code</a>
+      <a href="sharing.html" class="nav-link">Sharing</a>
       <a href="architecture.html" class="nav-link">Architecture</a>
+      <a href="skills.html" class="nav-link">Skills</a>
       <a href="security.html" class="nav-link">Security</a>
+      <a href="contributing.html" class="nav-link">Contributing</a>
+      <a href="faq-page.html" class="nav-link">FAQ</a>
+      <a href="documentation.html" class="nav-link">Full Reference</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -70,434 +122,769 @@
       <!-- Search & Browse -->
       <h2 id="search-browse">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#search-browse" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">search_knowledge</div>
-        <div class="ref-card-params">(query, type?, limit?, project?)</div>
-        <div class="ref-card-desc">FTS5 search with synonym expansion. Searches across all indexed content in phren.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">search_knowledge</span>
+          <span class="ref-card-desc">FTS5 search with synonym expansion. Searches across all indexed content in phren.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(query, type?, limit?, project?)</div>
+          <div class="ref-card-desc">FTS5 search with synonym expansion. Searches across all indexed content in phren.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_memory_detail</div>
-        <div class="ref-card-params">(id)</div>
-        <div class="ref-card-desc">Fetch full content of a memory by id (e.g. <code>mem:project/filename</code>). Layer 3 of progressive disclosure.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_memory_detail</span>
+          <span class="ref-card-desc">Fetch full content of a memory by id (e.g. <code>mem:project/filename</code>). Layer 3 of progressive disclosure.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(id)</div>
+          <div class="ref-card-desc">Fetch full content of a memory by id (e.g. <code>mem:project/filename</code>). Layer 3 of progressive disclosure.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_project_summary</div>
-        <div class="ref-card-params">(name)</div>
-        <div class="ref-card-desc">Project summary + file list.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_project_summary</span>
+          <span class="ref-card-desc">Project summary + file list.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name)</div>
+          <div class="ref-card-desc">Project summary + file list.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">list_projects</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">All projects in active profile.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">list_projects</span>
+          <span class="ref-card-desc">All projects in active profile.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">All projects in active profile.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_findings</div>
-        <div class="ref-card-params">(project, limit?)</div>
-        <div class="ref-card-desc">Read recent findings without a search query.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_findings</span>
+          <span class="ref-card-desc">Read recent findings without a search query.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, limit?)</div>
+          <div class="ref-card-desc">Read recent findings without a search query.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_consolidation_status</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Check if findings need consolidation.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_consolidation_status</span>
+          <span class="ref-card-desc">Check if findings need consolidation.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Check if findings need consolidation.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">health_check</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Run doctor checks and return results.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">health_check</span>
+          <span class="ref-card-desc">Run doctor checks and return results.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Run doctor checks and return results.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">list_hook_errors</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Show recent hook errors and failures.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">list_hook_errors</span>
+          <span class="ref-card-desc">Show recent hook errors and failures.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Show recent hook errors and failures.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_review_queue</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Read items waiting for review.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_review_queue</span>
+          <span class="ref-card-desc">Read items waiting for review.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Read items waiting for review.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">doctor_fix</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Run doctor self-heal checks and apply fixes.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">doctor_fix</span>
+          <span class="ref-card-desc">Run doctor self-heal checks and apply fixes.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Run doctor self-heal checks and apply fixes.</div>
+        </div>
+      </details>
 
       <!-- Task Management -->
       <h2 id="task-management">Task Management <span class="cat-badge cat-task">14 tools</span> <a href="#task-management" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_tasks</div>
-        <div class="ref-card-params">(project?, id?, item?)</div>
-        <div class="ref-card-desc">Read tasks, or fetch a single item by ID or text.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_tasks</span>
+          <span class="ref-card-desc">Read tasks, or fetch a single item by ID or text.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?, id?, item?)</div>
+          <div class="ref-card-desc">Read tasks, or fetch a single item by ID or text.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_task</div>
-        <div class="ref-card-params">(project, item)</div>
-        <div class="ref-card-desc">Add task to queue.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_task</span>
+          <span class="ref-card-desc">Add task to queue.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item)</div>
+          <div class="ref-card-desc">Add task to queue.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_tasks</div>
-        <div class="ref-card-params">(project, items[])</div>
-        <div class="ref-card-desc">Bulk add multiple tasks in one call.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_tasks</span>
+          <span class="ref-card-desc">Bulk add multiple tasks in one call.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, items[])</div>
+          <div class="ref-card-desc">Bulk add multiple tasks in one call.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">complete_task</div>
-        <div class="ref-card-params">(project, item)</div>
-        <div class="ref-card-desc">Move task to done by text match.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">complete_task</span>
+          <span class="ref-card-desc">Move task to done by text match.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item)</div>
+          <div class="ref-card-desc">Move task to done by text match.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">complete_tasks</div>
-        <div class="ref-card-params">(project, items[])</div>
-        <div class="ref-card-desc">Bulk complete multiple items in one call.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">complete_tasks</span>
+          <span class="ref-card-desc">Bulk complete multiple items in one call.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, items[])</div>
+          <div class="ref-card-desc">Bulk complete multiple items in one call.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">update_task</div>
-        <div class="ref-card-params">(project, item, updates)</div>
-        <div class="ref-card-desc">Update text, priority, context, section, or linked GitHub issue.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">update_task</span>
+          <span class="ref-card-desc">Update text, priority, context, section, or linked GitHub issue.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item, updates)</div>
+          <div class="ref-card-desc">Update text, priority, context, section, or linked GitHub issue.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">link_task_issue</div>
-        <div class="ref-card-params">(project, item, issue_number?, issue_url?, unlink?)</div>
-        <div class="ref-card-desc">Link or unlink an existing GitHub issue on a task item.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">link_task_issue</span>
+          <span class="ref-card-desc">Link or unlink an existing GitHub issue on a task item.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item, issue_number?, issue_url?, unlink?)</div>
+          <div class="ref-card-desc">Link or unlink an existing GitHub issue on a task item.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">promote_task_to_issue</div>
-        <div class="ref-card-params">(project, item, repo?, title?, body?, mark_done?)</div>
-        <div class="ref-card-desc">Create a GitHub issue from a task item and link it back.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">promote_task_to_issue</span>
+          <span class="ref-card-desc">Create a GitHub issue from a task item and link it back.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item, repo?, title?, body?, mark_done?)</div>
+          <div class="ref-card-desc">Create a GitHub issue from a task item and link it back.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_task</div>
-        <div class="ref-card-params">(project, item)</div>
-        <div class="ref-card-desc">Remove a task by matching text.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_task</span>
+          <span class="ref-card-desc">Remove a task by matching text.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item)</div>
+          <div class="ref-card-desc">Remove a task by matching text.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_tasks</div>
-        <div class="ref-card-params">(project, items[])</div>
-        <div class="ref-card-desc">Bulk remove multiple tasks in one call.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_tasks</span>
+          <span class="ref-card-desc">Bulk remove multiple tasks in one call.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, items[])</div>
+          <div class="ref-card-desc">Bulk remove multiple tasks in one call.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">pin_task</div>
-        <div class="ref-card-params">(project, item)</div>
-        <div class="ref-card-desc">Pin a task so it stays visible across sessions.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">pin_task</span>
+          <span class="ref-card-desc">Pin a task so it stays visible across sessions.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item)</div>
+          <div class="ref-card-desc">Pin a task so it stays visible across sessions.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">work_next_task</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Pick the next highest-priority task to work on.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">work_next_task</span>
+          <span class="ref-card-desc">Pick the next highest-priority task to work on.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Pick the next highest-priority task to work on.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">promote_task</div>
-        <div class="ref-card-params">(project, item)</div>
-        <div class="ref-card-desc">Promote a task to a higher priority section.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">promote_task</span>
+          <span class="ref-card-desc">Promote a task to a higher priority section.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, item)</div>
+          <div class="ref-card-desc">Promote a task to a higher priority section.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">tidy_done_tasks</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Archive completed tasks to keep the list clean.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">tidy_done_tasks</span>
+          <span class="ref-card-desc">Archive completed tasks to keep the list clean.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Archive completed tasks to keep the list clean.</div>
+        </div>
+      </details>
 
       <!-- Finding Capture -->
       <h2 id="finding-capture">Finding Capture <span class="cat-badge cat-finding">12 tools</span> <a href="#finding-capture" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_finding</div>
-        <div class="ref-card-params">(project, finding, citation?: { file?, line?, repo?, commit? })</div>
-        <div class="ref-card-desc">Append finding with optional citation metadata.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_finding</span>
+          <span class="ref-card-desc">Append finding with optional citation metadata.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, finding, citation?: { file?, line?, repo?, commit? })</div>
+          <div class="ref-card-desc">Append finding with optional citation metadata.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_findings</div>
-        <div class="ref-card-params">(project, findings[])</div>
-        <div class="ref-card-desc">Bulk add multiple findings in one call.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_findings</span>
+          <span class="ref-card-desc">Bulk add multiple findings in one call.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, findings[])</div>
+          <div class="ref-card-desc">Bulk add multiple findings in one call.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">supersede_finding</div>
-        <div class="ref-card-params">(project, finding_text, superseded_by)</div>
-        <div class="ref-card-desc">Mark a finding as superseded by a newer one.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">supersede_finding</span>
+          <span class="ref-card-desc">Mark a finding as superseded by a newer one.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, finding_text, superseded_by)</div>
+          <div class="ref-card-desc">Mark a finding as superseded by a newer one.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">retract_finding</div>
-        <div class="ref-card-params">(project, finding_text, reason)</div>
-        <div class="ref-card-desc">Retract a finding with lifecycle reason metadata.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">retract_finding</span>
+          <span class="ref-card-desc">Retract a finding with lifecycle reason metadata.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, finding_text, reason)</div>
+          <div class="ref-card-desc">Retract a finding with lifecycle reason metadata.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">resolve_contradiction</div>
-        <div class="ref-card-params">(project, finding_text, finding_text_other, resolution)</div>
-        <div class="ref-card-desc">Resolve contradiction between two findings.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">resolve_contradiction</span>
+          <span class="ref-card-desc">Resolve contradiction between two findings.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, finding_text, finding_text_other, resolution)</div>
+          <div class="ref-card-desc">Resolve contradiction between two findings.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_contradictions</div>
-        <div class="ref-card-params">(project?, finding_text?)</div>
-        <div class="ref-card-desc">List unresolved contradicted findings.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_contradictions</span>
+          <span class="ref-card-desc">List unresolved contradicted findings.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?, finding_text?)</div>
+          <div class="ref-card-desc">List unresolved contradicted findings.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">edit_finding</div>
-        <div class="ref-card-params">(project, old_text, new_text)</div>
-        <div class="ref-card-desc">Edit a finding in place while preserving inline metadata.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">edit_finding</span>
+          <span class="ref-card-desc">Edit a finding in place while preserving inline metadata.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, old_text, new_text)</div>
+          <div class="ref-card-desc">Edit a finding in place while preserving inline metadata.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_finding</div>
-        <div class="ref-card-params">(project, text)</div>
-        <div class="ref-card-desc">Remove a finding by match.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_finding</span>
+          <span class="ref-card-desc">Remove a finding by match.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, text)</div>
+          <div class="ref-card-desc">Remove a finding by match.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_findings</div>
-        <div class="ref-card-params">(project, findings[])</div>
-        <div class="ref-card-desc">Bulk remove multiple findings in one call.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_findings</span>
+          <span class="ref-card-desc">Bulk remove multiple findings in one call.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, findings[])</div>
+          <div class="ref-card-desc">Bulk remove multiple findings in one call.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">push_changes</div>
-        <div class="ref-card-params">(message?)</div>
-        <div class="ref-card-desc">Commit and push phren changes.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">push_changes</span>
+          <span class="ref-card-desc">Commit and push phren changes.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(message?)</div>
+          <div class="ref-card-desc">Commit and push phren changes.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">auto_extract_findings</div>
-        <div class="ref-card-params">(context)</div>
-        <div class="ref-card-desc">Extract findings from conversation context automatically.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">auto_extract_findings</span>
+          <span class="ref-card-desc">Extract findings from conversation context automatically.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(context)</div>
+          <div class="ref-card-desc">Extract findings from conversation context automatically.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_finding_sensitivity</div>
-        <div class="ref-card-params">(level)</div>
-        <div class="ref-card-desc">Set finding capture sensitivity level.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_finding_sensitivity</span>
+          <span class="ref-card-desc">Set finding capture sensitivity level.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(level)</div>
+          <div class="ref-card-desc">Set finding capture sensitivity level.</div>
+        </div>
+      </details>
 
       <!-- Memory Quality -->
       <h2 id="memory-quality">Memory Quality <span class="cat-badge cat-memory">2 tools</span> <a href="#memory-quality" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">pin_memory</div>
-        <div class="ref-card-params">(project, memory)</div>
-        <div class="ref-card-desc">Write canonical/pinned memory entries that persist across consolidation.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">pin_memory</span>
+          <span class="ref-card-desc">Write canonical/pinned memory entries that persist across consolidation.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, memory)</div>
+          <div class="ref-card-desc">Write canonical/pinned memory entries that persist across consolidation.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">memory_feedback</div>
-        <div class="ref-card-params">(key, feedback)</div>
-        <div class="ref-card-desc">Record helpful/reprompt/regression outcomes for memory quality tracking.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">memory_feedback</span>
+          <span class="ref-card-desc">Record helpful/reprompt/regression outcomes for memory quality tracking.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(key, feedback)</div>
+          <div class="ref-card-desc">Record helpful/reprompt/regression outcomes for memory quality tracking.</div>
+        </div>
+      </details>
 
       <!-- Data Management -->
       <h2 id="data-management">Data Management <span class="cat-badge cat-data">4 tools</span> <a href="#data-management" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_project</div>
-        <div class="ref-card-params">(path, profile?)</div>
-        <div class="ref-card-desc">Bootstrap a directory into phren and add to active profile.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_project</span>
+          <span class="ref-card-desc">Bootstrap a directory into phren and add to active profile.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(path, profile?)</div>
+          <div class="ref-card-desc">Bootstrap a directory into phren and add to active profile.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">export_project</div>
-        <div class="ref-card-params">(project)</div>
-        <div class="ref-card-desc">Export project data as portable JSON.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">export_project</span>
+          <span class="ref-card-desc">Export project data as portable JSON.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project)</div>
+          <div class="ref-card-desc">Export project data as portable JSON.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">import_project</div>
-        <div class="ref-card-params">(data)</div>
-        <div class="ref-card-desc">Import project from exported JSON.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">import_project</span>
+          <span class="ref-card-desc">Import project from exported JSON.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(data)</div>
+          <div class="ref-card-desc">Import project from exported JSON.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">manage_project</div>
-        <div class="ref-card-params">(project, action: "archive"|"unarchive")</div>
-        <div class="ref-card-desc">Archive or restore a project.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">manage_project</span>
+          <span class="ref-card-desc">Archive or restore a project.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, action: "archive"|"unarchive")</div>
+          <div class="ref-card-desc">Archive or restore a project.</div>
+        </div>
+      </details>
 
       <!-- Fragment Graph -->
       <h2 id="fragment-graph">Fragment Graph <span class="cat-badge cat-graph">5 tools</span> <a href="#fragment-graph" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">search_fragments</div>
-        <div class="ref-card-params">(name)</div>
-        <div class="ref-card-desc">Find fragments and related docs by name.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">search_fragments</span>
+          <span class="ref-card-desc">Find fragments and related docs by name.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name)</div>
+          <div class="ref-card-desc">Find fragments and related docs by name.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_related_docs</div>
-        <div class="ref-card-params">(fragment)</div>
-        <div class="ref-card-desc">Get docs linked to a named fragment.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_related_docs</span>
+          <span class="ref-card-desc">Get docs linked to a named fragment.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(fragment)</div>
+          <div class="ref-card-desc">Get docs linked to a named fragment.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">read_graph</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Read the fragment graph for a project or all projects.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">read_graph</span>
+          <span class="ref-card-desc">Read the fragment graph for a project or all projects.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Read the fragment graph for a project or all projects.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">link_findings</div>
-        <div class="ref-card-params">(project, finding_text, fragment, relation?)</div>
-        <div class="ref-card-desc">Manually link a finding to a fragment.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">link_findings</span>
+          <span class="ref-card-desc">Manually link a finding to a fragment.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project, finding_text, fragment, relation?)</div>
+          <div class="ref-card-desc">Manually link a finding to a fragment.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">cross_project_fragments</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Find fragments shared across multiple projects.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">cross_project_fragments</span>
+          <span class="ref-card-desc">Find fragments shared across multiple projects.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Find fragments shared across multiple projects.</div>
+        </div>
+      </details>
 
       <!-- Session Management -->
       <h2 id="session-management">Session Management <span class="cat-badge cat-session">4 tools</span> <a href="#session-management" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">session_start</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Mark session start. Returns prior summary + recent findings + active task.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">session_start</span>
+          <span class="ref-card-desc">Mark session start. Returns prior summary + recent findings + active task.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Mark session start. Returns prior summary + recent findings + active task.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">session_end</div>
-        <div class="ref-card-params">(summary?)</div>
-        <div class="ref-card-desc">Mark session end, save summary for next session.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">session_end</span>
+          <span class="ref-card-desc">Mark session end, save summary for next session.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(summary?)</div>
+          <div class="ref-card-desc">Mark session end, save summary for next session.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">session_context</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Get current session state: project, duration, findings added so far.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">session_context</span>
+          <span class="ref-card-desc">Get current session state: project, duration, findings added so far.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Get current session state: project, duration, findings added so far.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">session_history</div>
-        <div class="ref-card-params">(limit?, sessionId?, project?)</div>
-        <div class="ref-card-desc">List past sessions or drill into a specific session to see its findings and tasks.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">session_history</span>
+          <span class="ref-card-desc">List past sessions or drill into a specific session to see its findings and tasks.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(limit?, sessionId?, project?)</div>
+          <div class="ref-card-desc">List past sessions or drill into a specific session to see its findings and tasks.</div>
+        </div>
+      </details>
 
       <!-- Skills Management -->
       <h2 id="skills-management">Skills Management <span class="cat-badge cat-skill">6 tools</span> <a href="#skills-management" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">list_skills</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">List all installed skills with metadata.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">list_skills</span>
+          <span class="ref-card-desc">List all installed skills with metadata.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">List all installed skills with metadata.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">read_skill</div>
-        <div class="ref-card-params">(name, project?)</div>
-        <div class="ref-card-desc">Read full skill file content and parsed frontmatter.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">read_skill</span>
+          <span class="ref-card-desc">Read full skill file content and parsed frontmatter.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name, project?)</div>
+          <div class="ref-card-desc">Read full skill file content and parsed frontmatter.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">write_skill</div>
-        <div class="ref-card-params">(name, content, scope)</div>
-        <div class="ref-card-desc">Create or update a skill. Scope: <code>'global'</code> or project name.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">write_skill</span>
+          <span class="ref-card-desc">Create or update a skill. Scope: <code>'global'</code> or project name.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name, content, scope)</div>
+          <div class="ref-card-desc">Create or update a skill. Scope: <code>'global'</code> or project name.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_skill</div>
-        <div class="ref-card-params">(name, project?)</div>
-        <div class="ref-card-desc">Delete a skill file.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_skill</span>
+          <span class="ref-card-desc">Delete a skill file.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name, project?)</div>
+          <div class="ref-card-desc">Delete a skill file.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">enable_skill</div>
-        <div class="ref-card-params">(name, project?)</div>
-        <div class="ref-card-desc">Enable a disabled skill without rewriting it.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">enable_skill</span>
+          <span class="ref-card-desc">Enable a disabled skill without rewriting it.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name, project?)</div>
+          <div class="ref-card-desc">Enable a disabled skill without rewriting it.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">disable_skill</div>
-        <div class="ref-card-params">(name, project?)</div>
-        <div class="ref-card-desc">Disable a skill without deleting it.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">disable_skill</span>
+          <span class="ref-card-desc">Disable a skill without deleting it.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(name, project?)</div>
+          <div class="ref-card-desc">Disable a skill without deleting it.</div>
+        </div>
+      </details>
 
       <!-- Hooks Management -->
       <h2 id="hooks-management">Hooks Management <span class="cat-badge cat-hook">4 tools</span> <a href="#hooks-management" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">list_hooks</div>
-        <div class="ref-card-params">(project?)</div>
-        <div class="ref-card-desc">Show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths, optionally including per-project overrides.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">list_hooks</span>
+          <span class="ref-card-desc">Show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths, optionally including per-project overrides.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(project?)</div>
+          <div class="ref-card-desc">Show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths, optionally including per-project overrides.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">toggle_hooks</div>
-        <div class="ref-card-params">(enabled, tool?, project?, event?)</div>
-        <div class="ref-card-desc">Enable/disable hooks globally, per tool, or per tracked project/event.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">toggle_hooks</span>
+          <span class="ref-card-desc">Enable/disable hooks globally, per tool, or per tracked project/event.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(enabled, tool?, project?, event?)</div>
+          <div class="ref-card-desc">Enable/disable hooks globally, per tool, or per tracked project/event.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">add_custom_hook</div>
-        <div class="ref-card-params">(event, command, timeout?)</div>
-        <div class="ref-card-desc">Add a custom integration hook.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">add_custom_hook</span>
+          <span class="ref-card-desc">Add a custom integration hook.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(event, command, timeout?)</div>
+          <div class="ref-card-desc">Add a custom integration hook.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">remove_custom_hook</div>
-        <div class="ref-card-params">(event, command?)</div>
-        <div class="ref-card-desc">Remove custom hooks by event/command match.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">remove_custom_hook</span>
+          <span class="ref-card-desc">Remove custom hooks by event/command match.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(event, command?)</div>
+          <div class="ref-card-desc">Remove custom hooks by event/command match.</div>
+        </div>
+      </details>
 
       <!-- Configuration -->
       <h2 id="configuration">Configuration <span class="cat-badge cat-config">6 tools</span> <a href="#configuration" class="anchor-link">#</a></h2>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">get_config</div>
-        <div class="ref-card-params">()</div>
-        <div class="ref-card-desc">Read current governance and policy configuration.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">get_config</span>
+          <span class="ref-card-desc">Read current governance and policy configuration.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">()</div>
+          <div class="ref-card-desc">Read current governance and policy configuration.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_proactivity</div>
-        <div class="ref-card-params">(level)</div>
-        <div class="ref-card-desc">Set agent proactivity level (off, low, medium, high).</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_proactivity</span>
+          <span class="ref-card-desc">Set agent proactivity level (off, low, medium, high).</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(level)</div>
+          <div class="ref-card-desc">Set agent proactivity level (off, low, medium, high).</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_task_mode</div>
-        <div class="ref-card-params">(mode)</div>
-        <div class="ref-card-desc">Set task management mode (manual, suggest, auto).</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_task_mode</span>
+          <span class="ref-card-desc">Set task management mode (manual, suggest, auto).</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(mode)</div>
+          <div class="ref-card-desc">Set task management mode (manual, suggest, auto).</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_retention_policy</div>
-        <div class="ref-card-params">(settings)</div>
-        <div class="ref-card-desc">Configure retention and decay policy.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_retention_policy</span>
+          <span class="ref-card-desc">Configure retention and decay policy.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(settings)</div>
+          <div class="ref-card-desc">Configure retention and decay policy.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_workflow_policy</div>
-        <div class="ref-card-params">(settings)</div>
-        <div class="ref-card-desc">Configure workflow approval gates.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_workflow_policy</span>
+          <span class="ref-card-desc">Configure workflow approval gates.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(settings)</div>
+          <div class="ref-card-desc">Configure workflow approval gates.</div>
+        </div>
+      </details>
 
-      <div class="ref-card" data-searchable>
-        <div class="ref-card-name">set_index_policy</div>
-        <div class="ref-card-params">(settings)</div>
-        <div class="ref-card-desc">Configure indexer include/exclude globs.</div>
-      </div>
+      <details class="ref-card" data-searchable>
+        <summary>
+          <span class="ref-card-name">set_index_policy</span>
+          <span class="ref-card-desc">Configure indexer include/exclude globs.</span>
+        </summary>
+        <div class="ref-card-details">
+          <div class="ref-card-params">(settings)</div>
+          <div class="ref-card-desc">Configure indexer include/exclude globs.</div>
+        </div>
+      </details>
 
       <!-- Return Format -->
       <h2 id="return-format">Return Format <a href="#return-format" class="anchor-link">#</a></h2>
@@ -566,5 +953,6 @@ const observer = new IntersectionObserver(entries => {
 
 document.querySelectorAll('h2[id]').forEach(el => observer.observe(el));
 </script>
+<script src="docs.js"></script>
 </body>
 </html>

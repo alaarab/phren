@@ -28,10 +28,19 @@ export function renderGraphScript(): string {
   /* ── colour & size maps ─────────────────────────────────────────────── */
   /* Fixed colors for non-finding node types — phren purple/cyan palette */
   var COLORS = {
-    project: '#7B68AE',
-    'task-active': '#10b981', 'task-queue': '#5B4B8A',
-    entity: '#3a7bae', reference: '#6b8e7a',
+    project: '#9B7FD4',
+    'task-active': '#10b981', 'task-queue': '#7B68AE',
+    entity: '#D4892E', reference: '#6b8e7a',
     other: '#B8A0D6'
+  };
+
+  /* Finding topic slug -> semantic color for visual hierarchy */
+  var FINDING_TOPIC_COLORS = {
+    architecture: '#3B82F6', debugging: '#EF4444', security: '#EF4444',
+    performance: '#F59E0B', testing: '#10B981', devops: '#10B981',
+    tooling: '#3B82F6', api: '#3B82F6', database: '#3B82F6',
+    frontend: '#8B5CF6', auth: '#EF4444', data: '#6B7280',
+    mobile: '#06B6D4', ai_ml: '#8B5CF6', general: '#6B7280'
   };
   var RADII = {
     project: 18,
@@ -54,7 +63,8 @@ export function renderGraphScript(): string {
     waypointIdx: 0,        /* current waypoint index */
     tripDist: 0,           /* total distance of current trip (for ease-in-out) */
     tripProgress: 0,       /* distance traveled so far this trip */
-    targetNodeId: null     /* id of destination node (set in phrenMoveTo) */
+    targetNodeId: null,    /* id of destination node (set in phrenMoveTo) */
+    targetNodeRef: null    /* live reference to destination node object */
   };
 
   /* ── phren sprite image ─────────────────────────────────────────────── */
@@ -93,6 +103,14 @@ export function renderGraphScript(): string {
   }
 
   /* find shortest edge path from nearest node to target node via BFS */
+  /* look up a visible node by id — used to resolve live positions */
+  function phrenNodeById(id) {
+    for (var i = 0; i < visibleNodes.length; i++) {
+      if (visibleNodes[i].id === id) return visibleNodes[i];
+    }
+    return null;
+  }
+
   function phrenFindEdgePath(targetNode) {
     if (!targetNode || visibleNodes.length === 0) return [];
     /* find nearest visible node to phren's current position */
@@ -135,14 +153,11 @@ export function renderGraphScript(): string {
       }
     }
     if (!found) return [];
-    /* reconstruct path */
+    /* reconstruct path — store node IDs so positions are resolved live */
     var path = [];
-    var nodeById = {};
-    for (var i = 0; i < visibleNodes.length; i++) nodeById[visibleNodes[i].id] = visibleNodes[i];
     var cur = targetId;
     while (cur !== undefined && cur !== startId) {
-      var nd = nodeById[cur];
-      if (nd) path.unshift({ x: nd.x, y: nd.y });
+      path.unshift(cur);
       cur = prev[cur];
     }
     /* cap path length to avoid very long walks */
@@ -161,9 +176,10 @@ export function renderGraphScript(): string {
     phren.tripDist = Math.sqrt(tdx * tdx + tdy * tdy);
     phren.tripProgress = 0;
     /* try edge-walking if a target node is given */
-    phren.waypoints = targetNode ? phrenFindEdgePath(targetNode) : [];
+    phren.waypoints = targetNode ? phrenFindEdgePath(targetNode) : []; /* array of node IDs */
     phren.waypointIdx = 0;
     phren.targetNodeId = targetNode ? targetNode.id : null;
+    phren.targetNodeRef = targetNode || null; /* live reference for position tracking */
     /* ensure animation loop is running so phren movement renders */
     if (!animFrame) animFrame = requestAnimationFrame(tick);
   }
@@ -184,11 +200,18 @@ export function renderGraphScript(): string {
   function phrenUpdate(dt) {
     phren.idlePhase += dt;
     if (phren.moving) {
+      /* keep target coordinates synced with live node position (force layout moves nodes) */
+      if (phren.targetNodeRef && typeof phren.targetNodeRef.x === 'number') {
+        phren.targetX = phren.targetNodeRef.x;
+        phren.targetY = phren.targetNodeRef.y;
+      }
       /* determine current move target: next waypoint or final destination */
       var wx, wy;
       if (phren.waypoints.length > 0 && phren.waypointIdx < phren.waypoints.length) {
-        wx = phren.waypoints[phren.waypointIdx].x;
-        wy = phren.waypoints[phren.waypointIdx].y;
+        /* waypoints are node IDs — resolve to live positions */
+        var wpNode = phrenNodeById(phren.waypoints[phren.waypointIdx]);
+        if (wpNode) { wx = wpNode.x; wy = wpNode.y; }
+        else { wx = phren.targetX; wy = phren.targetY; phren.waypointIdx = phren.waypoints.length; }
       } else {
         wx = phren.targetX;
         wy = phren.targetY;
@@ -334,9 +357,11 @@ export function renderGraphScript(): string {
   }
 
   function topicGroupColor(group) {
-    /* group is 'topic:<slug>' for findings */
+    /* group is 'topic:<slug>' for findings — use semantic color if available */
     if (typeof group === 'string' && group.indexOf('topic:') === 0) {
-      return topicSlugToColor(group.slice(6));
+      var slug = group.slice(6);
+      if (FINDING_TOPIC_COLORS[slug]) return FINDING_TOPIC_COLORS[slug];
+      return topicSlugToColor(slug);
     }
     return COLORS[group] || COLORS.other;
   }
@@ -372,9 +397,13 @@ export function renderGraphScript(): string {
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
   function nodeRadius(n) {
-    if (n.group === 'entity') return Math.min(6 + (n.refCount || 0), 16);
-    if (typeof n.group === 'string' && n.group.indexOf('topic:') === 0) return RADII.other;
-    return RADII[n.group] || RADII.other;
+    var base;
+    if (n.group === 'entity') base = Math.min(6 + (n.refCount || 0), 16);
+    else if (typeof n.group === 'string' && n.group.indexOf('topic:') === 0) base = RADII.other;
+    else base = RADII[n.group] || RADII.other;
+    /* size boost by connection count */
+    var conns = n._connectionCount || 0;
+    return base + Math.min(conns * 0.5, 6);
   }
 
   function nodeColor(n) { return topicGroupColor(n.group); }
@@ -866,6 +895,14 @@ export function renderGraphScript(): string {
       }
     }
 
+    /* compute connection count per node for size scaling */
+    for (var i = 0; i < visibleNodes.length; i++) visibleNodes[i]._connectionCount = 0;
+    for (var i = 0; i < visibleLinks.length; i++) {
+      var lk = visibleLinks[i];
+      if (lk._source) lk._source._connectionCount = (lk._source._connectionCount || 0) + 1;
+      if (lk._target) lk._target._connectionCount = (lk._target._connectionCount || 0) + 1;
+    }
+
     updateLegend();
     /* only restart simulation if node count changed significantly */
     var oldCount = _prevVisibleCount || 0;
@@ -941,14 +978,26 @@ export function renderGraphScript(): string {
         var sMatch = ((lk._source.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._source.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
         var tMatch = ((lk._target.label || '').toLowerCase().indexOf(_sq) !== -1 || (lk._target.fullLabel || '').toLowerCase().indexOf(_sq) !== -1);
         ctx.beginPath();
-        ctx.strokeStyle = (sMatch || tMatch) ? 'rgba(150,150,150,0.11)' : 'rgba(150,150,150,0.035)';
+        ctx.strokeStyle = (sMatch || tMatch) ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.04)';
+        ctx.moveTo(lk._source.x, lk._source.y);
+        ctx.lineTo(lk._target.x, lk._target.y);
+        ctx.stroke();
+      }
+    } else if (selectedNode) {
+      /* When a node is selected, highlight connected edges */
+      for (var i = 0; i < links.length; i++) {
+        var lk = links[i];
+        if (!lk._source || !lk._target) continue;
+        var isConnected = (lk._source === selectedNode || lk._target === selectedNode);
+        ctx.beginPath();
+        ctx.strokeStyle = isConnected ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.08)';
         ctx.moveTo(lk._source.x, lk._source.y);
         ctx.lineTo(lk._target.x, lk._target.y);
         ctx.stroke();
       }
     } else {
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(150,150,150,0.10)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
       for (var i = 0; i < links.length; i++) {
         var lk = links[i];
         if (!lk._source || !lk._target) continue;
@@ -1053,35 +1102,69 @@ export function renderGraphScript(): string {
       ctx.setLineDash([]);
     }
 
-    /* 3. nodes (batch by fill colour, apply opacity) */
-    var fillBuckets = {};
-    for (var i = 0; i < nodes.length; i++) {
-      var c = nodeColor(nodes[i]);
-      if (!fillBuckets[c]) fillBuckets[c] = [];
-      fillBuckets[c].push(nodes[i]);
-    }
-    var fillColors = Object.keys(fillBuckets);
-    for (var ci = 0; ci < fillColors.length; ci++) {
-      var col = fillColors[ci];
-      var bucket = fillBuckets[col];
-      for (var i = 0; i < bucket.length; i++) {
-        var nd = bucket[i];
-        var mult = qualityMultiplier(nd);
-        var opacity = 0.3 + (mult - 0.2) * (0.7 / 1.3);
-        opacity = clamp(opacity, 0.3, 1.0);
-        /* dim non-matching nodes when search is active */
-        if (searchQuery) {
-          var sq = searchQuery.toLowerCase();
-          var sl = (nd.label || '').toLowerCase();
-          var sf = (nd.fullLabel || '').toLowerCase();
-          if (sl.indexOf(sq) === -1 && sf.indexOf(sq) === -1) opacity = 0.1;
-        }
-        ctx.globalAlpha = opacity;
-        ctx.beginPath();
-        ctx.arc(nd.x, nd.y, nodeRadius(nd), 0, Math.PI * 2);
-        ctx.fillStyle = col;
-        ctx.fill();
+    /* 3. nodes with glow, selection dimming, and visual hierarchy */
+    /* Build set of nodes connected to selected node for dimming */
+    var _connectedToSelected = null;
+    if (selectedNode) {
+      _connectedToSelected = {};
+      _connectedToSelected[selectedNode.id] = true;
+      for (var i = 0; i < links.length; i++) {
+        var lk = links[i];
+        if (!lk._source || !lk._target) continue;
+        if (lk._source === selectedNode) _connectedToSelected[lk._target.id] = true;
+        if (lk._target === selectedNode) _connectedToSelected[lk._source.id] = true;
       }
+    }
+
+    for (var i = 0; i < nodes.length; i++) {
+      var nd = nodes[i];
+      var col = nodeColor(nd);
+      var r = nodeRadius(nd);
+      var mult = qualityMultiplier(nd);
+      var opacity = 0.3 + (mult - 0.2) * (0.7 / 1.3);
+      opacity = clamp(opacity, 0.3, 1.0);
+
+      /* dim non-matching nodes when search is active */
+      if (searchQuery) {
+        var sq = searchQuery.toLowerCase();
+        var sl = (nd.label || '').toLowerCase();
+        var sf = (nd.fullLabel || '').toLowerCase();
+        if (sl.indexOf(sq) === -1 && sf.indexOf(sq) === -1) opacity = 0.1;
+      }
+
+      /* dim non-connected nodes when a node is selected */
+      if (_connectedToSelected && !_connectedToSelected[nd.id]) {
+        opacity *= 0.4;
+      }
+
+      ctx.globalAlpha = opacity;
+
+      /* node glow based on type */
+      var glowBlur = 0;
+      if (nd === selectedNode) {
+        glowBlur = 30;
+        ctx.shadowColor = 'rgba(255,255,255,0.6)';
+      } else if (nd.group === 'project') {
+        glowBlur = 20;
+        ctx.shadowColor = colorWithAlpha(col, 0.5);
+      } else if (nd.group === 'entity') {
+        glowBlur = 12;
+        ctx.shadowColor = 'rgba(212,137,46,0.4)';
+      } else if (typeof nd.group === 'string' && nd.group.indexOf('topic:') === 0) {
+        glowBlur = 6;
+        ctx.shadowColor = colorWithAlpha(col, 0.25);
+      }
+      if (glowBlur > 0) {
+        ctx.shadowBlur = glowBlur / scale;
+      }
+
+      ctx.beginPath();
+      ctx.arc(nd.x, nd.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
     }
     ctx.globalAlpha = 1.0;
 
@@ -1156,13 +1239,17 @@ export function renderGraphScript(): string {
       }
     }
 
-    /* 6. selection highlight */
+    /* 6. selection highlight with bloom */
     if (selectedNode) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,255,255,0.5)';
+      ctx.shadowBlur = 30 / scale;
       ctx.beginPath();
       ctx.arc(selectedNode.x, selectedNode.y, nodeRadius(selectedNode) + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = '#7B68AE';
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
       ctx.lineWidth = 2.5 / scale;
       ctx.stroke();
+      ctx.restore();
     }
 
     /* 6c. phren character */
@@ -1408,17 +1495,22 @@ export function renderGraphScript(): string {
 
   /* ── interaction ────────────────────────────────────────────────────── */
   function setupInteraction() {
+    var _mouseDownX = 0, _mouseDownY = 0, _mouseDownHit = null;
+    var CLICK_THRESHOLD = 5; /* px — distinguish click from drag */
+
     canvas.addEventListener('mousedown', function(e) {
       var rect = canvas.getBoundingClientRect();
       var mx = e.clientX - rect.left;
       var my = e.clientY - rect.top;
+      _mouseDownX = mx;
+      _mouseDownY = my;
       var hit = hitTest(mx, my);
+      _mouseDownHit = hit;
       if (hit) {
         dragging = hit;
         dragPullDepths = collectConnectedDepths(hit, 2);
         dragOffX = (mx - panX) / scale - hit.x;
         dragOffY = (my - panY) / scale - hit.y;
-        renderGraphDetails(hit);
       } else {
         panning = true;
         panStartX = mx - panX;
@@ -1466,14 +1558,24 @@ export function renderGraphScript(): string {
       }
     });
 
-    canvas.addEventListener('mouseup', function() {
+    canvas.addEventListener('mouseup', function(e) {
+      var rect = canvas.getBoundingClientRect();
+      var mx = e.clientX - rect.left;
+      var my = e.clientY - rect.top;
+      var dragDist = Math.sqrt((_mouseDownX - mx) * (_mouseDownX - mx) + (_mouseDownY - my) * (_mouseDownY - my));
       if (dragging) {
+        var clickedNode = dragging;
         dragging = null;
         dragPullDepths = null;
         /* restart simulation so gravity pulls nodes back into place */
         alpha = Math.max(alpha, 0.3);
+        /* only select + walk phren if this was a click, not a drag */
+        if (dragDist < CLICK_THRESHOLD && _mouseDownHit && clickedNode === _mouseDownHit) {
+          renderGraphDetails(_mouseDownHit);
+        }
       }
       panning = false;
+      _mouseDownHit = null;
     });
 
     canvas.addEventListener('mouseleave', function() {
