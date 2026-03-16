@@ -94,7 +94,7 @@ async function _drainEmbQueue(): Promise<void> {
   for (const [phrenPath, docs] of byPhrenPath) {
     const cache = getEmbeddingCache(phrenPath);
     try { await cache.load(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
     }
     const model = getEmbeddingModel();
     for (const { docPath, content } of docs) {
@@ -103,11 +103,11 @@ async function _drainEmbQueue(): Promise<void> {
         const vec = await embedText(content);
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue embedText: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue embedText: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     try { await cache.flush(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheFlush: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheFlush: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
 }
@@ -178,7 +178,7 @@ function _resolveImportsRecursive(
     try {
       normalized = fs.realpathSync.native(resolved);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports realpath: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports realpath: ${err instanceof Error ? err.message : String(err)}\n`);
       return `<!-- @import not found: ${trimmed} -->`;
     }
 
@@ -206,7 +206,7 @@ function _resolveImportsRecursive(
       const imported = fs.readFileSync(normalized, "utf-8");
       return _resolveImportsRecursive(imported, phrenPath, childSeen, depth + 1);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
       return `<!-- @import error: ${trimmed} -->`;
     }
   });
@@ -231,7 +231,7 @@ function touchSentinel(phrenPath: string): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(sentinelPath, Date.now().toString());
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] touchSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] touchSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -248,7 +248,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     for (const configPath of topicConfigEntries) {
@@ -256,7 +256,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(configPath);
         hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } else {
@@ -283,7 +283,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash globDir: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash globDir: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     files.sort();
@@ -292,7 +292,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     for (const configPath of topicConfigEntries) {
@@ -300,7 +300,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(configPath);
         hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
@@ -310,7 +310,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
   }
   // Include global/ files (pulled via @import) so changes invalidate the cache
@@ -323,7 +323,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(fp);
         hash.update(`global:${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   }
@@ -334,7 +334,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(manualLinksPath);
       hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
   }
   const indexPolicyPath = path.join(phrenPath, ".governance", "index-policy.json");
@@ -343,7 +343,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(indexPolicyPath);
       hash.update(`index-policy-file:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
   }
   if (profile) hash.update(`profile:${profile}`);
@@ -367,7 +367,7 @@ function loadHashMap(phrenPath: string): { version?: number; hashes: Record<stri
       return JSON.parse(fs.readFileSync(hashFile, "utf-8"));
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadHashMap: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadHashMap: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return { hashes: {} };
 }
@@ -386,7 +386,7 @@ function saveHashMap(phrenPath: string, hashes: Record<string, string>): void {
         const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
         if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] saveHashMap readExisting: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] saveHashMap readExisting: ${err instanceof Error ? err.message : String(err)}\n`);
       }
       const merged = { ...existing, ...hashes };
       // Remove entries for paths that no longer exist on disk
@@ -549,7 +549,7 @@ function insertFileIntoIndex(
     }
     return true;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] insertFileIntoIndex: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] insertFileIntoIndex: ${err instanceof Error ? err.message : String(err)}\n`);
     return false;
   }
 }
@@ -627,7 +627,7 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, phrenPath: string, docPa
   try {
     db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDoc]);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] deleteEntityLinksForDocPath globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] deleteEntityLinksForDocPath globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -641,10 +641,10 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
 
   // Delete old record
   try { deleteEntityLinksForDocPath(db, phrenPath, resolvedPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteEntityLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteEntityLinks: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteDocs: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteDocs: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   // Re-insert if file still exists
@@ -663,7 +663,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
           const content = fs.readFileSync(resolvedPath, "utf-8");
           extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex entityExtraction: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex entityExtraction: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
     }
@@ -674,7 +674,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(phrenPath, hashData.hashes);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex hashMap: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex hashMap: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   } else {
     // Remove stale embedding if file was deleted
@@ -685,7 +685,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
         c.delete(resolvedPath);
         await c.flush();
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex embeddingDelete: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex embeddingDelete: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     })();
   }
@@ -704,7 +704,7 @@ function readHashSentinel(phrenPath: string): { hash: string; computedAt: number
       return { hash: data.hash, computedAt: data.computedAt };
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return null;
 }
@@ -714,7 +714,7 @@ function writeHashSentinel(phrenPath: string, hash: string): void {
     const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
     fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] writeHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] writeHashSentinel: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -730,7 +730,7 @@ function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): b
       const stat = fs.statSync(dir);
       if (stat.mtimeMs > sentinel.computedAt) return false;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isSentinelFresh statDir: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isSentinelFresh statDir: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
   return true;
@@ -748,7 +748,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
     const graphMtime = fs.statSync(graphPath).mtimeMs;
     const anyNewer = allFiles.some(f => {
       try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph statFile: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph statFile: ${err instanceof Error ? err.message : String(err)}\n`);
         return true;
       }
     });
@@ -776,7 +776,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
               [entity, project, docKey]
             );
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert2: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert2: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
       } else {
@@ -797,18 +797,18 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
                   [name as string, proj, sourceDoc as string]
                 );
               } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert: ${err instanceof Error ? err.message : String(err)}\n`);
           }
             }
           }
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph globalEntitiesRestore: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph globalEntitiesRestore: ${err instanceof Error ? err.message : String(err)}\n`);
         }
       }
       return true;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph cacheLoad: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return false;
 }
@@ -828,7 +828,7 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
         // Validate: skip manual links whose sourceDoc no longer exists in the index
         const docCheck = queryDocBySourceKey(db, phrenPath, link.sourceDoc);
         if (!docCheck) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
           pruned = true;
           continue;
         }
@@ -855,11 +855,11 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
               [link.entity, projectMatch[1], link.sourceDoc]
             );
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks globalEntities: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks entry: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks entry: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     // Rewrite manual-links.json if stale entries were pruned
@@ -871,11 +871,11 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
           fs.renameSync(tmpPath, manualLinksPath);
         });
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks prune write: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks prune write: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] mergeManualLinks: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] mergeManualLinks: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -889,7 +889,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndexImpl userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndexImpl userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -962,7 +962,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               changedFiles.push(entry);
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex hashFile: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex hashFile: ${err instanceof Error ? err.message : String(err)}\n`);
           }
         }
 
@@ -994,17 +994,17 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           try {
             for (const missingPath of missingFromIndex) {
               try { deleteEntityLinksForDocPath(db, phrenPath, missingPath); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteEntityLinksForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
+                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteEntityLinksForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
               }
               try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteDocForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
+                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteDocForMissing: ${err instanceof Error ? err.message : String(err)}\n`);
               }
             }
             db.run("COMMIT");
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteCommit: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteCommit: ${err instanceof Error ? err.message : String(err)}\n`);
             try { db.run("ROLLBACK"); } catch (e2: unknown) {
-              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
             }
           }
 
@@ -1033,7 +1033,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               db.run("COMMIT");
             } catch (err: unknown) {
               try { db.run("ROLLBACK"); } catch (e2: unknown) {
-                if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
               }
               throw err;
             }
@@ -1048,7 +1048,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             fs.mkdirSync(cacheDir, { recursive: true });
             fs.writeFileSync(cacheFile, db.export());
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalCacheSave: ${err instanceof Error ? err.message : String(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalCacheSave: ${err instanceof Error ? err.message : String(err)}\n`);
           }
 
           const incMs = Date.now() - t0;
@@ -1102,7 +1102,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     try {
       newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
       fileCount++;
@@ -1126,7 +1126,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       const globalEntityRows = db.exec("SELECT entity, project, doc_key FROM global_entities")[0]?.values ?? [];
       fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, globalEntities: globalEntityRows, ts: Date.now() }));
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex entityGraphPersist: ${err instanceof Error ? err.message : String(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex entityGraphPersist: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
 
@@ -1140,7 +1140,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
 
   const buildMs = Date.now() - t0;
   debugLog(`Built FTS index: ${fileCount} files from ${getProjectDirs(phrenPath, profile).length} projects in ${buildMs}ms`);
-  if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) console.error(`Indexed ${fileCount} files from ${getProjectDirs(phrenPath, profile).length} projects`);
+  if ((process.env.PHREN_DEBUG)) console.error(`Indexed ${fileCount} files from ${getProjectDirs(phrenPath, profile).length} projects`);
   appendIndexEvent(phrenPath, {
     event: "build_index",
     cache: "miss",
@@ -1157,7 +1157,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     for (const f of fs.readdirSync(cacheDir)) {
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
       try { fs.unlinkSync(path.join(cacheDir, f)); } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex staleCacheCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex staleCacheCleanup: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
     debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);
@@ -1193,7 +1193,7 @@ function isRebuildLockHeld(phrenPath: string): boolean {
     const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
     return Date.now() - stat.mtimeMs <= staleThreshold;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isRebuildLockHeld stat: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isRebuildLockHeld stat: ${err instanceof Error ? err.message : String(err)}\n`);
     return false;
   }
 }
@@ -1204,7 +1204,7 @@ async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Pr
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadIndexSnapshotOrEmpty userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadIndexSnapshotOrEmpty userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -1310,7 +1310,7 @@ export function findFtsCacheForPath(phrenPath: string, profile?: string): { exis
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath userInfo: ${err instanceof Error ? err.message : String(err)}\n`);
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -1323,7 +1323,7 @@ export function findFtsCacheForPath(phrenPath: string, profile?: string): { exis
       return { exists: true, sizeBytes: stat.size };
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   return { exists: false };
 }

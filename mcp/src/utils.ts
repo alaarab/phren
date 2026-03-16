@@ -13,7 +13,7 @@ function loadSynonymsJson(fileName: string): Record<string, string[]> {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
@@ -294,7 +294,7 @@ function parseSynonymsYaml(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }
@@ -331,7 +331,7 @@ function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }

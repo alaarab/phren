@@ -103,7 +103,7 @@ async function openCacheDb(phrenPath: string): Promise<SqlJsDatabase> {
     return db;
   } catch (err) {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
     throw err;
   }
@@ -152,9 +152,9 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${err instanceof Error ? err.message : String(err)}\n`);
         try { onDisk?.close(); } catch (e2: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
         onDisk = null;
       }
@@ -166,7 +166,7 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
         fs.renameSync(tmp, dbPath);
       } finally {
         if (onDisk) try { onDisk.close(); } catch (e2: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
       }
     });
@@ -309,7 +309,7 @@ export async function getCachedEmbedding(
     return [];
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }
@@ -363,7 +363,7 @@ export async function getCachedEmbeddings(
     return texts.map(() => []);
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }

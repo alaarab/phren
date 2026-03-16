@@ -45,7 +45,7 @@ function removeManagedSkillLink(dest: string, managedRoot: string): void {
     if (!resolvedTarget.startsWith(managedPrefix)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (process.env.PHREN_DEBUG)) {
       process.stderr.write(`[phren] removeManagedSkillLink: ${errorMessage(err)}\n`);
     }
   }

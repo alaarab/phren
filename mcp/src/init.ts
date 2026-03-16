@@ -675,7 +675,7 @@ async function runWalkthrough(phrenPath: string): Promise<{
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaCheck: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaCheck: ${errorMessage(err)}\n`);
   }
 
   printSection("Auto-Capture (Optional)");
@@ -1232,8 +1232,8 @@ export async function runInit(opts: InitOptions = {}) {
   // from the previous product name. Only runs when the resolved phrenPath
   // doesn't exist yet but the legacy directory does.
   if (!opts._walkthroughStoragePath && !fs.existsSync(phrenPath)) {
-    const legacyDir = "." + "c" + "ortex";
-    const legacyPath = path.resolve(homePath(legacyDir));
+    // Pre-rebrand directory name — kept as literal for migration
+    const legacyPath = path.resolve(homePath(".cortex"));
     if (legacyPath !== phrenPath && fs.existsSync(legacyPath) && hasInstallMarkers(legacyPath)) {
       if (!dryRun) {
         fs.renameSync(legacyPath, phrenPath);
@@ -1246,9 +1246,8 @@ export async function runInit(opts: InitOptions = {}) {
   // init so users who already migrated the directory still get the fix.
   const skillsMigrateDir = path.join(phrenPath, "global", "skills");
   if (!dryRun && fs.existsSync(skillsMigrateDir)) {
-    const legacySkillBase = "c" + "ortex";
-    const legacySkillName = `${legacySkillBase}.md`;
-    const legacySkillPrefix = `${legacySkillBase}-`;
+    const legacySkillName = "cortex.md";
+    const legacySkillPrefix = "cortex-";
     for (const entry of fs.readdirSync(skillsMigrateDir)) {
       if (!entry.endsWith(".md")) continue;
       if (entry === legacySkillName) {
@@ -1730,7 +1729,7 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaInstallHint: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaInstallHint: ${errorMessage(err)}\n`);
     }
   }
 

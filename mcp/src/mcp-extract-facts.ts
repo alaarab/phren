@@ -32,7 +32,7 @@ export function readExtractedFacts(phrenPath: string, project: string): Extracte
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     return Array.isArray(data) ? data : [];
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readExtractedFacts: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readExtractedFacts: ${errorMessage(err)}\n`);
     return [];
   }
 }

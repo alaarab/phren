@@ -44,7 +44,7 @@ function loadFromDisk(phrenPath: string): TelemetryData {
       stats: { ...defaults.stats, ...raw.stats },
     };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry loadFromDisk: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry loadFromDisk: ${err instanceof Error ? err.message : String(err)}\n`);
     return defaults;
   }
 }
@@ -75,7 +75,7 @@ function flushTelemetryForPath(phrenPath: string): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry flush: ${err instanceof Error ? err.message : String(err)}\n`);
   }
   pendingCounts.set(phrenPath, 0);
 }

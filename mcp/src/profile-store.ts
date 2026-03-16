@@ -88,7 +88,7 @@ export function listMachines(phrenPath: string): PhrenResult<Record<string, stri
     }
     return phrenOk(cleaned);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listMachines yaml parse: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listMachines yaml parse: ${errorMessage(err)}\n`);
     return phrenErr(`Could not parse machines.yaml. Check the file for syntax errors or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
   }
 }
@@ -154,7 +154,7 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
         : [];
       profiles.push({ name, file: full, projects });
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listProfiles yamlParse: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listProfiles yamlParse: ${errorMessage(err)}\n`);
       return phrenErr(`profiles/${file}`, PhrenError.MALFORMED_YAML);
     }
   }

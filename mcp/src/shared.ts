@@ -129,7 +129,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
         hasLock = true;
         break;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
         try {
           const stat = fs.statSync(lockPath);
           if (Date.now() - stat.mtimeMs > staleMs) {
@@ -144,7 +144,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
             continue;
           }
         } catch (statErr: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
         }
         Atomics.wait(waiter, 0, 0, pollMs);
         waited += pollMs;
@@ -168,7 +168,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
       try {
         fs.unlinkSync(lockPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog unlock: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog unlock: ${errorMessage(err)}\n`);
       }
     }
   }

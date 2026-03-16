@@ -222,10 +222,10 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     fs.unlinkSync(fsBenchFile);
     fsMs = Date.now() - t0;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmark: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmark: ${errorMessage(err)}\n`);
     fsMs = -1;
     try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
   const fsSlow = fsMs > 500 || fsMs < 0;
@@ -362,7 +362,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor runtimeHealth: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor runtimeHealth: ${errorMessage(err)}\n`);
       runtime = null;
     }
   }

@@ -107,7 +107,7 @@ export class PhrenShell {
         if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell pushUndo: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell pushUndo: ${errorMessage(err)}\n`);
     }
   }
 

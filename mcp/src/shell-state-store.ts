@@ -58,7 +58,7 @@ export function loadShellState(phrenPath: string): ShellState {
       introSeenVersion: typeof raw.introSeenVersion === "string" ? raw.introSeenVersion : undefined,
     };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadShellState parse: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadShellState parse: ${errorMessage(err)}\n`);
     return fallback;
   }
 }

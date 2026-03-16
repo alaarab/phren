@@ -23,7 +23,7 @@ function loadChecksums(phrenPath: string): ChecksumStore {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadChecksums: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadChecksums: ${err instanceof Error ? err.message : String(err)}\n`);
     return {};
   }
 }

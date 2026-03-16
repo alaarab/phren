@@ -172,7 +172,7 @@ export async function handleDoctor(args: string[]) {
               tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissParse: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissParse: ${errorMessage(err)}\n`);
           }
         }
         const topMisses = [...tokenCounts.entries()]
@@ -187,7 +187,7 @@ export async function handleDoctor(args: string[]) {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
   }
 
   try {
@@ -217,7 +217,7 @@ export async function handleDoctor(args: string[]) {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor ollamaStatus: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor ollamaStatus: ${errorMessage(err)}\n`);
   }
 
   process.exit(result.ok ? 0 : 1);
@@ -258,7 +258,7 @@ export async function handleStatus() {
     const coverage = cache.coverage(listIndexedDocumentPaths(phrenPath, profile || undefined));
     console.log(`semantic-search: ${model} ready, ${formatEmbeddingCoverage(coverage)}`);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] handleStatus semanticSearch: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] handleStatus semanticSearch: ${errorMessage(err)}\n`);
   }
 }
 

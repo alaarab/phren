@@ -64,7 +64,7 @@ async function withCache<T>(
       return cache[key].result;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache load (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache load (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   const result = await compute();
@@ -75,7 +75,7 @@ async function withCache<T>(
     cache[key] = { result, ts: Date.now() };
     persistCache(cachePath, cache);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache persist (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache persist (${path.basename(cachePath)}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   return result;
@@ -625,7 +625,7 @@ export async function checkSemanticConflicts(
         try {
           return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan stat: ${err instanceof Error ? err.message : String(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan stat: ${err instanceof Error ? err.message : String(err)}\n`);
           return null;
         }
       })
@@ -638,7 +638,7 @@ export async function checkSemanticConflicts(
       if (bullets.length > 0) sources.push({ bullets, sourceProject: proj.name });
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan: ${err instanceof Error ? err.message : String(err)}\n`);
   }
 
   const annotations: string[] = [];

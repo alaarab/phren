@@ -470,7 +470,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
     return syncResult;
   }
 }
@@ -606,7 +606,7 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) {
+      if ((process.env.PHREN_DEBUG)) {
         process.stderr.write(`[phren] vectorFallback: ${err instanceof Error ? err.message : String(err)}\n`);
       }
     }
@@ -906,7 +906,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
+              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${err instanceof Error ? err.message : String(err)}\n`);
               stale = true;
             }
           }

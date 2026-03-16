@@ -196,7 +196,7 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
     return;
   }
 
@@ -342,7 +342,7 @@ function linkGlobal(phrenPath: string, tools: Set<string>) {
         fs.mkdirSync(copilotInstrDir, { recursive: true });
         symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
       }
     }
   }
@@ -386,7 +386,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
             fs.mkdirSync(copilotDir, { recursive: true });
             symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), phrenPath);
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject copilotInstructions: ${errorMessage(err)}\n`);
+            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject copilotInstructions: ${errorMessage(err)}\n`);
           }
         }
       }
@@ -407,7 +407,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
   const claudeFile = path.join(phrenPath, project, "CLAUDE.md");
   if (fs.existsSync(claudeFile)) {
     try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
     }
   }
 
@@ -423,7 +423,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
       const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
       if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, phrenPath)) excludeEntries.push("AGENTS.md");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject agentsMd: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject agentsMd: ${errorMessage(err)}\n`);
     }
   }
 
@@ -559,31 +559,31 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   maybeOfferStarterTemplateUpdate(phrenPath);
   let mcpStatus = "no_settings";
   try { mcpStatus = configureClaude(phrenPath, { mcpEnabled, hooksEnabled }) ?? "installed"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureClaude: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureClaude: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Claude", mcpStatus);
 
   let vsStatus = "no_vscode";
   try { vsStatus = configureVSCode(phrenPath, { mcpEnabled }) ?? "no_vscode"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureVSCode: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureVSCode: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("VS Code", vsStatus);
 
   let cursorStatus = "no_cursor";
   try { cursorStatus = configureCursorMcp(phrenPath, { mcpEnabled }) ?? "no_cursor"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCursorMcp: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCursorMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Cursor", cursorStatus);
 
   let copilotStatus = "no_copilot";
   try { copilotStatus = configureCopilotMcp(phrenPath, { mcpEnabled }) ?? "no_copilot"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCopilotMcp: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCopilotMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Copilot CLI", copilotStatus);
 
   let codexStatus = "no_codex";
   try { codexStatus = configureCodexMcp(phrenPath, { mcpEnabled }) ?? "no_codex"; } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCodexMcp: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link configureCodexMcp: ${errorMessage(err)}\n`);
   }
   logMcpTargetStatus("Codex", codexStatus);
   const mcpStatusForContext = [mcpStatus, vsStatus, cursorStatus, copilotStatus, codexStatus].some(
@@ -609,7 +609,7 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
     writeSkillMd(phrenPath);
     log(`  phren.SKILL.md written (agentskills-compatible tools)`);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG || process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link writeSkillMd: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link writeSkillMd: ${errorMessage(err)}\n`);
   }
   log("");
 
