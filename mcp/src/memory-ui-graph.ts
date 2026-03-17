@@ -258,8 +258,8 @@ export function renderGraphScript(): string {
         /* ease-in-out via sine curve over the full trip distance */
         var t = phren.tripDist > 0 ? Math.min(1, phren.tripProgress / phren.tripDist) : 1;
         var easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
-        var baseSpeed = Math.max(3, phren.tripDist * 0.12);
-        var speed = Math.max(1.5, baseSpeed * (0.15 + 0.85 * easeInOut));
+        var baseSpeed = Math.max(0.8, phren.tripDist * 0.03);
+        var speed = Math.max(0.4, baseSpeed * (0.15 + 0.85 * easeInOut));
         /* clamp speed to remaining distance — prevents overshoot oscillation */
         if (speed >= dist) {
           phren.x = wx;
@@ -339,10 +339,10 @@ export function renderGraphScript(): string {
     /* sprite rendering */
     if (phrenImgReady) {
       ctx.save();
-      /* fixed 48px size in screen pixels, scale up to 56px on arrival flash */
-      var spriteScreenSize = 48;
+      /* scale-aware sprite: 32px at default zoom, shrinks when zoomed out, caps at 40px */
+      var spriteScreenSize = Math.min(40, Math.max(16, 32 * Math.sqrt(scale)));
       if (phren.arriving && phren.arriveTimer < 0.4) {
-        spriteScreenSize = 48 + 8 * (1 - phren.arriveTimer / 0.4);
+        spriteScreenSize += 6 * (1 - phren.arriveTimer / 0.4);
       }
       var spriteSize = spriteScreenSize * s; /* convert to graph coords */
       /* bob up/down when walking — sine wave synced to walk progress */
@@ -367,18 +367,7 @@ export function renderGraphScript(): string {
         ctx.translate(-px, -py);
       }
       ctx.drawImage(phrenImg, px - spriteSize / 2, py - spriteSize / 2 + totalYOffset, spriteSize, spriteSize);
-      /* arrival flash: cyan glow ring */
-      if (phren.arriving && phren.arriveTimer < 0.6) {
-        var ringAlpha = 0.6 * (1 - phren.arriveTimer / 0.6);
-        ctx.beginPath();
-        ctx.arc(px, py + totalYOffset, spriteSize * 0.55, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(0,229,255,' + ringAlpha + ')';
-        ctx.lineWidth = 2 * s;
-        ctx.shadowColor = 'rgba(0,229,255,' + (ringAlpha * 0.5) + ')';
-        ctx.shadowBlur = 8;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      }
+      /* no glow ring — phren stands clean next to the node */
       ctx.restore();
     }
   }
@@ -1363,9 +1352,10 @@ export function renderGraphScript(): string {
   /* ── detail panel ───────────────────────────────────────────────────── */
   function renderGraphDetails(node) {
     selectedNode = node;
-    /* phren moves toward the selected node, following graph edges when possible */
+    /* phren moves toward the selected node, stopping just beside it (not on top) */
     if (node && typeof node.x === 'number' && typeof node.y === 'number') {
-      phrenMoveTo(node.x, node.y, node);
+      var nr = nodeRadius(node) + 12; /* offset by node radius + margin */
+      phrenMoveTo(node.x + nr, node.y - nr * 0.5, node);
     }
     /* fire external callback so VS Code extension can react to selection */
     if (_nodeSelectCb && node) {
