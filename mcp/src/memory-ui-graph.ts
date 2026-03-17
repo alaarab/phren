@@ -328,14 +328,6 @@ export function renderGraphScript(): string {
       }
     }
 
-    /* ambient glow — purple (behind sprite) */
-    var glowR = (52 + 8 * Math.sin(phren.idlePhase * 2.1)) * s;
-    var glowAlpha = phren.arriving ? 0.5 : 0.2 + 0.07 * Math.sin(phren.idlePhase * 2.1);
-    ctx.beginPath();
-    ctx.arc(px, py, glowR, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(123,104,174,' + glowAlpha + ')';
-    ctx.fill();
-
     /* sprite rendering */
     if (phrenImgReady) {
       ctx.save();
