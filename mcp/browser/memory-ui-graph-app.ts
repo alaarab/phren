@@ -208,6 +208,8 @@ const state = {
   isDragging: false,
   mascotRafId: 0,
   mascotCanvas: null as HTMLCanvasElement | null,
+  themeObserver: null as MutationObserver | null,
+  cleanupFns: [] as Array<() => void>,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -841,14 +843,16 @@ function refreshRenderer(resetCamera: boolean): void {
       notifyClear();
     });
 
-    document.addEventListener("keydown", (event) => {
+    const onKeydown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !state.selectedNodeId) return;
       state.selectedNodeId = null;
       state.hoveredNodeId = null;
       hideTooltip();
       state.renderer?.refresh();
       notifyClear();
-    });
+    };
+    document.addEventListener("keydown", onKeydown);
+    state.cleanupFns.push(() => document.removeEventListener("keydown", onKeydown));
 
     // --- Node dragging ---
     state.renderer.on("downNode", (payload) => {
@@ -866,13 +870,12 @@ function refreshRenderer(resetCamera: boolean): void {
       if (!state.draggedNode && state.container) state.container.style.cursor = "default";
     });
 
-    state.container.addEventListener("mousemove", (event: MouseEvent) => {
+    const onMouseMove = (event: MouseEvent) => {
       if (!state.draggedNode || !state.renderer || !state.graph) return;
       state.isDragging = true;
       const graphCoords = state.renderer.viewportToGraph({ x: event.offsetX, y: event.offsetY });
       state.graph.mergeNodeAttributes(state.draggedNode, { x: graphCoords.x, y: graphCoords.y });
-    });
-
+    };
     const endDrag = () => {
       if (state.draggedNode) {
         state.renderer?.setSettings({ enableCameraPanning: true });
@@ -881,8 +884,14 @@ function refreshRenderer(resetCamera: boolean): void {
         setTimeout(() => { state.isDragging = false; }, 0);
       }
     };
+    state.container.addEventListener("mousemove", onMouseMove);
     state.container.addEventListener("mouseup", endDrag);
     state.container.addEventListener("mouseleave", endDrag);
+    state.cleanupFns.push(() => {
+      state.container?.removeEventListener("mousemove", onMouseMove);
+      state.container?.removeEventListener("mouseup", endDrag);
+      state.container?.removeEventListener("mouseleave", endDrag);
+    });
 
     // --- CSS glow filter on sigma WebGL canvas ---
     const sigmaCanvases = state.container.querySelectorAll<HTMLCanvasElement>("canvas");
@@ -897,6 +906,7 @@ function refreshRenderer(resetCamera: boolean): void {
       applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    state.themeObserver = observer;
   } else if (state.graph) {
     state.renderer.setGraph(state.graph);
     state.renderer.setSettings({
@@ -1136,17 +1146,23 @@ function getNodeAt(x: number, y: number): NodeDetail | null {
 function destroy(): void {
   stopPhrenMascot();
   hideTooltip();
+  state.themeObserver?.disconnect();
+  state.themeObserver = null;
+  state.cleanupFns.forEach((fn) => fn());
+  state.cleanupFns = [];
   state.renderer?.kill();
   state.renderer = null;
   state.graph = null;
+  state.container = null;
+  state.tooltip = null;
 }
 
 // ── Phren mascot (sprite-based, ported from pre-sigma version) ──────────
 
 const phrenImg = new Image();
-phrenImg.src = PHREN_SPRITE_B64;
 let phrenImgReady = false;
 phrenImg.onload = () => { phrenImgReady = true; };
+phrenImg.src = PHREN_SPRITE_B64;
 
 const mascot = {
   // Graph-space coordinates (camera-independent)
@@ -1166,7 +1182,7 @@ const mascot = {
   currentNodeId: null as string | null,
   lastVisited: null as string | null,
   idleTimer: 0,
-  idlePause: 1.5,
+  idlePause: 5.0,
   userTarget: false,
 };
 
@@ -1246,13 +1262,14 @@ function mascotUpdate(dt: number): void {
         mascot.currentNodeId = mascot.targetNodeId;
       }
       mascot.idleTimer = 0;
-      mascot.idlePause = 1.0 + Math.random() * 1.5;
+      mascot.idlePause = mascot.userTarget ? 3.0 + Math.random() * 2.0 : 3.0 + Math.random() * 3.0;
     } else {
-      // Speed tuned for graph coords (~2.8 unit span). ~40-60 frames to cross the graph.
+      // User clicks: ~1s to cross. Auto-wander: ~2s leisurely stroll.
+      const divisor = mascot.userTarget ? 50 : 90;
       const t = mascot.tripDist > 0 ? Math.min(1, mascot.tripProgress / mascot.tripDist) : 1;
       const easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
-      const baseSpeed = Math.max(0.008, mascot.tripDist / 40);
-      const speed = Math.min(dist, Math.max(0.004, baseSpeed * (0.25 + 0.75 * easeInOut)));
+      const baseSpeed = Math.max(mascot.userTarget ? 0.008 : 0.003, mascot.tripDist / divisor);
+      const speed = Math.min(dist, Math.max(0.002, baseSpeed * (0.25 + 0.75 * easeInOut)));
       mascot.gx += (dx / dist) * speed;
       mascot.gy += (dy / dist) * speed;
       mascot.tripProgress += speed;
@@ -1444,28 +1461,6 @@ ROOT.graphReset = function graphReset(): void {
 
 ROOT.graphClearSelection = function graphClearSelection(): void {
   clearSelection();
-};
-
-(window as unknown as Record<string, unknown>)._mascotDebug = () => {
-  const targetPos = mascot.targetNodeId ? mascotGraphPos(mascot.targetNodeId) : null;
-  const currentPos = mascot.currentNodeId ? mascotGraphPos(mascot.currentNodeId) : null;
-  const vp = mascotToViewport(mascot.gx, mascot.gy);
-  // Also get where sigma thinks the current node is in viewport
-  const currentNodeVp = mascot.currentNodeId ? mascotToViewport(
-    currentPos?.x ?? 0, currentPos?.y ?? 0
-  ) : null;
-  return {
-    gx: mascot.gx, gy: mascot.gy,
-    targetGx: mascot.targetGx, targetGy: mascot.targetGy,
-    moving: mascot.moving, arriving: mascot.arriving,
-    currentNodeId: mascot.currentNodeId, targetNodeId: mascot.targetNodeId,
-    tripDist: mascot.tripDist, tripProgress: mascot.tripProgress,
-    initialized: mascot.initialized,
-    viewportPos: vp,
-    currentNodeVp,
-    targetGraphPos: targetPos,
-    currentGraphPos: currentPos,
-  };
 };
 
 ROOT.phrenGraph = {
