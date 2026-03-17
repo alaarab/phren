@@ -12,6 +12,7 @@ import { errorMessage } from "./utils.js";
 import { readInstallPreferences } from "./init-preferences.js";
 import { readCustomHooks } from "./hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "./provider-adapters.js";
+import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "./project-config.js";
 import { getAllSkills } from "./skill-registry.js";
 import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "./data-tasks.js";
 import { buildIndex, queryDocBySourceKey, queryRows } from "./shared-index.js";
@@ -171,7 +172,7 @@ export function collectSkillsForUI(phrenPath: string, profile = ""): Array<{ nam
   }));
 }
 
-export function getHooksData(phrenPath: string) {
+export function getHooksData(phrenPath: string, profile?: string) {
   const prefs = readInstallPreferences(phrenPath);
   const globalEnabled = prefs.hooksEnabled !== false;
   const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
@@ -184,7 +185,33 @@ export function getHooksData(phrenPath: string) {
     exists: fs.existsSync(paths[tool]),
   }));
 
-  return { globalEnabled, tools, customHooks: readCustomHooks(phrenPath) };
+  // Collect per-project hook overrides
+  const projectOverrides: Array<{
+    project: string;
+    baseEnabled: boolean | null;
+    events: Array<{ event: string; configured: boolean | null; enabled: boolean }>;
+  }> = [];
+  const projects = getProjectDirs(phrenPath, profile)
+    .map((dir) => path.basename(dir))
+    .filter((p) => p !== "global");
+  for (const project of projects) {
+    const config = readProjectConfig(phrenPath, project);
+    const hasOverrides =
+      typeof config.hooks?.enabled === "boolean" ||
+      PROJECT_HOOK_EVENTS.some((ev) => typeof config.hooks?.[ev] === "boolean");
+    if (!hasOverrides) continue;
+    projectOverrides.push({
+      project,
+      baseEnabled: typeof config.hooks?.enabled === "boolean" ? config.hooks.enabled : null,
+      events: PROJECT_HOOK_EVENTS.map((event) => ({
+        event,
+        configured: typeof config.hooks?.[event] === "boolean" ? config.hooks[event]! : null,
+        enabled: isProjectHookEnabled(phrenPath, project, event, config),
+      })),
+    });
+  }
+
+  return { globalEnabled, tools, customHooks: readCustomHooks(phrenPath), projectOverrides };
 }
 
 export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {

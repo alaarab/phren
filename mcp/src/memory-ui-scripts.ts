@@ -604,6 +604,10 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       return base + (base.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(_tsAuthToken);
     }
 
+    function loadJson(url) {
+      return fetch(url).then(function(r) { return r.json(); });
+    }
+
     function priorityBadge(p) {
       if (!p) return '';
       var colors = { high: '#ef4444', medium: '#f59e0b', low: '#6b7280' };
@@ -760,9 +764,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         html += '</div>';
         html += '<div class="task-card-actions">';
         if (t.section !== 'Done') {
-          html += '<button class="task-done-btn" onclick="completeTaskFromUi(\'' + esc(t.project).replace(/'/g, "\\'") + '\', \'' + esc(t.line).replace(/'/g, "\\'") + '\')" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</button>';
+          html += '<button class="task-done-btn" onclick="completeTaskFromUi(\\'' + esc(t.project).replace(/'/g, "\\\\'") + '\\', \\'' + esc(t.line).replace(/'/g, "\\\\'") + '\\')" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</button>';
         }
-        html += '<button class="task-remove-btn" onclick="removeTaskFromUi(\'' + esc(t.project).replace(/'/g, "\\'") + '\', \'' + esc(t.line).replace(/'/g, "\\'") + '\')" title="Delete task" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;cursor:pointer;color:var(--muted);font-size:var(--text-xs)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+        html += '<button class="task-remove-btn" onclick="removeTaskFromUi(\\'' + esc(t.project).replace(/'/g, "\\\\'") + '\\', \\'' + esc(t.line).replace(/'/g, "\\\\'") + '\\')" title="Delete task" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;cursor:pointer;color:var(--muted);font-size:var(--text-xs)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
         html += '</div>';
         html += '</div>';
         return html;
@@ -774,8 +778,8 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var projects = projectFilter ? [projectFilter] : Array.from(new Set(_allTasks.map(function(t) { return t.project; }))).sort();
       projects.forEach(function(proj) {
         html += '<div class="task-add-bar">';
-        html += '<input id="task-add-input-' + esc(proj) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(proj) + '\u2026" onkeydown="if(event.key===\'Enter\')addTaskFromUi(\'' + esc(proj).replace(/'/g, "\\'") + '\')">';
-        html += '<button class="task-add-btn" onclick="addTaskFromUi(\'' + esc(proj).replace(/'/g, "\\'") + '\')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
+        html += '<input id="task-add-input-' + esc(proj) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(proj) + '\u2026" onkeydown="if(event.key===\\\'Enter\\\')addTaskFromUi(\\'' + esc(proj).replace(/'/g, "\\\\'") + '\\')">';
+        html += '<button class="task-add-btn" onclick="addTaskFromUi(\\'' + esc(proj).replace(/'/g, "\\\\'") + '\\')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
         html += '</div>';
       });
 
@@ -901,7 +905,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var scopeNote = document.getElementById('settings-scope-note');
       if (scopeNote) {
         scopeNote.textContent = selectedProject
-          ? 'Showing effective config for "' + selectedProject + '". Overrides are saved to that project\'s phren.project.yaml.'
+          ? 'Showing effective config for "' + selectedProject + '". Overrides are saved to that project\\\'s phren.project.yaml.'
           : 'Showing global settings. Select a project to view and edit per-project overrides.';
       }
 
