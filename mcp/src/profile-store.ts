@@ -28,10 +28,35 @@ function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResul
   }
 }
 
+export interface ProfilePolicyDefaults {
+  findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
+  proactivity?: "high" | "medium" | "low";
+  proactivityFindings?: "high" | "medium" | "low";
+  proactivityTask?: "high" | "medium" | "low";
+  taskMode?: "off" | "manual" | "suggest" | "auto";
+  retentionPolicy?: {
+    ttlDays?: number;
+    retentionDays?: number;
+    autoAcceptThreshold?: number;
+    minInjectConfidence?: number;
+    decay?: {
+      d30?: number;
+      d60?: number;
+      d90?: number;
+      d120?: number;
+    };
+  };
+  workflowPolicy?: {
+    lowConfidenceThreshold?: number;
+    riskySections?: Array<"Review" | "Stale" | "Conflicts">;
+  };
+}
+
 export interface ProfileInfo {
   name: string;
   file: string;
   projects: string[];
+  defaults?: ProfilePolicyDefaults;
 }
 
 export interface ProjectCard {
@@ -132,6 +157,93 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   });
 }
 
+const VALID_FINDING_SENSITIVITY_VALS = ["minimal", "conservative", "balanced", "aggressive"] as const;
+const VALID_PROACTIVITY_VALS = ["high", "medium", "low"] as const;
+const VALID_TASK_MODE_VALS = ["off", "manual", "suggest", "auto"] as const;
+const VALID_RISKY_SECTION_VALS = ["Review", "Stale", "Conflicts"] as const;
+
+function pickEnumVal<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
+}
+
+function pickFiniteNum(value: unknown): number | undefined {
+  return typeof value === "number" && isFinite(value) ? value : undefined;
+}
+
+function parseProfilePolicyDefaults(raw: unknown): ProfilePolicyDefaults | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const data = raw as Record<string, unknown>;
+
+  const retentionRaw = data.retentionPolicy && typeof data.retentionPolicy === "object" && !Array.isArray(data.retentionPolicy)
+    ? data.retentionPolicy as Record<string, unknown>
+    : undefined;
+  const decayRaw = retentionRaw?.decay && typeof retentionRaw.decay === "object" && !Array.isArray(retentionRaw.decay)
+    ? retentionRaw.decay as Record<string, unknown>
+    : undefined;
+
+  const workflowRaw = data.workflowPolicy && typeof data.workflowPolicy === "object" && !Array.isArray(data.workflowPolicy)
+    ? data.workflowPolicy as Record<string, unknown>
+    : undefined;
+
+  const result: ProfilePolicyDefaults = {};
+
+  const fs_ = pickEnumVal(data.findingSensitivity, VALID_FINDING_SENSITIVITY_VALS);
+  if (fs_) result.findingSensitivity = fs_;
+  const pr = pickEnumVal(data.proactivity, VALID_PROACTIVITY_VALS);
+  if (pr) result.proactivity = pr;
+  const prf = pickEnumVal(data.proactivityFindings, VALID_PROACTIVITY_VALS);
+  if (prf) result.proactivityFindings = prf;
+  const prt = pickEnumVal(data.proactivityTask, VALID_PROACTIVITY_VALS);
+  if (prt) result.proactivityTask = prt;
+  const tm = pickEnumVal(data.taskMode, VALID_TASK_MODE_VALS);
+  if (tm) result.taskMode = tm;
+
+  if (retentionRaw) {
+    const ret: ProfilePolicyDefaults["retentionPolicy"] = {};
+    const ttlDays = pickFiniteNum(retentionRaw.ttlDays);
+    if (ttlDays !== undefined) ret.ttlDays = ttlDays;
+    const retentionDays = pickFiniteNum(retentionRaw.retentionDays);
+    if (retentionDays !== undefined) ret.retentionDays = retentionDays;
+    const aat = pickFiniteNum(retentionRaw.autoAcceptThreshold);
+    if (aat !== undefined) ret.autoAcceptThreshold = aat;
+    const mic = pickFiniteNum(retentionRaw.minInjectConfidence);
+    if (mic !== undefined) ret.minInjectConfidence = mic;
+    if (decayRaw) {
+      const decay: NonNullable<ProfilePolicyDefaults["retentionPolicy"]>["decay"] = {};
+      const d30 = pickFiniteNum(decayRaw.d30); if (d30 !== undefined) decay.d30 = d30;
+      const d60 = pickFiniteNum(decayRaw.d60); if (d60 !== undefined) decay.d60 = d60;
+      const d90 = pickFiniteNum(decayRaw.d90); if (d90 !== undefined) decay.d90 = d90;
+      const d120 = pickFiniteNum(decayRaw.d120); if (d120 !== undefined) decay.d120 = d120;
+      if (Object.keys(decay).length > 0) ret.decay = decay;
+    }
+    if (Object.keys(ret).length > 0) result.retentionPolicy = ret;
+  }
+
+  if (workflowRaw) {
+    const wf: ProfilePolicyDefaults["workflowPolicy"] = {};
+    const lct = pickFiniteNum(workflowRaw.lowConfidenceThreshold);
+    if (lct !== undefined) wf.lowConfidenceThreshold = lct;
+    if (Array.isArray(workflowRaw.riskySections)) {
+      const rs = (workflowRaw.riskySections as unknown[])
+        .filter((s): s is "Review" | "Stale" | "Conflicts" =>
+          typeof s === "string" && VALID_RISKY_SECTION_VALS.includes(s as "Review" | "Stale" | "Conflicts")
+        );
+      if (rs.length > 0) wf.riskySections = rs;
+    }
+    if (Object.keys(wf).length > 0) result.workflowPolicy = wf;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+export function getActiveProfileDefaults(phrenPath: string, profile?: string): ProfilePolicyDefaults | undefined {
+  const profiles = listProfiles(phrenPath);
+  if (!profiles.ok) return undefined;
+  const activeName = profile ?? profiles.data[0]?.name;
+  if (!activeName) return undefined;
+  return profiles.data.find((p) => p.name === activeName)?.defaults;
+}
+
 export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
   const profilesDir = path.join(phrenPath, "profiles");
   if (!fs.existsSync(profilesDir)) return phrenErr(`No profiles/ directory found. Run 'npx phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
@@ -152,7 +264,8 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
       const projects = Array.isArray(data?.projects)
         ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
         : [];
-      profiles.push({ name, file: full, projects });
+      const defaults = parseProfilePolicyDefaults(data?.defaults);
+      profiles.push({ name, file: full, projects, ...(defaults ? { defaults } : {}) });
     } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listProfiles yamlParse: ${errorMessage(err)}\n`);
       return phrenErr(`profiles/${file}`, PhrenError.MALFORMED_YAML);

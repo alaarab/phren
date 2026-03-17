@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.17
+0.0.18
 
 ## MCP Tools (67)
 
@@ -267,7 +267,7 @@ Ephemeral files live in subdirectories to keep the phren root clean:
 |-----------|----------|
 | `.runtime/` | audit.log, debug.log, telemetry.json, search-history.jsonl, quality markers, lock files |
 | `.sessions/` | noticed-{session}, extracted-{session} markers |
-| `.governance/` | shared policy JSON and access control |
+| `.config/` | shared policy JSON and access control |
 | `<project>/reference/` | Deep reference docs indexed as `reference` type |
 
 Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers from shared.ts.

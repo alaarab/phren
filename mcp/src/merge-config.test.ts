@@ -12,13 +12,13 @@ import { writeProjectConfig, readProjectConfig, projectConfigPath } from "./proj
 import { writeGovernanceInstallPreferences } from "./init-preferences.js";
 
 function writeGlobalRetentionPolicy(phrenPath: string, policy: Record<string, unknown>): void {
-  const dir = path.join(phrenPath, ".governance");
+  const dir = path.join(phrenPath, ".config");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "retention-policy.json"), JSON.stringify(policy, null, 2) + "\n");
 }
 
 function writeGlobalWorkflowPolicy(phrenPath: string, policy: Record<string, unknown>): void {
-  const dir = path.join(phrenPath, ".governance");
+  const dir = path.join(phrenPath, ".config");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "workflow-policy.json"), JSON.stringify(policy, null, 2) + "\n");
 }
@@ -359,7 +359,7 @@ describe("set_* tools write to phren.project.yaml when project given", () => {
   });
 
   // Test 4: set_proactivity with project writes to phren.project.yaml
-  it("set_proactivity with project writes to phren.project.yaml, not .governance/", () => {
+  it("set_proactivity with project writes to phren.project.yaml, not .config/", () => {
     // Simulate what set_proactivity does when project is given
     const project = "alpha";
     const level = "low" as const;
@@ -379,18 +379,18 @@ describe("set_* tools write to phren.project.yaml when project given", () => {
     const stored = readProjectConfig(phrenPath, project);
     expect(stored.config?.proactivity).toBe("low");
 
-    // Check .governance/ was NOT written
-    const govDir = path.join(phrenPath, ".governance");
+    // Check .config/ was NOT written
+    const govDir = path.join(phrenPath, ".config");
     const govFiles = fs.existsSync(govDir) ? fs.readdirSync(govDir) : [];
     // install-preferences.json should not be written by project-scoped set_proactivity
     expect(govFiles).not.toContain("install-preferences.json");
   });
 
-  // Test 5: set_proactivity without project writes to .governance/
-  it("set_proactivity without project writes to .governance/ install-preferences.json", () => {
+  // Test 5: set_proactivity without project writes to .config/
+  it("set_proactivity without project writes to .config/ install-preferences.json", () => {
     writeGovernanceInstallPreferences(phrenPath, { proactivity: "medium" });
 
-    const govPrefsPath = path.join(phrenPath, ".governance", "install-preferences.json");
+    const govPrefsPath = path.join(phrenPath, ".config", "install-preferences.json");
     expect(fs.existsSync(govPrefsPath)).toBe(true);
 
     const stored = JSON.parse(fs.readFileSync(govPrefsPath, "utf8"));

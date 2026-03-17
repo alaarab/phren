@@ -31,7 +31,7 @@ import {
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "./shared-governance.js";
 import { callLlm } from "./content-dedup.js";
-import { rankResults, searchKnowledgeRows, applyTrustFilter } from "./shared-retrieval.js";
+import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "./shared-retrieval.js";
 import { parseSourceComment } from "./content-citation.js";
 import { resolveActiveSessionScope } from "./mcp-session.js";
 
@@ -276,10 +276,36 @@ export function register(server: McpServer, ctx: McpContext): void {
         const safeQuery = retrieval.safeQuery;
 
         if (!safeQuery) return mcpResponse({ ok: false, error: "Search query is empty after sanitization." });
-        let rows = retrieval.rows;
+        let rows: FederatedDocRow[] = retrieval.rows ?? [];
         const usedFallback = retrieval.usedFallback;
 
-        if (!rows || rows.length === 0) {
+        // Merge federated store results when PHREN_FEDERATION_PATHS is set and no project filter
+        // (federation is global by nature — per-project filter only makes sense within a single store)
+        if (!filterProject) {
+          try {
+            const federatedRows = await searchFederatedStores(phrenPath, {
+              query,
+              maxResults,
+              fetchLimit,
+              filterType,
+            });
+            if (federatedRows.length > 0) {
+              // Dedup by path to avoid duplicates if stores share files
+              const localPaths = new Set(rows.map((r) => r.path || `${r.project}/${r.filename}`));
+              const uniqueFederated = federatedRows.filter((r) => {
+                const key = r.path || `${r.project}/${r.filename}`;
+                return !localPaths.has(key);
+              });
+              rows = [...rows, ...uniqueFederated];
+            }
+          } catch (err: unknown) {
+            if (process.env.PHREN_DEBUG) {
+              process.stderr.write(`[phren] search_knowledge federation: ${errorMessage(err)}\n`);
+            }
+          }
+        }
+
+        if (rows.length === 0) {
           logSearchMiss(phrenPath, query, filterProject);
           return mcpResponse({ ok: true, message: "No results found.", data: { query, results: [] } });
         }
@@ -421,6 +447,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const results = rows.map((row) => {
           const snippet = extractSnippet(row.content, query);
           const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
+          const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
           return {
             project: row.project,
             filename: row.filename,
@@ -429,6 +456,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             path: row.path,
             status: lifecycle?.primaryStatus,
             statuses: lifecycle?.statuses,
+            ...(federationSource ? { federation_source: federationSource } : {}),
           };
         });
 
@@ -448,9 +476,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${errorMessage(err)}\n`);
         }
 
-        const formatted = results.map((r) =>
-          `### ${r.project}/${r.filename} (${r.type})\n${r.snippet}\n\n\`${r.path}\``
-        );
+        const formatted = results.map((r) => {
+          const fedNote = r.federation_source ? ` [from: ${r.federation_source}]` : "";
+          return `### ${r.project}/${r.filename} (${r.type})${fedNote}\n${r.snippet}\n\n\`${r.path}\``;
+        });
 
         // Memory synthesis: generate a concise paragraph from top results when requested
         let synthesis: string | undefined;
@@ -639,7 +668,15 @@ export function register(server: McpServer, ctx: McpContext): void {
       const visibleItems = includeHistory
         ? allItems
         : allItems.filter(f => f.tier !== "archived" && !HISTORY_FINDING_STATUSES.has(f.status));
-      const filteredItems = status ? visibleItems.filter(f => f.status === status) : visibleItems;
+      // Apply scope filter: only show findings visible to the active scope
+      const activeScope = resolveActiveSessionScope(phrenPath, project);
+      const scopedItems = activeScope
+        ? visibleItems.filter(f => {
+          const itemScope = normalizeMemoryScope(f.scope);
+          return isMemoryScopeVisible(itemScope, activeScope);
+        })
+        : visibleItems;
+      const filteredItems = status ? scopedItems.filter(f => f.status === status) : scopedItems;
       if (!filteredItems.length) {
         const msg = historyCount > 0 && !includeHistory
           ? `No findings found for "${project}" with current filters. ${historyCount} historical finding(s) hidden. Pass include_history=true to show history.`

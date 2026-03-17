@@ -252,7 +252,7 @@ describe("path resolution helpers", () => {
 describe("governance validation", () => {
   it("validates shared governance schemas", () => {
     const phren = makePhren();
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
 
     const indexPolicy = path.join(govDir, "index-policy.json");
@@ -1367,7 +1367,7 @@ describe("pruneDeadMemories", () => {
   it("prunes entries older than retention policy in dry-run mode", () => {
     const phren = makePhren();
     grantAdmin(phren);
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
@@ -1391,7 +1391,7 @@ describe("pruneDeadMemories", () => {
   it("prunes entries and uses atomic write (no .bak file)", () => {
     const phren = makePhren();
     grantAdmin(phren);
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
@@ -1427,7 +1427,7 @@ describe("getRetentionPolicy and updateRetentionPolicy", () => {
 
   it("merges partial policy with defaults", () => {
     const phren = makePhren();
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "retention-policy.json"),
@@ -1448,7 +1448,7 @@ describe("getRetentionPolicy and updateRetentionPolicy", () => {
 
   it("non-admin cannot update policy", () => {
     const phren = makePhren();
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "access-control.json"),
@@ -1474,7 +1474,7 @@ describe("getWorkflowPolicy and updateWorkflowPolicy", () => {
 
   it("filters invalid riskySections values", () => {
     const phren = makePhren();
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "workflow-policy.json"),
@@ -1508,7 +1508,7 @@ describe("getIndexPolicy and updateIndexPolicy", () => {
 
   it("filters empty globs and falls back to defaults", () => {
     const phren = makePhren();
-    const govDir = path.join(phren, ".governance");
+    const govDir = path.join(phren, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     fs.writeFileSync(
       path.join(govDir, "index-policy.json"),
@@ -1643,7 +1643,7 @@ describe("getProjectDirs", () => {
     const phren = makePhren();
     fs.mkdirSync(path.join(phren, "proj-a"), { recursive: true });
     fs.mkdirSync(path.join(phren, "proj-b"), { recursive: true });
-    fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
     fs.mkdirSync(path.join(phren, "profiles"), { recursive: true });
     fs.mkdirSync(path.join(phren, "templates"), { recursive: true });
 
@@ -1651,7 +1651,7 @@ describe("getProjectDirs", () => {
     const names = dirs.map(d => path.basename(d));
     expect(names).toContain("proj-a");
     expect(names).toContain("proj-b");
-    expect(names).not.toContain(".governance");
+    expect(names).not.toContain(".config");
     expect(names).not.toContain("profiles");
     expect(names).not.toContain("templates");
   });

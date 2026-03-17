@@ -31,7 +31,7 @@ The common ones are boring infrastructure issues, not mystery behavior:
 - Hooks disabled or stale: retrieval stops, but your files are still there; rerun `phren init` or re-enable hooks with `phren hooks-mode on`.
 - Stale index: search quality drops until the next rebuild; `phren doctor` and `phren status` will flag index trouble.
 - Review queue growth: trust filtering is catching too much low-signal or stale content, which usually means your findings need pruning or governance thresholds need adjustment.
-- Governance lockout: if access control blocks a write, nothing is silently discarded; check `.governance/access-control.json`, `.runtime/access-control.local.json`, and actor identity (`PHREN_ACTOR` / OS user).
+- Governance lockout: if access control blocks a write, nothing is silently discarded; check `.config/access-control.json`, `.runtime/access-control.local.json`, and actor identity (`PHREN_ACTOR` / OS user).
 
 ## How does trust decay work?
 

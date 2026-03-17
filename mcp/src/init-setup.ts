@@ -486,8 +486,8 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
 
 export function ensureGovernanceFiles(phrenPath: string): string[] {
   const created: string[] = [];
-  const govDir = path.join(phrenPath, ".governance");
-  if (!fs.existsSync(govDir)) created.push(".governance/");
+  const govDir = path.join(phrenPath, ".config");
+  if (!fs.existsSync(govDir)) created.push(".config/");
   fs.mkdirSync(govDir, { recursive: true });
   const sv = GOVERNANCE_SCHEMA_VERSION;
   const policy = path.join(govDir, "retention-policy.json");
@@ -507,7 +507,7 @@ export function ensureGovernanceFiles(phrenPath: string): string[] {
         decay: { d30: 1.0, d60: 0.85, d90: 0.65, d120: 0.45 },
       }, null, 2) + "\n"
     );
-    created.push(".governance/retention-policy.json");
+    created.push(".config/retention-policy.json");
   }
   if (!fs.existsSync(workflow)) {
     atomicWriteText(
@@ -519,7 +519,7 @@ export function ensureGovernanceFiles(phrenPath: string): string[] {
         taskMode: "auto",
       }, null, 2) + "\n"
     );
-    created.push(".governance/workflow-policy.json");
+    created.push(".config/workflow-policy.json");
   }
   if (!fs.existsSync(indexPolicy)) {
     atomicWriteText(
@@ -531,7 +531,7 @@ export function ensureGovernanceFiles(phrenPath: string): string[] {
         includeHidden: false,
       }, null, 2) + "\n"
     );
-    created.push(".governance/index-policy.json");
+    created.push(".config/index-policy.json");
   }
   if (!fs.existsSync(runtimeHealth)) {
     atomicWriteText(runtimeHealth, JSON.stringify({ schemaVersion: sv }, null, 2) + "\n");
@@ -1402,12 +1402,12 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     fix: globalOk ? undefined : "Run `phren init` to create starter files",
   });
 
-  const govDir = path.join(phrenPath, ".governance");
+  const govDir = path.join(phrenPath, ".config");
   const govOk = fs.existsSync(govDir);
   checks.push({
     name: "config",
     ok: govOk,
-    detail: govOk ? ".governance/ config directory exists" : ".governance/ config directory missing",
+    detail: govOk ? ".config/ config directory exists" : ".config/ config directory missing",
     fix: govOk ? undefined : "Run `phren init` to create governance config",
   });
 

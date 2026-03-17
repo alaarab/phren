@@ -5,6 +5,7 @@ import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, 
 import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "./shared-governance.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "./project-config.js";
+import { getActiveProfileDefaults, type ProfilePolicyDefaults } from "./profile-store.js";
 import { runCustomHooks } from "./hooks.js";
 import {
   METADATA_REGEX,
@@ -112,7 +113,7 @@ const DEFAULT_RUNTIME_HEALTH: RuntimeHealth = {
 };
 
 function governanceDir(phrenPath: string): string {
-  return path.join(phrenPath, ".governance");
+  return path.join(phrenPath, ".config");
 }
 
 type GovernanceSchema =
@@ -400,7 +401,7 @@ export function getProjectConfigOverrides(phrenPath: string, projectName: string
   return readProjectConfigOverrides(phrenPath, projectName) ?? null;
 }
 
-export function mergeConfig(phrenPath: string, projectName?: string): ResolvedConfig {
+export function mergeConfig(phrenPath: string, projectName?: string, profile?: string): ResolvedConfig {
   const globalRetention = getRetentionPolicyGlobal(phrenPath);
   const globalWorkflow = getWorkflowPolicyGlobal(phrenPath);
 
@@ -409,63 +410,108 @@ export function mergeConfig(phrenPath: string, projectName?: string): ResolvedCo
     projectName = undefined;
   }
 
+  // Load profile-level defaults (global → profile → project resolution chain)
+  let profileDefaults: ProfilePolicyDefaults | undefined;
+  try {
+    profileDefaults = getActiveProfileDefaults(phrenPath, profile);
+  } catch {
+    // profile defaults are best-effort
+  }
+
+  // Apply profile defaults on top of global to get the profile-level base
+  const profileRetention: RetentionPolicy = profileDefaults?.retentionPolicy
+    ? {
+      schemaVersion: globalRetention.schemaVersion,
+      ttlDays: profileDefaults.retentionPolicy.ttlDays ?? globalRetention.ttlDays,
+      retentionDays: profileDefaults.retentionPolicy.retentionDays ?? globalRetention.retentionDays,
+      autoAcceptThreshold: profileDefaults.retentionPolicy.autoAcceptThreshold ?? globalRetention.autoAcceptThreshold,
+      minInjectConfidence: profileDefaults.retentionPolicy.minInjectConfidence ?? globalRetention.minInjectConfidence,
+      decay: {
+        d30: profileDefaults.retentionPolicy.decay?.d30 ?? globalRetention.decay.d30,
+        d60: profileDefaults.retentionPolicy.decay?.d60 ?? globalRetention.decay.d60,
+        d90: profileDefaults.retentionPolicy.decay?.d90 ?? globalRetention.decay.d90,
+        d120: profileDefaults.retentionPolicy.decay?.d120 ?? globalRetention.decay.d120,
+      },
+    }
+    : globalRetention;
+
+  const profileWorkflow: WorkflowPolicy = profileDefaults
+    ? {
+      schemaVersion: globalWorkflow.schemaVersion,
+      lowConfidenceThreshold: profileDefaults.workflowPolicy?.lowConfidenceThreshold ?? globalWorkflow.lowConfidenceThreshold,
+      riskySections: profileDefaults.workflowPolicy?.riskySections?.length
+        ? profileDefaults.workflowPolicy.riskySections
+        : globalWorkflow.riskySections,
+      taskMode: profileDefaults.taskMode ?? globalWorkflow.taskMode,
+      findingSensitivity: profileDefaults.findingSensitivity ?? globalWorkflow.findingSensitivity,
+    }
+    : globalWorkflow;
+
   if (!projectName) {
     return {
-      findingSensitivity: globalWorkflow.findingSensitivity,
-      proactivity: {},
-      taskMode: globalWorkflow.taskMode,
-      retentionPolicy: globalRetention,
-      workflowPolicy: globalWorkflow,
+      findingSensitivity: profileWorkflow.findingSensitivity,
+      proactivity: {
+        base: profileDefaults?.proactivity,
+        findings: profileDefaults?.proactivityFindings,
+        tasks: profileDefaults?.proactivityTask,
+      },
+      taskMode: profileWorkflow.taskMode,
+      retentionPolicy: profileRetention,
+      workflowPolicy: profileWorkflow,
     };
   }
 
   const overrides = readProjectConfigOverrides(phrenPath, projectName);
   if (!overrides) {
     return {
-      findingSensitivity: globalWorkflow.findingSensitivity,
-      proactivity: {},
-      taskMode: globalWorkflow.taskMode,
-      retentionPolicy: globalRetention,
-      workflowPolicy: globalWorkflow,
+      findingSensitivity: profileWorkflow.findingSensitivity,
+      proactivity: {
+        base: profileDefaults?.proactivity,
+        findings: profileDefaults?.proactivityFindings,
+        tasks: profileDefaults?.proactivityTask,
+      },
+      taskMode: profileWorkflow.taskMode,
+      retentionPolicy: profileRetention,
+      workflowPolicy: profileWorkflow,
     };
   }
 
-  // Merge retention policy
+  // Merge retention policy: profile as base, project overrides on top
   const retentionOverride = overrides.retentionPolicy;
   const mergedRetention: RetentionPolicy = retentionOverride
     ? {
-      schemaVersion: globalRetention.schemaVersion,
-      ttlDays: retentionOverride.ttlDays ?? globalRetention.ttlDays,
-      retentionDays: retentionOverride.retentionDays ?? globalRetention.retentionDays,
-      autoAcceptThreshold: retentionOverride.autoAcceptThreshold ?? globalRetention.autoAcceptThreshold,
-      minInjectConfidence: retentionOverride.minInjectConfidence ?? globalRetention.minInjectConfidence,
+      schemaVersion: profileRetention.schemaVersion,
+      ttlDays: retentionOverride.ttlDays ?? profileRetention.ttlDays,
+      retentionDays: retentionOverride.retentionDays ?? profileRetention.retentionDays,
+      autoAcceptThreshold: retentionOverride.autoAcceptThreshold ?? profileRetention.autoAcceptThreshold,
+      minInjectConfidence: retentionOverride.minInjectConfidence ?? profileRetention.minInjectConfidence,
       decay: {
-        d30: retentionOverride.decay?.d30 ?? globalRetention.decay.d30,
-        d60: retentionOverride.decay?.d60 ?? globalRetention.decay.d60,
-        d90: retentionOverride.decay?.d90 ?? globalRetention.decay.d90,
-        d120: retentionOverride.decay?.d120 ?? globalRetention.decay.d120,
+        d30: retentionOverride.decay?.d30 ?? profileRetention.decay.d30,
+        d60: retentionOverride.decay?.d60 ?? profileRetention.decay.d60,
+        d90: retentionOverride.decay?.d90 ?? profileRetention.decay.d90,
+        d120: retentionOverride.decay?.d120 ?? profileRetention.decay.d120,
       },
     }
-    : globalRetention;
+    : profileRetention;
 
-  // Merge workflow policy
+  // Merge workflow policy: profile as base, project overrides on top
   const workflowOverride = overrides.workflowPolicy;
   const mergedWorkflow: WorkflowPolicy = {
-    schemaVersion: globalWorkflow.schemaVersion,
-    lowConfidenceThreshold: workflowOverride?.lowConfidenceThreshold ?? globalWorkflow.lowConfidenceThreshold,
+    schemaVersion: profileWorkflow.schemaVersion,
+    lowConfidenceThreshold: workflowOverride?.lowConfidenceThreshold ?? profileWorkflow.lowConfidenceThreshold,
     riskySections: workflowOverride?.riskySections?.length
       ? workflowOverride.riskySections
-      : globalWorkflow.riskySections,
-    taskMode: overrides.taskMode ?? globalWorkflow.taskMode,
-    findingSensitivity: overrides.findingSensitivity ?? globalWorkflow.findingSensitivity,
+      : profileWorkflow.riskySections,
+    taskMode: overrides.taskMode ?? profileWorkflow.taskMode,
+    findingSensitivity: overrides.findingSensitivity ?? profileWorkflow.findingSensitivity,
   };
 
   return {
     findingSensitivity: mergedWorkflow.findingSensitivity,
     proactivity: {
-      base: overrides.proactivity,
-      findings: overrides.proactivityFindings,
-      tasks: overrides.proactivityTask,
+      base: overrides.proactivity ?? profileDefaults?.proactivity,
+      findings: overrides.proactivityFindings ?? profileDefaults?.proactivityFindings,
+      tasks: overrides.proactivityTask ?? profileDefaults?.proactivityTask,
     },
     taskMode: mergedWorkflow.taskMode,
     retentionPolicy: mergedRetention,

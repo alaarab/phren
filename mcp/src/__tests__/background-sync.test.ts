@@ -11,7 +11,7 @@ describe("handleBackgroundSync", () => {
   beforeEach(() => {
     tmp = makeTempDir("phren-bg-sync-");
     execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
-    fs.mkdirSync(path.join(tmp.path, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(tmp.path, ".config"), { recursive: true });
     initTestPhrenRoot(tmp.path);
     process.env.PHREN_PATH = tmp.path;
   });

@@ -12,7 +12,7 @@ describe("task lifecycle", () => {
   beforeEach(() => {
     tmp = makeTempDir("task-lifecycle-");
     grantAdmin(tmp.path);
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -29,7 +29,7 @@ describe("task lifecycle", () => {
   });
 
   it("suggest mode proposes a task without mutating tasks.md", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -54,7 +54,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode creates an active task and links an explicit GitHub issue URL", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -83,7 +83,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode suggests instead of writing when discovery intent detected", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -108,7 +108,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode writes task when execution intent detected", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -134,7 +134,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode writes task when both execution and discovery signals present", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -155,7 +155,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode writes task when no discovery signal present (default behavior)", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -176,7 +176,7 @@ describe("task lifecycle", () => {
   });
 
   it("auto mode completes the tracked task after a successful stop", () => {
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,

@@ -266,7 +266,7 @@ describe("memory workflow policy", () => {
   beforeEach(() => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-workflow-test-"));
     phrenDir = path.join(tmpRoot, "phren");
-    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phrenDir, ".config"), { recursive: true });
     actor = grantAdmin(phrenDir, "workflow-admin");
     process.env.PHREN_ACTOR = actor;
   });
@@ -302,7 +302,7 @@ describe("index policy", () => {
   beforeEach(() => {
     ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-index-policy-test-"));
     phrenDir = path.join(tmpRoot, "phren");
-    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phrenDir, ".config"), { recursive: true });
     grantAdmin(phrenDir, "index-admin");
   });
 

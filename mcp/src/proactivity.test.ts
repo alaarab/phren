@@ -32,7 +32,7 @@ describe("proactivity config", () => {
   }
 
   function writeGovernanceInstallPreferences(content: Record<string, unknown>): void {
-    const filePath = path.join(homeDir, ".phren", ".governance", "install-preferences.json");
+    const filePath = path.join(homeDir, ".phren", ".config", "install-preferences.json");
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(content, null, 2) + "\n");
   }

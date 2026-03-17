@@ -746,7 +746,7 @@ Configure indexer include/exclude globs.
 ### Governance identity and RBAC
 
 - Actor identity is resolved from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity.
-- Access policy comes from `.governance/access-control.json` with local augmentation from `.runtime/access-control.local.json`.
+- Access policy comes from `.config/access-control.json` with local augmentation from `.runtime/access-control.local.json`.
 - RBAC is enforced before write/policy/delete operations.
 
 ### Web UI security model

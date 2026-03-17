@@ -120,7 +120,7 @@ const TOY_DATASET: BenchmarkSession[] = [
 function makeTempPhren(prefix: string): { phrenPath: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   // Grant admin access for governance checks
-  const govDir = path.join(dir, ".governance");
+  const govDir = path.join(dir, ".config");
   fs.mkdirSync(govDir, { recursive: true });
   fs.writeFileSync(
     path.join(govDir, "access-control.json"),

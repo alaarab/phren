@@ -15,7 +15,7 @@ function fileChecksum(filePath: string): string {
 }
 
 function checksumStorePath(phrenPath: string): string {
-  return path.join(phrenPath, ".governance", "file-checksums.json");
+  return path.join(phrenPath, ".config", "file-checksums.json");
 }
 
 function loadChecksums(phrenPath: string): ChecksumStore {

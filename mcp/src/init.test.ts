@@ -116,9 +116,9 @@ describe.sequential("mcp mode configuration", () => {
   it("ships starter gitignore entries for local governance runtime state", () => {
     const starterGitignore = fs.readFileSync(path.join("starter", ".gitignore"), "utf8");
 
-    expect(starterGitignore).not.toContain(".governance/runtime-health.json");
-    expect(starterGitignore).not.toContain(".governance/memory-scores.json");
-    expect(starterGitignore).not.toContain(".governance/shell-state.json");
+    expect(starterGitignore).not.toContain(".config/runtime-health.json");
+    expect(starterGitignore).not.toContain(".config/memory-scores.json");
+    expect(starterGitignore).not.toContain(".config/shell-state.json");
     expect(starterGitignore).toContain(".runtime/");
     expect(starterGitignore).toContain(".sessions/");
   });
@@ -463,7 +463,7 @@ describe("ensureGovernanceFiles", () => {
 
   it("creates all governance files in a fresh directory", () => {
     ensureGovernanceFiles(tmpDir);
-    const govDir = path.join(tmpDir, ".governance");
+    const govDir = path.join(tmpDir, ".config");
 
     expect(fs.existsSync(path.join(govDir, "retention-policy.json"))).toBe(true);
     expect(fs.existsSync(path.join(govDir, "workflow-policy.json"))).toBe(true);
@@ -473,7 +473,7 @@ describe("ensureGovernanceFiles", () => {
 
   it("writes valid JSON in each governance file", () => {
     ensureGovernanceFiles(tmpDir);
-    const govDir = path.join(tmpDir, ".governance");
+    const govDir = path.join(tmpDir, ".config");
 
     const policy = JSON.parse(fs.readFileSync(path.join(govDir, "retention-policy.json"), "utf8"));
     expect(policy.ttlDays).toBe(120);
@@ -487,7 +487,7 @@ describe("ensureGovernanceFiles", () => {
   });
 
   it("does not overwrite existing governance files", () => {
-    const govDir = path.join(tmpDir, ".governance");
+    const govDir = path.join(tmpDir, ".config");
     fs.mkdirSync(govDir, { recursive: true });
     const policyPath = path.join(govDir, "retention-policy.json");
     fs.writeFileSync(policyPath, JSON.stringify({ ttlDays: 999 }, null, 2) + "\n");
@@ -532,7 +532,7 @@ describe("runInit walkthrough integration", () => {
     await suppressOutput(() => runInit({ yes: true }));
     expect(fs.existsSync(phrenPath)).toBe(true);
     // Should have governance files created
-    expect(fs.existsSync(path.join(phrenPath, ".governance", "retention-policy.json"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".config", "retention-policy.json"))).toBe(true);
   });
 
   it("fresh init starts empty and initializes a local git repo", async () => {
@@ -611,7 +611,7 @@ describe("runInit walkthrough integration", () => {
     expect(profileText).not.toContain("my-frontend");
     expect(profileText).toContain("real-project");
     expect(fs.existsSync(path.join(phrenPath, ".runtime"))).toBe(true);
-    expect(fs.existsSync(path.join(phrenPath, ".governance"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".config"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     // canonical-locks.json removed (canonical locks feature was stripped)
     expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
@@ -762,8 +762,8 @@ describe("runInit walkthrough integration", () => {
     }));
 
     const installPrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "install-preferences.json"), "utf8"));
-    const governancePrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".governance", "install-preferences.json"), "utf8"));
-    const workflowPolicy = JSON.parse(fs.readFileSync(path.join(phrenPath, ".governance", "workflow-policy.json"), "utf8"));
+    const governancePrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".config", "install-preferences.json"), "utf8"));
+    const workflowPolicy = JSON.parse(fs.readFileSync(path.join(phrenPath, ".config", "workflow-policy.json"), "utf8"));
 
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
     expect(installPrefs.proactivityFindings).toBe("medium");
@@ -925,7 +925,7 @@ describe("runPostInitVerify", () => {
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(phren, "global"), { recursive: true });
-      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
       fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
@@ -969,7 +969,7 @@ describe("runPostInitVerify", () => {
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(phren, "global"), { recursive: true });
-      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
       fs.writeFileSync(path.join(phren, "global", "CLAUDE.md"), "# Global\n");
@@ -1000,7 +1000,7 @@ describe("runPostInitVerify", () => {
     try {
       fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
       fs.mkdirSync(path.join(phren, "global"), { recursive: true });
-      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
       fs.writeFileSync(
         path.join(home, ".claude", "settings.json"),

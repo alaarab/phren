@@ -150,7 +150,7 @@ All state stays local as files (markdown/json), with git as transport in shared 
     FINDINGS.md
     skills/
 
-  .governance/
+  .config/
     access-control.json
     retention-policy.json
     workflow-policy.json
@@ -214,7 +214,7 @@ Skill resolution is deterministic and policy-aware:
 Identity and authorization flow:
 
 - actor identity from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity
-- shared role policy from `.governance/access-control.json`
+- shared role policy from `.config/access-control.json`
 - local fallback/augmentation from `.runtime/access-control.local.json`
 
 RBAC roles:

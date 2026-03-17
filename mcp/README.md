@@ -50,7 +50,7 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full API reference
 
 ## Governance and security highlights
 
-- RBAC uses `.governance/access-control.json` and `.runtime/access-control.local.json`
+- RBAC uses `.config/access-control.json` and `.runtime/access-control.local.json`
 - Web UI binds loopback-only, uses per-run auth token, enforces CSRF for mutations, and sets CSP headers
 - Telemetry is opt-in only (`phren config telemetry on`) and stored locally in `.runtime/telemetry.json`
 

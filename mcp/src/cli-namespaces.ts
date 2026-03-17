@@ -1496,7 +1496,7 @@ export async function handleFindingNamespace(args: string[]) {
   if (subcommand === "contradictions") {
     const project = args[1];
     const phrenPath = getPhrenPath();
-    const RESERVED_DIRS = new Set(["global", ".runtime", ".sessions", ".governance"]);
+    const RESERVED_DIRS = new Set(["global", ".runtime", ".sessions", ".config"]);
     const { readFindings } = await import("./data-access.js");
     const projects = project
       ? [project]

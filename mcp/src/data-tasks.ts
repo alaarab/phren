@@ -396,7 +396,7 @@ function writeTaskDoc(doc: TaskDoc): void {
 }
 
 function taskArchivePath(phrenPath: string, project: string): string {
-  return path.join(phrenPath, ".governance", "task-archive", `${project}.md`);
+  return path.join(phrenPath, ".config", "task-archive", `${project}.md`);
 }
 
 export function readTasks(phrenPath: string, project: string): PhrenResult<TaskDoc> {

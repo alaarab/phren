@@ -135,7 +135,7 @@ function hasRootManifest(candidate: string): boolean {
 
 function hasInstallMarkers(candidate: string): boolean {
   return fs.existsSync(path.join(candidate, "machines.yaml"))
-    || fs.existsSync(path.join(candidate, ".governance"))
+    || fs.existsSync(path.join(candidate, ".config"))
     || fs.existsSync(path.join(candidate, "global"));
 }
 
@@ -493,7 +493,7 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
     pushDirTokens(parts, path.join(phrenPath, "profiles"));
   }
   pushDirTokens(parts, path.join(phrenPath, "global", "skills"));
-  pushFileToken(parts, path.join(phrenPath, ".governance", "access-control.json"));
+  pushFileToken(parts, path.join(phrenPath, ".config", "access-control.json"));
   pushFileToken(parts, rootManifestPath(phrenPath));
   pushFileToken(parts, runtimeHealthFile(phrenPath));
   pushFileToken(parts, runtimeFile(phrenPath, "audit.log"));

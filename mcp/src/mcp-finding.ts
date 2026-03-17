@@ -36,6 +36,7 @@ import {
   retractFinding as retractFindingLifecycle,
   resolveFindingContradiction,
 } from "./finding-lifecycle.js";
+import { permissionDeniedError } from "./governance-rbac.js";
 
 
 
@@ -153,6 +154,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding, citation, sessionId, source, findingType, scope }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const addFindingDenied = permissionDeniedError(phrenPath, "add_finding", project);
+      if (addFindingDenied) return mcpResponse({ ok: false, error: addFindingDenied });
       if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
       if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
@@ -257,6 +260,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, findings, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const addFindingsDenied = permissionDeniedError(phrenPath, "add_finding", project);
+      if (addFindingsDenied) return mcpResponse({ ok: false, error: addFindingsDenied });
       if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
       if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
       return withWriteQueue(async () => {
@@ -483,6 +488,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, old_text, new_text }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const editDenied = permissionDeniedError(phrenPath, "edit_finding", project);
+      if (editDenied) return mcpResponse({ ok: false, error: editDenied });
       return withWriteQueue(async () => {
         const result = editFindingCore(phrenPath, project, old_text, new_text);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
@@ -511,6 +518,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, finding }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const removeDenied = permissionDeniedError(phrenPath, "remove_finding", project);
+      if (removeDenied) return mcpResponse({ ok: false, error: removeDenied });
       return withWriteQueue(async () => {
         const result = removeFindingCore(phrenPath, project, finding);
         if (result.ok) {
@@ -535,6 +544,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, findings }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const removeFindingsDenied = permissionDeniedError(phrenPath, "remove_finding", project);
+      if (removeFindingsDenied) return mcpResponse({ ok: false, error: removeFindingsDenied });
       return withWriteQueue(async () => {
         const result = removeFindingsCore(phrenPath, project, findings);
         if (result.ok) {

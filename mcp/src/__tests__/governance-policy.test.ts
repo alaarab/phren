@@ -24,7 +24,7 @@ import {
 } from "../governance-policy.js";
 
 function writeGovJson(phrenPath: string, filename: string, data: Record<string, unknown>): void {
-  const dir = path.join(phrenPath, ".governance");
+  const dir = path.join(phrenPath, ".config");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, filename), JSON.stringify(data, null, 2) + "\n");
 }
@@ -72,7 +72,7 @@ describe("getRetentionPolicy", () => {
   });
 
   it("falls back to defaults for invalid JSON", () => {
-    const dir = path.join(phrenPath, ".governance");
+    const dir = path.join(phrenPath, ".config");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "retention-policy.json"), "not-json");
     const policy = getRetentionPolicy(phrenPath);
@@ -281,7 +281,7 @@ describe("validateGovernanceJson", () => {
   });
 
   it("returns true for valid retention policy", () => {
-    const filePath = path.join(phrenPath, ".governance", "retention-policy.json");
+    const filePath = path.join(phrenPath, ".config", "retention-policy.json");
     writeGovJson(phrenPath, "retention-policy.json", {
       ttlDays: 60,
       retentionDays: 180,
@@ -291,7 +291,7 @@ describe("validateGovernanceJson", () => {
   });
 
   it("returns false for non-object JSON", () => {
-    const dir = path.join(phrenPath, ".governance");
+    const dir = path.join(phrenPath, ".config");
     fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, "retention-policy.json");
     fs.writeFileSync(filePath, '"just a string"');
@@ -299,13 +299,13 @@ describe("validateGovernanceJson", () => {
   });
 
   it("returns false for invalid numeric fields", () => {
-    const filePath = path.join(phrenPath, ".governance", "retention-policy.json");
+    const filePath = path.join(phrenPath, ".config", "retention-policy.json");
     writeGovJson(phrenPath, "retention-policy.json", { ttlDays: "not-a-number" });
     expect(validateGovernanceJson(filePath, "retention-policy")).toBe(false);
   });
 
   it("returns true for valid workflow policy", () => {
-    const filePath = path.join(phrenPath, ".governance", "workflow-policy.json");
+    const filePath = path.join(phrenPath, ".config", "workflow-policy.json");
     writeGovJson(phrenPath, "workflow-policy.json", {
       taskMode: "auto",
       findingSensitivity: "balanced",
@@ -314,7 +314,7 @@ describe("validateGovernanceJson", () => {
   });
 
   it("returns true for valid index policy", () => {
-    const filePath = path.join(phrenPath, ".governance", "index-policy.json");
+    const filePath = path.join(phrenPath, ".config", "index-policy.json");
     writeGovJson(phrenPath, "index-policy.json", {
       includeGlobs: ["**/*.md"],
       excludeGlobs: ["**/.git/**"],
@@ -324,7 +324,7 @@ describe("validateGovernanceJson", () => {
   });
 
   it("returns false for broken JSON", () => {
-    const dir = path.join(phrenPath, ".governance");
+    const dir = path.join(phrenPath, ".config");
     fs.mkdirSync(dir, { recursive: true });
     const filePath = path.join(dir, "workflow-policy.json");
     fs.writeFileSync(filePath, "{{{{");
@@ -504,7 +504,7 @@ describe("appendReviewQueue", () => {
 describe("schema version handling", () => {
   it("writes schemaVersion on policy update", () => {
     updateRetentionPolicy(phrenPath, { ttlDays: 30 });
-    const filePath = path.join(phrenPath, ".governance", "retention-policy.json");
+    const filePath = path.join(phrenPath, ".config", "retention-policy.json");
     const stored = JSON.parse(fs.readFileSync(filePath, "utf8"));
     expect(stored.schemaVersion).toBe(GOVERNANCE_SCHEMA_VERSION);
   });

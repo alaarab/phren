@@ -123,7 +123,7 @@ describe("PhrenShell", () => {
     seedPhren(dir);
     process.env.PHREN_ACTOR = "shell-test-admin";
     write(
-      path.join(dir, ".governance", "access-control.json"),
+      path.join(dir, ".config", "access-control.json"),
       JSON.stringify({
         admins: ["shell-test-admin"],
         maintainers: [],
@@ -225,7 +225,7 @@ describe("PhrenShell", () => {
     expect(parsedAfterTidy.ok).toBe(true);
     if (!parsedAfterTidy.ok) throw new Error(parsedAfterTidy.error);
     expect(parsedAfterTidy.data.items.Done.length).toBe(1);
-    const archiveFile = path.join(dir, ".governance", "task-archive", "demo.md");
+    const archiveFile = path.join(dir, ".config", "task-archive", "demo.md");
     expect(fs.existsSync(archiveFile)).toBe(true);
   });
 

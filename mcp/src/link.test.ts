@@ -620,7 +620,7 @@ describe("link", () => {
       fs.mkdirSync(phrenPath, { recursive: true });
 
       // Create minimal governance
-      const govDir = path.join(phrenPath, ".governance");
+      const govDir = path.join(phrenPath, ".config");
       fs.mkdirSync(govDir, { recursive: true });
       fs.writeFileSync(
         path.join(govDir, "access-control.json"),
@@ -699,7 +699,7 @@ describe("link", () => {
 
     it("checkData detects invalid governance JSON", async () => {
       fs.writeFileSync(
-        path.join(phrenPath, ".governance", "retention-policy.json"),
+        path.join(phrenPath, ".config", "retention-policy.json"),
         "{ invalid json"
       );
       const result = await runDoctor(phrenPath, false, true);
@@ -826,7 +826,7 @@ describe("link", () => {
       expect(repairedProfile).not.toContain("my-api");
       expect(repairedProfile).not.toContain("my-frontend");
       expect(fs.existsSync(path.join(phrenPath, ".runtime"))).toBe(true);
-      expect(fs.existsSync(path.join(phrenPath, ".governance"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, ".config"))).toBe(true);
     });
   });
 
@@ -994,7 +994,7 @@ hooks:
       tmp = makeTempDir("phren-checksum-test-");
       phren = tmp.path;
       fs.mkdirSync(path.join(phren, "testproj"), { recursive: true });
-      fs.mkdirSync(path.join(phren, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phren, ".config"), { recursive: true });
       fs.writeFileSync(path.join(phren, "testproj", "FINDINGS.md"), "# FINDINGS\n\n- Test finding\n");
       fs.writeFileSync(path.join(phren, "testproj", "tasks.md"), "# task\n\n## Queue\n\n- Item\n");
     });
@@ -1004,7 +1004,7 @@ hooks:
     it("updateFileChecksums creates checksum store", () => {
       const result = updateFileChecksums(phren);
       expect(result.updated).toBe(2);
-      const storePath = path.join(phren, ".governance", "file-checksums.json");
+      const storePath = path.join(phren, ".config", "file-checksums.json");
       expect(fs.existsSync(storePath)).toBe(true);
       const store = JSON.parse(fs.readFileSync(storePath, "utf8"));
       expect(store["testproj/FINDINGS.md"]).toBeDefined();

@@ -534,7 +534,7 @@ ${doneItems}
     expect(after.data.items.Done).toHaveLength(3);
 
     // Check archive file was created
-    const archivePath = path.join(tmpDir, ".governance", "task-archive", `${PROJECT}.md`);
+    const archivePath = path.join(tmpDir, ".config", "task-archive", `${PROJECT}.md`);
     expect(fs.existsSync(archivePath)).toBe(true);
   });
 

@@ -36,6 +36,7 @@ import {
 import { clearTaskCheckpoint } from "./session-checkpoints.js";
 import { incrementSessionTasksCompleted } from "./mcp-session.js";
 import { normalizeMemoryScope } from "./shared.js";
+import { permissionDeniedError } from "./governance-rbac.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
@@ -245,6 +246,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, item, scope }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const addTaskDenied = permissionDeniedError(phrenPath, "add_task", project);
+      if (addTaskDenied) return mcpResponse({ ok: false, error: addTaskDenied });
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
       if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
@@ -268,6 +271,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const addTasksDenied = permissionDeniedError(phrenPath, "add_task", project);
+      if (addTasksDenied) return mcpResponse({ ok: false, error: addTasksDenied });
       return withWriteQueue(async () => {
         const result = addTasksBatch(phrenPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
@@ -291,6 +296,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, item, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const completeTaskDenied = permissionDeniedError(phrenPath, "complete_task", project);
+      if (completeTaskDenied) return mcpResponse({ ok: false, error: completeTaskDenied });
       return withWriteQueue(async () => {
         const before = resolveTaskItem(phrenPath, project, item);
         const result = completeTaskStore(phrenPath, project, item);
@@ -324,6 +331,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, items, sessionId }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const completeTasksDenied = permissionDeniedError(phrenPath, "complete_task", project);
+      if (completeTasksDenied) return mcpResponse({ ok: false, error: completeTasksDenied });
       return withWriteQueue(async () => {
         const resolvedItems = items
           .map((match) => {
@@ -366,6 +375,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const removeTaskDenied = permissionDeniedError(phrenPath, "remove_task", project);
+      if (removeTaskDenied) return mcpResponse({ ok: false, error: removeTaskDenied });
       return withWriteQueue(async () => {
         const result = removeTaskStore(phrenPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
@@ -387,6 +398,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, items }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const removeTasksDenied = permissionDeniedError(phrenPath, "remove_task", project);
+      if (removeTasksDenied) return mcpResponse({ ok: false, error: removeTasksDenied });
       return withWriteQueue(async () => {
         const result = removeTasksBatch(phrenPath, project, items);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
@@ -419,6 +432,8 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, item, updates }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const updateTaskDenied = permissionDeniedError(phrenPath, "update_task", project);
+      if (updateTaskDenied) return mcpResponse({ ok: false, error: updateTaskDenied });
       return withWriteQueue(async () => {
         const result = updateTaskStore(phrenPath, project, item, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });

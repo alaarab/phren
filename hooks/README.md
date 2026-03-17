@@ -97,7 +97,7 @@ See the [Claude Code hooks docs](https://code.claude.com/docs/en/hooks-guide) fo
 
 ## Per-tool hook enablement
 
-By default, `hooksEnabled` is all-or-nothing. To control which tools get session wrappers, add a `hookTools` key to `.governance/install-preferences.json`:
+By default, `hooksEnabled` is all-or-nothing. To control which tools get session wrappers, add a `hookTools` key to `.config/install-preferences.json`:
 
 ```json
 {

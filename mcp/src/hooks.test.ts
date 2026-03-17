@@ -482,7 +482,7 @@ describe("hooks", () => {
       fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
       fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
-      fs.mkdirSync(path.join(phrenPath, ".governance"), { recursive: true });
+      fs.mkdirSync(path.join(phrenPath, ".config"), { recursive: true });
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false }));
 
       const configured = configureAllHooks(phrenPath);
@@ -533,7 +533,7 @@ describe("hooks", () => {
     });
 
     it("readCustomHooks returns empty array when no preferences file exists", () => {
-      fs.rmSync(path.join(phrenPath, ".governance"), { recursive: true, force: true });
+      fs.rmSync(path.join(phrenPath, ".config"), { recursive: true, force: true });
       expect(readCustomHooks(phrenPath)).toEqual([]);
     });
 

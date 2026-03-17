@@ -266,7 +266,7 @@ describe("CLI integration: add project", () => {
   beforeEach(() => {
     ({ phrenDir, cleanup } = setupPhrenDir());
     projectDir = path.join(path.dirname(phrenDir), "repo");
-    fs.mkdirSync(path.join(phrenDir, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(phrenDir, ".config"), { recursive: true });
     fs.mkdirSync(path.join(phrenDir, "profiles"), { recursive: true });
     fs.writeFileSync(path.join(phrenDir, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - global\n");
     fs.writeFileSync(path.join(phrenDir, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
@@ -302,7 +302,7 @@ describe("CLI integration: add project", () => {
   });
 
   it("fails clearly when phren is not initialized yet", () => {
-    fs.rmSync(path.join(phrenDir, ".governance"), { recursive: true, force: true });
+    fs.rmSync(path.join(phrenDir, ".config"), { recursive: true, force: true });
     const { stdout, exitCode } = runCli(
       ["add", projectDir],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
@@ -1388,7 +1388,7 @@ describe("CLI integration: init", () => {
     );
     expect(exitCode).toBe(0);
     expect(fs.existsSync(cliEnv.phrenDir)).toBe(true);
-    const govDir = path.join(cliEnv.phrenDir, ".governance");
+    const govDir = path.join(cliEnv.phrenDir, ".config");
     expect(fs.existsSync(govDir)).toBe(true);
   }, CLI_INTEGRATION_TIMEOUT_MS);
 

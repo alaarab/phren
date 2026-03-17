@@ -153,6 +153,10 @@ function findMostRecentSession(phrenPath: string): { file: string; state: Sessio
 }
 
 export function resolveActiveSessionScope(phrenPath: string, project?: string): string | undefined {
+  // PHREN_SCOPE env var takes priority over session-derived scope
+  const envScope = normalizeMemoryScope(process.env.PHREN_SCOPE);
+  if (envScope) return envScope;
+
   const dir = sessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
     dir,

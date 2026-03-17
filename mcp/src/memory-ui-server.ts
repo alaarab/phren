@@ -45,7 +45,7 @@ import {
   writeProjectTopics,
 } from "./project-topics.js";
 import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, VALID_TASK_MODES } from "./governance-policy.js";
-import { updateProjectConfigOverrides } from "./project-config.js";
+import { readProjectConfig, updateProjectConfigOverrides } from "./project-config.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
@@ -863,8 +863,29 @@ export function createWebUiHttpServer(
           phrenPath,
           profile || "",
         );
+        // Build file date map from source headers like [project/filename]
+        const fileDates: Record<string, string> = {};
+        for (const line of result.lines) {
+          const srcMatch = line.match(/^\[([^\]]+)\]\s/);
+          if (srcMatch) {
+            const sourceKey = srcMatch[1];
+            if (fileDates[sourceKey]) continue;
+            const slashIdx = sourceKey.indexOf("/");
+            if (slashIdx > 0) {
+              const proj = sourceKey.slice(0, slashIdx);
+              const file = sourceKey.slice(slashIdx + 1);
+              try {
+                const filePath = path.join(phrenPath, proj, file);
+                if (fs.existsSync(filePath)) {
+                  const stat = fs.statSync(filePath);
+                  fileDates[sourceKey] = stat.mtime.toISOString();
+                }
+              } catch { /* skip */ }
+            }
+          }
+        }
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, query, results: result.lines }));
+        res.end(JSON.stringify({ ok: true, query, results: result.lines, fileDates }));
       } catch (err: unknown) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
@@ -1028,6 +1049,36 @@ export function createWebUiHttpServer(
         const settingsProject = String(qs.project || "");
         const merged = settingsProject && isValidProjectName(settingsProject) ? mergeConfig(phrenPath, settingsProject) : null;
         const overrides = settingsProject && isValidProjectName(settingsProject) ? getProjectConfigOverrides(phrenPath, settingsProject) : null;
+        // Build project info when a specific project is selected
+        let projectInfo: { diskPath: string; ownership: string; configFile: string; configExists: boolean; hasFindings: boolean; hasTasks: boolean; hasSummary: boolean; hasClaudeMd: boolean; findingCount: number; taskCount: number } | null = null;
+        if (settingsProject && isValidProjectName(settingsProject)) {
+          const projectDir = path.join(phrenPath, settingsProject);
+          const configFile = path.join(projectDir, "phren.project.yaml");
+          const projConfig = readProjectConfig(phrenPath, settingsProject);
+          const findingsPath = path.join(projectDir, "FINDINGS.md");
+          const taskPath = path.join(projectDir, "tasks.md");
+          let findingCount = 0;
+          if (fs.existsSync(findingsPath)) {
+            findingCount = (fs.readFileSync(findingsPath, "utf8").match(/^- /gm) || []).length;
+          }
+          let taskCount = 0;
+          if (fs.existsSync(taskPath)) {
+            const queueMatch = fs.readFileSync(taskPath, "utf8").match(/## Queue[\s\S]*?(?=## |$)/);
+            if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
+          }
+          projectInfo = {
+            diskPath: projConfig.sourcePath || projectDir,
+            ownership: projConfig.ownership || "default",
+            configFile,
+            configExists: fs.existsSync(configFile),
+            hasFindings: fs.existsSync(findingsPath),
+            hasTasks: fs.existsSync(taskPath),
+            hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
+            hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")),
+            findingCount,
+            taskCount,
+          };
+        }
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({
           ok: true,
@@ -1045,6 +1096,7 @@ export function createWebUiHttpServer(
           workflowPolicy,
           merged,
           overrides,
+          projectInfo,
         }));
       } catch (err: unknown) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });

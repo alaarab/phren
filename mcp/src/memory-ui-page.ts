@@ -105,42 +105,22 @@ ${TASK_UI_STYLES}
 
   <!-- ── Review Tab ────────────────────────────────────────── -->
   <div id="tab-review" class="tab-content">
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h2>Sync State</h2></div>
-      <div class="card-body">
-        <div id="sync-state-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:var(--text-base)">
-          <div><strong>Auto-save</strong><div class="text-muted">${h(sync.autoSaveStatus || "n/a")}</div></div>
-          <div><strong>Last pull</strong><div class="text-muted">${h(sync.lastPullStatus || "n/a")} ${h(sync.lastPullAt || "")}</div></div>
-          <div><strong>Last push</strong><div class="text-muted">${h(sync.lastPushStatus || "n/a")} ${h(sync.lastPushAt || "")}</div></div>
-          <div><strong>Unsynced commits</strong><div class="text-muted">${h(String(sync.unsyncedCommits || 0))}</div></div>
-        </div>
-      </div>
-    </div>
-    <details class="review-help" style="margin-bottom:16px">
-      <summary>How review works</summary>
-      <p style="margin-top:8px;font-size:var(--text-sm);color:var(--muted)">Items waiting for your review. Approve to keep, reject to remove. You can also edit the text before approving, or use the checkboxes to bulk approve or reject multiple items at once.</p>
-    </details>
-
-    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Items waiting for your review. Approve to keep, reject to remove.</p>
-
-    <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
-
-    <div class="review-filters" id="review-filters" style="display:none">
+    <div class="review-toolbar" id="review-filters" style="display:none">
       <select id="review-filter-project">
         <option value="">All projects</option>
       </select>
-      <select id="review-filter-machine">
-        <option value="">All machines</option>
-      </select>
-      <select id="review-filter-model">
-        <option value="">All models</option>
-      </select>
-      <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:8px"></span>
-      <label id="review-select-all" style="display:none;margin-left:auto;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;user-select:none">
+      <label class="review-flagged-toggle" id="review-flagged-toggle">
+        <input type="checkbox" id="highlight-only-btn" />
+        <span>Flagged only</span>
+      </label>
+      <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
+      <label id="review-select-all" style="display:none;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;user-select:none">
         <input type="checkbox" onchange="toggleSelectAll(this.checked)" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)" />
         Select all
       </label>
-      <button class="btn btn-sm" id="highlight-only-btn">Flagged only</button>
+      <span id="review-sync-status" class="review-sync-dot" title="Sync status">
+        <span class="review-sync-indicator" id="review-sync-indicator"></span>
+      </span>
     </div>
 
     <div id="batch-bar" class="batch-bar">
@@ -148,10 +128,6 @@ ${TASK_UI_STYLES}
       <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve selected</button>
       <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject selected</button>
       <button class="btn btn-sm" onclick="clearBatchSelection()">Clear</button>
-    </div>
-
-    <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
-      <span><kbd>j</kbd>/<kbd>k</kbd> navigate</span>
     </div>
 
     <div class="review-cards" id="review-cards-list">
@@ -175,9 +151,10 @@ ${TASK_UI_STYLES}
     <div style="max-width:720px;margin:0 auto">
       <div style="display:flex;gap:8px;margin-bottom:16px">
         <input type="text" id="search-query" placeholder="Search fragments, findings, tasks..." style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:var(--text-base);font-family:var(--font);outline:none" />
-        <select id="search-project-filter" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
-          <option value="">All projects</option>
-        </select>
+        <div id="search-project-wrap" style="position:relative">
+          <button id="search-project-btn" type="button" onclick="window._phrenToggleProjectDropdown()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm);cursor:pointer;font-family:var(--font);min-width:120px;text-align:left;white-space:nowrap">All projects</button>
+          <div id="search-project-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:50;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,.15);max-height:240px;overflow-y:auto;min-width:160px"></div>
+        </div>
         <select id="search-type-filter" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
           <option value="">All types</option>
           <option value="finding">Findings</option>
@@ -292,6 +269,12 @@ ${TASK_UI_STYLES}
         </div>
         <div class="settings-section-body" style="padding:12px 18px">
           <div id="settings-scope-note" style="font-size:var(--text-sm);color:var(--muted)">Showing global settings. Select a project to view and edit per-project overrides.</div>
+        </div>
+      </section>
+      <section id="settings-project-info-section" class="settings-section" style="display:none;border-top:3px solid color-mix(in srgb, var(--accent) 45%, var(--border))">
+        <div class="settings-section-header">Project Info</div>
+        <div class="settings-section-body">
+          <div id="settings-project-info" style="color:var(--muted)"></div>
         </div>
       </section>
       <section class="settings-section settings-section-findings">
