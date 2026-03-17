@@ -1573,7 +1573,9 @@ export function renderSearchScript(authToken: string): string {
 })();`;
 }
 
-export function renderGraphPopupScript(): string {
+// renderGraphPopupScript removed — replaced by renderGraphHostScript + sigma popover
+
+function __removed_renderGraphPopupScript(): string {
   return `(function() {
   var popup = document.getElementById('graph-popup');
   var popupCard = document.getElementById('graph-popup-card');
