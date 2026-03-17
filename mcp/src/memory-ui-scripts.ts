@@ -2186,10 +2186,15 @@ export function renderGraphHostScript(): string {
     return score ? chip('Quality ' + score, false) : '';
   }
 
+  function docChip(doc) {
+    var border = 'var(--border)';
+    var bg = 'var(--surface-raised)';
+    return '<span data-doc-click="' + esc(doc) + '" style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid ' + border + ';background:' + bg + ';font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline dotted" title="Search for ' + esc(doc) + '">' + esc(doc) + '</span>';
+  }
   function docsList(node) {
     var docs = (node.refDocs || []).map(function(ref) { return ref.doc; });
     if (!docs.length) return '';
-    return '<div style="display:flex;flex-wrap:wrap;gap:8px">' + docs.slice(0, 12).map(function(doc) { return chip(doc, false); }).join('') + '</div>';
+    return '<div style="display:flex;flex-wrap:wrap;gap:8px">' + docs.slice(0, 12).map(function(doc) { return docChip(doc); }).join('') + '</div>';
   }
 
   function renderView(node) {
@@ -2432,6 +2437,20 @@ export function renderGraphHostScript(): string {
   function bindPopoverActions() {
     var closeBtn = document.getElementById('graph-node-close');
     if (closeBtn) closeBtn.onclick = hidePopover;
+
+    // Doc reference chips — click to search for the document
+    document.querySelectorAll('[data-doc-click]').forEach(function(chip) {
+      chip.addEventListener('click', function() {
+        var doc = chip.getAttribute('data-doc-click') || '';
+        if (!doc) return;
+        // Search for this doc in the graph by updating the search filter
+        var searchInput = document.querySelector('input[data-search-filter]');
+        if (searchInput) {
+          searchInput.value = doc.replace(/FINDINGS\\.md$/, '').replace(/\\/$/, '');
+          searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+    });
 
     document.querySelectorAll('[data-graph-action]').forEach(function(button) {
       button.addEventListener('click', function() {
