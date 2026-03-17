@@ -556,7 +556,7 @@ phren
 | Area | File(s) | Change |
 |---|---|---|
 | Web UI colors | `memory-ui-assets.ts` | Replace cyan accent with amber, warm backgrounds |
-| Graph node types | `memory-ui-graph.ts` | Rename `entity` -> `fragment`, update COLORS map |
+| Graph node types | `mcp/browser/memory-ui-graph-app.ts` | Rename `entity` -> `fragment`, update COLORS map |
 | CLI status | `status.ts` | New format, phren branding |
 | CLI shell | `shell-render.ts`, `shell-view.ts` | Rename labels, adjust color usage |
 | Init output | `init.ts` | New messaging style |
