@@ -900,7 +900,7 @@ export function createWebUiHttpServer(
       if (!requireGetAuth(req, res, url, authToken, true)) return;
       try {
         const docs = readTasksAcrossProjects(phrenPath, profile);
-        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean }> = [];
+        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean; sessionId?: string }> = [];
         for (const doc of docs) {
           for (const section of ["Active", "Queue", "Done"] as const) {
             for (const item of doc.items[section]) {
@@ -914,6 +914,7 @@ export function createWebUiHttpServer(
                 githubUrl: item.githubUrl,
                 context: item.context,
                 checked: item.checked,
+                sessionId: item.sessionId,
               });
             }
           }

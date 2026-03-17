@@ -117,24 +117,11 @@ ${TASK_UI_STYLES}
       </div>
     </div>
     <details class="review-help" style="margin-bottom:16px">
-      <summary>Help: How the Review Queue works</summary>
-      <dl>
-        <dt>What is the Review Queue?</dt>
-        <dd>Fragments flagged by governance for human review. Items accumulate here when <code>phren maintain govern</code> is run.</dd>
-        <dt>Can I approve, reject, or edit items here?</dt>
-        <dd>Yes. Each review card has <strong>Approve</strong>, <strong>Reject</strong>, and <strong>Edit</strong> buttons. Approve accepts the fragment, Reject removes it, and Edit lets you revise the text before accepting. You can also use batch actions to approve or reject multiple items at once.</dd>
-        <dt>How do I clear items?</dt>
-        <dd>Approve or reject items directly in the UI, or use maintenance flows such as <code>phren maintain prune</code>.</dd>
-        <dt>Is this automatic?</dt>
-        <dd>No. Agents do not auto-accept review-queue items.</dd>
-        <dt>How do items get here?</dt>
-        <dd><code>phren maintain govern</code> flags stale or low-confidence fragments for review.</dd>
-        <dt>How to reduce noise?</dt>
-        <dd>Run <code>phren maintain prune</code> to auto-remove expired items without manual review.</dd>
-      </dl>
+      <summary>How review works</summary>
+      <p style="margin-top:8px;font-size:var(--text-sm);color:var(--muted)">Items waiting for your review. Approve to keep, reject to remove. You can also edit the text before approving, or use the checkboxes to bulk approve or reject multiple items at once.</p>
     </details>
 
-    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Fragments flagged for review. Approve, reject, or edit items directly from this tab.</p>
+    <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px;letter-spacing:-0.01em">Items waiting for your review. Approve to keep, reject to remove.</p>
 
     <div id="review-summary-banner" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center"></div>
 
@@ -149,7 +136,18 @@ ${TASK_UI_STYLES}
         <option value="">All models</option>
       </select>
       <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:8px"></span>
-      <button class="btn btn-sm" id="highlight-only-btn" style="margin-left:auto">Flagged only</button>
+      <label id="review-select-all" style="display:none;margin-left:auto;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;user-select:none">
+        <input type="checkbox" onchange="toggleSelectAll(this.checked)" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)" />
+        Select all
+      </label>
+      <button class="btn btn-sm" id="highlight-only-btn">Flagged only</button>
+    </div>
+
+    <div id="batch-bar" class="batch-bar">
+      <span id="batch-count" class="batch-bar-count"></span>
+      <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve selected</button>
+      <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject selected</button>
+      <button class="btn btn-sm" onclick="clearBatchSelection()">Clear</button>
     </div>
 
     <div id="review-kbd-hints" style="font-size:var(--text-xs);color:var(--muted);margin-bottom:12px;display:none;gap:16px;flex-wrap:wrap">
@@ -243,7 +241,7 @@ ${TASK_UI_STYLES}
         <div style="padding:20px;color:var(--muted)">Loading...</div>
       </div>
       <div class="split-reader" id="hooks-reader">
-        <div class="reader-empty">Select a hook config to view its contents.</div>
+        <div class="reader-empty">Select a hook config to view its contents.<br/><span style="font-size:var(--text-sm);color:var(--muted);margin-top:8px;display:inline-block">Per-project hooks can also be configured in Settings &gt; [project name].</span></div>
       </div>
     </div>
   </div>

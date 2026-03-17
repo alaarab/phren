@@ -592,7 +592,7 @@ describe.sequential("web-ui removed review queue mutation routes", () => {
     expect(res.body).toContain("phren");
     expect(res.body).toContain("Review");
     expect(res.body).toContain("Graph");
-    expect(res.body).toContain("Approve, reject, or edit items directly from this tab.");
+    expect(res.body).toContain("Items waiting for your review. Approve to keep, reject to remove.");
     expect(res.body).toContain('data-ui-action="reviewAction"');
   });
 
