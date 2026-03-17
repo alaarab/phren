@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.18
 
-## MCP Tools (67)
+## MCP Tools (69)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -132,6 +132,8 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `set_retention_policy(settings)` : configure retention and decay policy
 - `set_workflow_policy(settings)` : configure workflow approval gates
 - `set_index_policy(settings)` : configure indexer include/exclude globs
+- `get_topic_config(project)` : read topic-config.json for a project (topics, domain, pinned)
+- `set_topic_config(project, topics, domain?)` : write topic-config.json for a project
 
 Maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 
