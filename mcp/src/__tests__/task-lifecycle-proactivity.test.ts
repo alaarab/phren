@@ -48,7 +48,7 @@ describe("task lifecycle suppression", () => {
   beforeEach(() => {
     tmp = makeTempDir("task-lifecycle-suppression-");
     grantAdmin(tmp.path);
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,
@@ -118,7 +118,7 @@ describe("task lifecycle task proactivity gating", () => {
   beforeEach(() => {
     tmp = makeTempDir("task-lifecycle-proactivity-");
     grantAdmin(tmp.path);
-    writeFile(path.join(tmp.path, ".governance", "workflow-policy.json"), JSON.stringify({
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
       lowConfidenceThreshold: 0.7,

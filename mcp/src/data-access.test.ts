@@ -392,7 +392,7 @@ describe("task mutation helpers", () => {
     if (!after.ok) return;
     expect(after.data.items.Done).toHaveLength(1);
 
-    const archive = path.join(tmpDir, ".governance", "task-archive", `${PROJECT}.md`);
+    const archive = path.join(tmpDir, ".config", "task-archive", `${PROJECT}.md`);
     expect(fs.existsSync(archive)).toBe(true);
     const archiveContent = fs.readFileSync(archive, "utf8");
     expect(archiveContent).toContain("done B");

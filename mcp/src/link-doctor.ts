@@ -464,7 +464,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     ];
 
     for (const item of governanceChecks) {
-      const filePath = path.join(phrenPath, ".governance", item.file);
+      const filePath = path.join(phrenPath, ".config", item.file);
       const exists = fs.existsSync(filePath);
       const valid = exists ? validateGovernanceJson(filePath, item.schema) : false;
       checks.push({

@@ -399,7 +399,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
       fs.closeSync(fd);
     }
     if (project) spawnArgs.push(project);
-    const logDir = path.join(phrenPathLocal, ".governance");
+    const logDir = path.join(phrenPathLocal, ".config");
     fs.mkdirSync(logDir, { recursive: true });
     const logPath = path.join(logDir, "background-maintenance.log");
     const logFd = fs.openSync(logPath, "a");
@@ -446,7 +446,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
   } catch (err: unknown) {
     const errMsg = errorMessage(err);
     try {
-      const logDir = path.join(phrenPathLocal, ".governance");
+      const logDir = path.join(phrenPathLocal, ".config");
       fs.mkdirSync(logDir, { recursive: true });
       fs.appendFileSync(
         path.join(logDir, "background-maintenance.log"),
@@ -958,7 +958,7 @@ export async function handleHookStop() {
         const m = line.match(/^\s*([^/]+)\/([^|]+)\s*\|/);
         if (!m) continue;
         const proj = m[1].trim();
-        if (proj.startsWith(".")) continue; // skip .governance, .runtime, etc.
+        if (proj.startsWith(".")) continue; // skip .config, .runtime, etc.
         const file = m[2].trim();
         if (!changes.has(proj)) changes.set(proj, new Set());
         if (/findings/i.test(file)) changes.get(proj)!.add("findings");

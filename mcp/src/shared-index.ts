@@ -337,7 +337,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
       }
   }
-  const indexPolicyPath = path.join(phrenPath, ".governance", "index-policy.json");
+  const indexPolicyPath = path.join(phrenPath, ".config", "index-policy.json");
   if (fs.existsSync(indexPolicyPath)) {
     try {
       const stat = fs.statSync(indexPolicyPath);
@@ -722,7 +722,7 @@ function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): b
   // Check mtime of key directories — if any are newer than the sentinel, it's stale
   const dirsToCheck = [
     phrenPath,
-    path.join(phrenPath, ".governance"),
+    path.join(phrenPath, ".config"),
     path.join(phrenPath, ".runtime"),
   ];
   for (const dir of dirsToCheck) {

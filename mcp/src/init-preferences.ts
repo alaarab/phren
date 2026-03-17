@@ -29,7 +29,7 @@ function preferencesFile(phrenPath: string): string {
 }
 
 export function governanceInstallPreferencesFile(phrenPath: string): string {
-  return path.join(phrenPath, ".governance", "install-preferences.json");
+  return path.join(phrenPath, ".config", "install-preferences.json");
 }
 
 function readPreferencesFile(file: string): InstallPreferences {

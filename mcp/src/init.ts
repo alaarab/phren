@@ -264,7 +264,7 @@ function parseRiskySectionsAnswer(raw: string | undefined | null, fallback: Work
 function hasInstallMarkers(phrenPath: string): boolean {
   return fs.existsSync(phrenPath) && (
     fs.existsSync(path.join(phrenPath, "machines.yaml")) ||
-    fs.existsSync(path.join(phrenPath, ".governance")) ||
+    fs.existsSync(path.join(phrenPath, ".config")) ||
     fs.existsSync(path.join(phrenPath, "global"))
   );
 }
@@ -1713,7 +1713,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  ${phrenPath}/global/CLAUDE.md    Global instructions loaded in every session`);
   log(`  ${phrenPath}/global/skills/      Phren slash commands`);
   log(`  ${phrenPath}/profiles/           Machine-to-project mappings`);
-  log(`  ${phrenPath}/.governance/        Memory quality settings and config`);
+  log(`  ${phrenPath}/.config/        Memory quality settings and config`);
 
   // Ollama status summary (skip if already covered in walkthrough)
   const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);

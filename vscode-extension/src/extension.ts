@@ -1711,9 +1711,9 @@ function patchJsonFile(filePath: string, patch: Record<string, unknown>): void {
 
 function syncSettingsToPreferences(storePath: string, config: ConfigSource): void {
   try {
-    const governancePrefsPath = path.join(storePath, ".governance", "install-preferences.json");
+    const governancePrefsPath = path.join(storePath, ".config", "install-preferences.json");
     const runtimePrefsPath = path.join(storePath, ".runtime", "install-preferences.json");
-    const workflowPolicyPath = path.join(storePath, ".governance", "workflow-policy.json");
+    const workflowPolicyPath = path.join(storePath, ".config", "workflow-policy.json");
 
     // Proactivity → governance install-preferences.json
     const proactivity = config.get<string>("proactivity", "");
@@ -1759,7 +1759,7 @@ function syncSettingsToPreferences(storePath: string, config: ConfigSource): voi
     // Finding sensitivity → governance policy.json
     const findingSensitivity = config.get<string>("findingSensitivity", "");
     if (findingSensitivity && ["minimal", "conservative", "balanced", "aggressive"].includes(findingSensitivity)) {
-      const policyPath = path.join(storePath, ".governance", "policy.json");
+      const policyPath = path.join(storePath, ".config", "policy.json");
       patchJsonFile(policyPath, { findingSensitivity });
     }
   } catch {

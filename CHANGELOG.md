@@ -192,7 +192,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [1.32.0] - 2026-03-11
 
 ### Added
-- **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Phren captures findings and auto-captures session insights. Configurable via `phren config finding-sensitivity`, VS Code settings (`phren.findingSensitivity`), and written to `.governance/policy.json` for the MCP server to read.
+- **Finding sensitivity levels**: four-level knob (`minimal`, `conservative`, `balanced`, `aggressive`) controls how aggressively Phren captures findings and auto-captures session insights. Configurable via `phren config finding-sensitivity`, VS Code settings (`phren.findingSensitivity`), and written to `.config/policy.json` for the MCP server to read.
 - **Dedup via response**: `add_finding` now returns Jaccard similarity candidates alongside the saved finding instead of making a separate LLM call. Zero extra API cost for live duplicate detection. The active agent evaluates candidates directly.
 - **Domain-neutral fragment detection**: fragment extraction now learns fragment patterns adaptively from each project's own findings instead of matching against a hardcoded web-dev vocabulary. Reduces false positives on non-web projects.
 - **Stack-ranked task priorities with gravity**: tasks now carry a numeric rank instead of `high`/`medium`/`low`. Inactive tasks sink over time via a gravity function so the top of the list stays actionable without manual triage.
@@ -201,7 +201,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`phren config proactivity`** CLI command to get/set the proactivity level from the terminal.
 - **Intent-aware auto task mode**: task-mode `auto` now reads code-change context (modified files, branch name) to infer intent and suppress task creation when the user is in a maintenance or review flow. Suppression patterns are configurable.
 - **Finding supersession annotations**: `add_finding` appends `<!-- phren:superseded_by "..." DATE -->` to the old finding and `<!-- phren:supersedes "..." -->` to the new one when a near-duplicate is replaced. Contradicting findings get `<!-- phren:contradicts "..." -->`. `get_findings` filters superseded entries by default; pass `include_superseded: true` to include them. VS Code tree view shows distinct icons for superseded (`lightbulb-autofix`), conflicting (`warning`), and potential-duplicate (`issue-opened`) findings.
-- **VS Code `phren.findingSensitivity` setting**: dropdown with per-level descriptions; writes `findingSensitivity` to `.governance/policy.json` on change and shows an info notification.
+- **VS Code `phren.findingSensitivity` setting**: dropdown with per-level descriptions; writes `findingSensitivity` to `.config/policy.json` on change and shows an info notification.
 - **VS Code `potentialDuplicates` tree indicator**: findings returned with potential-duplicate candidates from `add_finding` show an `issue-opened` icon and `"(possible duplicate)"` description in the explorer tree, with the first candidate in the tooltip.
 - **Capability registry**: internal registry documents which features are implemented across all four surfaces (CLI, MCP, VS Code, web UI) with handler cross-references.
 - **Task negation pattern detection**: phrases like "don't add a task" or "no task needed" suppress automatic task creation in `auto` mode.
@@ -466,7 +466,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Telemetry: in-memory buffer with flush after 10 events or process exit (was writing to disk on every call).
-- File path consistency: search-history.jsonl moved from `.governance/` to `.runtime/`.
+- File path consistency: search-history.jsonl moved from `.config/` to `.runtime/`.
 - Extraction quality: `cli-extract.ts` now filters out commit-message-style entries.
 - Concurrent learning test: test strings "Concurrent learning A/B" triggered duplicate detection because single-char suffixes were filtered out during normalization.
 - Template init: recursive subdirectory copy and `{{date}}` placeholder replacement.
@@ -559,10 +559,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - New CLI: `phren migrate-findings <project> [--pin] [--dry-run]`.
   - New MCP tool: `migrate_legacy_findings`.
 - New indexer completeness controls:
-  - Explicit include/exclude and hidden-doc indexing policy via `.governance/index-policy.json`.
+  - Explicit include/exclude and hidden-doc indexing policy via `.config/index-policy.json`.
   - New CLI: `phren index-policy get|set ...`.
   - New MCP tool: `index_policy`.
-- Runtime lifecycle health tracking in `.governance/runtime-health.json`:
+- Runtime lifecycle health tracking in `.config/runtime-health.json`:
   - Session start, prompt, stop, auto-save, and maintenance status timestamps.
 
 ### Changed
@@ -612,18 +612,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - Canonical drift locks with auto-restore and conflict queueing.
 - Lightweight review UI (`memory-ui`) with accepted/stale/conflicting/recently-used views and one-click approve/reject/edit actions backed by markdown files.
 - Role-based memory permissions and policy defaults auto-created at init/link:
-  - `.governance/access-control.json`
-  - `.governance/memory-policy.json`
+  - `.config/access-control.json`
+  - `.config/memory-policy.json`
 - MCP mode controls:
   - `init`/`link` accept `--mcp on|off` to choose MCP tools vs hooks-only fallback during one-shot setup.
   - New `mcp-mode on|off|status` command toggles MCP integration later without reinstalling.
-  - MCP preference is persisted in `.governance/install-preferences.json`.
+  - MCP preference is persisted in `.config/install-preferences.json`.
 - Expanded MCP auto-configuration beyond Claude/VS Code:
   - New best-effort MCP config writers for Cursor, GitHub Copilot CLI, and Codex.
   - `init`, `link`, and `mcp-mode` now apply MCP mode across all detected tool targets.
   - `uninstall` now removes phren MCP entries from all known tool config paths.
 - Memory workflow policy and approval gates:
-  - New workflow policy file: `.governance/memory-workflow-policy.json`.
+  - New workflow policy file: `.config/memory-workflow-policy.json`.
   - New CLI command: `memory-workflow [get|set ...]`.
   - New MCP tool: `memory_workflow`.
   - `memory-ui` now enforces maintainer/admin approval for risky queue items (by section or low confidence).

@@ -1,7 +1,7 @@
 /**
  * Tests for the findingSensitivity feature.
  *
- * Setting lives in .governance/workflow-policy.json under `findingSensitivity`.
+ * Setting lives in .config/workflow-policy.json under `findingSensitivity`.
  * 4 levels: minimal (cap 0) / conservative (cap 3) / balanced (cap 10) / aggressive (cap 20)
  *
  * Key surfaces tested:
@@ -40,7 +40,7 @@ function writeWorkflowPolicy(
   phrenPath: string,
   overrides: Record<string, unknown> = {},
 ) {
-  const govDir = path.join(phrenPath, ".governance");
+  const govDir = path.join(phrenPath, ".config");
   fs.mkdirSync(govDir, { recursive: true });
   writeFile(
     path.join(govDir, "workflow-policy.json"),
@@ -77,7 +77,7 @@ describe("finding sensitivity — defaults", () => {
   it("getWorkflowPolicy returns findingSensitivity='balanced' when policy has no findingSensitivity key", () => {
     writeWorkflowPolicy(tmp.path);
     // Remove the key from the written file to simulate legacy policy
-    const filePath = path.join(tmp.path, ".governance", "workflow-policy.json");
+    const filePath = path.join(tmp.path, ".config", "workflow-policy.json");
     const data = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
     delete data.findingSensitivity;
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n");

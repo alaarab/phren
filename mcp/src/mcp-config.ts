@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
@@ -25,7 +27,12 @@ import {
   type ProjectConfigOverrides,
   updateProjectConfigOverrides,
 } from "./project-config.js";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, safeProjectPath } from "./utils.js";
+import {
+  readProjectTopics,
+  writeProjectTopics,
+  type ProjectTopic,
+} from "./project-topics.js";
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function proactivitySnapshot(phrenPath: string) {
@@ -60,7 +67,7 @@ function hasOwnOverride(overrides: ProjectConfigOverrides, key: keyof ProjectCon
 
 
 const projectParam = z.string().optional().describe(
-  "Project name. When provided, writes to that project's phren.project.yaml instead of global .governance/."
+  "Project name. When provided, writes to that project's phren.project.yaml instead of global .config/."
 );
 
 // ── Registration ────────────────────────────────────────────────────────────
@@ -523,6 +530,116 @@ export function register(server: McpServer, ctx: McpContext): void {
         ok: true,
         message: "Index policy updated.",
         data: result.data,
+      });
+    }
+  );
+
+  // ── get_topic_config ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_topic_config",
+    {
+      title: "◆ phren · get topic config",
+      description:
+        "Read the topic-config.json for a project. Returns the list of topics, domain, " +
+        "and pinned topics. When no config exists, returns the built-in default topics for the project.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name to read topic config from."),
+      }),
+    },
+    async ({ project }) => {
+      const err = validateProject(project);
+      if (err) return mcpResponse({ ok: false, error: err });
+
+      const projectDir = safeProjectPath(phrenPath, project);
+      if (!projectDir || !fs.existsSync(projectDir)) {
+        return mcpResponse({ ok: false, error: `Project "${project}" not found in phren.` });
+      }
+
+      const result = readProjectTopics(phrenPath, project);
+      const configPath = path.join(projectDir, "topic-config.json");
+      const raw = fs.existsSync(configPath)
+        ? (() => { try { return JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { return null; } })()
+        : null;
+
+      return mcpResponse({
+        ok: true,
+        message: `Topic config for "${project}" (source: ${result.source}).`,
+        data: {
+          project,
+          source: result.source,
+          domain: result.domain ?? raw?.domain ?? null,
+          topics: result.topics,
+          pinnedTopics: raw?.pinnedTopics ?? [],
+        },
+      });
+    }
+  );
+
+  // ── set_topic_config ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "set_topic_config",
+    {
+      title: "◆ phren · set topic config",
+      description:
+        "Write the topic-config.json for a project. Accepts a list of topics with slug, label, " +
+        "description, and keywords. Merges with any existing pinnedTopics and domain.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name to write topic config for."),
+        topics: z.array(z.object({
+          slug: z.string().describe("Topic slug (lowercase, hyphens allowed)."),
+          label: z.string().describe("Human-readable label."),
+          description: z.string().optional().describe("Short description of what goes in this topic."),
+          keywords: z.array(z.string()).optional().describe("Keywords used for auto-classification."),
+        })).describe("Topic list to write."),
+        domain: z.string().optional().describe("Optional domain label (e.g. 'software', 'music')."),
+      }),
+    },
+    async ({ project, topics, domain }) => {
+      const err = validateProject(project);
+      if (err) return mcpResponse({ ok: false, error: err });
+
+      const projectDir = safeProjectPath(phrenPath, project);
+      if (!projectDir || !fs.existsSync(projectDir)) {
+        return mcpResponse({ ok: false, error: `Project "${project}" not found in phren.` });
+      }
+
+      const normalized: ProjectTopic[] = topics.map((t) => ({
+        slug: t.slug,
+        label: t.label,
+        description: t.description ?? "",
+        keywords: t.keywords ?? [],
+      }));
+
+      // If a domain is provided, patch it onto the existing file before writing topics
+      if (domain) {
+        const configPath = path.join(projectDir, "topic-config.json");
+        if (fs.existsSync(configPath)) {
+          try {
+            const existing = JSON.parse(fs.readFileSync(configPath, "utf8"));
+            if (existing && typeof existing === "object") {
+              existing.domain = domain;
+              fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + "\n");
+            }
+          } catch {
+            // ignore read errors; writeProjectTopics will still succeed
+          }
+        } else {
+          fs.mkdirSync(projectDir, { recursive: true });
+          fs.writeFileSync(configPath, JSON.stringify({ version: 1, domain, topics: [] }, null, 2) + "\n");
+        }
+      }
+
+      const result = writeProjectTopics(phrenPath, project, normalized);
+      if (!result.ok) {
+        return mcpResponse({ ok: false, error: result.error });
+      }
+
+      return mcpResponse({
+        ok: true,
+        message: `Topic config written for "${project}" (${result.topics.length} topics).`,
+        data: { project, topics: result.topics, domain: domain ?? null },
       });
     }
   );

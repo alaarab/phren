@@ -387,7 +387,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       }
 
       const auditPathNew = runtimeFile(host.phrenPath, "audit.log");
-      const auditPathLegacy = path.join(host.phrenPath, ".governance", "audit.log");
+      const auditPathLegacy = path.join(host.phrenPath, ".config", "audit.log");
       const auditPath = fs.existsSync(auditPathNew) ? auditPathNew : auditPathLegacy;
       if (fs.existsSync(auditPath)) {
         const auditLines = fs.readFileSync(auditPath, "utf8").split("\n")

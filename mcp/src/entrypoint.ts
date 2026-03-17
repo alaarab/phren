@@ -270,7 +270,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const ownershipArg = getOptionValue(argv.slice(1), "--ownership");
     const phrenPath = defaultPhrenPath();
     const profile = (process.env.PHREN_PROFILE) || undefined;
-    if (!fs.existsSync(phrenPath) || !fs.existsSync(path.join(phrenPath, ".governance"))) {
+    if (!fs.existsSync(phrenPath) || !fs.existsSync(path.join(phrenPath, ".config"))) {
       console.log("phren is not set up yet. Run: npx phren init");
       return finish(1);
     }

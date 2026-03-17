@@ -90,7 +90,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
     execFileSync("git", ["clone", remote, repo], { stdio: "ignore" });
     configureRepo(repo);
-    fs.mkdirSync(path.join(repo, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(repo, ".config"), { recursive: true });
     initTestPhrenRoot(repo);
 
     fs.mkdirSync(path.join(repo, "demo"), { recursive: true });
@@ -123,8 +123,8 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
     configureRepo(repoA);
     configureRepo(repoB);
-    fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
-    fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(repoA, ".config"), { recursive: true });
+    fs.mkdirSync(path.join(repoB, ".config"), { recursive: true });
     initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
@@ -165,8 +165,8 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
     configureRepo(repoA);
     configureRepo(repoB);
-    fs.mkdirSync(path.join(repoA, ".governance"), { recursive: true });
-    fs.mkdirSync(path.join(repoB, ".governance"), { recursive: true });
+    fs.mkdirSync(path.join(repoA, ".config"), { recursive: true });
+    fs.mkdirSync(path.join(repoB, ".config"), { recursive: true });
     initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });

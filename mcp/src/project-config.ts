@@ -40,6 +40,12 @@ export interface ProjectConfigOverrides {
   };
 }
 
+export interface ProjectAccessControl {
+  admins?: string[];
+  contributors?: string[];
+  readers?: string[];
+}
+
 export interface ProjectConfig {
   ownership?: ProjectOwnershipMode;
   sourcePath?: string;
@@ -53,6 +59,7 @@ export interface ProjectConfig {
   };
   mcpServers?: Record<string, ProjectMcpServerEntry>;
   config?: ProjectConfigOverrides;
+  access?: ProjectAccessControl;
 }
 
 export const PROJECT_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"] as const;

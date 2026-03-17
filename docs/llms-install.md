@@ -270,7 +270,7 @@ All governance actions (scans, prunes, migrations, feedback) are logged to `.run
 ### Identity and RBAC
 
 Access control is role-based (`admin`, `maintainer`, `contributor`, `viewer`):
-- shared policy: `.governance/access-control.json`
+- shared policy: `.config/access-control.json`
 - local actor overrides: `.runtime/access-control.local.json`
 - actor identity source: `PHREN_ACTOR` (when trusted) or OS user identity
 

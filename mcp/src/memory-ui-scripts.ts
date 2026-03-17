@@ -978,6 +978,35 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
         var isProject = Boolean(selectedProject);
 
+        // Render project info section
+        var infoSection = document.getElementById('settings-project-info-section');
+        var infoEl = document.getElementById('settings-project-info');
+        if (infoSection && infoEl) {
+          if (isProject && data.projectInfo) {
+            var pi = data.projectInfo;
+            infoSection.style.display = '';
+            var infoHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-size:var(--text-sm)">';
+            infoHtml += '<div><strong style="color:var(--ink)">Disk path</strong><div class="text-muted" style="font-family:var(--mono);font-size:var(--text-xs);word-break:break-all">' + esc(pi.diskPath) + '</div></div>';
+            infoHtml += '<div><strong style="color:var(--ink)">Ownership</strong><div class="text-muted">' + esc(pi.ownership) + '</div></div>';
+            infoHtml += '<div><strong style="color:var(--ink)">Config file</strong><div class="text-muted" style="font-family:var(--mono);font-size:var(--text-xs);word-break:break-all">' + esc(pi.configFile) + '</div>' + (pi.configExists ? '<span style="color:var(--green);font-size:var(--text-xs)">exists</span>' : '<span style="color:var(--muted);font-size:var(--text-xs)">not created</span>') + '</div>';
+            infoHtml += '<div><strong style="color:var(--ink)">Findings</strong><div class="text-muted">' + pi.findingCount + ' entries</div></div>';
+            infoHtml += '<div><strong style="color:var(--ink)">Tasks</strong><div class="text-muted">' + pi.taskCount + ' in queue</div></div>';
+            infoHtml += '</div>';
+            var files = [];
+            if (pi.hasFindings) files.push('FINDINGS.md');
+            if (pi.hasTasks) files.push('tasks.md');
+            if (pi.hasSummary) files.push('summary.md');
+            if (pi.hasClaudeMd) files.push('CLAUDE.md');
+            if (files.length) {
+              infoHtml += '<div style="margin-top:10px;font-size:var(--text-xs);color:var(--muted)">Files: ' + files.map(function(f) { return '<span class="badge" style="margin-right:4px">' + esc(f) + '</span>'; }).join('') + '</div>';
+            }
+            infoEl.innerHTML = infoHtml;
+          } else {
+            infoSection.style.display = 'none';
+            infoEl.innerHTML = '';
+          }
+        }
+
         function sourceBadge(isOverride) {
           if (!isProject) return '';
           return isOverride
@@ -1193,21 +1222,21 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       }
       list.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">' +
         '<thead><tr style="border-bottom:1px solid var(--border);text-align:left">' +
-        '<th style="padding:8px">Session</th><th style="padding:8px">Project</th><th style="padding:8px">Date</th>' +
-        '<th style="padding:8px">Duration</th><th style="padding:8px">Findings</th><th style="padding:8px">Status</th></tr></thead><tbody>' +
+        '<th style="padding:8px">Session</th><th style="padding:8px">Project</th><th style="padding:8px">Started</th>' +
+        '<th style="padding:8px">Ended</th><th style="padding:8px">Duration</th><th style="padding:8px">Findings</th></tr></thead><tbody>' +
         sessions.map(function(s) {
           var id = s.sessionId.slice(0, 8);
-          var date = (s.startedAt || '').slice(0, 16).replace('T', ' ');
+          var startDate = (s.startedAt || '').slice(0, 16).replace('T', ' ');
+          var endDate = s.endedAt ? (s.endedAt || '').slice(0, 16).replace('T', ' ') : '<span style="color:var(--green)">active</span>';
           var dur = s.durationMins != null ? s.durationMins + 'm' : '—';
-          var status = s.status === 'active' ? '<span style="color:var(--green)">● active</span>' : 'ended';
           var summarySnip = s.summary ? '<div class="text-muted" style="font-size:var(--text-xs);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.summary.slice(0, 80)) + '</div>' : '';
           return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" data-ts-action="showSessionDetail" data-session-id="' + esc(s.sessionId) + '">' +
             '<td style="padding:8px;font-family:monospace">' + esc(id) + summarySnip + '</td>' +
             '<td style="padding:8px">' + esc(s.project || '—') + '</td>' +
-            '<td style="padding:8px">' + esc(date) + '</td>' +
+            '<td style="padding:8px">' + esc(startDate) + '</td>' +
+            '<td style="padding:8px">' + endDate + '</td>' +
             '<td style="padding:8px">' + esc(dur) + '</td>' +
-            '<td style="padding:8px">' + (s.findingsAdded || 0) + '</td>' +
-            '<td style="padding:8px">' + status + '</td></tr>';
+            '<td style="padding:8px">' + (s.findingsAdded || 0) + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
 
@@ -1364,94 +1393,161 @@ export function renderSearchScript(authToken: string): string {
 
   var esc = window._phrenEsc;
 
+  function relativeDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    var now = new Date();
+    var diff = now.getTime() - d.getTime();
+    var days = Math.floor(diff / 86400000);
+    if (days < 1) return 'today';
+    if (days === 1) return '1d ago';
+    if (days < 7) return days + 'd ago';
+    if (days < 30) return Math.floor(days / 7) + 'w ago';
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getDate();
+  }
+
+  // Multi-select project filter
+  var _selectedProjects = [];
+  function getSelectedProjects() { return _selectedProjects.slice(); }
+  function toggleProjectFilter(name) {
+    var idx = _selectedProjects.indexOf(name);
+    if (idx === -1) _selectedProjects.push(name);
+    else _selectedProjects.splice(idx, 1);
+    renderProjectFilterLabel();
+    renderProjectFilterChecks();
+  }
+  function renderProjectFilterLabel() {
+    var btn = document.getElementById('search-project-btn');
+    if (!btn) return;
+    if (!_selectedProjects.length) btn.textContent = 'All projects';
+    else if (_selectedProjects.length === 1) btn.textContent = _selectedProjects[0];
+    else btn.textContent = _selectedProjects.length + ' projects';
+  }
+  function renderProjectFilterChecks() {
+    var items = document.querySelectorAll('#search-project-dropdown input[type=checkbox]');
+    for (var i = 0; i < items.length; i++) {
+      items[i].checked = _selectedProjects.indexOf(items[i].value) !== -1;
+    }
+  }
+  window._phrenToggleProjectDropdown = function() {
+    var dd = document.getElementById('search-project-dropdown');
+    if (dd) dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+  };
+  document.addEventListener('click', function(e) {
+    var wrap = document.getElementById('search-project-wrap');
+    var dd = document.getElementById('search-project-dropdown');
+    if (wrap && dd && !wrap.contains(e.target)) dd.style.display = 'none';
+  });
+
+  function parseResults(lines) {
+    var cards = [];
+    var current = null;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line.trim()) continue;
+      if (line.startsWith('[') && line.indexOf(']') > 0) {
+        if (current) cards.push(current);
+        var bracket = line.indexOf(']');
+        var source = line.slice(1, bracket);
+        var meta = line.slice(bracket + 1).trim();
+        current = { source: source, meta: meta, snippets: [] };
+      } else if (line === '(keyword fallback)') {
+        // skip
+      } else if (current) {
+        current.snippets.push(line);
+      } else {
+        cards.push({ source: '', meta: '', snippets: [line] });
+      }
+    }
+    if (current) cards.push(current);
+    return cards;
+  }
+  function renderCards(cards) {
+    var html = '';
+    for (var c = 0; c < cards.length; c++) {
+      var card = cards[c];
+      html += '<div class="card" style="margin-bottom:8px">';
+      html += '<div class="card-header" style="padding:10px 14px;display:flex;align-items:center">';
+      if (card.source) {
+        html += '<span style="font-weight:500;font-size:var(--text-sm)">' + esc(card.source) + '</span>';
+      }
+      if (card.meta) {
+        html += '<span class="text-muted" style="font-size:var(--text-xs);margin-left:8px">' + esc(card.meta) + '</span>';
+      }
+      html += '</div>';
+      if (card.snippets.length) {
+        html += '<div class="card-body" style="padding:10px 14px;font-size:var(--text-sm);white-space:pre-wrap;color:var(--ink-secondary)">';
+        html += esc(card.snippets.join('\\n'));
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
   function doSearch() {
     var q = document.getElementById('search-query').value.trim();
     if (!q) return;
-    var project = document.getElementById('search-project-filter').value;
+    var projects = getSelectedProjects();
     var type = document.getElementById('search-type-filter').value;
     var statusEl = document.getElementById('search-status');
     var resultsEl = document.getElementById('search-results');
     statusEl.textContent = 'Searching...';
     resultsEl.innerHTML = '';
 
-    var url = '/api/search?q=' + encodeURIComponent(q) + '&limit=20';
-    if (project) url += '&project=' + encodeURIComponent(project);
-    if (type) url += '&type=' + encodeURIComponent(type);
+    var fetches = [];
+    if (projects.length <= 1) {
+      var url = '/api/search?q=' + encodeURIComponent(q) + '&limit=20';
+      if (projects.length === 1) url += '&project=' + encodeURIComponent(projects[0]);
+      if (type) url += '&type=' + encodeURIComponent(type);
+      fetches.push(fetch(searchAuthUrl(url)).then(function(r) { return r.json(); }));
+    } else {
+      for (var pi = 0; pi < projects.length; pi++) {
+        (function(proj) {
+          var purl = '/api/search?q=' + encodeURIComponent(q) + '&limit=20&project=' + encodeURIComponent(proj);
+          if (type) purl += '&type=' + encodeURIComponent(type);
+          fetches.push(fetch(searchAuthUrl(purl)).then(function(r) { return r.json(); }));
+        })(projects[pi]);
+      }
+    }
 
-    fetch(searchAuthUrl(url)).then(function(r) { return r.json(); }).then(function(data) {
-      if (!data.ok) {
-        statusEl.textContent = '';
-        resultsEl.innerHTML = '<div style="padding:24px;color:var(--muted);text-align:center">' + esc(data.error || 'Search failed') + '</div>';
+    Promise.all(fetches).then(function(results) {
+      var allCards = [];
+      var hasError = false;
+      for (var ri = 0; ri < results.length; ri++) {
+        if (!results[ri].ok) { hasError = true; continue; }
+        var parsed = parseResults(results[ri].results || []);
+        allCards = allCards.concat(parsed);
+      }
+      if (!allCards.length) {
+        statusEl.textContent = hasError ? 'Search error.' : 'No results.';
+        resultsEl.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">' + (hasError ? 'Search failed' : 'No results for \\u201c' + esc(q) + '\\u201d') + '</div>';
         return;
       }
-      var lines = data.results || [];
-      if (!lines.length) {
-        statusEl.textContent = 'No results.';
-        resultsEl.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">No results for \\u201c' + esc(q) + '\\u201d</div>';
-        return;
-      }
-
-      // Parse lines into result cards: lines starting with [ are headers, others are content
-      var cards = [];
-      var current = null;
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i];
-        if (!line.trim()) continue;
-        if (line.startsWith('[') && line.indexOf(']') > 0) {
-          if (current) cards.push(current);
-          var bracket = line.indexOf(']');
-          var source = line.slice(1, bracket);
-          var meta = line.slice(bracket + 1).trim();
-          current = { source: source, meta: meta, snippets: [] };
-        } else if (line === '(keyword fallback)') {
-          // skip
-        } else if (current) {
-          current.snippets.push(line);
-        } else {
-          // orphan line, show as standalone
-          cards.push({ source: '', meta: '', snippets: [line] });
-        }
-      }
-      if (current) cards.push(current);
-
-      statusEl.textContent = cards.length + ' result(s)';
-      var html = '';
-      for (var c = 0; c < cards.length; c++) {
-        var card = cards[c];
-        html += '<div class="card" style="margin-bottom:8px">';
-        html += '<div class="card-header" style="padding:10px 14px">';
-        if (card.source) {
-          html += '<span style="font-weight:500;font-size:var(--text-sm)">' + esc(card.source) + '</span>';
-        }
-        if (card.meta) {
-          html += '<span class="text-muted" style="font-size:var(--text-xs);margin-left:8px">' + esc(card.meta) + '</span>';
-        }
-        html += '</div>';
-        if (card.snippets.length) {
-          html += '<div class="card-body" style="padding:10px 14px;font-size:var(--text-sm);white-space:pre-wrap;color:var(--ink-secondary)">';
-          html += esc(card.snippets.join('\\n'));
-          html += '</div>';
-        }
-        html += '</div>';
-      }
-      resultsEl.innerHTML = html;
+      statusEl.textContent = allCards.length + ' result(s)';
+      resultsEl.innerHTML = renderCards(allCards);
     }).catch(function(err) {
       statusEl.textContent = '';
       resultsEl.innerHTML = '<div style="padding:24px;color:var(--muted);text-align:center">Search error: ' + esc(String(err)) + '</div>';
     });
   }
 
-  // Populate project filter
+  // Populate project filter dropdown
   function loadSearchProjects() {
     if (_searchProjectsLoaded) return;
     _searchProjectsLoaded = true;
     fetch(searchAuthUrl('/api/projects')).then(function(r) { return r.json(); }).then(function(data) {
       if (!data.ok) return;
-      var sel = document.getElementById('search-project-filter');
+      var dd = document.getElementById('search-project-dropdown');
+      if (!dd) return;
+      var html = '';
       (data.projects || []).forEach(function(p) {
-        var opt = document.createElement('option');
-        opt.value = p.name; opt.textContent = p.name;
-        sel.appendChild(opt);
+        html += '<label class="search-ms-item" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:var(--text-sm);white-space:nowrap"><input type="checkbox" value="' + esc(p.name) + '" style="accent-color:var(--accent);cursor:pointer" /><span>' + esc(p.name) + '</span></label>';
+      });
+      dd.innerHTML = html;
+      dd.querySelectorAll('input[type=checkbox]').forEach(function(cb) {
+        cb.addEventListener('change', function() { toggleProjectFilter(cb.value); });
       });
     }).catch(function() {});
   }
@@ -1501,13 +1597,9 @@ export function renderEventWiringScript(): string {
   // --- Review filters ---
   var reviewFilterProject = document.getElementById('review-filter-project');
   if (reviewFilterProject) reviewFilterProject.addEventListener('change', function() { filterReviewCards(); });
-  var reviewFilterMachine = document.getElementById('review-filter-machine');
-  if (reviewFilterMachine) reviewFilterMachine.addEventListener('change', function() { filterReviewCards(); });
-  var reviewFilterModel = document.getElementById('review-filter-model');
-  if (reviewFilterModel) reviewFilterModel.addEventListener('change', function() { filterReviewCards(); });
 
   var highlightBtn = document.getElementById('highlight-only-btn');
-  if (highlightBtn) highlightBtn.addEventListener('click', function() { toggleHighlightOnly(this); });
+  if (highlightBtn) highlightBtn.addEventListener('change', function() { filterReviewCards(); });
 
   // --- Graph controls ---
   var graphZoomIn = document.getElementById('graph-zoom-in');
@@ -1526,6 +1618,20 @@ export function renderEventWiringScript(): string {
   // --- Sessions filter ---
   var sessionsFilterProject = document.getElementById('sessions-filter-project');
   if (sessionsFilterProject) sessionsFilterProject.addEventListener('change', function() { loadSessions(); });
+
+  // --- Mascot click animation ---
+  var mascotSvg = document.querySelector('.header-brand svg');
+  if (mascotSvg) {
+    mascotSvg.addEventListener('click', function() {
+      mascotSvg.classList.remove('popped');
+      void mascotSvg.offsetWidth;
+      mascotSvg.classList.add('popped');
+      mascotSvg.addEventListener('animationend', function handler() {
+        mascotSvg.classList.remove('popped');
+        mascotSvg.removeEventListener('animationend', handler);
+      });
+    });
+  }
 
   // --- Command palette ---
   var cmdpal = document.getElementById('cmdpal');

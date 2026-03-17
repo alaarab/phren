@@ -88,7 +88,7 @@ describe.sequential("web-ui server", () => {
     seedProject(tmpRoot);
     process.env.PHREN_ACTOR = "web-ui-admin";
     write(
-      path.join(tmpRoot, ".governance", "access-control.json"),
+      path.join(tmpRoot, ".config", "access-control.json"),
       JSON.stringify({
         admins: ["web-ui-admin"],
         maintainers: [],
@@ -254,7 +254,7 @@ describe.sequential("web-ui CSRF protection", () => {
     seedProject(tmpRoot);
     process.env.PHREN_ACTOR = "web-ui-admin";
     write(
-      path.join(tmpRoot, ".governance", "access-control.json"),
+      path.join(tmpRoot, ".config", "access-control.json"),
       JSON.stringify({
         admins: ["web-ui-admin"],
         maintainers: [],
@@ -382,7 +382,7 @@ describe("web-ui HTML rendering", () => {
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain("Items waiting for your review. Approve to keep, reject to remove.");
+      expect(body).toContain("review-cards-list");
       expect(body).toContain("var cardText = esc(item.text);");
       expect(body).toContain("textEl.innerHTML = esc(item.text).replace(/\\n/g, '<br>');");
       expect(body).toContain('data-ui-action="reviewAction"');

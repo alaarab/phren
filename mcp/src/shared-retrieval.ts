@@ -15,6 +15,7 @@ import {
   getEntityBoostDocs,
   decodeFiniteNumber,
   rowToDocWithRowid,
+  buildIndex,
 } from "./shared-index.js";
 import {
   filterTrustedFindingsDetailed,
@@ -604,6 +605,59 @@ export async function searchKnowledgeRows(
   }
 
   return { safeQuery, rows, usedFallback };
+}
+
+// ── Federation search ─────────────────────────────────────────────────────────
+
+export interface FederatedDocRow extends DocRow {
+  /** The phren store path this result came from (undefined = local store). */
+  federationSource?: string;
+}
+
+/**
+ * Parse PHREN_FEDERATION_PATHS env var and return valid, distinct paths.
+ * Paths are colon-separated. The local phrenPath is excluded to avoid duplicate results.
+ */
+export function parseFederationPaths(localPhrenPath: string): string[] {
+  const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
+  if (!raw.trim()) return [];
+  return raw
+    .split(":")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && p !== localPhrenPath && fs.existsSync(p));
+}
+
+/**
+ * Search additional phren stores defined in PHREN_FEDERATION_PATHS.
+ * Returns an array of results tagged with their source store. Read-only — no mutations.
+ */
+export async function searchFederatedStores(
+  localPhrenPath: string,
+  options: Omit<SearchKnowledgeRowsOptions, "phrenPath">,
+): Promise<FederatedDocRow[]> {
+  const federationPaths = parseFederationPaths(localPhrenPath);
+  if (federationPaths.length === 0) return [];
+
+  const allRows: FederatedDocRow[] = [];
+
+  for (const storePath of federationPaths) {
+    try {
+      const federatedDb = await buildIndex(storePath);
+      const result = await searchKnowledgeRows(federatedDb, { ...options, phrenPath: storePath });
+      if (result.rows && result.rows.length > 0) {
+        for (const row of result.rows) {
+          allRows.push({ ...row, federationSource: storePath });
+        }
+      }
+    } catch (err: unknown) {
+      if (process.env.PHREN_DEBUG) {
+        process.stderr.write(`[phren] federatedSearch storePath=${storePath}: ${errorMessage(err)}\n`);
+      }
+      // Federation errors are non-fatal — continue with other stores
+    }
+  }
+
+  return allRows;
 }
 
 // ── Trust filter ─────────────────────────────────────────────────────────────

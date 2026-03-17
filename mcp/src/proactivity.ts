@@ -31,6 +31,43 @@ function resolveProactivityPhrenPath(explicitPhrenPath?: string): string | null 
   return explicitPhrenPath ?? findPhrenPath();
 }
 
+export interface UserPreferences {
+  proactivity?: "high" | "medium" | "low";
+  proactivityFindings?: "high" | "medium" | "low";
+  proactivityTask?: "high" | "medium" | "low";
+  findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
+}
+
+/** Read per-user preferences from ~/.phren/.users/<actor>/preferences.json. Actor from PHREN_ACTOR env var. */
+export function readUserPreferences(explicitPhrenPath?: string): UserPreferences {
+  const phrenPath = resolveProactivityPhrenPath(explicitPhrenPath);
+  if (!phrenPath) return {};
+
+  const actor = (process.env.PHREN_ACTOR || "").trim();
+  if (!actor || !/^[a-zA-Z0-9_@.-]{1,128}$/.test(actor)) return {};
+
+  // Sanitize actor name to safe path component (no path traversal)
+  const safeActor = actor.replace(/[^a-zA-Z0-9_@.-]/g, "_");
+  const prefsFile = `${phrenPath}/.users/${safeActor}/preferences.json`;
+  if (!fs.existsSync(prefsFile)) return {};
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(prefsFile, "utf8")) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return {
+      proactivity: parseProactivityLevel(parsed.proactivity as string | undefined),
+      proactivityFindings: parseProactivityLevel(parsed.proactivityFindings as string | undefined),
+      proactivityTask: parseProactivityLevel(parsed.proactivityTask as string | undefined),
+      findingSensitivity: ["minimal", "conservative", "balanced", "aggressive"].includes(String(parsed.findingSensitivity))
+        ? parsed.findingSensitivity as UserPreferences["findingSensitivity"]
+        : undefined,
+    };
+  } catch (err: unknown) {
+    debugLog(`readUserPreferences: failed to parse ${prefsFile}: ${errorMessage(err)}`);
+    return {};
+  }
+}
+
 function readGovernanceProactivityPreferences(explicitPhrenPath?: string): GovernanceProactivityPreferences {
   const phrenPath = resolveProactivityPhrenPath(explicitPhrenPath);
   if (!phrenPath) return {};
@@ -56,6 +93,10 @@ function readGovernanceProactivityPreferences(explicitPhrenPath?: string): Gover
 }
 
 function getConfiguredProactivityDefault(explicitPhrenPath?: string): ProactivityLevel {
+  // Resolution chain: user prefs (highest) → governance prefs → install prefs → default
+  const userPrefs = readUserPreferences(explicitPhrenPath);
+  if (userPrefs.proactivity) return userPrefs.proactivity;
+
   const governancePreference = readGovernanceProactivityPreferences(explicitPhrenPath).proactivity;
   if (governancePreference) return governancePreference;
 
@@ -91,6 +132,11 @@ function getWorkflowPolicySensitivityLevel(explicitPhrenPath?: string): Proactiv
 }
 
 function getConfiguredProactivityLevelForFindingsDefault(explicitPhrenPath?: string): ProactivityLevel {
+  // User prefs take priority over governance prefs
+  const userPrefs = readUserPreferences(explicitPhrenPath);
+  if (userPrefs.proactivityFindings) return userPrefs.proactivityFindings;
+  if (userPrefs.proactivity) return userPrefs.proactivity;
+
   const prefs = readGovernanceProactivityPreferences(explicitPhrenPath);
   return prefs.proactivityFindings
     ?? prefs.proactivity
@@ -99,6 +145,11 @@ function getConfiguredProactivityLevelForFindingsDefault(explicitPhrenPath?: str
 }
 
 function getConfiguredProactivityLevelForTaskDefault(explicitPhrenPath?: string): ProactivityLevel {
+  // User prefs take priority over governance prefs
+  const userPrefs = readUserPreferences(explicitPhrenPath);
+  if (userPrefs.proactivityTask) return userPrefs.proactivityTask;
+  if (userPrefs.proactivity) return userPrefs.proactivity;
+
   const prefs = readGovernanceProactivityPreferences(explicitPhrenPath);
   return prefs.proactivityTask
     ?? prefs.proactivity

@@ -23,7 +23,7 @@ function restoreEnv(name: keyof typeof originalEnv): void {
 }
 
 function governancePrefsPath(): string {
-  return path.join(phrenDir, ".governance", "install-preferences.json");
+  return path.join(phrenDir, ".config", "install-preferences.json");
 }
 
 function installPrefsPath(): string {

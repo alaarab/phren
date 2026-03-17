@@ -40,10 +40,10 @@ describe("telemetry", () => {
     expect(isTelemetryEnabled(tmpDir)).toBe(false);
   });
 
-  it("stores telemetry in .runtime/ not .governance/", () => {
+  it("stores telemetry in .runtime/ not .config/", () => {
     setTelemetryEnabled(tmpDir, true);
     const runtimePath = path.join(tmpDir, ".runtime", "telemetry.json");
-    const oldPath = path.join(tmpDir, ".governance", "telemetry.json");
+    const oldPath = path.join(tmpDir, ".config", "telemetry.json");
     expect(fs.existsSync(runtimePath)).toBe(true);
     expect(fs.existsSync(oldPath)).toBe(false);
   });

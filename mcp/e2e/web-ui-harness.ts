@@ -113,7 +113,7 @@ function seedSkillFixture(phrenDir: string): void {
 
 function seedProjectFixtures(phrenDir: string): void {
   writeFile(
-    path.join(phrenDir, ".governance", "access-control.json"),
+    path.join(phrenDir, ".config", "access-control.json"),
     JSON.stringify({
       admins: [FALLBACK_ACTOR, os.userInfo().username],
       maintainers: [],
