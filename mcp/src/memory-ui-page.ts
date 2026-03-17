@@ -10,6 +10,7 @@ import {
   renderTasksAndSettingsScript,
   renderSearchScript,
   renderEventWiringScript,
+  renderGraphHostScript,
 } from "./memory-ui-scripts.js";
 
 function h(s: string): string {
@@ -174,7 +175,7 @@ ${TASK_UI_STYLES}
   <!-- ── Graph Tab ─────────────────────────────────────────── -->
   <div id="tab-graph" class="tab-content">
     <div class="graph-container">
-      <canvas id="graph-canvas"></canvas>
+      <div id="graph-canvas" aria-label="Knowledge graph"></div>
       <div class="graph-tooltip" id="graph-tooltip"></div>
       <div class="graph-controls">
         <button id="graph-zoom-in" title="Zoom in">+</button>
@@ -186,15 +187,11 @@ ${TASK_UI_STYLES}
         <div class="graph-filter" id="graph-project-filter"></div>
         <div class="graph-filter" id="graph-limit-row" style="align-items:center;gap:8px"></div>
       </div>
-      <!-- legend removed: colors explained in Filters dropdown -->
-    </div>
-    <div id="graph-detail-panel" class="card" style="margin-top:16px">
-      <div class="card-header">
-        <h2>Selected Bubble</h2>
-        <span id="graph-detail-meta" class="text-muted" style="font-size:var(--text-sm)">Click a bubble to inspect it.</span>
-      </div>
-      <div class="card-body" id="graph-detail-body" style="display:flex;flex-direction:column;gap:12px">
-        <p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p>
+      <div id="graph-node-popover" style="display:none;position:absolute;left:0;top:0;z-index:12;max-width:min(440px,calc(100% - 24px));pointer-events:none">
+        <div id="graph-node-popover-card" class="card" style="pointer-events:auto;position:relative;box-shadow:var(--shadow-lg);border:1px solid var(--border);background:color-mix(in srgb, var(--surface) 96%, transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)">
+          <button id="graph-node-close" type="button" aria-label="Close selected node" title="Close" style="position:absolute;top:10px;right:10px;width:38px;height:38px;border-radius:999px;border:1px solid var(--border);background:var(--surface-raised);color:var(--ink);cursor:pointer;font-size:20px;line-height:1;display:grid;place-items:center">×</button>
+          <div id="graph-node-content" style="padding:18px 18px 16px 18px"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -325,6 +322,9 @@ ${renderWebUiScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderGraphScript()}
+</script>
+<script${nonceAttr}>
+${renderGraphHostScript()}
 </script>
 <script${nonceAttr}>
 ${renderReviewQueueEditSyncScript()}

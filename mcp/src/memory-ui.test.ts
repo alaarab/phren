@@ -393,15 +393,15 @@ describe("web-ui HTML rendering", () => {
     }
   });
 
-  it("renders graph detail scaffolding and enhanced graph controls", () => {
+  it("renders graph popup scaffolding and enhanced graph controls", () => {
     const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-graph-html-");
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain('id="graph-detail-panel"');
-      expect(body).toContain('id="graph-detail-body"');
+      expect(body).toContain('id="graph-node-popover"');
+      expect(body).toContain('id="graph-node-content"');
       expect(body).toContain("phrenGraph");
-      expect(body).toContain("window.graphClearSelection");
+      expect(body).toContain("/api/tasks/update");
     } finally {
       cleanup();
     }

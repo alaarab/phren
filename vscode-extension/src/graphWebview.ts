@@ -16,18 +16,13 @@ import { PhrenClient } from "./phrenClient";
  */
 function loadGraphScript(): string {
   const candidates = [
-    // 1. Packaged: copied alongside extension output
-    path.resolve(__dirname, "memory-ui-graph.js"),
-    // 2. Source checkout: repo root -> mcp/dist/
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "memory-ui-graph.js"),
+    path.resolve(__dirname, "memory-ui-graph.runtime.js"),
+    path.resolve(__dirname, "..", "..", "mcp", "dist", "memory-ui-graph.runtime.js"),
+    path.resolve(__dirname, "..", "..", "mcp", "dist", "generated", "memory-ui-graph.browser.js"),
   ];
   for (const candidate of candidates) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require(candidate);
-      if (typeof mod.renderGraphScript === "function") {
-        return mod.renderGraphScript();
-      }
+      if (fs.existsSync(candidate)) return fs.readFileSync(candidate, "utf8");
     } catch {
       // Try next candidate
     }
@@ -106,6 +101,8 @@ interface GraphNode {
   topicSlug?: string;
   topicLabel?: string;
   scoreKey?: string;
+  taskItemId?: string;
+  checked?: boolean;
 }
 
 interface GraphEdge {
@@ -162,52 +159,24 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     if (!message) return;
     const command = asString(message.command);
 
-    if (command === "nodeClick") {
-      // Webview clicked a node — send back detail for findings
-      const nodeId = asString(message.nodeId);
-      const kind = asString(message.kind);
-      if (!nodeId || kind !== "finding" || !graphData) return;
-
-      // Find the node in the loaded payload
-      const node = graphData.nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-
-      panel.webview.postMessage({
-        command: "nodeDetail",
-        nodeId,
-        kind: "finding",
-        projectName: node.projectName,
-        text: node.text,
-        date: node.date ?? "",
-        topicLabel: node.topicLabel ?? "",
-        stableId: node.stableId ?? "",
-      });
+    async function refreshGraph(): Promise<void> {
+      graphData = await loadGraphData(client);
+      panel.webview.html = renderGraphHtml(panel.webview, graphData);
     }
 
-    if (command === "editFinding") {
+    if (command === "saveFindingEdit") {
       const projectName = asString(message.projectName);
-      const originalText = asString(message.text);
-      if (!projectName || !originalText) return;
-
-      const edited = await vscode.window.showInputBox({
-        title: "Edit Finding",
-        value: originalText,
-        prompt: "Edit the finding text. Save to replace the existing entry.",
-        validateInput: (v) => (v.trim().length === 0 ? "Finding text cannot be empty." : undefined),
-      });
-
-      if (!edited || edited.trim() === originalText.trim()) return;
+      const oldText = asString(message.oldText);
+      const newText = asString(message.newText);
+      if (!projectName || !oldText || !newText) return;
 
       try {
-        await client.editFinding(projectName, originalText, edited.trim());
-        vscode.window.showInformationMessage("Finding updated.");
-
-        // Reload graph data so the panel reflects the change
-        graphData = await loadGraphData(client);
-        panel.webview.html = renderGraphHtml(panel.webview, graphData);
+        await client.editFinding(projectName, oldText, newText);
+        await refreshGraph();
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to update finding: ${toErrorMessage(err)}`);
       }
+      return;
     }
 
     if (command === "deleteFinding") {
@@ -215,21 +184,75 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const text = asString(message.text);
       if (!projectName || !text) return;
 
-      const confirm = await vscode.window.showWarningMessage(
-        `Delete this finding from "${projectName}"?`,
-        { modal: true },
-        "Delete",
-      );
-      if (confirm !== "Delete") return;
-
       try {
         await client.removeFinding(projectName, text);
-        vscode.window.showInformationMessage("Finding deleted.");
-
-        graphData = await loadGraphData(client);
-        panel.webview.html = renderGraphHtml(panel.webview, graphData);
+        await refreshGraph();
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to delete finding: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "saveTaskEdit") {
+      const projectName = asString(message.projectName);
+      const item = asString(message.item);
+      const nextText = asString(message.text);
+      const section = asString(message.section);
+      const priority = asString(message.priority);
+      if (!projectName || !item || !nextText) return;
+
+      try {
+        await client.updateTask(projectName, item, {
+          text: nextText,
+          section,
+          priority,
+        });
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to update task: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "completeTask") {
+      const projectName = asString(message.projectName);
+      const item = asString(message.item);
+      if (!projectName || !item) return;
+
+      try {
+        await client.completeTask(projectName, item);
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to complete task: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "moveTask") {
+      const projectName = asString(message.projectName);
+      const item = asString(message.item);
+      const section = asString(message.section);
+      if (!projectName || !item || !section) return;
+
+      try {
+        await client.updateTask(projectName, item, { section });
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to move task: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "deleteTask") {
+      const projectName = asString(message.projectName);
+      const item = asString(message.item);
+      if (!projectName || !item) return;
+
+      try {
+        await client.removeTask(projectName, item);
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to delete task: ${toErrorMessage(err)}`);
       }
     }
   });
@@ -328,6 +351,8 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
         qualityMultiplier: qualityMultiplierFromEntry(taskScore),
         lastUsedAt: taskScore?.lastUsedAt,
         helpful: taskScore?.helpful,
+        taskItemId: task.id,
+        checked: task.checked,
       });
       edges.push({ source: projectNodeId, target: taskId });
     }
@@ -668,10 +693,8 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
 function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string {
   const nonce = getNonce();
   const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
-
-  // Load the web-ui graph script (Barnes-Hut force sim, relevance gravity, a11y, etc.)
+  const payloadJson = safePayload;
   const graphScript = loadGraphScript();
-
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -681,100 +704,284 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   <title>Phren Fragment Graph</title>
   <style>
     :root {
-      color-scheme:light dark;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      --border:color-mix(in srgb,var(--vscode-foreground) 20%,transparent);
-      --surface:var(--vscode-editorWidget-background);
-      --ink:var(--vscode-foreground);
-      --muted:color-mix(in srgb,var(--vscode-foreground) 50%,transparent);
+      color-scheme: light dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --border: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+      --surface: var(--vscode-editorWidget-background);
+      --surface-raised: color-mix(in srgb, var(--vscode-editorWidget-background) 94%, transparent);
+      --surface-sunken: color-mix(in srgb, var(--vscode-editorWidget-background) 82%, transparent);
+      --ink: var(--vscode-foreground);
+      --muted: color-mix(in srgb, var(--vscode-foreground) 52%, transparent);
+      --accent: var(--vscode-textLink-foreground, #4da3ff);
+      --danger: var(--vscode-errorForeground, #ff6b6b);
+      --shadow: 0 16px 32px rgba(0, 0, 0, 0.34);
     }
-    * { box-sizing:border-box; }
-    body { margin:0; height:100vh; overflow:hidden; color:var(--vscode-foreground); background:var(--vscode-editor-background); }
-    .graph-layout { display:grid; grid-template-columns:3fr 1fr; height:100vh; }
-    .graph-container { position:relative; overflow:hidden; }
-    #graph-canvas { display:block; width:100%; height:100%; }
-    #graph-tooltip { display:none; position:absolute; pointer-events:none; padding:4px 8px; border-radius:4px; font-size:12px; max-width:300px; word-break:break-all; background:var(--vscode-editorWidget-background); color:var(--vscode-foreground); border:1px solid var(--border); z-index:10; box-shadow:0 2px 6px rgba(0,0,0,0.3); }
-    .graph-controls { position:absolute; top:10px; right:10px; display:flex; flex-direction:column; gap:4px; z-index:2; }
-    .graph-controls button { width:36px; height:36px; border:1px solid var(--border); border-radius:6px; background:color-mix(in srgb,var(--vscode-editorWidget-background) 85%,transparent); color:var(--vscode-foreground); font-size:16px; cursor:pointer; display:grid; place-items:center; backdrop-filter:blur(4px); }
-    .graph-controls button:hover { background:var(--vscode-button-hoverBackground); color:var(--vscode-button-foreground); }
-    #graph-filter, #graph-project-filter, #graph-limit-row { display:flex; gap:8px; padding:6px 12px; align-items:center; flex-wrap:wrap; background:var(--vscode-editorWidget-background); border-bottom:1px solid var(--border); }
-    .graph-legend { display:flex; gap:10px; padding:6px 12px; flex-wrap:wrap; background:var(--vscode-editorWidget-background); border-bottom:1px solid var(--border); }
-    .graph-legend-item { display:flex; align-items:center; gap:4px; font-size:11px; opacity:0.7; }
-    .graph-legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; }
-    .graph-detail-panel { padding:16px; overflow:auto; border-left:1px solid var(--border); }
-    .graph-detail-panel h2 { margin:0 0 4px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; opacity:0.6; }
-    #graph-detail-meta { font-size:13px; margin-bottom:8px; }
-    #graph-detail-body { font-size:13px; line-height:1.6; }
-    .btn { padding:4px 10px; border:1px solid var(--border); border-radius:4px; background:var(--surface); color:var(--ink); font-size:12px; cursor:pointer; }
-    .btn.active, .btn:hover { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
-    .btn-sm { font-size:11px; padding:3px 8px; }
-    .text-muted { color:var(--muted); }
-    #node-overlay { display:none; position:absolute; z-index:20; min-width:220px; max-width:320px; background:var(--vscode-editorWidget-background); border:1px solid var(--border); border-radius:8px; padding:12px; box-shadow:0 4px 16px rgba(0,0,0,0.4); font-size:13px; }
-    #node-overlay h3 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; opacity:0.6; }
-    #node-overlay-text { margin:0 0 10px; line-height:1.5; word-break:break-word; }
-    #node-overlay-meta { font-size:11px; opacity:0.65; margin-bottom:10px; }
-    #node-overlay-actions { display:flex; gap:6px; }
-    #node-overlay-close { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--ink); font-size:16px; cursor:pointer; opacity:0.5; line-height:1; padding:0; }
-    #node-overlay-close:hover { opacity:1; }
-    @media (max-width:700px) {
-      .graph-layout { grid-template-columns:1fr; grid-template-rows:55vh 1fr; }
-      .graph-detail-panel { border-left:none; border-top:1px solid var(--border); }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; overflow: hidden; color: var(--ink); background: var(--vscode-editor-background); }
+    #graph-filter, #graph-project-filter, #graph-limit-row {
+      display: flex;
+      gap: 8px;
+      padding: 8px 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .graph-shell { height: calc(100vh - 120px); position: relative; overflow: hidden; }
+    .graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+    #graph-canvas { width: 100%; height: 100%; display: block; }
+    #graph-tooltip {
+      display: none;
+      position: absolute;
+      pointer-events: none;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      max-width: 320px;
+      word-break: break-word;
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--border);
+      z-index: 14;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    }
+    #graph-tooltip.visible { display: block; }
+    .graph-controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 4;
+    }
+    .graph-controls button {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface) 88%, transparent);
+      color: var(--ink);
+      font-size: 16px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      backdrop-filter: blur(6px);
+    }
+    .graph-controls button:hover {
+      background: var(--vscode-button-hoverBackground, var(--surface-sunken));
+      color: var(--vscode-button-foreground, var(--ink));
+    }
+    .btn {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn:hover, .btn.active {
+      background: var(--vscode-button-background, var(--surface-sunken));
+      color: var(--vscode-button-foreground, var(--ink));
+    }
+    .btn-danger {
+      border-color: color-mix(in srgb, var(--danger) 70%, var(--border));
+      color: var(--danger);
+    }
+    #node-popover {
+      display: none;
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 20;
+      max-width: min(420px, calc(100% - 24px));
+      pointer-events: none;
+    }
+    #node-popover-card {
+      position: relative;
+      pointer-events: auto;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: color-mix(in srgb, var(--surface) 96%, transparent);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+      padding: 18px 18px 16px;
+    }
+    #node-popover-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-raised);
+      color: var(--ink);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      z-index: 1;
+    }
+    #node-popover-content {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding-right: 42px;
+    }
+    .node-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .node-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-sunken);
+      font-size: 11px;
+      color: var(--ink);
+    }
+    .node-copy { white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
+    .node-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .node-metric {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-raised);
+      padding: 10px 12px;
+    }
+    .node-metric-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .node-metric-value {
+      font-size: 20px;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    .node-docs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .node-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .node-editor {
+      width: 100%;
+      min-height: 170px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: var(--surface-sunken);
+      color: var(--ink);
+      font: inherit;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    .node-select-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .node-select-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .node-select-wrap select {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--surface);
+      color: var(--ink);
     }
   </style>
 </head>
 <body>
-  <a href="#graph-detail-panel" id="skip-link" class="sr-only" style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;z-index:100;">Skip to details panel</a>
   <div id="graph-filter"></div>
   <div id="graph-project-filter"></div>
   <div id="graph-limit-row"></div>
-  <div class="graph-legend"></div>
-  <main class="graph-layout">
+  <main class="graph-shell">
     <section class="graph-container">
-      <canvas id="graph-canvas"></canvas>
+      <div id="graph-canvas"></div>
       <div id="graph-tooltip"></div>
       <div class="graph-controls">
         <button id="btn-zoom-in" title="Zoom in">+</button>
         <button id="btn-zoom-out" title="Zoom out">&minus;</button>
         <button id="btn-zoom-reset" title="Reset view">R</button>
       </div>
-      <div id="node-overlay" role="dialog" aria-label="Finding detail">
-        <button id="node-overlay-close" title="Close" aria-label="Close">&times;</button>
-        <h3>Finding</h3>
-        <div id="node-overlay-text"></div>
-        <div id="node-overlay-meta"></div>
-        <div id="node-overlay-actions">
-          <button class="btn btn-sm" id="node-overlay-edit">Edit</button>
-          <button class="btn btn-sm" id="node-overlay-delete" style="border-color:var(--vscode-errorForeground,#f44);color:var(--vscode-errorForeground,#f44)">Delete</button>
+      <div id="node-popover" role="dialog" aria-label="Node detail">
+        <div id="node-popover-card">
+          <button id="node-popover-close" title="Close" aria-label="Close">&times;</button>
+          <div id="node-popover-content"></div>
         </div>
       </div>
     </section>
-    <aside class="graph-detail-panel" id="graph-detail-panel">
-      <h2>Details</h2>
-      <div id="graph-detail-meta">Click a bubble to inspect it.</div>
-      <div id="graph-detail-body"><p class="text-muted" style="margin:0">Use the graph filters, then click a project or finding bubble to pin its details here.</p></div>
-    </aside>
   </main>
   <script nonce="${nonce}">
-// ── Web UI graph engine (Barnes-Hut + relevance gravity) ──
 ${graphScript}
-
-// ── Data adapter: transform extension payload to web-ui format ──
 (function() {
-  var payload = ${safePayload};
+  var payload = ${payloadJson};
+  var vscode = acquireVsCodeApi();
+  var nodeLookup = {};
+  for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+
+  function esc(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function nodeKindLabel(node) {
+    if (node.kind === 'entity') return node.entityType ? 'Fragment · ' + node.entityType : 'Fragment';
+    if (node.kind === 'finding') return node.topicLabel ? 'Finding · ' + node.topicLabel : 'Finding';
+    if (node.kind === 'task') return 'Task';
+    if (node.kind === 'reference') return 'Reference';
+    if (node.kind === 'project') return 'Project';
+    return node.kind || 'Node';
+  }
+
+  function chip(text) {
+    return '<span class="node-chip">' + esc(text) + '</span>';
+  }
+
+  function neighbors(id) {
+    var ids = [];
+    for (var index = 0; index < payload.edges.length; index++) {
+      var edge = payload.edges[index];
+      if (edge.source === id) ids.push(edge.target);
+      else if (edge.target === id) ids.push(edge.source);
+    }
+    return ids;
+  }
+
+  function projectCounts(node) {
+    var counts = { finding: 0, task: 0, entity: 0, reference: 0 };
+    var ids = neighbors(node.id);
+    for (var index = 0; index < ids.length; index++) {
+      var neighbor = nodeLookup[ids[index]];
+      if (!neighbor) continue;
+      if (neighbor.kind === 'finding') counts.finding++;
+      else if (neighbor.kind === 'task') counts.task++;
+      else if (neighbor.kind === 'entity') counts.entity++;
+      else if (neighbor.kind === 'reference') counts.reference++;
+    }
+    return counts;
+  }
 
   var graphNodes = [];
   var topicMap = {};
-  for (var i = 0; i < payload.nodes.length; i++) {
-    var n = payload.nodes[i];
+  for (var index = 0; index < payload.nodes.length; index++) {
+    var n = payload.nodes[index];
     var group = 'other';
     if (n.kind === 'project') group = 'project';
     else if (n.kind === 'finding') {
       group = n.topicSlug ? 'topic:' + n.topicSlug : 'topic:general';
-      if (n.topicSlug && !topicMap[n.topicSlug]) {
-        topicMap[n.topicSlug] = n.topicLabel || n.topicSlug;
-      }
-    }
-    else if (n.kind === 'task') group = 'task-' + (n.subtype || 'queue');
+      if (n.topicSlug && !topicMap[n.topicSlug]) topicMap[n.topicSlug] = n.topicLabel || n.topicSlug;
+    } else if (n.kind === 'task') group = 'task-' + (n.subtype || 'queue');
     else if (n.kind === 'entity') group = 'entity';
     else if (n.kind === 'reference') group = 'reference';
 
@@ -789,61 +996,55 @@ ${graphScript}
       entityType: n.entityType || n.subtype || '',
       section: n.section || '',
       priority: n.priority || '',
-      refDocs: n.docs || [],
+      refDocs: (n.docs || []).map(function(doc) { return { doc: doc, project: n.projectName || '' }; }),
       connectedProjects: n.connectedProjects || [],
       topicSlug: n.topicSlug || '',
       topicLabel: n.topicLabel || '',
       tagged: n.kind === 'finding'
     });
   }
+
   var topics = [];
-  var tSlugs = Object.keys(topicMap);
-  for (var ti = 0; ti < tSlugs.length; ti++) {
-    topics.push({ slug: tSlugs[ti], label: topicMap[tSlugs[ti]] });
+  var topicSlugs = Object.keys(topicMap);
+  for (var topicIndex = 0; topicIndex < topicSlugs.length; topicIndex++) {
+    topics.push({ slug: topicSlugs[topicIndex], label: topicMap[topicSlugs[topicIndex]] });
   }
 
-  var graphLinks = [];
-  for (var j = 0; j < payload.edges.length; j++) {
-    graphLinks.push({
-      source: payload.edges[j].source,
-      target: payload.edges[j].target
-    });
-  }
+  var graphLinks = payload.edges.map(function(edge) {
+    return { source: edge.source, target: edge.target };
+  });
 
-  // Build scores in web-ui format (flat entries map)
-  var scores = {};
-  if (payload.scores && payload.scores.entries) {
-    scores = payload.scores.entries;
-  }
-
-  // Detect VS Code theme
+  var scores = payload.scores && payload.scores.entries ? payload.scores.entries : {};
   var bodyBg = getComputedStyle(document.body).backgroundColor || '';
   var isDark = true;
   if (bodyBg) {
-    var m = bodyBg.match(/\\d+/g);
-    if (m && m.length >= 3) {
-      var lum = (parseInt(m[0]) * 299 + parseInt(m[1]) * 587 + parseInt(m[2]) * 114) / 1000;
+    var rgb = bodyBg.match(/\\d+/g);
+    if (rgb && rgb.length >= 3) {
+      var lum = (parseInt(rgb[0]) * 299 + parseInt(rgb[1]) * 587 + parseInt(rgb[2]) * 114) / 1000;
       isDark = lum < 128;
     }
   }
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
 
-  // Mount the web-ui graph
-  if (window.phrenGraph && window.phrenGraph.mount) {
-    window.phrenGraph.mount({
-      nodes: graphNodes,
-      links: graphLinks,
-      scores: scores,
-      topics: topics
-    });
-  } else {
-    var fallback = document.getElementById('graph-canvas');
-    if (fallback && fallback.parentElement) {
-      fallback.parentElement.innerHTML = '<p style="padding:24px;color:var(--vscode-errorForeground,#f44)">Graph engine not available. Ensure the phren MCP server is built (npm run build in project root).</p>';
+  var graphMountError = null;
+  try {
+    if (!window.phrenGraph || typeof window.phrenGraph.mount !== 'function') {
+      throw new Error('Shared graph renderer is unavailable.');
+    }
+    window.phrenGraph.mount({ nodes: graphNodes, links: graphLinks, scores: scores, topics: topics });
+  } catch (error) {
+    graphMountError = error;
+  }
+
+  if (graphMountError) {
+    var graphCanvas = document.getElementById('graph-canvas');
+    if (graphCanvas) {
+      graphCanvas.innerHTML = '<div style="display:grid;place-items:center;height:100%;padding:24px;text-align:center;color:var(--danger)">'
+        + '<div><div style="font-size:16px;font-weight:600;margin-bottom:8px">Graph failed to load</div>'
+        + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div></div></div>';
     }
   }
 
-  // Wire up zoom buttons and skip-link via addEventListener (CSP safe)
   var zoomInBtn = document.getElementById('btn-zoom-in');
   var zoomOutBtn = document.getElementById('btn-zoom-out');
   var zoomResetBtn = document.getElementById('btn-zoom-reset');
@@ -851,98 +1052,255 @@ ${graphScript}
   if (zoomOutBtn) zoomOutBtn.addEventListener('click', function() { window.graphZoom(0.8); });
   if (zoomResetBtn) zoomResetBtn.addEventListener('click', function() { window.graphReset(); });
 
-  var skipLink = document.getElementById('skip-link');
-  if (skipLink) {
-    skipLink.addEventListener('focus', function() { skipLink.style.position = 'static'; skipLink.style.width = 'auto'; skipLink.style.height = 'auto'; });
-    skipLink.addEventListener('blur', function() { skipLink.style.position = 'absolute'; skipLink.style.left = '-9999px'; skipLink.style.width = '1px'; skipLink.style.height = '1px'; });
+  var popover = document.getElementById('node-popover');
+  var popoverCard = document.getElementById('node-popover-card');
+  var popoverContent = document.getElementById('node-popover-content');
+  var popoverClose = document.getElementById('node-popover-close');
+  var currentNode = null;
+  var editMode = null;
+
+  function currentPoint() {
+    return {
+      x: popover ? parseFloat(popover.style.left || '24') : 24,
+      y: popover ? parseFloat(popover.style.top || '24') : 24
+    };
   }
 
-  // ── Node click → detail overlay ──
-  var vscode = acquireVsCodeApi();
-  var overlay = document.getElementById('node-overlay');
-  var overlayText = document.getElementById('node-overlay-text');
-  var overlayMeta = document.getElementById('node-overlay-meta');
-  var overlayEdit = document.getElementById('node-overlay-edit');
-  var overlayDelete = document.getElementById('node-overlay-delete');
-  var overlayClose = document.getElementById('node-overlay-close');
-
-  // Track current finding for action buttons
-  var currentDetail = null;
-
-  function hideOverlay() {
-    if (overlay) overlay.style.display = 'none';
-    currentDetail = null;
+  function clearGraphSelection() {
+    if (window.phrenGraph && typeof window.phrenGraph.clearSelection === 'function') {
+      window.phrenGraph.clearSelection();
+      return;
+    }
+    if (typeof window.graphClearSelection === 'function') window.graphClearSelection();
   }
 
-  if (overlayClose) overlayClose.addEventListener('click', hideOverlay);
+  function hidePopover(skipSelectionClear) {
+    currentNode = null;
+    editMode = null;
+    if (popover) {
+      popover.style.display = 'none';
+      popover.setAttribute('aria-hidden', 'true');
+    }
+    if (skipSelectionClear !== true) clearGraphSelection();
+  }
 
-  if (overlayEdit) overlayEdit.addEventListener('click', function() {
-    if (!currentDetail) return;
-    vscode.postMessage({ command: 'editFinding', projectName: currentDetail.projectName, text: currentDetail.text });
-  });
-
-  if (overlayDelete) overlayDelete.addEventListener('click', function() {
-    if (!currentDetail) return;
-    vscode.postMessage({ command: 'deleteFinding', projectName: currentDetail.projectName, text: currentDetail.text });
-    hideOverlay();
-  });
-
-  // Hook into the graph engine's node-select event (fired when the user clicks a bubble)
-  // phrenGraph exposes window.phrenGraph.onNodeSelect(callback)
-  if (window.phrenGraph && window.phrenGraph.onNodeSelect) {
-    window.phrenGraph.onNodeSelect(function(node, canvasX, canvasY) {
-      if (!node || node.group === 'project' || node.group === 'entity' || node.group === 'reference') {
-        hideOverlay();
-        return;
-      }
-      // Notify extension — it will send back full detail via postMessage
-      vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: node.id.startsWith('finding:') ? 'finding' : node.id.startsWith('task:') ? 'task' : 'other' });
-
-      // Position overlay near the click point
-      if (overlay) {
-        var container = document.querySelector('.graph-container');
-        var rect = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: 800, height: 600 };
-        var ox = Math.min(canvasX + 16, rect.width - 340);
-        var oy = Math.min(canvasY + 16, rect.height - 200);
-        overlay.style.left = Math.max(8, ox) + 'px';
-        overlay.style.top = Math.max(8, oy) + 'px';
-        overlay.style.display = 'none'; // hidden until extension responds
-      }
+  function positionPopover(x, y) {
+    if (!popover || !popoverCard) return;
+    popover.style.display = 'block';
+    popover.setAttribute('aria-hidden', 'false');
+    popover.style.visibility = 'hidden';
+    requestAnimationFrame(function() {
+      var container = document.querySelector('.graph-container');
+      var containerRect = container ? container.getBoundingClientRect() : { width: 900, height: 600 };
+      var cardRect = popoverCard.getBoundingClientRect();
+      var left = Math.min(Math.max(12, x + 18), Math.max(12, containerRect.width - cardRect.width - 12));
+      var top = Math.min(Math.max(12, y + 18), Math.max(12, containerRect.height - cardRect.height - 12));
+      popover.style.left = left + 'px';
+      popover.style.top = top + 'px';
+      popover.style.visibility = 'visible';
     });
-  } else {
-    // Fallback: listen for canvas clicks directly and derive node from payload
-    var canvas = document.getElementById('graph-canvas');
-    if (canvas) {
-      canvas.addEventListener('click', function(evt) {
-        // If the graph engine doesn't have onNodeSelect, fall back to a manual hit test
-        // against a simple node-position map if window.phrenGraph.getNodeAt is available
-        if (window.phrenGraph && window.phrenGraph.getNodeAt) {
-          var node = window.phrenGraph.getNodeAt(evt.offsetX, evt.offsetY);
-          if (node && node.id.startsWith('finding:')) {
-            vscode.postMessage({ command: 'nodeClick', nodeId: node.id, kind: 'finding' });
+  }
+
+  function renderDocs(node) {
+    var docs = node.docs || [];
+    if (!docs.length) return '<div style="color:var(--muted);font-size:12px">No linked docs.</div>';
+    return '<div class="node-docs">' + docs.slice(0, 12).map(function(doc) { return chip(doc); }).join('') + '</div>';
+  }
+
+  function renderView(node) {
+    var title = node.label || node.text || node.id;
+    var chips = [chip(nodeKindLabel(node))];
+    if (node.projectName) chips.push(chip(node.projectName));
+    if (node.kind === 'task' && node.section) chips.push(chip(node.section));
+    if (node.kind === 'task' && node.priority) chips.push(chip('Priority ' + node.priority));
+    if (node.kind === 'finding' && node.topicLabel) chips.push(chip(node.topicLabel));
+
+    var body = '';
+    var actions = [];
+
+    if (node.kind === 'project') {
+      var counts = projectCounts(node);
+      body += '<div class="node-grid">'
+        + '<div class="node-metric"><div class="node-metric-label">Findings</div><div class="node-metric-value">' + counts.finding + '</div></div>'
+        + '<div class="node-metric"><div class="node-metric-label">Tasks</div><div class="node-metric-value">' + counts.task + '</div></div>'
+        + '<div class="node-metric"><div class="node-metric-label">Fragments</div><div class="node-metric-value">' + counts.entity + '</div></div>'
+        + '<div class="node-metric"><div class="node-metric-label">References</div><div class="node-metric-value">' + counts.reference + '</div></div>'
+        + '</div>';
+      if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
+    } else if (node.kind === 'finding') {
+      body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
+      actions.push('<button type="button" class="btn" data-node-action="edit">Edit</button>');
+      actions.push('<button type="button" class="btn btn-danger" data-node-action="delete">Delete</button>');
+    } else if (node.kind === 'task') {
+      body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
+      actions.push('<button type="button" class="btn" data-node-action="edit">Edit</button>');
+      if ((node.section || '').toLowerCase() !== 'done') actions.push('<button type="button" class="btn" data-node-action="complete">Done</button>');
+      if ((node.section || '').toLowerCase() !== 'active') actions.push('<button type="button" class="btn" data-node-action="move-active">Move to Active</button>');
+      if ((node.section || '').toLowerCase() !== 'queue') actions.push('<button type="button" class="btn" data-node-action="move-queue">Move to Queue</button>');
+      actions.push('<button type="button" class="btn btn-danger" data-node-action="delete">Delete</button>');
+    } else if (node.kind === 'entity') {
+      if (node.connectedProjects && node.connectedProjects.length) {
+        body += '<div class="node-chips">' + node.connectedProjects.map(function(project) { return chip(project); }).join('') + '</div>';
+      }
+      body += renderDocs(node);
+    } else if (node.kind === 'reference') {
+      body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
+    } else {
+      body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
+    }
+
+    return '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(nodeKindLabel(node)) + '</div>'
+      + '<div style="font-size:20px;font-weight:600;line-height:1.2">' + esc(title) + '</div>'
+      + '<div class="node-chips">' + chips.join('') + '</div>'
+      + body
+      + (actions.length ? '<div class="node-actions">' + actions.join('') + '</div>' : '');
+  }
+
+  function renderEdit(node) {
+    var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var section = node.section || 'Queue';
+    var priority = node.priority || '';
+    return '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
+      + '<div style="font-size:18px;font-weight:600;line-height:1.2">' + esc(node.projectName || nodeKindLabel(node)) + '</div>'
+      + '<textarea id="node-editor" class="node-editor">' + esc(node.text || node.label || '') + '</textarea>'
+      + (node.kind === 'task'
+        ? '<div class="node-select-grid">'
+          + '<label class="node-select-wrap">Status<select id="node-section"><option value="Queue"' + (section === 'Queue' ? ' selected' : '') + '>Queue</option><option value="Active"' + (section === 'Active' ? ' selected' : '') + '>Active</option><option value="Done"' + (section === 'Done' ? ' selected' : '') + '>Done</option></select></label>'
+          + '<label class="node-select-wrap">Priority<select id="node-priority"><option value=""' + (!priority ? ' selected' : '') + '>None</option><option value="high"' + (priority === 'high' ? ' selected' : '') + '>High</option><option value="medium"' + (priority === 'medium' ? ' selected' : '') + '>Medium</option><option value="low"' + (priority === 'low' ? ' selected' : '') + '>Low</option></select></label>'
+          + '</div>'
+        : '')
+      + '<div class="node-actions"><button type="button" class="btn" data-node-action="save">Save</button><button type="button" class="btn" data-node-action="cancel">Cancel</button></div>';
+  }
+
+  function bindActions() {
+    if (popoverClose) popoverClose.onclick = function() { hidePopover(false); };
+    function taskItemKey() {
+      return (currentNode && (currentNode.taskItemId || currentNode.text)) || '';
+    }
+    document.querySelectorAll('[data-node-action]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        if (!currentNode) return;
+        var action = button.getAttribute('data-node-action');
+        if (action === 'edit') {
+          editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+          var point = currentPoint();
+          renderPopover(currentNode, point.x, point.y);
+          return;
+        }
+        if (action === 'cancel') {
+          editMode = null;
+          var point = currentPoint();
+          renderPopover(currentNode, point.x, point.y);
+          return;
+        }
+        if (action === 'save') {
+          var editor = document.getElementById('node-editor');
+          var nextText = editor ? editor.value.trim() : '';
+          if (!nextText) return;
+          if (editMode === 'task') {
+            var sectionEl = document.getElementById('node-section');
+            var priorityEl = document.getElementById('node-priority');
+            vscode.postMessage({
+              command: 'saveTaskEdit',
+              projectName: currentNode.projectName,
+              item: taskItemKey(),
+              text: nextText,
+              section: sectionEl ? sectionEl.value : currentNode.section,
+              priority: priorityEl ? priorityEl.value : currentNode.priority
+            });
+          } else {
+            vscode.postMessage({
+              command: 'saveFindingEdit',
+              projectName: currentNode.projectName,
+              oldText: currentNode.text,
+              newText: nextText
+            });
+          }
+          return;
+        }
+        if (action === 'delete') {
+          if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
+          if (currentNode.kind === 'task') {
+            vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItemKey() });
+          } else if (currentNode.kind === 'finding') {
+            vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text });
+          }
+          return;
+        }
+        if (action === 'complete') {
+          vscode.postMessage({ command: 'completeTask', projectName: currentNode.projectName, item: taskItemKey() });
+          return;
+        }
+        if (action === 'move-active') {
+          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Active' });
+          return;
+        }
+        if (action === 'move-queue') {
+          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Queue' });
+        }
+      });
+    });
+  }
+
+  function renderPopover(node, x, y) {
+    if (!popoverContent || !node) {
+      hidePopover(true);
+      return;
+    }
+    currentNode = node;
+    popoverContent.innerHTML = editMode ? renderEdit(node) : renderView(node);
+    bindActions();
+    positionPopover(x, y);
+    if (editMode) {
+      requestAnimationFrame(function() {
+        var editor = document.getElementById('node-editor');
+        if (editor && typeof editor.focus === 'function') {
+          editor.focus();
+          if (typeof editor.setSelectionRange === 'function') {
+            var end = editor.value ? editor.value.length : 0;
+            editor.setSelectionRange(end, end);
           }
         }
       });
     }
   }
 
-  // Listen for messages back from the extension
-  window.addEventListener('message', function(event) {
-    var msg = event.data;
-    if (!msg || msg.command !== 'nodeDetail') return;
-    if (msg.kind !== 'finding') return;
+  function outsidePointer(event) {
+    if (!currentNode || !popoverCard) return;
+    var target = event.target;
+    if (target instanceof Node && popoverCard.contains(target)) return;
+    hidePopover();
+  }
 
-    currentDetail = { projectName: msg.projectName, text: msg.text, nodeId: msg.nodeId };
-
-    if (overlayText) overlayText.textContent = msg.text || '';
-    if (overlayMeta) {
-      var meta = '';
-      if (msg.date) meta += msg.date;
-      if (msg.topicLabel) meta += (meta ? ' · ' : '') + msg.topicLabel;
-      overlayMeta.textContent = meta;
+  document.addEventListener('pointerdown', outsidePointer, true);
+  document.addEventListener('keydown', function(event) {
+    if (event.key !== 'Escape' || !currentNode) return;
+    if (editMode) {
+      editMode = null;
+      var point = currentPoint();
+      renderPopover(currentNode, point.x, point.y);
+      return;
     }
-    if (overlay) overlay.style.display = 'block';
+    hidePopover();
   });
+
+  if (window.phrenGraph && window.phrenGraph.onNodeSelect) {
+    window.phrenGraph.onNodeSelect(function(node, x, y) {
+      if (!node) {
+        hidePopover(true);
+        return;
+      }
+      currentNode = Object.assign({}, nodeLookup[node.id] || {}, node);
+      editMode = null;
+      renderPopover(currentNode, x, y);
+    });
+  }
+
+  if (window.phrenGraph && window.phrenGraph.onSelectionClear) {
+    window.phrenGraph.onSelectionClear(function() {
+      hidePopover(true);
+    });
+  }
 })();
   </script>
 </body>

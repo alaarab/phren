@@ -3,13 +3,18 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const sourcePath = path.resolve(extensionRoot, "..", "mcp", "dist", "memory-ui-graph.js");
-const targetPath = path.resolve(extensionRoot, "out", "memory-ui-graph.js");
+const assets = [
+  "memory-ui-graph.js",
+  "memory-ui-graph.runtime.js",
+];
 
-if (!fs.existsSync(sourcePath)) {
-  throw new Error(`Missing graph engine at ${sourcePath}. Run the root Phren build before packaging the VS Code extension.`);
+for (const asset of assets) {
+  const sourcePath = path.resolve(extensionRoot, "..", "mcp", "dist", asset);
+  const targetPath = path.resolve(extensionRoot, "out", asset);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Missing graph engine asset at ${sourcePath}. Run the root Phren build before packaging the VS Code extension.`);
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(sourcePath, targetPath);
+  process.stdout.write(`Copied ${asset} to ${targetPath}\n`);
 }
-
-fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-fs.copyFileSync(sourcePath, targetPath);
-process.stdout.write(`Copied memory-ui-graph.js to ${targetPath}\n`);
