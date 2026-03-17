@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 67 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 69 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |

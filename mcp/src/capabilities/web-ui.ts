@@ -35,7 +35,7 @@ export const webUiManifest: CapabilityManifest = {
 
     // Graph
     "graph.read": { implemented: true, handler: "memory-ui-server.ts:/api/graph" },
-    "graph.visualize": { implemented: true, handler: "memory-ui-page.ts:graph tab (Canvas2D + Barnes-Hut engine)" },
+    "graph.visualize": { implemented: true, handler: "memory-ui-graph-app.ts:graph tab (Sigma.js v3 + ForceAtlas2)" },
     "graph.link_findings": { implemented: false, reason: "No link findings action in web UI" },
 
     // Config
