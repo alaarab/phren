@@ -21,7 +21,7 @@ import {
   removeTask as removeTaskStore,
   TASKS_FILENAME,
 } from "./data-access.js";
-import { isValidProjectName, errorMessage } from "./utils.js";
+import { isValidProjectName, errorMessage, queueFilePath } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import {
   buildGraph,
@@ -459,6 +459,102 @@ export function createWebUiHttpServer(
         accepted: recentAccepted(phrenPath),
         usage: recentUsage(phrenPath),
       }));
+      return;
+    }
+
+    // POST /api/approve — remove item from review queue (keep finding)
+    if (req.method === "POST" && pathname === "/api/approve") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const line = String(parsed.line || "");
+        if (!project || !isValidProjectName(project) || !line) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing project or line" }));
+          return;
+        }
+        try {
+          const qPath = queueFilePath(phrenPath, project);
+          if (fs.existsSync(qPath)) {
+            const content = fs.readFileSync(qPath, "utf8");
+            const lines = content.split("\n");
+            const filtered = lines.filter((l) => l.trim() !== line.trim());
+            fs.writeFileSync(qPath, filtered.join("\n"));
+          }
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err: unknown) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+        }
+      });
+      return;
+    }
+
+    // POST /api/reject — remove item from review queue AND remove finding
+    if (req.method === "POST" && pathname === "/api/reject") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const line = String(parsed.line || "");
+        if (!project || !isValidProjectName(project) || !line) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing project or line" }));
+          return;
+        }
+        try {
+          // Remove from review queue
+          const qPath = queueFilePath(phrenPath, project);
+          if (fs.existsSync(qPath)) {
+            const content = fs.readFileSync(qPath, "utf8");
+            const lines = content.split("\n");
+            const filtered = lines.filter((l) => l.trim() !== line.trim());
+            fs.writeFileSync(qPath, filtered.join("\n"));
+          }
+          // Also remove the finding from FINDINGS.md
+          // Extract text from the line (strip "- " prefix and inline metadata)
+          const findingText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
+          if (findingText) {
+            removeFinding(phrenPath, project, findingText);
+          }
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err: unknown) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+        }
+      });
+      return;
+    }
+
+    // POST /api/edit — edit a finding's text
+    if (req.method === "POST" && pathname === "/api/edit") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const line = String(parsed.line || "");
+        const newText = String(parsed.new_text || "");
+        if (!project || !isValidProjectName(project) || !line || !newText) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing project, line, or new_text" }));
+          return;
+        }
+        try {
+          const oldText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
+          const result = editFinding(phrenPath, project, oldText, newText);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
+        } catch (err: unknown) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
+        }
+      });
       return;
     }
 

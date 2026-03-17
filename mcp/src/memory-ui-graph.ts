@@ -165,27 +165,30 @@ export function renderGraphScript(): string {
     return path;
   }
 
-  /* pin a node so the force simulation skips it (prevents jitter while phren walks) */
-  var phrenPinnedNode = null;
+  /* pin nodes so the force simulation skips them (prevents jitter while phren walks) */
+  var phrenPinnedNodes = [];
 
   function phrenPinNode(node) {
-    if (phrenPinnedNode && phrenPinnedNode !== node) {
-      /* unpin previous target — let physics resume on it */
-      phrenPinnedNode._phrenPinned = false;
-      phrenPinnedNode.vx = 0;
-      phrenPinnedNode.vy = 0;
-    }
-    if (node) {
+    if (node && !node._phrenPinned) {
       node._phrenPinned = true;
       node.vx = 0;
       node.vy = 0;
+      phrenPinnedNodes.push(node);
     }
-    phrenPinnedNode = node;
+  }
+
+  function phrenUnpinAll() {
+    for (var i = 0; i < phrenPinnedNodes.length; i++) {
+      phrenPinnedNodes[i]._phrenPinned = false;
+      phrenPinnedNodes[i].vx = 0;
+      phrenPinnedNodes[i].vy = 0;
+    }
+    phrenPinnedNodes = [];
   }
 
   function phrenMoveTo(x, y, targetNode) {
-    /* pin the target node so physics doesn't move it while phren walks there */
-    phrenPinNode(targetNode);
+    /* unpin all previously pinned nodes before starting a new move */
+    phrenUnpinAll();
     phren.targetX = x;
     phren.targetY = y;
     phren.moving = true;
@@ -200,6 +203,12 @@ export function renderGraphScript(): string {
     phren.waypointIdx = 0;
     phren.targetNodeId = targetNode ? targetNode.id : null;
     phren.targetNodeRef = targetNode || null; /* live reference for position tracking */
+    /* pin target node and all waypoint nodes so physics doesn't move them during walk */
+    phrenPinNode(targetNode);
+    for (var i = 0; i < phren.waypoints.length; i++) {
+      var wpn = phrenNodeById(phren.waypoints[i]);
+      if (wpn) phrenPinNode(wpn);
+    }
     /* ensure animation loop is running so phren movement renders */
     if (!animFrame) animFrame = requestAnimationFrame(tick);
   }
@@ -239,16 +248,45 @@ export function renderGraphScript(): string {
       var dx = wx - phren.x;
       var dy = wy - phren.y;
       var dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 2) {
+      /* snap-to-target helper — used both by arrival check and overshoot clamp */
+      var snapped = false;
+      if (dist < 4) {
         phren.x = wx;
         phren.y = wy;
-        /* advance to next waypoint or finish */
+        snapped = true;
+      } else {
+        /* ease-in-out via sine curve over the full trip distance */
+        var t = phren.tripDist > 0 ? Math.min(1, phren.tripProgress / phren.tripDist) : 1;
+        var easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
+        var baseSpeed = Math.max(3, phren.tripDist * 0.12);
+        var speed = Math.max(1.5, baseSpeed * (0.15 + 0.85 * easeInOut));
+        /* clamp speed to remaining distance — prevents overshoot oscillation */
+        if (speed >= dist) {
+          phren.x = wx;
+          phren.y = wy;
+          speed = dist;
+          snapped = true;
+        } else {
+          phren.x += (dx / dist) * speed;
+          phren.y += (dy / dist) * speed;
+        }
+        phren.tripProgress += speed;
+        /* record trail — longer buffer for gradual fade */
+        phren.trailPoints.push({ x: phren.x, y: phren.y, age: 0 });
+        if (phren.trailPoints.length > 50) phren.trailPoints.shift();
+      }
+      /* advance waypoint or finish when snapped to current target */
+      if (snapped) {
         if (phren.waypoints.length > 0 && phren.waypointIdx < phren.waypoints.length) {
           phren.waypointIdx++;
         } else {
           phren.moving = false;
           phren.arriving = true;
           phren.arriveTimer = 0;
+          /* clear trail on arrival so purple line doesn't linger */
+          phren.trailPoints = [];
+          /* unpin all nodes now that phren has arrived */
+          phrenUnpinAll();
           /* update keyboard-nav current node */
           if (phren.targetNodeId) {
             phrenCurrentNodeId = phren.targetNodeId;
@@ -256,18 +294,6 @@ export function renderGraphScript(): string {
             phrenRefreshAdjacentLinks();
           }
         }
-      } else {
-        /* ease-in-out via sine curve over the full trip distance */
-        var t = phren.tripDist > 0 ? Math.min(1, phren.tripProgress / phren.tripDist) : 1;
-        var easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
-        var baseSpeed = Math.max(3, phren.tripDist * 0.12);
-        var speed = Math.max(1.5, baseSpeed * (0.15 + 0.85 * easeInOut));
-        phren.x += (dx / dist) * speed;
-        phren.y += (dy / dist) * speed;
-        phren.tripProgress += speed;
-        /* record trail — longer buffer for gradual fade */
-        phren.trailPoints.push({ x: phren.x, y: phren.y, age: 0 });
-        if (phren.trailPoints.length > 50) phren.trailPoints.shift();
       }
     }
     if (phren.arriving) {

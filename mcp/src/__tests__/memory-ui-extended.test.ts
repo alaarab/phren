@@ -569,13 +569,13 @@ describe.sequential("web-ui removed review queue mutation routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 404 for removed JSON review queue mutation routes", async () => {
+  it("accepts JSON review queue mutation routes with valid params", async () => {
     const res = await postForm(port, "/api/edit", {
       project: "demo",
       line: "- [2026-03-05] something",
       new_text: "updated",
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 
   it("returns 404 for POST to unknown route", async () => {
@@ -1135,29 +1135,29 @@ describe.sequential("web-ui JSON API auth and removed queue routes", () => {
     expect(res.status).toBe(401);
   });
 
-  it("POST /api/approve returns 404", async () => {
+  it("POST /api/approve requires auth", async () => {
     const res = await postForm(port, "/api/approve", {
       project: "demo",
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
-  it("POST /api/reject returns 404", async () => {
+  it("POST /api/reject requires auth", async () => {
     const res = await postForm(port, "/api/reject", {
       project: "demo",
       line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
-  it("POST /api/edit returns 404", async () => {
+  it("POST /api/edit requires auth", async () => {
     const res = await postForm(port, "/api/edit", {
       project: "demo",
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
       new_text: "updated text",
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(401);
   });
 
   it("POST /api/hook-toggle succeeds with correct auth", async () => {
@@ -1185,7 +1185,7 @@ describe.sequential("web-ui JSON API auth and removed queue routes", () => {
     expect(JSON.parse(res.body).error).toContain("CSRF");
   });
 
-  it("removed JSON review queue routes stay absent even with auth and CSRF", async () => {
+  it("JSON review queue edit route works with auth and CSRF", async () => {
     const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
     expect(csrfRes.status).toBe(200);
     const csrf = JSON.parse(csrfRes.body).token as string;
@@ -1196,6 +1196,6 @@ describe.sequential("web-ui JSON API auth and removed queue routes", () => {
       line: "- [2026-03-05] Keep this memory [confidence 0.90]",
       new_text: "Updated workflow-safe memory",
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
   });
 });
