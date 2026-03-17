@@ -484,7 +484,7 @@ function nodeRank(node: RuntimeNode): number {
 function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
   const filteredNodes = state.rawNodes.filter(nodeMatchesFilters);
 
-  let selectedId = state.selectedNodeId;
+  const selectedId = state.selectedNodeId;
   let limitedNodes = filteredNodes.slice();
   if (limitedNodes.length > state.nodeLimit) {
     const sorted = limitedNodes
@@ -682,14 +682,6 @@ function buildGraph(nodes: RuntimeNode[], links: RawLink[]): Graph {
   return graph;
 }
 
-function stageCenter(): { x: number; y: number } {
-  if (!state.container) return { x: 0, y: 0 };
-  return {
-    x: state.container.clientWidth / 2,
-    y: state.container.clientHeight / 2,
-  };
-}
-
 function positionForNode(nodeId: string): { x: number; y: number } | null {
   if (!state.renderer || !state.graph?.hasNode(nodeId)) return null;
   const attrs = state.graph.getNodeAttributes(nodeId);
@@ -814,17 +806,14 @@ function refreshRenderer(resetCamera: boolean): void {
       hideTooltip();
       state.renderer?.refresh();
       const detail = nodeDetail(payload.node);
-      if (detail && detail.kind !== "project") {
-        const nodePosition = positionForNode(payload.node);
-        if (nodePosition && state.renderer) {
-          const graphPosition = state.renderer.getNodeDisplayData(payload.node);
-          if (graphPosition) {
-            state.renderer.getCamera().animate({
-              x: graphPosition.x,
-              y: graphPosition.y,
-              ratio: Math.max(state.renderer.getCamera().ratio * 0.85, 0.16),
-            }, { duration: 220 });
-          }
+      if (detail && detail.kind !== "project" && state.renderer) {
+        const graphPosition = state.renderer.getNodeDisplayData(payload.node);
+        if (graphPosition) {
+          state.renderer.getCamera().animate({
+            x: graphPosition.x,
+            y: graphPosition.y,
+            ratio: Math.max(state.renderer.getCamera().ratio * 0.85, 0.16),
+          }, { duration: 220 });
         }
       }
       notifySelection(payload.node);
@@ -1056,9 +1045,9 @@ function buildFilterBar(): void {
       filterPanel.style.display = filterPanel.style.display === "block" ? "none" : "block";
     });
     filterPanel.addEventListener("click", (event) => event.stopPropagation());
-    document.addEventListener("click", () => {
-      filterPanel.style.display = "none";
-    });
+    const closePanel = () => { filterPanel.style.display = "none"; };
+    document.addEventListener("click", closePanel);
+    state.cleanupFns.push(() => document.removeEventListener("click", closePanel));
   }
 }
 
@@ -1285,6 +1274,14 @@ function mascotUpdate(dt: number): void {
 
   // Auto-wander: when idle long enough, pick a neighbor
   if (!mascot.moving && !mascot.arriving && mascot.initialized) {
+    // If current node was deleted, relocate to a random visible node
+    if (mascot.currentNodeId && !state.graph?.hasNode(mascot.currentNodeId)) {
+      if (state.visibleNodes.length > 0) {
+        const fallback = state.visibleNodes[Math.floor(Math.random() * state.visibleNodes.length)];
+        const pos = mascotGraphPos(fallback.id);
+        if (pos) { mascot.gx = pos.x; mascot.gy = pos.y; mascot.currentNodeId = fallback.id; }
+      }
+    }
     mascot.idleTimer += dt;
     if (mascot.idleTimer >= mascot.idlePause) {
       const next = mascotPickTarget();
@@ -1375,6 +1372,8 @@ function mascotDraw(ctx: CanvasRenderingContext2D): void {
 
 function startPhrenMascot(): void {
   if (!state.container || !state.renderer) return;
+  // Clean up previous mascot if mount() called without destroy()
+  stopPhrenMascot();
 
   // Create overlay canvas
   const canvas = document.createElement("canvas");

@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const assets = [
-  "memory-ui-graph.js",
   "memory-ui-graph.runtime.js",
 ];
 
