@@ -687,6 +687,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
     };
 
     window.toggleDoneSection = function(btn) {
+      if (!btn) return;
       var list = btn.nextElementSibling;
       var arrow = btn.querySelector('.task-toggle-arrow');
       if (!list) return;
@@ -716,10 +717,10 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
       var doneTasks = showDone ? [] : _allTasks.filter(function(t) {
         if (projectFilter && t.project !== projectFilter) return false;
-        return t.section === 'Done';
+        return t.section === 'Done' || t.checked;
       });
 
-      var activeCount = tasks.filter(function(t) { return t.section !== 'Done'; }).length;
+      var activeCount = tasks.filter(function(t) { return t.section !== 'Done' && !t.checked; }).length;
       var countEl = document.getElementById('tasks-count');
       if (countEl) countEl.textContent = activeCount + ' active' + (doneTasks.length ? ', ' + doneTasks.length + ' done' : '');
 
@@ -740,12 +741,13 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         return pa - pb;
       }
 
-      // Separate into priority groups
-      var high = tasks.filter(function(t) { return t.priority === 'high' && t.section !== 'Done'; }).sort(sortByPriority);
-      var medium = tasks.filter(function(t) { return t.priority === 'medium' && t.section !== 'Done'; }).sort(sortByPriority);
-      var low = tasks.filter(function(t) { return t.priority === 'low' && t.section !== 'Done'; }).sort(sortByPriority);
-      var noPriority = tasks.filter(function(t) { return !t.priority && t.section !== 'Done'; }).sort(sortByPriority);
-      var doneVisible = tasks.filter(function(t) { return t.section === 'Done'; });
+      // Separate into priority groups (exclude checked tasks even if not in Done section)
+      function isActive(t) { return t.section !== 'Done' && !t.checked; }
+      var high = tasks.filter(function(t) { return t.priority === 'high' && isActive(t); }).sort(sortByPriority);
+      var medium = tasks.filter(function(t) { return t.priority === 'medium' && isActive(t); }).sort(sortByPriority);
+      var low = tasks.filter(function(t) { return t.priority === 'low' && isActive(t); }).sort(sortByPriority);
+      var noPriority = tasks.filter(function(t) { return !t.priority && isActive(t); }).sort(sortByPriority);
+      var doneVisible = tasks.filter(function(t) { return t.section === 'Done' || t.checked; });
 
       function renderTaskCard(t) {
         var borderClass = t.priority === 'high' ? ' task-card-high' : t.priority === 'medium' ? ' task-card-medium' : t.priority === 'low' ? ' task-card-low' : '';
@@ -763,10 +765,10 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         if (t.context) html += '<span class="task-card-context">' + esc(t.context) + '</span>';
         html += '</div>';
         html += '<div class="task-card-actions">';
-        if (t.section !== 'Done') {
-          html += '<button class="task-done-btn" onclick="completeTaskFromUi(\\'' + esc(t.project).replace(/'/g, "\\\\'") + '\\', \\'' + esc(t.line).replace(/'/g, "\\\\'") + '\\')" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</button>';
+        if (t.section !== 'Done' && !t.checked) {
+          html += '<button class="task-done-btn" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</button>';
         }
-        html += '<button class="task-remove-btn" onclick="removeTaskFromUi(\\'' + esc(t.project).replace(/'/g, "\\\\'") + '\\', \\'' + esc(t.line).replace(/'/g, "\\\\'") + '\\')" title="Delete task" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;cursor:pointer;color:var(--muted);font-size:var(--text-xs)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+        html += '<button class="task-remove-btn" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Delete task" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;cursor:pointer;color:var(--muted);font-size:var(--text-xs)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
         html += '</div>';
         html += '</div>';
         return html;
@@ -774,12 +776,12 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
       var html = '';
 
-      // Add task input at top
-      var projects = projectFilter ? [projectFilter] : Array.from(new Set(_allTasks.map(function(t) { return t.project; }))).sort();
+      // Add task input at top (only when a specific project is selected)
+      var projects = projectFilter ? [projectFilter] : [];
       projects.forEach(function(proj) {
         html += '<div class="task-add-bar">';
-        html += '<input id="task-add-input-' + esc(proj) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(proj) + '\u2026" onkeydown="if(event.key===\\\'Enter\\\')addTaskFromUi(\\'' + esc(proj).replace(/'/g, "\\\\'") + '\\')">';
-        html += '<button class="task-add-btn" onclick="addTaskFromUi(\\'' + esc(proj).replace(/'/g, "\\\\'") + '\\')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
+        html += '<input id="task-add-input-' + esc(proj) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(proj) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(proj) + '">';
+        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(proj) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
         html += '</div>';
       });
 
@@ -805,7 +807,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var allDone = showDone ? doneVisible : doneTasks;
       if (allDone.length) {
         html += '<div class="task-done-section">';
-        html += '<button class="task-done-toggle" onclick="toggleDoneSection(this)">';
+        html += '<button class="task-done-toggle" data-ts-action="toggleDoneSection">';
         html += '<span class="task-toggle-arrow">\u25B6</span> Completed <span class="task-section-count">' + allDone.length + '</span></button>';
         html += '<div class="task-done-list" style="display:none">';
         html += '<div class="task-card-grid">';
@@ -1225,7 +1227,11 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var actionEl = target.closest('[data-ts-action]');
       if (!actionEl) return;
       var action = actionEl.getAttribute('data-ts-action');
-      if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
+      if (action === 'toggleDoneSection') { toggleDoneSection(actionEl); }
+      else if (action === 'completeTask') { completeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
+      else if (action === 'removeTask') { removeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
+      else if (action === 'addTask') { addTaskFromUi(actionEl.getAttribute('data-project')); }
+      else if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleAutoCapture') { setAutoCapture(actionEl.getAttribute('data-enabled') !== 'true'); }
       else if (action === 'setTaskMode') { setTaskMode(actionEl.getAttribute('data-mode')); }
       else if (action === 'setProactivity') { setProactivity(actionEl.getAttribute('data-level')); }
@@ -1259,6 +1265,15 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var inputEl = document.getElementById('wf-input-' + field);
         var val = inputEl ? inputEl.value : '';
         postProjectOverride(proj, field, val, false);
+      }
+    });
+
+    // Keydown delegation for add-task inputs (Enter key)
+    document.addEventListener('keydown', function(e) {
+      var target = e.target;
+      if (!target || !target.getAttribute) return;
+      if (target.getAttribute('data-ts-action') === 'addTaskKeydown' && e.key === 'Enter') {
+        addTaskFromUi(target.getAttribute('data-project'));
       }
     });
 
