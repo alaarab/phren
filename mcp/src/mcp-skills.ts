@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { parseSkillFrontmatter, validateSkillFrontmatter } from "./link-skills.js";
 import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
@@ -150,10 +150,17 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         fs.mkdirSync(destDir, { recursive: true });
         const existing = findLocalSkill(phrenPath, scope, safeName);
-        const dest = path.resolve(existing
-          ? existing.path
-          : path.join(destDir, `${safeName}.md`));
-        if (!dest.startsWith(phrenPath + path.sep) && dest !== phrenPath) {
+        const dest = existing
+          ? safeProjectPath(destDir, path.relative(destDir, existing.path))
+          : safeProjectPath(destDir, `${safeName}.md`);
+        if (!dest) {
+          return mcpResponse({ ok: false, error: "Skill path escapes phren store." });
+        }
+        try {
+          if (fs.existsSync(dest) && fs.lstatSync(dest).isSymbolicLink()) {
+            return mcpResponse({ ok: false, error: "Refusing to write through a symlinked skill path." });
+          }
+        } catch {
           return mcpResponse({ ok: false, error: "Skill path escapes phren store." });
         }
         const existed = Boolean(existing) || fs.existsSync(dest);

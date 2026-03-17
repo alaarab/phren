@@ -64,10 +64,9 @@ describe("hooks platform compatibility", () => {
   describe("buildLifecycleCommands platform behavior", () => {
     it("generates hookTool command alongside other lifecycle commands", () => {
       const cmds = buildLifecycleCommands(phrenPath);
-      const pathInCmd = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       expect(cmds).toHaveProperty("hookTool");
       expect(cmds.hookTool).toContain("hook-tool");
-      expect(cmds.hookTool).toContain(pathInCmd);
+      expect(cmds.hookTool).toContain(phrenPath);
     });
 
     it("handles paths with spaces correctly", () => {
@@ -76,19 +75,18 @@ describe("hooks platform compatibility", () => {
       const cmds = buildLifecycleCommands(spacedPath);
       expect(cmds.sessionStart).toContain("my phren path");
       // Path should be quoted
-      expect(cmds.sessionStart).toContain('"');
+      expect(cmds.sessionStart).toContain("PHREN_PATH='");
     });
 
     it("handles paths with backslashes", () => {
       const cmds = buildLifecycleCommands("/tmp/path\\with\\backslashes");
-      expect(cmds.sessionStart).toContain("\\\\");
+      expect(cmds.sessionStart).toContain("/tmp/path\\with\\backslashes");
     });
 
     it("all four commands reference the same phren path", () => {
       const cmds = buildLifecycleCommands(phrenPath);
-      const pathInCmd = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       for (const cmd of [cmds.sessionStart, cmds.userPromptSubmit, cmds.stop, cmds.hookTool]) {
-        expect(cmd).toContain(pathInCmd);
+        expect(cmd).toContain(phrenPath);
       }
     });
   });

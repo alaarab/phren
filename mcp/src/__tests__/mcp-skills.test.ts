@@ -121,4 +121,39 @@ describe("mcp-skills", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Invalid scope");
   });
+
+  it("read_skill ignores symlinked skill files that point outside the phren store", async () => {
+    const outsideDir = makeTempDir("mcp-skills-outside-");
+    try {
+      const outsideFile = path.join(outsideDir.path, "secret.md");
+      fs.writeFileSync(outsideFile, "---\nname: secret\n---\nsecret\n");
+      fs.symlinkSync(outsideFile, path.join(tmp.path, "demo", "skills", "secret.md"), process.platform === "win32" ? "file" : undefined);
+
+      const res = parseResult(await server.call("read_skill", { project: "demo", name: "secret" }));
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("not found");
+    } finally {
+      outsideDir.cleanup();
+    }
+  });
+
+  it("write_skill rejects symlinked skill paths that point outside the phren store", async () => {
+    const outsideDir = makeTempDir("mcp-skills-write-escape-");
+    try {
+      const outsideFile = path.join(outsideDir.path, "linked.md");
+      fs.writeFileSync(outsideFile, "outside\n");
+      fs.symlinkSync(outsideFile, path.join(tmp.path, "demo", "skills", "linked.md"), process.platform === "win32" ? "file" : undefined);
+
+      const res = parseResult(await server.call("write_skill", {
+        name: "linked",
+        scope: "demo",
+        content: "---\nname: linked\ndescription: blocked\n---\nbody\n",
+      }));
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/escapes phren store|symlinked skill path/i);
+      expect(fs.readFileSync(outsideFile, "utf8")).toBe("outside\n");
+    } finally {
+      outsideDir.cleanup();
+    }
+  });
 });

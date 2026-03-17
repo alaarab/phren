@@ -3,43 +3,18 @@
 // reach into governance, init, project-config, hooks, init-setup, etc. directly.
 
 import {
-  debugLog,
-  appendAuditLog,
   getPhrenPath,
   readRootManifest,
-  sessionMarker,
-  runtimeFile,
-  EXEC_TIMEOUT_MS,
-  getProjectDirs,
-  findProjectNameCaseInsensitive,
-  homePath,
+  appendAuditLog,
 } from "./shared.js";
 import {
   updateRuntimeHealth,
-  getWorkflowPolicy,
-  withFileLock,
-  appendReviewQueue,
-  recordFeedback,
-  getQualityMultiplier,
 } from "./shared-governance.js";
 import { detectProject } from "./shared-index.js";
 import { getHooksEnabledPreference } from "./init.js";
 import { isToolHookEnabled } from "./hooks.js";
-import { isProjectHookEnabled, readProjectConfig, getProjectSourcePath } from "./project-config.js";
+import { isProjectHookEnabled } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
-import {
-  detectProjectDir,
-  ensureLocalGitRepo,
-  isProjectTracked,
-  repairPreexistingInstall,
-} from "./init-setup.js";
-import { getProactivityLevelForTask, getProactivityLevelForFindings } from "./proactivity.js";
-import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
-import { isFeatureEnabled, errorMessage } from "./utils.js";
-import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
-import { finalizeTaskSession } from "./task-lifecycle.js";
-import { appendFindingJournal } from "./finding-journal.js";
-import { runDoctor } from "./link.js";
 
 export interface HookContext {
   phrenPath: string;

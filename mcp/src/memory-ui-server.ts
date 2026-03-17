@@ -21,7 +21,7 @@ import {
   removeTask as removeTaskStore,
   TASKS_FILENAME,
 } from "./data-access.js";
-import { isValidProjectName, errorMessage, queueFilePath } from "./utils.js";
+import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "./utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "./init-preferences.js";
 import {
   buildGraph,
@@ -44,7 +44,7 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "./project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides } from "./governance-policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, VALID_TASK_MODES } from "./governance-policy.js";
 import { updateProjectConfigOverrides } from "./project-config.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
@@ -248,6 +248,8 @@ function readFormBody(req: http.IncomingMessage, res: http.ServerResponse): Prom
     req.on("data", (chunk) => {
       received += chunk.length;
       if (received > MAX_FORM_BODY_BYTES) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Request body too large" }));
         req.destroy();
         resolve(null);
         return;
@@ -573,7 +575,12 @@ export function createWebUiHttpServer(
         res.end(JSON.stringify({ ok: false, error: `File not allowed: ${file}` }));
         return;
       }
-      const filePath = path.join(phrenPath, project, file);
+      const filePath = safeProjectPath(phrenPath, project, file);
+      if (!filePath) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Invalid project or file path" }));
+        return;
+      }
       if (!fs.existsSync(filePath)) {
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify({ ok: false, error: `File not found: ${file}` }));
@@ -1070,13 +1077,13 @@ export function createWebUiHttpServer(
         if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
         if (!requireCsrf(res, parsed, csrfTokens, true)) return;
         const value = String(parsed.value || "").trim().toLowerCase();
-        const valid = ["off", "manual", "auto"];
+        const valid: readonly string[] = VALID_TASK_MODES;
         if (!valid.includes(value)) {
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}` }));
           return;
         }
-        const result = updateWorkflowPolicy(phrenPath, { taskMode: value as "off" | "manual" | "auto" });
+        const result = updateWorkflowPolicy(phrenPath, { taskMode: value as typeof VALID_TASK_MODES[number] });
         res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
         res.end(JSON.stringify(result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error }));
       });
@@ -1189,7 +1196,7 @@ export function createWebUiHttpServer(
           });
           const merged = mergeConfig(phrenPath, project);
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: true, config: merged }));
+          res.end(JSON.stringify({ ok: true, config: merged, ...(registrationWarning ? { warning: registrationWarning } : {}) }));
         } catch (err: unknown) {
           res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
           res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));

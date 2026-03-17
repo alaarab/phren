@@ -339,10 +339,10 @@ export function renderGraphScript(): string {
     /* sprite rendering */
     if (phrenImgReady) {
       ctx.save();
-      /* fixed 128px size in screen pixels, scale up to 148px on arrival flash */
-      var spriteScreenSize = 128;
+      /* fixed 48px size in screen pixels, scale up to 56px on arrival flash */
+      var spriteScreenSize = 48;
       if (phren.arriving && phren.arriveTimer < 0.4) {
-        spriteScreenSize = 128 + 20 * (1 - phren.arriveTimer / 0.4);
+        spriteScreenSize = 48 + 8 * (1 - phren.arriveTimer / 0.4);
       }
       var spriteSize = spriteScreenSize * s; /* convert to graph coords */
       /* bob up/down when walking — sine wave synced to walk progress */
@@ -1455,8 +1455,8 @@ export function renderGraphScript(): string {
       if (healthText) html += '<div style="margin-top:4px">' + healthText + '</div>';
       if (node.project) {
         html += '<div style="display:flex;gap:8px;margin-top:12px">';
-        html += '<button class="btn btn-sm" onclick="window.graphNodeEdit(' + JSON.stringify(node.project) + ',' + JSON.stringify(findingText) + ')" style="padding:5px 14px;font-size:12px">Edit</button>';
-        html += '<button class="btn btn-sm" onclick="window.graphNodeDelete(' + JSON.stringify(node.project) + ',' + JSON.stringify(findingText) + ')" style="padding:5px 14px;font-size:12px;color:#ef4444;border-color:#ef4444">Delete</button>';
+        html += '<button class="btn btn-sm" data-action="graphNodeEdit" data-project="' + esc(node.project) + '" data-finding="' + esc(findingText) + '" style="padding:5px 14px;font-size:12px">Edit</button>';
+        html += '<button class="btn btn-sm" data-action="graphNodeDelete" data-project="' + esc(node.project) + '" data-finding="' + esc(findingText) + '" style="padding:5px 14px;font-size:12px;color:#ef4444;border-color:#ef4444">Delete</button>';
         html += '</div>';
       }
 
@@ -1508,8 +1508,8 @@ export function renderGraphScript(): string {
           html += '<div style="margin-top:8px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface-alt,var(--surface))">';
           html += '<div style="font-size:12px;line-height:1.5;color:var(--ink)">' + esc(lfText) + '</div>';
           html += '<div style="display:flex;gap:6px;margin-top:6px">';
-          html += '<button class="btn btn-sm" onclick="window.graphNodeEdit(' + JSON.stringify(lf.project) + ',' + JSON.stringify(lfText) + ')" style="padding:3px 10px;font-size:11px">Edit</button>';
-          html += '<button class="btn btn-sm" onclick="window.graphNodeDelete(' + JSON.stringify(lf.project) + ',' + JSON.stringify(lfText) + ')" style="padding:3px 10px;font-size:11px;color:#ef4444;border-color:#ef4444">Delete</button>';
+          html += '<button class="btn btn-sm" data-action="graphNodeEdit" data-project="' + esc(lf.project) + '" data-finding="' + esc(lfText) + '" style="padding:3px 10px;font-size:11px">Edit</button>';
+          html += '<button class="btn btn-sm" data-action="graphNodeDelete" data-project="' + esc(lf.project) + '" data-finding="' + esc(lfText) + '" style="padding:3px 10px;font-size:11px;color:#ef4444;border-color:#ef4444">Delete</button>';
           html += '</div></div>';
         }
       }
@@ -2057,11 +2057,25 @@ export function renderGraphScript(): string {
     renderGraphDetails(null);
   };
 
+  /* ── delegated click handler for graph detail panel buttons ─────────── */
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    var actionEl = target.closest('[data-action]');
+    if (!actionEl) return;
+    var action = actionEl.getAttribute('data-action');
+    var project = actionEl.getAttribute('data-project');
+    var finding = actionEl.getAttribute('data-finding');
+    if (action === 'graphNodeEdit' && project && finding) { window.graphNodeEdit(project, finding); }
+    else if (action === 'graphNodeDelete' && project && finding) { window.graphNodeDelete(project, finding); }
+  });
+
   /* ── node edit/delete actions ────────────────────────────────────────── */
 
-  function fetchCsrfToken(cb) {
-    fetch('/api/csrf-token').then(function(r) { return r.json(); }).then(function(d) { cb(d.token || ''); }).catch(function() { cb(''); });
-  }
+  var authUrl = window._phrenAuthUrl || function(u) { return u; };
+  var fetchCsrfToken = window._phrenFetchCsrfToken || function(cb) {
+    fetch(authUrl('/api/csrf-token')).then(function(r) { return r.json(); }).then(function(d) { cb(d.token || ''); }).catch(function() { cb(''); });
+  };
 
   window.graphNodeEdit = function(project, findingText) {
     var panel = document.getElementById('graph-detail-panel');
@@ -2097,7 +2111,7 @@ export function renderGraphScript(): string {
         body.set('old_text', findingText);
         body.set('new_text', newText);
         if (csrf) body.set('_csrf', csrf);
-        fetch('/api/findings/' + encodeURIComponent(project), { method: 'PUT', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+        fetch(authUrl('/api/findings/' + encodeURIComponent(project)), { method: 'PUT', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
           .then(function(r) { return r.json(); })
           .then(function(d) {
             if (d.ok) {
@@ -2123,7 +2137,7 @@ export function renderGraphScript(): string {
       var body = new URLSearchParams();
       body.set('text', findingText);
       if (csrf) body.set('_csrf', csrf);
-      fetch('/api/findings/' + encodeURIComponent(project), { method: 'DELETE', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+      fetch(authUrl('/api/findings/' + encodeURIComponent(project)), { method: 'DELETE', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
         .then(function(r) { return r.json(); })
         .then(function(d) {
           if (d.ok) {

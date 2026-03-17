@@ -3,9 +3,9 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { isValidProjectName, errorMessage } from "./utils.js";
+import { isValidProjectName, errorMessage, safeProjectPath } from "./utils.js";
 import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
-import { debugLog, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
+import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
 
 
 
@@ -46,18 +46,20 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const projectDir = path.join(phrenPath, project);
-      if (!fs.existsSync(projectDir)) return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+      const projectDir = safeProjectPath(phrenPath, project);
+      if (!projectDir || !fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
+        return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+      }
 
       const exported: Record<string, unknown> = { project, exportedAt: new Date().toISOString(), version: 1 };
 
-      const summaryPath = path.join(projectDir, "summary.md");
-      if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
+      const summaryPath = safeProjectPath(projectDir, "summary.md");
+      if (summaryPath && fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
 
       const learningsResult = readFindings(phrenPath, project);
       if (learningsResult.ok) exported.learnings = learningsResult.data;
-      const findingsPath = path.join(projectDir, "FINDINGS.md");
-      if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
+      const findingsPath = safeProjectPath(projectDir, "FINDINGS.md");
+      if (findingsPath && fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
       const taskResult = readTasks(phrenPath, project);
       if (taskResult.ok) {
@@ -67,8 +69,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
       }
 
-      const claudePath = path.join(projectDir, "CLAUDE.md");
-      if (fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
+      const claudePath = safeProjectPath(projectDir, "CLAUDE.md");
+      if (claudePath && fs.existsSync(claudePath)) exported.claudeMd = fs.readFileSync(claudePath, "utf8");
 
       return mcpResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
     }
@@ -101,7 +103,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const parsed = parsedResult.data;
 
         // Warn about unknown fields silently discarded by .passthrough()
-        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "task", "exportedAt", "version", "findingsRaw"]);
+        const knownTopLevel = new Set(["project", "overwrite", "summary", "claudeMd", "learnings", "task", "taskRaw", "exportedAt", "version", "findingsRaw"]);
         const unknownFields = Object.keys(decoded as Record<string, unknown>).filter(k => !knownTopLevel.has(k));
         if (unknownFields.length > 0) {
           debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
@@ -120,7 +122,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        const projectDir = path.join(phrenPath, projectName);
+        const projectDir = safeProjectPath(phrenPath, projectName);
+        if (!projectDir) {
+          return mcpResponse({ ok: false, error: `Invalid project name: "${parsed.project}"` });
+        }
         const overwrite = parsed.overwrite === true;
         if (fs.existsSync(projectDir) && !overwrite) {
           return mcpResponse({
@@ -132,6 +137,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const stagingRoot = fs.mkdtempSync(path.join(phrenPath, `.phren-import-${projectName}-`));
         const stagedProjectDir = path.join(stagingRoot, projectName);
         const imported: string[] = [];
+        let backupDir: string | null = null;
         const cleanupDir = (dir: string) => {
           if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
         };
@@ -204,7 +210,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push(TASKS_FILENAME);
           }
 
-          const backupDir = overwrite ? path.join(phrenPath, `${projectName}.import-backup-${Date.now()}`) : null;
+          backupDir = overwrite ? path.join(phrenPath, `${projectName}.import-backup-${Date.now()}`) : null;
 
           try {
             if (overwrite && fs.existsSync(projectDir)) {
@@ -240,21 +246,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!overwrite) {
             // Non-overwrite case: no backup to restore — remove the orphaned project dir
             try { fs.rmSync(projectDir, { recursive: true }); } catch { /* best-effort */ }
-          } else {
-            // Find the backup dir that was created earlier
+          } else if (backupDir) {
             try {
-              for (const entry of fs.readdirSync(phrenPath)) {
-                if (entry.startsWith(`${projectName}.import-backup-`)) {
-                  const backupPath = path.join(phrenPath, entry);
-                  if (fs.existsSync(backupPath) && !fs.existsSync(projectDir)) {
-                    fs.renameSync(backupPath, projectDir);
-                  } else if (fs.existsSync(backupPath)) {
-                    // Active dir exists — remove imported dir then restore backup
-                    fs.rmSync(projectDir, { recursive: true, force: true });
-                    fs.renameSync(backupPath, projectDir);
-                  }
-                  break;
-                }
+              if (fs.existsSync(backupDir) && !fs.existsSync(projectDir)) {
+                fs.renameSync(backupDir, projectDir);
+              } else if (fs.existsSync(backupDir)) {
+                fs.rmSync(projectDir, { recursive: true, force: true });
+                fs.renameSync(backupDir, projectDir);
               }
             } catch (err: unknown) {
               if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${errorMessage(err)}\n`);
@@ -268,13 +266,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Backup is only deleted after successful rebuild so we can restore on failure
-        if (overwrite) {
+        if (backupDir && fs.existsSync(backupDir)) {
           try {
-            for (const entry of fs.readdirSync(phrenPath)) {
-              if (entry.startsWith(`${projectName}.import-backup-`)) {
-                fs.rmSync(path.join(phrenPath, entry), { recursive: true, force: true });
-              }
-            }
+            fs.rmSync(backupDir, { recursive: true, force: true });
           } catch (err: unknown) {
             if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${errorMessage(err)}\n`);
           }
@@ -302,10 +296,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
       const activeProject = findProjectNameCaseInsensitive(phrenPath, project);
-      const projectDir = path.join(phrenPath, project);
-      const archiveDir = path.join(phrenPath, `${project}.archived`);
+      const archivedProject = findArchivedProjectNameCaseInsensitive(phrenPath, project);
 
       if (action === "archive") {
+        if (!activeProject) {
+          return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+        }
+        const projectDir = path.join(phrenPath, activeProject);
+        const archiveDir = path.join(phrenPath, `${activeProject}.archived`);
         if (!fs.existsSync(projectDir)) {
           return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
@@ -331,11 +329,13 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (activeProject) {
         return mcpResponse({ ok: false, error: `Project "${activeProject}" already exists as an active project.` });
       }
-      if (!fs.existsSync(archiveDir)) {
+      if (!archivedProject) {
         const entries = fs.readdirSync(phrenPath).filter((e) => e.endsWith(".archived"));
         const available = entries.map((e) => e.replace(/\.archived$/, ""));
         return mcpResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
       }
+      const projectDir = path.join(phrenPath, archivedProject);
+      const archiveDir = path.join(phrenPath, `${archivedProject}.archived`);
 
       fs.renameSync(archiveDir, projectDir);
       try {
@@ -346,8 +346,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
       return mcpResponse({
         ok: true,
-        message: `Unarchived project "${project}". It is now active again.`,
-        data: { project, path: projectDir },
+        message: `Unarchived project "${archivedProject}". It is now active again.`,
+        data: { project: archivedProject, path: projectDir },
       });
       }); // end withWriteQueue
     }

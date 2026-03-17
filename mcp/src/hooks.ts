@@ -1,7 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createHmac } from "crypto";
+import { lookup } from "dns/promises";
 import { execFileSync } from "child_process";
+import { isIP } from "net";
 import { fileURLToPath } from "url";
 import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, installPreferencesFile, atomicWriteText, type PhrenErrorCode } from "./shared.js";
 import { errorMessage } from "./utils.js";
@@ -69,6 +71,10 @@ function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+}
+
 export interface LifecycleCommands {
   sessionStart: string;
   userPromptSubmit: string;
@@ -90,9 +96,11 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const quotedPhren = shellSingleQuote(phrenPath);
 
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const quotedEntry = shellSingleQuote(entry);
     if (isWindows) {
       return {
         sessionStart: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-session-start`,
@@ -102,10 +110,10 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
       };
     }
     return {
-      sessionStart: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-session-start`,
-      userPromptSubmit: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-prompt`,
-      stop: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-stop`,
-      hookTool: `PHREN_PATH="${escapedPhren}" node "${escapedEntry}" hook-tool`,
+      sessionStart: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-session-start`,
+      userPromptSubmit: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-prompt`,
+      stop: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-stop`,
+      hookTool: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-tool`,
     };
   }
 
@@ -119,10 +127,10 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
     };
   }
   return {
-    sessionStart: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-session-start`,
-    userPromptSubmit: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-prompt`,
-    stop: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-stop`,
-    hookTool: `PHREN_PATH="${escapedPhren}" npx -y ${packageSpec} hook-tool`,
+    sessionStart: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-prompt`,
+    stop: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-stop`,
+    hookTool: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-tool`,
   };
 }
 
@@ -134,7 +142,7 @@ function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" 
   if (process.platform === "win32") {
     return `set "PHREN_HOOK_TOOL=${tool}" && ${command}`;
   }
-  return `PHREN_HOOK_TOOL="${tool}" ${command}`;
+  return `PHREN_HOOK_TOOL=${shellSingleQuote(tool)} ${command}`;
 }
 
 function withHookToolLifecycleCommands(
@@ -158,9 +166,6 @@ function installSessionWrapper(tool: string, phrenPath: string): boolean {
   const localBinDir = homePath(".local", "bin");
   const wrapperPath = path.join(localBinDir, tool);
 
-  const escapedBinary = realBinary.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const escapedEntry = entry ? entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"') : "";
   const packageSpec = phrenPackageSpec();
   const sessionStartCmd = entry
     ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-session-start`
@@ -171,9 +176,10 @@ function installSessionWrapper(tool: string, phrenPath: string): boolean {
   const content = `#!/bin/sh
 set -u
 
-REAL_BIN="${escapedBinary}"
-PHREN_PATH="\${PHREN_PATH:-${escapedPhren}}"
-ENTRY_SCRIPT="${escapedEntry}"
+REAL_BIN=${shellSingleQuote(realBinary)}
+DEFAULT_PHREN_PATH=${shellSingleQuote(phrenPath)}
+PHREN_PATH="\${PHREN_PATH:-$DEFAULT_PHREN_PATH}"
+ENTRY_SCRIPT=${shellSingleQuote(entry || "")}
 export PHREN_HOOK_TOOL="${tool}"
 
 if [ ! -x "$REAL_BIN" ]; then
@@ -368,14 +374,96 @@ export function getHookTarget(h: CustomHookEntry): string {
   return "webhook" in h ? h.webhook : h.command;
 }
 
-/** Re-validate a command hook at execution time (mirrors mcp-hooks.ts validateHookCommand). */
-function validateCommandAtExecution(command: string): string | null {
+export function validateCustomHookCommand(command: string): string | null {
   const trimmed = command.trim();
   if (!trimmed) return "Command cannot be empty.";
   if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
-  if (/[`$(){}&|;<>]/.test(trimmed)) return "Command contains disallowed shell characters.";
+  if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
+    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
+  }
   if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
   if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
+  return null;
+}
+
+function normalizeWebhookHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
+function isPrivateOrLoopbackIpv4(address: string): boolean {
+  const octets = address.split(".").map((part) => Number.parseInt(part, 10));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  if (octets[0] === 0 || octets[0] === 10 || octets[0] === 127) return true;
+  if (octets[0] === 169 && octets[1] === 254) return true;
+  if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+  if (octets[0] === 192 && octets[1] === 168) return true;
+  return false;
+}
+
+function isPrivateOrLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) return isPrivateOrLoopbackIpv4(normalized);
+  if (ipVersion !== 6) return false;
+  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("::ffff:")) return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateOrLoopbackIpv4(mapped[1]);
+  return false;
+}
+
+function blockedWebhookHostnameReason(hostname: string): string | null {
+  const normalized = normalizeWebhookHostname(hostname);
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    /^(0x[0-9a-f]+|0\d+)$/i.test(normalized) ||
+    /^\d{8,10}$/.test(normalized)
+  ) {
+    return `webhook hostname "${hostname}" is a private or loopback address.`;
+  }
+  if (isPrivateOrLoopbackAddress(normalized)) {
+    return `webhook hostname "${hostname}" is a private or loopback address.`;
+  }
+  return null;
+}
+
+export function validateCustomWebhookUrl(webhook: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(webhook.trim());
+  } catch {
+    return "webhook is not a valid URL.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "webhook must be an http:// or https:// URL.";
+  }
+  return blockedWebhookHostnameReason(parsed.hostname);
+}
+
+async function validateWebhookAtExecution(webhook: string): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(webhook);
+  } catch {
+    return "webhook is not a valid URL.";
+  }
+
+  const literalBlock = blockedWebhookHostnameReason(parsed.hostname);
+  if (literalBlock) return literalBlock;
+
+  try {
+    const records = await lookup(parsed.hostname, { all: true, verbatim: true });
+    if (records.some((record) => isPrivateOrLoopbackAddress(record.address))) {
+      return `webhook hostname "${parsed.hostname}" resolved to a private or loopback address.`;
+    }
+  } catch (err: unknown) {
+    debugLog(`validateWebhookAtExecution lookup failed for ${parsed.hostname}: ${errorMessage(err)}`);
+  }
+
   return null;
 }
 
@@ -443,13 +531,22 @@ export function runCustomHooks(
       if (hook.secret) {
         headers["X-Phren-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
       }
-      fetch(hook.webhook, {
-        method: "POST",
-        headers,
-        body: payload,
-        redirect: "manual",
-        signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT),
-      })
+      void validateWebhookAtExecution(hook.webhook)
+        .then((blockReason) => {
+          if (blockReason) {
+            const message = `${event}: skipped webhook ${hook.webhook}: ${blockReason}`;
+            debugLog(`runCustomHooks webhook: ${message}`);
+            appendHookErrorLog(phrenPath, event, message);
+            return;
+          }
+          return fetch(hook.webhook, {
+            method: "POST",
+            headers,
+            body: payload,
+            redirect: "manual",
+            signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT),
+          });
+        })
         .catch((err: unknown) => {
           const message = `${event}: ${hook.webhook}: ${errorMessage(err)}`;
           debugLog(`runCustomHooks webhook: ${message}`);
@@ -461,7 +558,7 @@ export function runCustomHooks(
         });
       continue;
     }
-    const cmdErr = validateCommandAtExecution(hook.command);
+    const cmdErr = validateCustomHookCommand(hook.command);
     if (cmdErr) {
       const message = `${event}: skipped hook (re-validation failed): ${cmdErr}`;
       debugLog(`runCustomHooks: ${message}`);

@@ -4,7 +4,8 @@ const WEB_UI_SCRIPT_TEMPLATE = "(function() {\n  // ── State ─────
 
 
 export function renderWebUiScript(authToken: string): string {
-  const script = WEB_UI_SCRIPT_TEMPLATE.replace("__PHREN_AUTH_TOKEN_1d7b7c99__", authToken);
+  const safeToken = JSON.stringify(authToken).slice(1, -1); // escape for JS string literal
+  const script = WEB_UI_SCRIPT_TEMPLATE.replace("__PHREN_AUTH_TOKEN_1d7b7c99__", safeToken);
 
   return script;
 }

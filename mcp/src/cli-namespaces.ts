@@ -3,6 +3,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import {
   expandHomePath,
+  findArchivedProjectNameCaseInsensitive,
   findProjectNameCaseInsensitive,
   getPhrenPath,
   getProjectDirs,
@@ -30,7 +31,7 @@ import {
 } from "./project-config.js";
 import { addFinding, removeFinding } from "./core-finding.js";
 import { supersedeFinding, retractFinding, resolveFindingContradiction } from "./finding-lifecycle.js";
-import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry } from "./hooks.js";
+import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, type CustomHookEntry } from "./hooks.js";
 import { runtimeFile } from "./shared.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
@@ -368,6 +369,11 @@ export function handleHooksNamespace(args: string[]) {
     }
     if (!HOOK_EVENT_VALUES.includes(event as typeof HOOK_EVENT_VALUES[number])) {
       console.error(`Invalid event "${event}". Valid events: ${HOOK_EVENT_VALUES.join(", ")}`);
+      process.exit(1);
+    }
+    const commandErr = validateCustomHookCommand(command);
+    if (commandErr) {
+      console.error(commandErr);
       process.exit(1);
     }
     const phrenPath = getPhrenPath();
@@ -840,9 +846,10 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       process.exit(1);
     }
     const phrenPath = getPhrenPath();
-    const projectDir = path.join(phrenPath, name);
-    const archiveDir = path.join(phrenPath, `${name}.archived`);
     if (subcommand === "archive") {
+      const activeProject = findProjectNameCaseInsensitive(phrenPath, name);
+      const projectDir = activeProject ? path.join(phrenPath, activeProject) : path.join(phrenPath, name);
+      const archiveDir = path.join(phrenPath, `${activeProject ?? name}.archived`);
       if (!fs.existsSync(projectDir)) {
         console.error(`Project "${name}" not found.`);
         process.exit(1);
@@ -860,10 +867,14 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
         process.exit(1);
       }
     } else {
-      if (fs.existsSync(projectDir)) {
-        console.error(`Project "${name}" already exists as an active project.`);
+      const activeProject = findProjectNameCaseInsensitive(phrenPath, name);
+      if (activeProject) {
+        console.error(`Project "${activeProject}" already exists as an active project.`);
         process.exit(1);
       }
+      const archivedProject = findArchivedProjectNameCaseInsensitive(phrenPath, name);
+      const projectDir = path.join(phrenPath, archivedProject ?? name);
+      const archiveDir = path.join(phrenPath, `${archivedProject ?? name}.archived`);
       if (!fs.existsSync(archiveDir)) {
         const available = fs.readdirSync(phrenPath)
           .filter((e) => e.endsWith(".archived"))
@@ -877,7 +888,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       }
       try {
         fs.renameSync(archiveDir, projectDir);
-        console.log(`Unarchived project "${name}". It is now active again.`);
+        console.log(`Unarchived project "${archivedProject ?? name}". It is now active again.`);
         console.log("Note: the search index will be updated on next search.");
       } catch (err: unknown) {
         console.error(`Unarchive failed: ${errorMessage(err)}`);

@@ -169,6 +169,21 @@ describe("mcp-data: export/import round-trip", () => {
     expect(res.error).toContain("not found");
   });
 
+  it("export rejects symlinked project dirs that resolve outside the phren store", async () => {
+    const outside = makeTempDir("mcp-data-export-outside-");
+    try {
+      writeFile(path.join(outside.path, "summary.md"), "# outside");
+      fs.symlinkSync(outside.path, path.join(tmp.path, "linked"), process.platform === "win32" ? "junction" : "dir");
+
+      register(server as any, makeCtx(tmp.path));
+      const res = parseResult(await server.call("export_project", { project: "linked" }));
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("not found");
+    } finally {
+      outside.cleanup();
+    }
+  });
+
   it("import rejects invalid JSON", async () => {
     register(server as any, makeCtx(tmp.path));
     const res = parseResult(await server.call("import_project", { data: "not json{" }));
@@ -293,6 +308,32 @@ describe("mcp-data: archive/unarchive", () => {
     expect(fs.existsSync(archivedDir)).toBe(false);
   });
 
+  it("archives a project when the caller uses different casing", async () => {
+    const projectDir = path.join(tmp.path, "MyProj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# MyProj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "archive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "MyProj.archived"))).toBe(true);
+    expect(fs.existsSync(projectDir)).toBe(false);
+  });
+
+  it("unarchives a project when the caller uses different casing", async () => {
+    const archivedDir = path.join(tmp.path, "MyProj.archived");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    writeFile(path.join(archivedDir, "summary.md"), "# MyProj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "unarchive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "MyProj"))).toBe(true);
+    expect(fs.existsSync(archivedDir)).toBe(false);
+  });
+
   it("archive then unarchive round-trip preserves data", async () => {
     const projectDir = path.join(tmp.path, "roundtrip");
     fs.mkdirSync(projectDir, { recursive: true });
@@ -377,6 +418,40 @@ describe("mcp-data: import rollback on rebuildIndex failure", () => {
 
     // For a non-overwrite import, the orphaned project dir is removed on rollback
     expect(fs.existsSync(path.join(tmp.path, "crash-test"))).toBe(false);
+  });
+
+  it("import rollback restores the backup created by the current run, not a stale backup", async () => {
+    const projectDir = path.join(tmp.path, "restore-me");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# current backup");
+    fs.mkdirSync(path.join(tmp.path, "restore-me.import-backup-stale"), { recursive: true });
+    writeFile(path.join(tmp.path, "restore-me.import-backup-stale", "summary.md"), "# stale backup");
+
+    register(server as any, makeCtx(tmp.path, {
+      rebuildIndex: async () => { throw new Error("index crash"); },
+    }));
+
+    const payload = { project: "restore-me", overwrite: true, summary: "# imported" };
+    const res = parseResult(await server.call("import_project", { data: JSON.stringify(payload) }));
+    expect(res.ok).toBe(false);
+    expect(fs.readFileSync(path.join(tmp.path, "restore-me", "summary.md"), "utf8")).toContain("current backup");
+    expect(fs.existsSync(path.join(tmp.path, "restore-me.import-backup-stale"))).toBe(true);
+  });
+
+  it("successful overwrite import only removes the backup created for that run", async () => {
+    const projectDir = path.join(tmp.path, "keep-stale");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# current");
+    fs.mkdirSync(path.join(tmp.path, "keep-stale.import-backup-stale"), { recursive: true });
+    writeFile(path.join(tmp.path, "keep-stale.import-backup-stale", "summary.md"), "# stale");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "keep-stale", overwrite: true, summary: "# imported" };
+    const res = parseResult(await server.call("import_project", { data: JSON.stringify(payload) }));
+    expect(res.ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmp.path, "keep-stale", "summary.md"), "utf8")).toContain("imported");
+    expect(fs.existsSync(path.join(tmp.path, "keep-stale.import-backup-stale"))).toBe(true);
   });
 });
 

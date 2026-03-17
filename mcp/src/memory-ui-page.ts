@@ -340,7 +340,7 @@ ${TASK_UI_STYLES}
 </div>
 
 <script${nonceAttr}>
-${renderWebUiScript(h(authToken || ""))}
+${renderWebUiScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderGraphScript()}
@@ -349,7 +349,7 @@ ${renderGraphScript()}
 ${renderReviewQueueEditSyncScript()}
 </script>
 <script${nonceAttr}>
-${renderSharedWebUiHelpers(h(authToken || ""))}
+${renderSharedWebUiHelpers(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}
