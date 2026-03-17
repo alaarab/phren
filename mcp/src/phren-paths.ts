@@ -343,6 +343,20 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
   return null;
 }
 
+export function findArchivedProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
+  const needle = name.toLowerCase();
+  try {
+    for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.endsWith(".archived")) continue;
+      const archivedName = entry.name.slice(0, -".archived".length);
+      if (archivedName.toLowerCase() === needle) return archivedName;
+    }
+  } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findArchivedProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+  }
+  return null;
+}
+
 function getLocalProjectDirs(phrenPath: string, manifest: PhrenRootManifest): string[] {
   const primaryProject = manifest.primaryProject;
   if (!primaryProject || !isValidProjectName(primaryProject)) return [];

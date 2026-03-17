@@ -857,6 +857,25 @@ describe.sequential("web-ui project-content validation", () => {
     expect(data.ok).toBe(true);
     expect(data.content).toContain("Use WAL mode for SQLite");
   });
+
+  it("GET /api/project-content rejects symlinked project dirs that resolve outside the phren store", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-project-content-escape-"));
+    try {
+      fs.writeFileSync(path.join(outsideDir, "FINDINGS.md"), "outside secret\n");
+      fs.symlinkSync(outsideDir, path.join(tmpRoot, "linked"), process.platform === "win32" ? "junction" : "dir");
+
+      const res = await httpGet(
+        port,
+        "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=linked&file=" + encodeURIComponent("FINDINGS.md")
+      );
+      expect(res.status).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Invalid project or file path");
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe.sequential("web-ui project topics and reference APIs", () => {

@@ -147,4 +147,15 @@ describe("mcp-hooks SSRF blocklist", () => {
     );
     expect(res.ok).toBe(true);
   });
+
+  it("rejects command hooks with shell metacharacters", async () => {
+    const res = parseResult(
+      await server.call("add_custom_hook", {
+        event: "pre-save",
+        command: "echo ok\nrm -rf /tmp/nope",
+      })
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("disallowed shell characters");
+  });
 });

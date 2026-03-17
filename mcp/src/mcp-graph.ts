@@ -311,7 +311,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
             if (fs.existsSync(manualLinksPath)) {
               try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err: unknown) {
-                if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings manualLinksRead: ${errorMessage(err)}\n`);
+                process.stderr.write(`[phren] link_findings manualLinksRead: manual-links.json is malformed — aborting to avoid data loss: ${errorMessage(err)}\n`);
+                throw err;
               }
             }
             const newEntry = { entity: fragmentName, entityType: resolvedFragmentType, sourceDoc, relType };

@@ -7,8 +7,9 @@
  *   window._phrenFetchCsrfToken(cb) — fetch the CSRF token and call cb(token)
  */
 export function renderSharedWebUiHelpers(authToken: string): string {
+  const safeToken = JSON.stringify(authToken).slice(1, -1); // escape for JS string literal
   return `(function() {
-  window._phrenAuthToken = '${authToken}';
+  window._phrenAuthToken = '${safeToken}';
   window._phrenEsc = function(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   };

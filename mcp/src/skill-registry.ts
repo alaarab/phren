@@ -3,6 +3,7 @@ import * as path from "path";
 import { getProjectDirs } from "./shared.js";
 import { parseSkillFrontmatter } from "./link-skills.js";
 import { isSkillEnabled } from "./skill-state.js";
+import { safeProjectPath } from "./utils.js";
 
 export interface SkillEntry {
   name: string;
@@ -85,14 +86,30 @@ function collectSkills(
 ): SkillEntry[] {
   if (!fs.existsSync(root)) return [];
   const results: SkillEntry[] = [];
+  const realRoot = (() => {
+    try {
+      return fs.realpathSync(root);
+    } catch {
+      return path.resolve(root);
+    }
+  })();
 
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const isFolder = entry.isDirectory();
-    const filePath = isFolder
+    const candidatePath = isFolder
       ? path.join(root, entry.name, "SKILL.md")
       : entry.name.endsWith(".md") ? path.join(root, entry.name) : null;
-
-    if (!filePath || seen.has(filePath) || !fs.existsSync(filePath)) continue;
+    if (!candidatePath) continue;
+    const safeCandidate = safeProjectPath(root, path.relative(root, candidatePath));
+    if (!safeCandidate || seen.has(safeCandidate) || !fs.existsSync(safeCandidate)) continue;
+    try {
+      if (fs.lstatSync(safeCandidate).isSymbolicLink()) continue;
+      const realCandidate = fs.realpathSync(safeCandidate);
+      if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) continue;
+    } catch {
+      continue;
+    }
+    const filePath = safeCandidate;
     seen.add(filePath);
 
     const name = isFolder ? entry.name : entry.name.replace(/\.md$/, "");

@@ -66,6 +66,7 @@ export {
   findPhrenPathWithArg,
   normalizeProjectNameForCreate,
   findProjectNameCaseInsensitive,
+  findArchivedProjectNameCaseInsensitive,
   getProjectDirs,
   collectNativeMemoryFiles,
   computePhrenLiveStateToken,

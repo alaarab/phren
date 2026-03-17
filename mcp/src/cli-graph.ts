@@ -1,5 +1,5 @@
 import { getPhrenPath } from "./shared.js";
-import { buildIndex, queryRows, queryFragmentLinks } from "./shared-index.js";
+import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
 
@@ -160,7 +160,10 @@ export async function handleGraphLink(args: string[]): Promise<void> {
     withFileLock(manualLinksPath, () => {
       let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
       if (fs.existsSync(manualLinksPath)) {
-        try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch { /* fresh start */ }
+        try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err) {
+          process.stderr.write(`[phren] link_fragment: manual-links.json is malformed — aborting to avoid data loss: ${err instanceof Error ? err.message : String(err)}\n`);
+          throw err;
+        }
       }
       const newEntry = { entity: normalizedFragment, entityType: "fragment", sourceDoc, relType: "mentions" };
       const alreadyStored = existing.some(

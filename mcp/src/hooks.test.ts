@@ -74,9 +74,9 @@ describe("hooks", () => {
       expect(cmds.stop).toContain("hook-stop");
     });
 
-    it("escapes paths with special characters", () => {
+    it("quotes paths with special characters safely", () => {
       const cmds = buildLifecycleCommands('/tmp/my "phren" path');
-      expect(cmds.sessionStart).toContain('\\"phren\\"');
+      expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path'`);
     });
   });
 
@@ -456,7 +456,7 @@ describe("hooks", () => {
       expect(cmds.sessionStart).toMatch(/npx -y @phren\/cli@.+ hook-session-start/);
       expect(cmds.userPromptSubmit).toMatch(/npx -y @phren\/cli@.+ hook-prompt/);
       expect(cmds.stop).toMatch(/npx -y @phren\/cli@.+ hook-stop/);
-      expect(cmds.sessionStart).toContain('/tmp/my \\"phren\\" path\\\\nested');
+      expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path\\nested'`);
     });
 
     it("buildLifecycleCommands uses local node entry script when available", () => {
@@ -655,6 +655,35 @@ describe("hooks", () => {
       } finally {
         await new Promise<void>((resolve) => redirectServer.close(() => resolve()));
         await new Promise<void>((resolve) => targetServer.close(() => resolve()));
+      }
+    });
+
+    it("runCustomHooks blocks webhooks that resolve to loopback at execution time", async () => {
+      let loopbackHits = 0;
+      const loopbackServer = http.createServer((_, res) => {
+        loopbackHits += 1;
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("loopback-hit");
+      });
+      await new Promise<void>((resolve) => loopbackServer.listen(0, "127.0.0.1", () => resolve()));
+      const address = loopbackServer.address();
+      if (!address || typeof address === "string") throw new Error("failed to bind loopback server");
+
+      try {
+        writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "post-search", webhook: `http://localhost:${address.port}/hook` },
+          ],
+        }));
+        const result = runCustomHooks(phrenPath, "post-search");
+        expect(result.ran).toBe(1);
+        expect(result.errors).toHaveLength(0);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(loopbackHits).toBe(0);
+        const hookErrorLog = path.join(phrenPath, ".runtime", "hook-errors.log");
+        expect(fs.readFileSync(hookErrorLog, "utf8")).toContain("private or loopback address");
+      } finally {
+        await new Promise<void>((resolve) => loopbackServer.close(() => resolve()));
       }
     });
   });

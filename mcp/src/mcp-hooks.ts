@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { readInstallPreferences, writeInstallPreferences, updateInstallPreferences, type InstallPreferences } from "./init-preferences.js";
-import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "./hooks.js";
+import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, validateCustomWebhookUrl, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "./hooks.js";
 import { hookConfigPath } from "./shared.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig } from "./project-config.js";
 import { isValidProjectName } from "./utils.js";
@@ -13,28 +13,6 @@ const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
 
 const VALID_CUSTOM_EVENTS = HOOK_EVENT_VALUES;
-
-/**
- * Validate a custom hook command at registration time.
- * Rejects obviously dangerous patterns to reduce confused-deputy risk
- * if install-preferences.json is ever compromised.
- * Returns an error string, or null if valid.
- */
-function validateHookCommand(command: string): string | null {
-  const trimmed = command.trim();
-  if (!trimmed) return "Command cannot be empty.";
-  if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
-  // Reject shell metacharacters that allow injection or arbitrary execution
-  // when the command is later run via `sh -c`.
-  if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
-    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
-  }
-  // eval and source can execute arbitrary code
-  if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
-  // Command must start with a word character, path, or quoted string
-  if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
-  return null;
-}
 
 function normalizeHookTool(input: string | undefined): HookTool | null {
   if (!input) return null;
@@ -235,46 +213,11 @@ export function register(server: McpServer, ctx: McpContext): void {
       let newHook: CustomHookEntry;
       if (webhook) {
         const trimmed = webhook.trim();
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-          return mcpResponse({ ok: false, error: "webhook must be an http:// or https:// URL." });
-        }
-        // Reject private/loopback hostnames to prevent SSRF
-        try {
-          const { hostname } = new URL(trimmed);
-          const h = hostname.toLowerCase().replace(/^\[|\]$/g, ""); // strip IPv6 brackets
-          const ssrfBlocked =
-            h === "localhost" ||
-            // IPv4 private/loopback ranges
-            /^127\./.test(h) ||
-            /^10\./.test(h) ||
-            /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
-            /^192\.168\./.test(h) ||
-            /^169\.254\./.test(h) ||
-            // IPv6 loopback
-            h === "::1" ||
-            // IPv6 ULA (fc00::/7 covers fc:: and fd::)
-            h.startsWith("fc") ||
-            h.startsWith("fd") ||
-            // IPv6 link-local (fe80::/10)
-            h.startsWith("fe80:") ||
-            // IPv4-mapped IPv6 (::ffff:10.x.x.x, ::ffff:127.x.x.x, etc.)
-            /^::ffff:/i.test(h) ||
-            // Raw numeric IPv4 forms not normalized by all URL parsers:
-            // decimal (2130706433), hex (0x7f000001), octal (0177.0.0.1 prefix)
-            /^(0x[0-9a-f]+|0\d+)$/i.test(h) ||
-            // Pure decimal integer that encodes an IPv4 address (8+ digits covers 0.0.0.0+)
-            /^\d{8,10}$/.test(h) ||
-            h.endsWith(".local") ||
-            h.endsWith(".internal");
-          if (ssrfBlocked) {
-            return mcpResponse({ ok: false, error: `webhook hostname "${hostname}" is a private or loopback address.` });
-          }
-        } catch {
-          return mcpResponse({ ok: false, error: "webhook is not a valid URL." });
-        }
+        const webhookErr = validateCustomWebhookUrl(trimmed);
+        if (webhookErr) return mcpResponse({ ok: false, error: webhookErr });
         newHook = { event, webhook: trimmed, ...(secret ? { secret } : {}), ...(timeout !== undefined ? { timeout } : {}) } satisfies WebhookHookEntry;
       } else {
-        const cmdErr = validateHookCommand(command!);
+        const cmdErr = validateCustomHookCommand(command!);
         if (cmdErr) return mcpResponse({ ok: false, error: cmdErr });
         newHook = { event, command: command!, ...(timeout !== undefined ? { timeout } : {}) } satisfies CommandHookEntry;
       }
