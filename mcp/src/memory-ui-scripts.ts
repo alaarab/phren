@@ -609,11 +609,19 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       return fetch(url).then(function(r) { return r.json(); });
     }
 
+    var _taskViewMode = 'list';
+
     function priorityBadge(p) {
       if (!p) return '';
       var colors = { high: '#ef4444', medium: '#f59e0b', low: '#6b7280' };
       var color = colors[p] || '#6b7280';
       return '<span class="task-priority-badge task-priority-' + esc(p) + '">' + esc(p) + '</span>';
+    }
+
+    function sessionBadge(sessionId) {
+      if (!sessionId) return '';
+      var short = sessionId.length > 8 ? sessionId.slice(0, 8) : sessionId;
+      return '<span class="task-session-badge" title="Session ' + esc(sessionId) + '">' + esc(short) + '</span>';
     }
 
     function statusChip(section, checked) {
@@ -735,10 +743,16 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       // Group by priority within sections
       var priorityOrder = { high: 0, medium: 1, low: 2 };
       function sortByPriority(a, b) {
-        var pa = priorityOrder[a.priority] !== undefined ? priorityOrder[a.priority] : 1;
-        var pb = priorityOrder[b.priority] !== undefined ? priorityOrder[b.priority] : 1;
+        // Unchecked before checked
+        var aChecked = a.checked || a.section === 'Done' ? 1 : 0;
+        var bChecked = b.checked || b.section === 'Done' ? 1 : 0;
+        if (aChecked !== bChecked) return aChecked - bChecked;
+        // Pinned first
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
+        // Then by priority
+        var pa = priorityOrder[a.priority] !== undefined ? priorityOrder[a.priority] : 1;
+        var pb = priorityOrder[b.priority] !== undefined ? priorityOrder[b.priority] : 1;
         return pa - pb;
       }
 
@@ -760,6 +774,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         html += pinIndicator(t.pinned);
         html += githubBadge(t.githubIssue, t.githubUrl);
         html += priorityBadge(t.priority);
+        html += sessionBadge(t.sessionId);
         html += '</div>';
         html += '<div class="task-card-body">';
         html += '<span class="task-card-text">' + esc(t.line) + '</span>';
@@ -777,6 +792,30 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
       var html = '';
 
+      // Summary bar
+      var allActive = _allTasks.filter(function(t) { return t.section !== 'Done' && !t.checked; });
+      var highCount = allActive.filter(function(t) { return t.priority === 'high'; }).length;
+      var medCount = allActive.filter(function(t) { return t.priority === 'medium'; }).length;
+      var lowCount = allActive.filter(function(t) { return t.priority === 'low'; }).length;
+      var projectCounts = {};
+      allActive.forEach(function(t) { projectCounts[t.project] = (projectCounts[t.project] || 0) + 1; });
+      var topProjects = Object.keys(projectCounts).sort(function(a, b) { return projectCounts[b] - projectCounts[a]; }).slice(0, 3);
+      html += '<div class="task-summary-bar">';
+      html += '<span class="task-summary-total">' + allActive.length + ' active</span>';
+      if (highCount) html += '<span class="task-summary-pill task-summary-high">' + highCount + ' high</span>';
+      if (medCount) html += '<span class="task-summary-pill task-summary-medium">' + medCount + ' medium</span>';
+      if (lowCount) html += '<span class="task-summary-pill task-summary-low">' + lowCount + ' low</span>';
+      if (topProjects.length) {
+        html += '<span class="task-summary-projects">';
+        topProjects.forEach(function(p) { html += '<span class="task-summary-project">' + esc(p) + ' (' + projectCounts[p] + ')</span>'; });
+        html += '</span>';
+      }
+      html += '<span class="task-view-toggle" style="margin-left:auto">';
+      html += '<button class="task-view-btn' + (_taskViewMode === 'list' ? ' active' : '') + '" data-ts-action="setTaskView" data-mode="list" title="List view"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
+      html += '<button class="task-view-btn' + (_taskViewMode === 'compact' ? ' active' : '') + '" data-ts-action="setTaskView" data-mode="compact" title="Compact view"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg></button>';
+      html += '</span>';
+      html += '</div>';
+
       // Add task input at top (only when a specific project is selected)
       var projects = projectFilter ? [projectFilter] : [];
       projects.forEach(function(proj) {
@@ -789,9 +828,10 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       // Priority sections
       function renderSection(title, items, icon) {
         if (!items.length) return '';
+        var gridClass = _taskViewMode === 'compact' ? 'task-card-grid task-card-grid-compact' : 'task-card-grid';
         var shtml = '<div class="task-priority-section">';
         shtml += '<div class="task-section-header"><span class="task-section-icon">' + icon + '</span> ' + title + ' <span class="task-section-count">' + items.length + '</span></div>';
-        shtml += '<div class="task-card-grid">';
+        shtml += '<div class="' + gridClass + '">';
         items.forEach(function(t) { shtml += renderTaskCard(t); });
         shtml += '</div></div>';
         return shtml;
@@ -1232,6 +1272,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       else if (action === 'completeTask') { completeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'removeTask') { removeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'addTask') { addTaskFromUi(actionEl.getAttribute('data-project')); }
+      else if (action === 'setTaskView') { _taskViewMode = actionEl.getAttribute('data-mode') || 'list'; filterTasks(); }
       else if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleAutoCapture') { setAutoCapture(actionEl.getAttribute('data-enabled') !== 'true'); }
       else if (action === 'setTaskMode') { setTaskMode(actionEl.getAttribute('data-mode')); }

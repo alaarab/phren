@@ -554,5 +554,107 @@ export const TASK_UI_STYLES = `
     transition: transform 0.2s;
   }
   .task-done-list { padding-top: 8px; }
+
+  /* ── Task Summary Bar ──────────────────────────── */
+  .task-summary-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface-sunken, var(--surface));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    font-size: var(--text-sm);
+  }
+  .task-summary-total {
+    font-weight: 600;
+    color: var(--ink);
+    font-size: var(--text-base);
+  }
+  .task-summary-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .task-summary-high { background: #ef444422; color: #ef4444; }
+  .task-summary-medium { background: #f59e0b22; color: #f59e0b; }
+  .task-summary-low { background: #6b728022; color: #6b7280; }
+  .task-summary-projects {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .task-summary-project {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Task Session Badge ──────────────────────────── */
+  .task-session-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-family: var(--mono, monospace);
+    background: var(--surface-sunken, var(--surface));
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  /* ── Task View Toggle ──────────────────────────── */
+  .task-view-toggle {
+    display: flex;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .task-view-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 28px;
+    background: var(--surface);
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .task-view-btn:hover { color: var(--ink); }
+  .task-view-btn.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  /* ── Task Compact Grid ──────────────────────────── */
+  .task-card-grid-compact {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 8px;
+  }
+  .task-card-grid-compact .task-card {
+    padding: 10px 12px;
+  }
+  .task-card-grid-compact .task-card-body {
+    gap: 2px;
+  }
+  .task-card-grid-compact .task-card-text {
+    font-size: var(--text-sm);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .task-card-grid-compact .task-card-context { display: none; }
+  .task-card-grid-compact .task-card-actions { margin-top: 6px; }
 `;
 

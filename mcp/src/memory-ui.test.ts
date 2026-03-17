@@ -382,7 +382,7 @@ describe("web-ui HTML rendering", () => {
     try {
       seedProject(tmpRoot);
       const body = renderPageForTests(tmpRoot, "csrf-token");
-      expect(body).toContain("Approve, reject, or edit items directly from this tab.");
+      expect(body).toContain("Items waiting for your review. Approve to keep, reject to remove.");
       expect(body).toContain("var cardText = esc(item.text);");
       expect(body).toContain("textEl.innerHTML = esc(item.text).replace(/\\n/g, '<br>');");
       expect(body).toContain('data-ui-action="reviewAction"');
