@@ -596,8 +596,9 @@ export function renderReviewQueueEditSyncScript(): string {
 }
 
 export function renderTasksAndSettingsScript(authToken: string): string {
+  const safeToken = JSON.stringify(authToken).slice(1, -1);
   return `(function() {
-    var _tsAuthToken = '${authToken}';
+    var _tsAuthToken = '${safeToken}';
     var _allTasks = [];
     var esc = window._phrenEsc;
 
@@ -1600,6 +1601,21 @@ export function renderEventWiringScript(): string {
 
   var highlightBtn = document.getElementById('highlight-only-btn');
   if (highlightBtn) highlightBtn.addEventListener('change', function() { filterReviewCards(); });
+
+  var selectAllCb = document.getElementById('review-select-all-cb');
+  if (selectAllCb) selectAllCb.addEventListener('change', function() { toggleSelectAll(this.checked); });
+
+  // Batch bar buttons
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    var actionEl = target.closest('[data-batch-action]');
+    if (!actionEl) return;
+    var action = actionEl.getAttribute('data-batch-action');
+    if (action === 'approve') { batchAction('approve'); }
+    else if (action === 'reject') { batchAction('reject'); }
+    else if (action === 'clear') { clearBatchSelection(); }
+  });
 
   // --- Graph controls ---
   var graphZoomIn = document.getElementById('graph-zoom-in');
