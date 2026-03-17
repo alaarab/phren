@@ -2,6 +2,7 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { build as esbuild } from "esbuild";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,6 +10,7 @@ const repoRoot = path.resolve(__dirname, "..");
 const mcpRoot = path.join(repoRoot, "mcp");
 const srcRoot = path.join(mcpRoot, "src");
 const distRoot = path.join(mcpRoot, "dist");
+const browserRoot = path.join(mcpRoot, "browser");
 const tempRoot = path.join(mcpRoot, `.dist-build-${process.pid}-${Date.now()}`);
 
 function tscExec() {
@@ -20,6 +22,25 @@ function copySupplementalAssets(targetDir) {
     if (!/^synonyms.*\.json$/u.test(entry)) continue;
     fs.copyFileSync(path.join(srcRoot, entry), path.join(targetDir, entry));
   }
+}
+
+async function bundleBrowserAssets(targetDir) {
+  const targetGeneratedDir = path.join(targetDir, "generated");
+  fs.mkdirSync(targetGeneratedDir, { recursive: true });
+  await esbuild({
+    bundle: true,
+    entryPoints: [path.join(browserRoot, "memory-ui-graph-app.ts")],
+    format: "iife",
+    legalComments: "none",
+    minify: true,
+    outfile: path.join(targetGeneratedDir, "memory-ui-graph.browser.js"),
+    platform: "browser",
+    target: ["es2020"],
+  });
+  fs.copyFileSync(
+    path.join(targetGeneratedDir, "memory-ui-graph.browser.js"),
+    path.join(targetDir, "memory-ui-graph.runtime.js"),
+  );
 }
 
 function syncTree(sourceDir, targetDir) {
@@ -54,6 +75,7 @@ function pruneMissing(sourceDir, targetDir) {
 try {
   fs.rmSync(tempRoot, { recursive: true, force: true });
   fs.mkdirSync(tempRoot, { recursive: true });
+  await bundleBrowserAssets(tempRoot);
   execFileSync(tscExec(), ["-p", path.join(mcpRoot, "tsconfig.json"), "--outDir", tempRoot], {
     cwd: repoRoot,
     stdio: "inherit",

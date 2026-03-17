@@ -1573,6 +1573,368 @@ export function renderSearchScript(authToken: string): string {
 })();`;
 }
 
+export function renderGraphPopupScript(): string {
+  return `(function() {
+  var popup = document.getElementById('graph-popup');
+  var popupCard = document.getElementById('graph-popup-card');
+  var popupLabel = document.getElementById('graph-popup-label');
+  var popupTitle = document.getElementById('graph-popup-title');
+  var popupMeta = document.getElementById('graph-popup-meta');
+  var popupBody = document.getElementById('graph-popup-body');
+  var popupClose = document.getElementById('graph-popup-close');
+  var esc = window._phrenEsc || function(s) { return String(s); };
+  var authUrl = window._phrenAuthUrl || function(path) { return path; };
+  var authBody = window._phrenAuthBody || function(body) { return body; };
+  var fetchCsrfToken = window._phrenFetchCsrfToken || function(cb) { cb(null); };
+  var currentDetail = null;
+  var isEditing = false;
+
+  function showToast(msg, type) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast' + (type ? ' ' + type : '');
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(function() {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 2800);
+  }
+
+  function typeLabel(kind) {
+    if (kind === 'finding') return 'Finding';
+    if (kind === 'task') return 'Task';
+    if (kind === 'entity') return 'Fragment';
+    if (kind === 'reference') return 'Reference';
+    return 'Project';
+  }
+
+  function popupPoint(point) {
+    return point || { x: 28, y: 28 };
+  }
+
+  function renderMeta(detail) {
+    if (!popupMeta) return;
+    var parts = [];
+    if (detail.project) parts.push('<span class="graph-pill">' + esc(detail.project) + '</span>');
+    if (detail.section) parts.push('<span class="graph-pill">' + esc(detail.section) + '</span>');
+    if (detail.priority) parts.push('<span class="graph-pill">' + esc(detail.priority + ' priority') + '</span>');
+    if (detail.entityType) parts.push('<span class="graph-pill">' + esc(detail.entityType) + '</span>');
+    if (detail.topicLabel) parts.push('<span class="graph-pill">' + esc(detail.topicLabel) + '</span>');
+    if (detail.health) parts.push('<span class="graph-pill graph-pill-' + esc(detail.health) + '">' + esc(detail.health) + '</span>');
+    popupMeta.innerHTML = parts.join('');
+  }
+
+  function statLine(label, value) {
+    return '<div class="graph-popup-line"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
+  }
+
+  function renderDocs(detail) {
+    if (!detail.refDocs || !detail.refDocs.length) return '';
+    var docs = detail.refDocs.slice(0, 8).map(function(ref) {
+      var doc = typeof ref === 'string' ? ref : (ref.doc || '');
+      return '<div class="graph-popup-doc">' + esc(doc) + '</div>';
+    }).join('');
+    return '<div class="graph-popup-section"><h4>Linked docs</h4><div class="graph-popup-docs">' + docs + '</div></div>';
+  }
+
+  function renderProject(detail) {
+    var counts = detail.connections || {};
+    return '' +
+      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label || detail.id) + '</div>' +
+      '<div class="graph-popup-stats">' +
+        statLine('Neighbors', counts.total || 0) +
+        statLine('Findings', counts.findings || 0) +
+        statLine('Tasks', counts.tasks || 0) +
+        statLine('Fragments', counts.entities || 0) +
+        statLine('References', counts.references || 0) +
+      '</div>';
+  }
+
+  function renderFinding(detail) {
+    return '' +
+      '<div class="graph-popup-summary" id="graph-popup-text">' + esc(detail.fullLabel || detail.label) + '</div>' +
+      '<div class="graph-popup-actions">' +
+        '<button class="btn btn-sm" data-graph-action="edit">Edit</button>' +
+        '<button class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>' +
+      '</div>' +
+      renderDocs(detail);
+  }
+
+  function renderTask(detail) {
+    var section = detail.section || 'Queue';
+    var priority = detail.priority || 'none';
+    return '' +
+      '<div class="graph-popup-summary" id="graph-popup-text">' + esc(detail.fullLabel || detail.label) + '</div>' +
+      '<div class="graph-popup-section"><h4>Status</h4><div class="graph-popup-actions">' +
+        '<button class="btn btn-sm' + (section === 'Active' ? ' active' : '') + '" data-graph-action="task-status" data-status="Active">Active</button>' +
+        '<button class="btn btn-sm' + (section === 'Queue' ? ' active' : '') + '" data-graph-action="task-status" data-status="Queue">Queue</button>' +
+        '<button class="btn btn-sm" data-graph-action="task-status" data-status="Done">Done</button>' +
+      '</div></div>' +
+      '<div class="graph-popup-section"><h4>Priority</h4><div class="graph-popup-actions">' +
+        '<button class="btn btn-sm' + (priority === 'high' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="high">High</button>' +
+        '<button class="btn btn-sm' + (priority === 'medium' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="medium">Medium</button>' +
+        '<button class="btn btn-sm' + (priority === 'low' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="low">Low</button>' +
+      '</div></div>' +
+      '<div class="graph-popup-actions">' +
+        '<button class="btn btn-sm" data-graph-action="edit">Edit</button>' +
+        '<button class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>' +
+      '</div>';
+  }
+
+  function renderEntity(detail) {
+    var projects = (detail.connectedProjects || []).map(function(project) {
+      return '<span class="graph-pill">' + esc(project) + '</span>';
+    }).join('');
+    return '' +
+      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label) + '</div>' +
+      '<div class="graph-popup-stats">' +
+        statLine('References', detail.refCount || 0) +
+        statLine('Projects', (detail.connectedProjects || []).length) +
+        statLine('Neighbors', (detail.connections && detail.connections.total) || 0) +
+      '</div>' +
+      (projects ? '<div class="graph-popup-section"><h4>Projects</h4><div class="graph-popup-pills">' + projects + '</div></div>' : '') +
+      renderDocs(detail);
+  }
+
+  function renderReference(detail) {
+    return '' +
+      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label) + '</div>' +
+      '<div class="graph-popup-stats">' +
+        statLine('Project', detail.project || 'shared') +
+        statLine('Neighbors', (detail.connections && detail.connections.total) || 0) +
+      '</div>' +
+      renderDocs(detail);
+  }
+
+  function renderEditor(detail) {
+    return '' +
+      '<div class="graph-popup-editor">' +
+        '<textarea id="graph-popup-editor-input">' + esc(detail.fullLabel || detail.label) + '</textarea>' +
+        '<div class="graph-popup-actions">' +
+          '<button class="btn btn-sm btn-primary" data-graph-action="save-edit">Save</button>' +
+          '<button class="btn btn-sm" data-graph-action="cancel-edit">Cancel</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function renderBody(detail) {
+    if (!popupBody) return;
+    if (isEditing && (detail.kind === 'finding' || detail.kind === 'task')) {
+      popupBody.innerHTML = renderEditor(detail);
+      return;
+    }
+    if (detail.kind === 'project') popupBody.innerHTML = renderProject(detail);
+    else if (detail.kind === 'finding') popupBody.innerHTML = renderFinding(detail);
+    else if (detail.kind === 'task') popupBody.innerHTML = renderTask(detail);
+    else if (detail.kind === 'entity') popupBody.innerHTML = renderEntity(detail);
+    else popupBody.innerHTML = renderReference(detail);
+  }
+
+  function positionPopup(point) {
+    if (!popupCard) return;
+    var container = document.querySelector('#tab-graph .graph-container');
+    if (!container) return;
+    var rect = container.getBoundingClientRect();
+    var width = popupCard.offsetWidth || 360;
+    var height = popupCard.offsetHeight || 260;
+    var safe = popupPoint(point);
+    var left = Math.max(14, Math.min(safe.x + 18, rect.width - width - 14));
+    var top = Math.max(14, Math.min(safe.y + 18, rect.height - height - 14));
+    popupCard.style.left = left + 'px';
+    popupCard.style.top = top + 'px';
+  }
+
+  function renderPopup(detail, point) {
+    if (!popup || !popupLabel || !popupTitle) return;
+    currentDetail = detail;
+    popupLabel.textContent = typeLabel(detail.kind);
+    popupTitle.textContent = detail.label || detail.fullLabel || detail.id;
+    renderMeta(detail);
+    renderBody(detail);
+    popup.classList.add('open');
+    requestAnimationFrame(function() { positionPopup(point); });
+  }
+
+  function closePopup(skipSelectionClear) {
+    currentDetail = null;
+    isEditing = false;
+    if (popup) popup.classList.remove('open');
+    if (!skipSelectionClear && typeof window.graphClearSelection === 'function') window.graphClearSelection();
+  }
+
+  function refetchGraph(keepNodeId) {
+    if (typeof window.loadGraph !== 'function') return;
+    window.loadGraph();
+    if (keepNodeId && window.phrenGraph && typeof window.phrenGraph.selectNode === 'function') {
+      var attempts = 0;
+      var timer = setInterval(function() {
+        attempts++;
+        if (window.phrenGraph.selectNode(keepNodeId) || attempts > 18) clearInterval(timer);
+      }, 120);
+    }
+  }
+
+  function postForm(url, method, body, onOk) {
+    fetchCsrfToken(function(csrfToken) {
+      var nextBody = authBody(body);
+      if (csrfToken) nextBody += '&_csrf=' + encodeURIComponent(csrfToken);
+      fetch(url, {
+        method: method,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: nextBody
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Request failed');
+        onOk(data);
+      }).catch(function(err) {
+        showToast(String((err && err.message) || err || 'Request failed'), 'err');
+      });
+    });
+  }
+
+  function saveFindingEdit(nextText) {
+    postForm(authUrl('/api/findings/' + encodeURIComponent(currentDetail.project)), 'PUT',
+      'old_text=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label) + '&new_text=' + encodeURIComponent(nextText),
+      function() {
+        currentDetail.fullLabel = nextText;
+        currentDetail.label = nextText.length > 55 ? nextText.slice(0, 52) + '...' : nextText;
+        isEditing = false;
+        renderPopup(currentDetail);
+        refetchGraph(currentDetail.id);
+        showToast('Finding updated', 'ok');
+      }
+    );
+  }
+
+  function saveTaskEdit(nextText) {
+    postForm('/api/tasks/update', 'POST',
+      'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label) + '&text=' + encodeURIComponent(nextText),
+      function() {
+        currentDetail.fullLabel = nextText;
+        currentDetail.label = nextText.length > 55 ? nextText.slice(0, 52) + '...' : nextText;
+        isEditing = false;
+        renderPopup(currentDetail);
+        refetchGraph(currentDetail.id);
+        showToast('Task updated', 'ok');
+      }
+    );
+  }
+
+  function updateTask(payload) {
+    var body = 'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label);
+    Object.keys(payload).forEach(function(key) {
+      body += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]);
+    });
+    postForm('/api/tasks/update', 'POST', body, function() {
+      if (payload.section) currentDetail.section = payload.section;
+      if (payload.priority) currentDetail.priority = payload.priority;
+      renderPopup(currentDetail);
+      refetchGraph(payload.section === 'Done' ? null : currentDetail.id);
+      if (payload.section === 'Done') closePopup(true);
+      showToast('Task updated', 'ok');
+    });
+  }
+
+  function completeTask() {
+    postForm('/api/tasks/complete', 'POST',
+      'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
+      function() {
+        closePopup(true);
+        refetchGraph(null);
+        showToast('Task completed', 'ok');
+      }
+    );
+  }
+
+  function deleteCurrent() {
+    if (!currentDetail) return;
+    if (currentDetail.kind === 'finding') {
+      postForm(authUrl('/api/findings/' + encodeURIComponent(currentDetail.project)), 'DELETE',
+        'text=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
+        function() {
+          closePopup(true);
+          refetchGraph(null);
+          showToast('Finding deleted', 'ok');
+        }
+      );
+    } else if (currentDetail.kind === 'task') {
+      postForm('/api/tasks/remove', 'POST',
+        'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
+        function() {
+          closePopup(true);
+          refetchGraph(null);
+          showToast('Task deleted', 'ok');
+        }
+      );
+    }
+  }
+
+  if (popupClose) popupClose.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    closePopup(false);
+  });
+
+  if (popupCard) {
+    popupCard.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target || typeof target.closest !== 'function' || !currentDetail) return;
+      var actionEl = target.closest('[data-graph-action]');
+      if (!actionEl) return;
+      var action = actionEl.getAttribute('data-graph-action');
+      if (action === 'edit') {
+        isEditing = true;
+        renderPopup(currentDetail);
+      } else if (action === 'cancel-edit') {
+        isEditing = false;
+        renderPopup(currentDetail);
+      } else if (action === 'save-edit') {
+        var input = document.getElementById('graph-popup-editor-input');
+        var nextText = input ? input.value.trim() : '';
+        if (!nextText) {
+          showToast('Text cannot be empty', 'err');
+          return;
+        }
+        if (currentDetail.kind === 'finding') saveFindingEdit(nextText);
+        else if (currentDetail.kind === 'task') saveTaskEdit(nextText);
+      } else if (action === 'delete') {
+        deleteCurrent();
+      } else if (action === 'task-status') {
+        var status = actionEl.getAttribute('data-status') || 'Queue';
+        if (status === 'Done') completeTask();
+        else updateTask({ section: status });
+      } else if (action === 'task-priority') {
+        updateTask({ priority: actionEl.getAttribute('data-priority') || 'medium' });
+      }
+    });
+  }
+
+  document.addEventListener('pointerdown', function(e) {
+    if (!popup || !popup.classList.contains('open')) return;
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (popupCard && popupCard.contains(target)) return;
+    if (target.closest('.graph-filters') || target.closest('.graph-controls')) return;
+    closePopup(false);
+  });
+
+  if (window.phrenGraph && typeof window.phrenGraph.onNodeSelect === 'function') {
+    window.phrenGraph.onNodeSelect(function(detail, point) {
+      isEditing = false;
+      renderPopup(detail, point);
+    });
+  }
+
+  if (window.phrenGraph && typeof window.phrenGraph.onSelectionClear === 'function') {
+    window.phrenGraph.onSelectionClear(function() {
+      currentDetail = null;
+      isEditing = false;
+      if (popup) popup.classList.remove('open');
+    });
+  }
+})();`;
+}
+
 export function renderEventWiringScript(): string {
   return `(function() {
   // --- Navigation tabs ---
@@ -1662,3 +2024,492 @@ export function renderEventWiringScript(): string {
 })();`;
 }
 
+export function renderGraphHostScript(): string {
+  return `(function() {
+  var currentNode = null;
+  var editMode = null;
+
+  function graphApi() {
+    return window.phrenGraph || null;
+  }
+
+  function esc(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function graphData() {
+    var api = graphApi();
+    return api && api.getData ? api.getData() : { nodes: [], links: [], topics: [], total: 0 };
+  }
+
+  function authToken() {
+    try {
+      return new URL(window.location.href).searchParams.get('_auth') || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function authUrl(path) {
+    var token = authToken();
+    if (!token) return path;
+    return path + (path.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(token);
+  }
+
+  function graphToast(message, type) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast' + (type ? ' ' + type : '');
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(function() {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 2600);
+  }
+
+  function fetchCsrfToken() {
+    return fetch(authUrl('/api/csrf-token')).then(function(r) { return r.json(); }).then(function(data) {
+      return data && data.ok ? (data.token || null) : null;
+    }).catch(function() { return null; });
+  }
+
+  function formBody(fields, csrfToken) {
+    var parts = [];
+    Object.keys(fields).forEach(function(key) {
+      var value = fields[key];
+      if (value === undefined || value === null) return;
+      parts.push(encodeURIComponent(key) + '=' + encodeURIComponent(String(value)));
+    });
+    if (csrfToken) parts.push('_csrf=' + encodeURIComponent(csrfToken));
+    return parts.join('&');
+  }
+
+  function graphRequest(path, method, fields) {
+    return fetchCsrfToken().then(function(csrfToken) {
+      return fetch(authUrl(path), {
+        method: method,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: formBody(fields || {}, csrfToken)
+      }).then(function(r) { return r.json(); });
+    });
+  }
+
+  function hidePopover() {
+    currentNode = null;
+    editMode = null;
+    var popover = document.getElementById('graph-node-popover');
+    if (popover) popover.style.display = 'none';
+    if (typeof window.graphClearSelection === 'function') window.graphClearSelection();
+  }
+
+  function positionPopover(x, y) {
+    var popover = document.getElementById('graph-node-popover');
+    var card = document.getElementById('graph-node-popover-card');
+    var container = document.querySelector('#tab-graph .graph-container');
+    if (!popover || !card || !container) return;
+    popover.style.display = 'block';
+    popover.style.visibility = 'hidden';
+    requestAnimationFrame(function() {
+      var containerRect = container.getBoundingClientRect();
+      var cardRect = card.getBoundingClientRect();
+      var left = Math.min(Math.max(12, x + 18), Math.max(12, containerRect.width - cardRect.width - 12));
+      var top = Math.min(Math.max(12, y + 18), Math.max(12, containerRect.height - cardRect.height - 12));
+      popover.style.left = left + 'px';
+      popover.style.top = top + 'px';
+      popover.style.visibility = 'visible';
+    });
+  }
+
+  function currentPopoverPoint() {
+    var popover = document.getElementById('graph-node-popover');
+    return {
+      x: popover ? parseFloat(popover.style.left || '24') : 24,
+      y: popover ? parseFloat(popover.style.top || '24') : 24
+    };
+  }
+
+  function neighborIds(nodeId) {
+    var data = graphData();
+    var ids = [];
+    (data.links || []).forEach(function(link) {
+      if (link.source === nodeId) ids.push(link.target);
+      else if (link.target === nodeId) ids.push(link.source);
+    });
+    return ids;
+  }
+
+  function nodeMap() {
+    var data = graphData();
+    var map = {};
+    (data.nodes || []).forEach(function(node) { map[node.id] = node; });
+    return map;
+  }
+
+  function projectCounts(node) {
+    var map = nodeMap();
+    var counts = { finding: 0, task: 0, entity: 0, reference: 0, other: 0 };
+    neighborIds(node.id).forEach(function(id) {
+      var neighbor = map[id];
+      if (!neighbor) return;
+      var kind = neighbor.kind || 'other';
+      if (counts[kind] === undefined) counts.other++;
+      else counts[kind]++;
+    });
+    return counts;
+  }
+
+  function kindLabel(node) {
+    if (!node) return '';
+    if (node.kind === 'entity') return node.entityType ? 'Fragment · ' + node.entityType : 'Fragment';
+    if (node.kind === 'reference') return 'Reference';
+    if (node.kind === 'task') return 'Task';
+    if (node.kind === 'project') return 'Project';
+    if (node.kind === 'finding') return node.topicLabel ? 'Finding · ' + node.topicLabel : 'Finding';
+    return node.kind || 'Node';
+  }
+
+  function chip(text, accent) {
+    var border = accent ? 'var(--accent)' : 'var(--border)';
+    var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
+    return '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid ' + border + ';background:' + bg + ';font-size:11px;color:var(--ink)">' + esc(text) + '</span>';
+  }
+
+  function scoreLine(node) {
+    var score = typeof node.qualityScore === 'number' ? Math.round(node.qualityScore * 100) : null;
+    return score ? chip('Quality ' + score, false) : '';
+  }
+
+  function docsList(node) {
+    var docs = (node.refDocs || []).map(function(ref) { return ref.doc; });
+    if (!docs.length) return '';
+    return '<div style="display:flex;flex-wrap:wrap;gap:8px">' + docs.slice(0, 12).map(function(doc) { return chip(doc, false); }).join('') + '</div>';
+  }
+
+  function renderView(node) {
+    var title = node.displayLabel || node.label || node.tooltipLabel || node.id;
+    var meta = [kindLabel(node)];
+    if (node.projectName) meta.push(node.projectName);
+    if (node.kind === 'task' && node.section) meta.push(node.section);
+    if (node.kind === 'task' && node.priority) meta.push('Priority ' + node.priority);
+    if (node.kind === 'finding' && node.topicLabel) meta.push(node.topicLabel);
+
+    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
+
+    var body = '';
+    var actions = [];
+
+    if (node.kind === 'project') {
+      var counts = projectCounts(node);
+      body += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.finding + '</div></div>';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.task + '</div></div>';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Fragments</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.entity + '</div></div>';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
+      body += '</div>';
+    } else if (node.kind === 'finding') {
+      body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
+      actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
+    } else if (node.kind === 'task') {
+      body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
+      body += chip('Status ' + (node.section || 'Queue'), true);
+      if (node.priority) body += chip('Priority ' + node.priority, false);
+      body += '</div>';
+      actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
+      if ((node.section || '').toLowerCase() !== 'done') actions.push('<button type="button" class="btn btn-sm" data-graph-action="complete">Done</button>');
+      if ((node.section || '').toLowerCase() !== 'active') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-active">Move to Active</button>');
+      if ((node.section || '').toLowerCase() !== 'queue') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-queue">Move to Queue</button>');
+      actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
+    } else if (node.kind === 'entity') {
+      if (node.connectedProjects && node.connectedProjects.length) {
+        body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">' + node.connectedProjects.map(function(project) { return chip(project, true); }).join('') + '</div>';
+      }
+      body += docsList(node) || '<div class="text-muted">No linked references.</div>';
+    } else if (node.kind === 'reference') {
+      body += '<div style="white-space:pre-wrap;line-height:1.6;font-size:var(--text-base)">' + esc(node.tooltipLabel || title) + '</div>';
+      body += docsList(node);
+    } else {
+      body += '<div style="white-space:pre-wrap;line-height:1.6;font-size:var(--text-base)">' + esc(node.tooltipLabel || title) + '</div>';
+    }
+
+    return header
+      + '<div style="display:flex;flex-direction:column;gap:14px;margin-top:16px">' + body + '</div>'
+      + (actions.length ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:18px">' + actions.join('') + '</div>' : '');
+  }
+
+  function renderEdit(node) {
+    var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var text = node.tooltipLabel || node.fullLabel || node.displayLabel || '';
+    var section = node.section || 'Queue';
+    var priority = node.priority || '';
+    var sectionControls = '';
+    var priorityControls = '';
+    if (node.kind === 'task') {
+      sectionControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Status<select id="graph-task-section" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value="Queue"' + (section === 'Queue' ? ' selected' : '') + '>Queue</option><option value="Active"' + (section === 'Active' ? ' selected' : '') + '>Active</option><option value="Done"' + (section === 'Done' ? ' selected' : '') + '>Done</option></select></label>';
+      priorityControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Priority<select id="graph-task-priority" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value=""' + (!priority ? ' selected' : '') + '>None</option><option value="high"' + (priority === 'high' ? ' selected' : '') + '>High</option><option value="medium"' + (priority === 'medium' ? ' selected' : '') + '>Medium</option><option value="low"' + (priority === 'low' ? ' selected' : '') + '>Low</option></select></label>';
+    }
+    return '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div><div style="font-size:var(--text-md);font-weight:600">' + esc(node.projectName || kindLabel(node)) + '</div></div>'
+      + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">'
+      + '<textarea id="graph-node-editor" style="min-height:180px;width:100%;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--surface-sunken);color:var(--ink);font:inherit;line-height:1.55;resize:vertical">' + esc(text) + '</textarea>'
+      + (node.kind === 'task' ? '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">' + sectionControls + priorityControls + '</div>' : '')
+      + '<div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn btn-sm" data-graph-action="save-edit">Save</button><button type="button" class="btn btn-sm" data-graph-action="cancel-edit">Cancel</button></div>'
+      + '</div>';
+  }
+
+  function renderPopover(node, x, y) {
+    currentNode = node;
+    var content = document.getElementById('graph-node-content');
+    if (!content || !node) {
+      currentNode = null;
+      editMode = null;
+      var popover = document.getElementById('graph-node-popover');
+      if (popover) popover.style.display = 'none';
+      return;
+    }
+    content.innerHTML = editMode ? renderEdit(node) : renderView(node);
+    bindPopoverActions();
+    positionPopover(x, y);
+  }
+
+  function matchesNode(node, match) {
+    if (!node || !match) return false;
+    if (match.id && node.id !== match.id) return false;
+    if (match.kind && node.kind !== match.kind) return false;
+    if (match.projectName && node.projectName !== match.projectName) return false;
+    if (match.tooltipLabel && (node.tooltipLabel || node.fullLabel || '') !== match.tooltipLabel) return false;
+    if (match.displayLabel && (node.displayLabel || node.label || '') !== match.displayLabel) return false;
+    return true;
+  }
+
+  function reloadGraph(match) {
+    return fetch(authUrl('/api/graph')).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function(data) {
+      var api = graphApi();
+      if (!api || !api.mount) return;
+      api.mount(data);
+      if (!match) {
+        hidePopover();
+        return;
+      }
+      var next = null;
+      var dataNodes = api.getData ? api.getData().nodes : [];
+      for (var index = 0; index < dataNodes.length; index++) {
+        if (matchesNode(dataNodes[index], match)) {
+          next = dataNodes[index];
+          break;
+        }
+      }
+      if (next && api.focusNode) api.focusNode(next.id);
+      else hidePopover();
+    });
+  }
+
+  function saveFindingEdit() {
+    var editor = document.getElementById('graph-node-editor');
+    if (!editor || !currentNode) return;
+    var nextText = editor.value.trim();
+    if (!nextText || nextText === (currentNode.tooltipLabel || currentNode.fullLabel || '').trim()) {
+      editMode = null;
+      var point = currentPopoverPoint();
+      renderPopover(currentNode, point.x, point.y);
+      return;
+    }
+    graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'PUT', {
+      old_text: currentNode.tooltipLabel || currentNode.fullLabel || '',
+      new_text: nextText
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+      graphToast('Finding updated', 'ok');
+      editMode = null;
+      return reloadGraph({ kind: 'finding', projectName: currentNode.projectName, tooltipLabel: nextText });
+    }).catch(function(err) {
+      graphToast('Update failed: ' + err.message, 'err');
+    });
+  }
+
+  function saveTaskEdit() {
+    var editor = document.getElementById('graph-node-editor');
+    var sectionEl = document.getElementById('graph-task-section');
+    var priorityEl = document.getElementById('graph-task-priority');
+    if (!editor || !currentNode) return;
+    var nextText = editor.value.trim();
+    if (!nextText) {
+      graphToast('Task text cannot be empty', 'err');
+      return;
+    }
+    var updates = { text: nextText };
+    if (sectionEl && sectionEl.value) updates.section = sectionEl.value;
+    if (priorityEl) updates.priority = priorityEl.value;
+    graphRequest('/api/tasks/update', 'POST', {
+      project: currentNode.projectName,
+      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
+      text: updates.text,
+      section: updates.section || '',
+      priority: updates.priority || ''
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+      graphToast('Task updated', 'ok');
+      editMode = null;
+      var nextSection = updates.section || currentNode.section || 'Queue';
+      if (nextSection === 'Done') {
+        hidePopover();
+        return reloadGraph(null);
+      }
+      return reloadGraph({ kind: 'task', projectName: currentNode.projectName, tooltipLabel: nextText });
+    }).catch(function(err) {
+      graphToast('Update failed: ' + err.message, 'err');
+    });
+  }
+
+  function deleteCurrentNode() {
+    if (!currentNode) return;
+    if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
+    if (currentNode.kind === 'finding') {
+      graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'DELETE', {
+        text: currentNode.tooltipLabel || currentNode.fullLabel || ''
+      }).then(function(result) {
+        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
+        graphToast('Finding deleted', 'ok');
+        return reloadGraph(null);
+      }).catch(function(err) {
+        graphToast('Delete failed: ' + err.message, 'err');
+      });
+      return;
+    }
+    if (currentNode.kind === 'task') {
+      graphRequest('/api/tasks/remove', 'POST', {
+        project: currentNode.projectName,
+        item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
+      }).then(function(result) {
+        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
+        graphToast('Task removed', 'ok');
+        return reloadGraph(null);
+      }).catch(function(err) {
+        graphToast('Delete failed: ' + err.message, 'err');
+      });
+    }
+  }
+
+  function completeCurrentTask() {
+    if (!currentNode) return;
+    graphRequest('/api/tasks/complete', 'POST', {
+      project: currentNode.projectName,
+      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
+      graphToast('Task completed', 'ok');
+      return reloadGraph(null);
+    }).catch(function(err) {
+      graphToast('Update failed: ' + err.message, 'err');
+    });
+  }
+
+  function moveCurrentTask(section) {
+    if (!currentNode) return;
+    graphRequest('/api/tasks/update', 'POST', {
+      project: currentNode.projectName,
+      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
+      section: section
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
+      graphToast('Task moved to ' + section, 'ok');
+      return reloadGraph({ kind: 'task', projectName: currentNode.projectName, tooltipLabel: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '' });
+    }).catch(function(err) {
+      graphToast('Update failed: ' + err.message, 'err');
+    });
+  }
+
+  function bindPopoverActions() {
+    var closeBtn = document.getElementById('graph-node-close');
+    if (closeBtn) closeBtn.onclick = hidePopover;
+
+    document.querySelectorAll('[data-graph-action]').forEach(function(button) {
+      button.addEventListener('click', function() {
+        var action = button.getAttribute('data-graph-action');
+        if (action === 'edit') {
+          editMode = currentNode && (currentNode.kind === 'finding' || currentNode.kind === 'task') ? currentNode.kind : null;
+          var point = currentPopoverPoint();
+          renderPopover(currentNode, point.x, point.y);
+        } else if (action === 'cancel-edit') {
+          editMode = null;
+          var point = currentPopoverPoint();
+          renderPopover(currentNode, point.x, point.y);
+        } else if (action === 'save-edit') {
+          if (editMode === 'task') saveTaskEdit();
+          else saveFindingEdit();
+        } else if (action === 'delete') {
+          deleteCurrentNode();
+        } else if (action === 'complete') {
+          completeCurrentTask();
+        } else if (action === 'move-active') {
+          moveCurrentTask('Active');
+        } else if (action === 'move-queue') {
+          moveCurrentTask('Queue');
+        }
+      });
+    });
+  }
+
+  function ensureHostBindings() {
+    var api = graphApi();
+    if (!api || !api.onNodeSelect) return false;
+    api.onNodeSelect(function(node, x, y) {
+      if (!node) {
+        currentNode = null;
+        editMode = null;
+        var popover = document.getElementById('graph-node-popover');
+        if (popover) popover.style.display = 'none';
+        return;
+      }
+      editMode = null;
+      renderPopover(node, x, y);
+    });
+    if (typeof api.onSelectionClear === 'function') {
+      api.onSelectionClear(function() {
+        currentNode = null;
+        editMode = null;
+        var popover = document.getElementById('graph-node-popover');
+        if (popover) popover.style.display = 'none';
+      });
+    }
+    return true;
+  }
+
+  function onOutsidePointer(event) {
+    var popover = document.getElementById('graph-node-popover-card');
+    if (!currentNode || !popover) return;
+    if (popover.contains(event.target)) return;
+    hidePopover();
+  }
+
+  function onEscape(event) {
+    if (event.key !== 'Escape' || !currentNode) return;
+    if (editMode) {
+      editMode = null;
+      var point = currentPopoverPoint();
+      renderPopover(currentNode, point.x, point.y);
+      return;
+    }
+    hidePopover();
+  }
+
+  document.addEventListener('pointerdown', onOutsidePointer);
+  document.addEventListener('keydown', onEscape);
+
+  if (!ensureHostBindings()) {
+    var tries = 0;
+    var timer = setInterval(function() {
+      tries++;
+      if (ensureHostBindings() || tries > 40) clearInterval(timer);
+    }, 100);
+  }
+})();`;
+}

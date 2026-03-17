@@ -19,6 +19,7 @@ import {
   addTask as addTaskStore,
   completeTask as completeTaskStore,
   removeTask as removeTaskStore,
+  updateTask as updateTaskStore,
   TASKS_FILENAME,
 } from "./data-access.js";
 import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "./utils.js";
@@ -1000,6 +1001,35 @@ export function createWebUiHttpServer(
           return;
         }
         const result = removeTaskStore(phrenPath, project, item);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/tasks/update") {
+      void readFormBody(req, res).then((parsed) => {
+        if (!parsed) return;
+        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
+        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
+        const project = String(parsed.project || "");
+        const item = String(parsed.item || "");
+        if (!project || !item || !isValidProjectName(project)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
+          return;
+        }
+
+        const updates: {
+          text?: string;
+          priority?: string;
+          section?: string;
+        } = {};
+        if (Object.prototype.hasOwnProperty.call(parsed, "text")) updates.text = String(parsed.text || "");
+        if (Object.prototype.hasOwnProperty.call(parsed, "priority")) updates.priority = String(parsed.priority || "");
+        if (Object.prototype.hasOwnProperty.call(parsed, "section")) updates.section = String(parsed.section || "");
+
+        const result = updateTaskStore(phrenPath, project, item, updates);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
       });
