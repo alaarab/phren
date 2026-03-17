@@ -115,7 +115,7 @@ ${TASK_UI_STYLES}
       </label>
       <span id="review-filter-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
       <label id="review-select-all" style="display:none;align-items:center;gap:6px;font-size:var(--text-sm);color:var(--muted);cursor:pointer;user-select:none">
-        <input type="checkbox" onchange="toggleSelectAll(this.checked)" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)" />
+        <input type="checkbox" id="review-select-all-cb" style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)" />
         Select all
       </label>
       <span id="review-sync-status" class="review-sync-dot" title="Sync status">
@@ -125,9 +125,9 @@ ${TASK_UI_STYLES}
 
     <div id="batch-bar" class="batch-bar">
       <span id="batch-count" class="batch-bar-count"></span>
-      <button class="btn btn-sm btn-approve" onclick="batchAction('approve')">Approve selected</button>
-      <button class="btn btn-sm btn-reject" onclick="batchAction('reject')">Reject selected</button>
-      <button class="btn btn-sm" onclick="clearBatchSelection()">Clear</button>
+      <button class="btn btn-sm btn-approve" data-batch-action="approve">Approve selected</button>
+      <button class="btn btn-sm btn-reject" data-batch-action="reject">Reject selected</button>
+      <button class="btn btn-sm" data-batch-action="clear">Clear</button>
     </div>
 
     <div class="review-cards" id="review-cards-list">
@@ -339,10 +339,10 @@ ${renderSkillUiEnhancementScript(h(authToken || ""))}
 ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
 <script${nonceAttr}>
-${renderTasksAndSettingsScript(h(authToken || ""))}
+${renderTasksAndSettingsScript(authToken || "")}
 </script>
 <script${nonceAttr}>
-${renderSearchScript(h(authToken || ""))}
+${renderSearchScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderEventWiringScript()}
