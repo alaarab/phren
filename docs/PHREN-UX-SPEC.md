@@ -70,13 +70,14 @@ Phren has a specific set of verbs that define how it speaks and how users speak 
 
 ### 2.1 What Phren Looks Like
 
-Phren is a small glowing orb, an ember of awareness. He is geometric, warm, and simple enough to animate smoothly. He matches the amber/copper center of the main icon: the knowledge at the heart of the network.
+Phren is a small purple pixel creature — a soft, round brain-like character with a friendly face, stubby legs, and a cyan sparkle. He is geometric, gentle, and simple enough to animate smoothly. He matches the purple/indigo palette of the main icon.
 
 **Visual description:**
-- A radial gradient orb: bright warm center (#FDE89A -> #F5C840 -> #D4892E -> #8B4A12)
-- A soft pulsing ambient glow around him (#D4892E at low opacity)
-- A faint dashed orbit ring that rotates slowly, hinting at the connections he maintains
-- A small bright inner spot , his "awareness," the center of attention
+- A pixel-art body in soft lavender-purple (#9A8CF8 range)
+- Deeper violet shadows for depth (#5040E0 range)
+- Dark indigo outlines (#1E2070 range)
+- A cyan sparkle/antenna accent (#28D2F2) — his signature detail
+- Light periwinkle feet (#9EA0F8 range)
 
 **Size:** 64x64 SVG at full resolution. Scales down to 20px for status bar, 32px for inline UI, 48px for graph explorer.
 
@@ -118,7 +119,7 @@ This is phren's showcase moment. When the user clicks a fragment node in the kno
 | **Web UI header** | Small static orb next to wordmark, pulses on sync | 20px |
 | **Web UI empty states** | Idle phren with message below ("Nothing here yet") | 48px |
 | **Web UI loading** | Retrieving-state phren while data loads | 32px |
-| **VS Code status bar** | Simplified: just the colored dot (amber/green/red), phren-derived | 8px dot |
+| **VS Code status bar** | Simplified: just the colored dot (purple/green/red), phren-derived | 8px dot |
 | **CLI** | Not visual, personality only through text | n/a |
 | **Docs site hero** | Large animated phren with orbit ring, idle state | 80px |
 | **README** | Static icon (existing icon.svg, not the character) | 100px |
@@ -127,7 +128,7 @@ This is phren's showcase moment. When the user clicks a fragment node in the kno
 
 - **Never cute.** Phren is not a mascot. He's a presence, closer to a firefly than a cartoon.
 - **Never in the way.** His animations are subtle. If you're not looking for him, you might not notice. That's fine.
-- **Warm, not flashy.** The amber glow should feel like candlelight, not neon. Opacity stays low on the ambient effects.
+- **Soft, not flashy.** The purple glow should feel gentle, not neon. Opacity stays low on the ambient effects.
 - **Purposeful movement.** He only moves when there's a reason: retrieving a fragment, acknowledging an action. No idle wandering.
 - **Scale gracefully.** At 20px he's just a glowing dot. At 80px you see the full gradient, orbit ring, and inner highlight. Both should feel like the same character.
 
@@ -137,7 +138,7 @@ This is phren's showcase moment. When the user clicks a fragment node in the kno
 
 ### 2.1 Philosophy
 
-The current phren icon already tells the story: a warm copper ember at center (your knowledge) surrounded by cool indigo nodes (the connections phren maintains). The rebrand makes this duality the entire palette.
+The phren icon tells the story: a purple pixel character (your knowledge keeper) with a cyan sparkle (awareness) on a deep indigo background (the dark space where memory lives). The palette follows the icon.
 
 ### 2.2 Palette
 
@@ -145,12 +146,12 @@ The current phren icon already tells the story: a warm copper ember at center (y
 
 | Token | Light | Dark | Usage |
 |---|---|---|---|
-| `--phren-amber` | `#b8860b` | `#d4892e` | Primary accent. Phren's voice. |
-| `--phren-amber-dim` | `rgba(184,134,11,.08)` | `rgba(212,137,46,.10)` | Subtle amber backgrounds |
-| `--phren-amber-glow` | `rgba(184,134,11,.15)` | `rgba(212,137,46,.18)` | Hover states, focus rings |
-| `--phren-copper` | `#8b4a12` | `#f5c840` | Highlights, active states |
-| `--phren-indigo` | `#2b5f8e` | `#3a7bae` | Secondary. Structure, links. |
-| `--phren-indigo-dim` | `rgba(43,95,142,.08)` | `rgba(58,123,174,.10)` | Subtle structure backgrounds |
+| `--phren-purple` | `#7c3aed` | `#9B8CF8` | Primary accent. Phren's voice. |
+| `--phren-purple-dim` | `rgba(124,58,237,.08)` | `rgba(155,140,248,.10)` | Subtle purple backgrounds |
+| `--phren-purple-glow` | `rgba(124,58,237,.15)` | `rgba(155,140,248,.18)` | Hover states, focus rings |
+| `--phren-violet` | `#5B43F3` | `#6B5DF0` | Highlights, active states |
+| `--phren-cyan` | `#28D2F2` | `#28D3F2` | Secondary accent. Sparkle, links. |
+| `--phren-cyan-dim` | `rgba(40,210,242,.08)` | `rgba(40,211,242,.10)` | Subtle cyan backgrounds |
 
 #### Surface Colors
 
@@ -169,7 +170,7 @@ The current phren icon already tells the story: a warm copper ember at center (y
 | Token | Value | Usage |
 |---|---|---|
 | `--success` | `#10b981` | Healthy, synced, complete |
-| `--warning` | `#d4892e` | Matches amber, phren's notices |
+| `--warning` | `#eab308` | Standard warning yellow |
 | `--danger` | `#c45a4a` | Warmer red, errors |
 
 ### 2.3 Graph Visualization Colors
@@ -178,10 +179,10 @@ The knowledge graph is phren's signature visual. Fragment nodes use topic-hashed
 
 | Node Type | Old Color | New Color | Why |
 |---|---|---|---|
-| project | `#7c3aed` (purple) | `#d4892e` (amber) | Projects are central knowledge, warm |
-| fragment (was entity) | `#06b6d4` (cyan) | `#3a7bae` (indigo) | Fragments are structural connections |
+| project | `#7c3aed` (purple) | `#7c3aed` (purple) | Projects are central knowledge, matches brand |
+| fragment (was entity) | `#06b6d4` (cyan) | `#28D2F2` (cyan) | Fragments use the cyan sparkle accent |
 | task-active | `#10b981` (green) | `#10b981` (green) | Keep, universally understood |
-| task-queue | `#eab308` (yellow) | `#b8860b` (dark gold) | Align with amber family |
+| task-queue | `#eab308` (yellow) | `#eab308` (yellow) | Keep, universally understood |
 | reference | `#14b8a6` (teal) | `#6b8e7a` (sage) | Quieter, natural tone |
 
 ---
@@ -267,13 +268,13 @@ New: "The MCP server" (drop the number, it changes and sounds like bragging)
 
 ### 4.1 Philosophy
 
-Phren's CLI reads like notes in a margin, not a dashboard. Quiet text, amber highlights only for phren's own contributions (what it surfaced, what it noticed).
+Phren's CLI reads like notes in a margin, not a dashboard. Quiet text, purple/cyan highlights only for phren's own contributions (what it surfaced, what it noticed).
 
 ### 4.2 ANSI Color Mapping
 
 | Purpose | Current | Phren |
 |---|---|---|
-| Phren's voice (notices, surfaces) | cyan | yellow/amber (`\x1b[33m`) |
+| Phren's voice (notices, surfaces) | cyan | purple (`\x1b[35m`) |
 | Success/confirmation | green | green (keep) |
 | Errors | red | red (keep) |
 | Structure/labels | bold white | dim white (`\x1b[2m`) |
@@ -371,16 +372,16 @@ Move from "admin dashboard" to "knowledge workspace." The Web UI is where you se
 - Left: phren icon (small, 20px) + "phren" wordmark
 - Right: project selector + theme toggle + sync indicator
 
-**Sync indicator:** A small amber dot that pulses gently when syncing, solid when synced, hollow when disconnected. Not a badge with text. Just a dot.
+**Sync indicator:** A small purple dot that pulses gently when syncing, solid when synced, hollow when disconnected. Not a badge with text. Just a dot.
 
 ### 5.3 Color System Update
 
-Replace the current cyan accent throughout with amber:
+Keep the purple/cyan accent palette consistent across surfaces:
 
 ```css
 :root {
   /* Phren palette */
-  --accent: #b8860b;
+  --accent: #9B8CF8;
   --accent-hover: #9a7209;
   --accent-dim: rgba(184,134,11,.08);
   --accent-glow: rgba(184,134,11,.15);
@@ -392,7 +393,7 @@ Replace the current cyan accent throughout with amber:
 }
 
 [data-theme="dark"] {
-  --accent: #d4892e;
+  --accent: #7c3aed;
   --accent-hover: #e09a3a;
   --accent-dim: rgba(212,137,46,.10);
   --accent-glow: rgba(212,137,46,.18);
@@ -407,11 +408,11 @@ Replace the current cyan accent throughout with amber:
 
 The graph is phren's showcase, and the home of his signature interaction (see section 2.3). Changes:
 - Rename "entity" to "fragment" everywhere in labels, tooltips, legend
-- Project nodes use amber (`#d4892e`), fragment nodes use indigo (`#3a7bae`)
-- Connection lines between fragments use warm copper tones (from the icon: `#8B5A1A`)
+- Project nodes use purple (`#7c3aed`), fragment nodes use cyan (`#28D2F2`)
+- Connection lines between fragments use soft indigo tones (`#4040A0`)
 - The center glow effect on project nodes mirrors the icon's ember
 - **Phren character lives here:** His orb sits at the center of the graph on load, and moves toward nodes when clicked. See section 2.3 for the full interaction spec.
-- When phren moves toward a node, the detail panel opens with that node's content. The tooltip during movement reads "retrieving..." in amber text.
+- When phren moves toward a node, the detail panel opens with that node's content. The tooltip during movement reads "retrieving..." in cyan text.
 
 ### 5.5 Fragment List (was Findings)
 
@@ -448,7 +449,7 @@ PHREN
 ### 6.2 Status Bar
 
 Left side of status bar: `phren` with a colored dot:
-- Amber dot: syncing
+- Purple dot: syncing
 - Green dot: synced
 - No dot: disconnected/inactive
 - Red dot: error
@@ -458,7 +459,7 @@ Click opens the phren sidebar.
 ### 6.3 Theme Integration
 
 VS Code has its own theming. Phren's extension should:
-- Use `ThemeColor` API for icons (amber accent where possible)
+- Use `ThemeColor` API for icons (purple accent where possible)
 - Not fight the user's theme. Adapt to it
 - Use standard VS Code tree view patterns, not custom webviews (for the sidebar)
 
@@ -468,14 +469,14 @@ VS Code has its own theming. Phren's extension should:
 
 ### 7.1 Current State
 
-The docs site at `docs/index.html` uses the phren icon palette (dark background, copper center, indigo nodes). This is already close to phren's direction.
+The docs site at `docs/index.html` uses the phren icon palette (dark background, purple character, cyan sparkle). This already matches phren's direction.
 
 ### 7.2 Changes
 
 - Replace all "phren" with "phren" in text and meta tags
 - Replace all "entity" with "fragment"
 - The hero section SVG animation should keep the node-graph motif but use "fragment" language
-- Color scheme: keep the dark background (`#0A0B09`), warm text (`#E8E4D9`), copper/indigo palette
+- Color scheme: keep the dark background (`#0A0B09`), warm text (`#E8E4D9`), purple/cyan palette
 - Navigation: "phren" wordmark becomes "phren"
 
 ### 7.3 New Hero Copy
@@ -555,7 +556,7 @@ phren
 
 | Area | File(s) | Change |
 |---|---|---|
-| Web UI colors | `memory-ui-assets.ts` | Replace cyan accent with amber, warm backgrounds |
+| Web UI colors | `memory-ui-assets.ts` | Keep purple/cyan palette consistent across all views |
 | Graph node types | `mcp/browser/memory-ui-graph-app.ts` | Rename `entity` -> `fragment`, update COLORS map |
 | CLI status | `status.ts` | New format, phren branding |
 | CLI shell | `shell-render.ts`, `shell-view.ts` | Rename labels, adjust color usage |
