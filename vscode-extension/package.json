@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -170,22 +170,70 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "phren.toggleSkill", "when": "false" },
-        { "command": "phren.toggleHook", "when": "false" },
-        { "command": "phren.openSessionOverview", "when": "false" },
-        { "command": "phren.copySessionId", "when": "false" },
-        { "command": "phren.filterFindingsByDate", "when": "false" },
-        { "command": "phren.completeTask", "when": "false" },
-        { "command": "phren.removeTask", "when": "false" },
-        { "command": "phren.pinTask", "when": "false" },
-        { "command": "phren.updateTask", "when": "false" },
-        { "command": "phren.removeFinding", "when": "false" },
-        { "command": "phren.supersedeFinding", "when": "false" },
-        { "command": "phren.retractFinding", "when": "false" },
-        { "command": "phren.resolveContradiction", "when": "false" },
-        { "command": "phren.linkTaskIssue", "when": "false" },
-        { "command": "phren.createTaskIssue", "when": "false" },
-        { "command": "phren.toggleProject", "when": "false" }
+        {
+          "command": "phren.toggleSkill",
+          "when": "false"
+        },
+        {
+          "command": "phren.toggleHook",
+          "when": "false"
+        },
+        {
+          "command": "phren.openSessionOverview",
+          "when": "false"
+        },
+        {
+          "command": "phren.copySessionId",
+          "when": "false"
+        },
+        {
+          "command": "phren.filterFindingsByDate",
+          "when": "false"
+        },
+        {
+          "command": "phren.completeTask",
+          "when": "false"
+        },
+        {
+          "command": "phren.removeTask",
+          "when": "false"
+        },
+        {
+          "command": "phren.pinTask",
+          "when": "false"
+        },
+        {
+          "command": "phren.updateTask",
+          "when": "false"
+        },
+        {
+          "command": "phren.removeFinding",
+          "when": "false"
+        },
+        {
+          "command": "phren.supersedeFinding",
+          "when": "false"
+        },
+        {
+          "command": "phren.retractFinding",
+          "when": "false"
+        },
+        {
+          "command": "phren.resolveContradiction",
+          "when": "false"
+        },
+        {
+          "command": "phren.linkTaskIssue",
+          "when": "false"
+        },
+        {
+          "command": "phren.createTaskIssue",
+          "when": "false"
+        },
+        {
+          "command": "phren.toggleProject",
+          "when": "false"
+        }
       ],
       "editor/context": [
         {
@@ -345,7 +393,12 @@
         "properties": {
           "phren.findingSensitivity": {
             "type": "string",
-            "enum": ["minimal", "conservative", "balanced", "aggressive"],
+            "enum": [
+              "minimal",
+              "conservative",
+              "balanced",
+              "aggressive"
+            ],
             "default": "balanced",
             "order": 1,
             "enumDescriptions": [
@@ -358,7 +411,11 @@
           },
           "phren.proactivity": {
             "type": "string",
-            "enum": ["high", "medium", "low"],
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
             "default": "high",
             "order": 2,
             "enumDescriptions": [
@@ -370,7 +427,11 @@
           },
           "phren.proactivityFindings": {
             "type": "string",
-            "enum": ["high", "medium", "low"],
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
             "default": "high",
             "order": 3,
             "enumDescriptions": [
@@ -382,7 +443,11 @@
           },
           "phren.proactivityTasks": {
             "type": "string",
-            "enum": ["high", "medium", "low"],
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
             "default": "high",
             "order": 4,
             "enumDescriptions": [
@@ -394,7 +459,12 @@
           },
           "phren.taskMode": {
             "type": "string",
-            "enum": ["off", "manual", "suggest", "auto"],
+            "enum": [
+              "off",
+              "manual",
+              "suggest",
+              "auto"
+            ],
             "default": "auto",
             "order": 5,
             "enumDescriptions": [
