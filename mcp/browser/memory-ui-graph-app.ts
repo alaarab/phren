@@ -202,7 +202,7 @@ const state = {
   filterHealth: "all",
   filterProject: "all",
   searchQuery: "",
-  nodeLimit: 650,
+  nodeLimit: 2000,
   theme: "dark" as "dark" | "light",
   draggedNode: null as string | null,
   isDragging: false,
@@ -967,7 +967,7 @@ function buildFilterBar(): void {
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Health</div>',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px">${healthSection}</div>`,
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Node limit</div>',
-    `<input type="number" data-limit-input min="50" max="5000" value="${state.nodeLimit}" style="width:120px;padding:7px 9px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />`,
+    `<input type="number" data-limit-input min="50" max="50000" value="${state.nodeLimit}" style="width:120px;padding:7px 9px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />`,
     '</div>',
     '</div>',
     `<span style="flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap">${state.visibleNodes.length} / ${state.rawNodes.length}</span>`,
@@ -1023,7 +1023,7 @@ function buildFilterBar(): void {
   limitInput?.addEventListener("change", () => {
     const nextLimit = Number.parseInt(limitInput.value, 10);
     if (!Number.isFinite(nextLimit)) return;
-    state.nodeLimit = clamp(nextLimit, 50, 5000);
+    state.nodeLimit = clamp(nextLimit, 50, 50000);
     limitInput.value = String(state.nodeLimit);
     applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
   });
