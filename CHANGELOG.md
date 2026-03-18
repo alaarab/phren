@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.21] - 2026-03-17
+
+### Changed
+- **Organic graph layout**: replaced circular ring anchor with shuffled grid + jitter; tighter child node scatter; linLogMode + lower gravity for natural community separation; weak inter-project edges for shared entities
+- **Repo cleanup**: removed dead MP4 video, unused demo HTML, redundant example profiles
+
 ## [0.0.20] - 2026-03-17
 
 ### Changed
