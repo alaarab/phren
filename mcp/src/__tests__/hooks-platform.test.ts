@@ -62,11 +62,20 @@ describe("hooks platform compatibility", () => {
   }
 
   describe("buildLifecycleCommands platform behavior", () => {
+    // On Windows, paths in commands get double-backslash escaped inside set "VAR=..."
+    const isWin = process.platform === "win32";
+    function cmdContainsPath(cmd: string, p: string): boolean {
+      if (cmd.includes(p)) return true;
+      // On Windows, backslashes are doubled in the set command
+      if (isWin && cmd.includes(p.replace(/\\/g, "\\\\"))) return true;
+      return false;
+    }
+
     it("generates hookTool command alongside other lifecycle commands", () => {
       const cmds = buildLifecycleCommands(phrenPath);
       expect(cmds).toHaveProperty("hookTool");
       expect(cmds.hookTool).toContain("hook-tool");
-      expect(cmds.hookTool).toContain(phrenPath);
+      expect(cmdContainsPath(cmds.hookTool, phrenPath)).toBe(true);
     });
 
     it("handles paths with spaces correctly", () => {
@@ -75,7 +84,7 @@ describe("hooks platform compatibility", () => {
       const cmds = buildLifecycleCommands(spacedPath);
       expect(cmds.sessionStart).toContain("my phren path");
       // Path should be quoted — single quotes on POSIX, double quotes on Windows
-      if (process.platform === "win32") {
+      if (isWin) {
         expect(cmds.sessionStart).toContain('set "PHREN_PATH=');
       } else {
         expect(cmds.sessionStart).toContain("PHREN_PATH='");
@@ -84,13 +93,13 @@ describe("hooks platform compatibility", () => {
 
     it("handles paths with backslashes", () => {
       const cmds = buildLifecycleCommands("/tmp/path\\with\\backslashes");
-      expect(cmds.sessionStart).toContain("/tmp/path\\with\\backslashes");
+      expect(cmdContainsPath(cmds.sessionStart, "/tmp/path\\with\\backslashes")).toBe(true);
     });
 
     it("all four commands reference the same phren path", () => {
       const cmds = buildLifecycleCommands(phrenPath);
       for (const cmd of [cmds.sessionStart, cmds.userPromptSubmit, cmds.stop, cmds.hookTool]) {
-        expect(cmd).toContain(phrenPath);
+        expect(cmdContainsPath(cmd, phrenPath)).toBe(true);
       }
     });
   });
