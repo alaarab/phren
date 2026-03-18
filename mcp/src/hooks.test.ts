@@ -76,7 +76,11 @@ describe("hooks", () => {
 
     it("quotes paths with special characters safely", () => {
       const cmds = buildLifecycleCommands('/tmp/my "phren" path');
-      expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path'`);
+      if (process.platform === "win32") {
+        expect(cmds.sessionStart).toContain('set "PHREN_PATH=/tmp/my \\"phren\\" path"');
+      } else {
+        expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path'`);
+      }
     });
   });
 
@@ -456,7 +460,11 @@ describe("hooks", () => {
       expect(cmds.sessionStart).toMatch(/npx -y @phren\/cli@.+ hook-session-start/);
       expect(cmds.userPromptSubmit).toMatch(/npx -y @phren\/cli@.+ hook-prompt/);
       expect(cmds.stop).toMatch(/npx -y @phren\/cli@.+ hook-stop/);
-      expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path\\nested'`);
+      if (process.platform === "win32") {
+        expect(cmds.sessionStart).toContain('set "PHREN_PATH=/tmp/my \\"phren\\" path\\\\nested"');
+      } else {
+        expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path\\nested'`);
+      }
     });
 
     it("buildLifecycleCommands uses local node entry script when available", () => {
