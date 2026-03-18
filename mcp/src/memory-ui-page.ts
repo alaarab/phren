@@ -51,29 +51,73 @@ ${TASK_UI_STYLES}
 
 <div class="header">
   <div class="header-brand">
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="hdr-brain" cx="45%" cy="40%" r="55%">
-          <stop offset="0%" stop-color="#9B8BC4"/>
-          <stop offset="50%" stop-color="#7B68AE"/>
-          <stop offset="100%" stop-color="#5B4B8A"/>
-        </radialGradient>
-      </defs>
-      <!-- brain body -->
-      <ellipse cx="12" cy="12" rx="8" ry="7.5" fill="url(#hdr-brain)"/>
-      <!-- brain folds -->
-      <path d="M8 9.5c1.5-1 3-0.5 4 0s2.5 0.8 3.5-0.2" stroke="#5B4B8A" stroke-width="0.7" fill="none" stroke-linecap="round"/>
-      <path d="M7.5 12c2 0.8 3.5 0.2 5-0.5s3 0 4 0.8" stroke="#5B4B8A" stroke-width="0.6" fill="none" stroke-linecap="round"/>
-      <!-- eyes (dark diamonds) -->
-      <path d="M9 11l0.8-0.8 0.8 0.8-0.8 0.8z" fill="#2D2255"/>
-      <path d="M13.4 11l0.8-0.8 0.8 0.8-0.8 0.8z" fill="#2D2255"/>
-      <!-- smile -->
-      <path d="M10.5 13.5c0.5 0.4 1.2 0.5 2 0.1" stroke="#2D2255" stroke-width="0.5" fill="none" stroke-linecap="round"/>
-      <!-- legs -->
-      <rect x="9.5" y="18.5" width="1.5" height="2" rx="0.5" fill="#5B4B8A"/>
-      <rect x="13" y="18.5" width="1.5" height="2" rx="0.5" fill="#5B4B8A"/>
-      <!-- cyan sparkle -->
-      <path d="M18 4l0.5 1.5L20 6l-1.5 0.5L18 8l-0.5-1.5L16 6l1.5-0.5z" fill="#00E5FF"/>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="24" height="24" style="image-rendering:pixelated">
+      <circle cx="32" cy="32" r="32" fill="#12122a"/>
+      <g fill="rgb(103,226,248)"><rect x="44" y="12" width="4" height="4"/></g>
+      <g fill="rgb(138,127,236)"><rect x="20" y="16" width="4" height="4"/></g>
+      <g fill="rgb(150,144,247)"><rect x="24" y="16" width="4" height="4"/></g>
+      <g fill="rgb(102,74,242)"><rect x="28" y="16" width="4" height="4"/></g>
+      <g fill="rgb(168,165,249)"><rect x="32" y="16" width="4" height="4"/></g>
+      <g fill="rgb(144,147,247)"><rect x="36" y="16" width="4" height="4"/></g>
+      <g fill="rgb(119,108,251)"><rect x="40" y="16" width="4" height="4"/></g>
+      <g fill="rgb(102,80,247)"><rect x="20" y="20" width="4" height="4"/></g>
+      <g fill="rgb(105,77,249)"><rect x="24" y="20" width="4" height="4"/></g>
+      <g fill="rgb(197,195,252)"><rect x="28" y="20" width="4" height="4"/></g>
+      <g fill="rgb(154,148,247)"><rect x="32" y="20" width="4" height="4"/></g>
+      <g fill="rgb(152,131,250)"><rect x="36" y="20" width="4" height="4"/></g>
+      <g fill="rgb(151,145,249)"><rect x="40" y="20" width="4" height="4"/></g>
+      <g fill="rgb(37,37,143)"><rect x="44" y="20" width="4" height="4"/></g>
+      <g fill="rgb(84,63,227)"><rect x="16" y="24" width="4" height="4"/></g>
+      <g fill="rgb(153,132,251)"><rect x="20" y="24" width="4" height="4"/></g>
+      <g fill="rgb(154,143,249)"><rect x="24" y="24" width="4" height="4"/></g>
+      <g fill="rgb(159,147,249)"><rect x="28" y="24" width="4" height="4"/></g>
+      <g fill="rgb(93,76,236)"><rect x="32" y="24" width="4" height="4"/></g>
+      <g fill="rgb(156,134,251)"><rect x="36" y="24" width="4" height="4"/></g>
+      <g fill="rgb(154,137,248)"><rect x="40" y="24" width="4" height="4"/></g>
+      <g fill="rgb(149,130,251)"><rect x="44" y="24" width="4" height="4"/></g>
+      <g fill="rgb(34,37,124)"><rect x="12" y="28" width="4" height="4"/></g>
+      <g fill="rgb(144,124,251)"><rect x="16" y="28" width="4" height="4"/></g>
+      <g fill="rgb(150,132,250)"><rect x="20" y="28" width="4" height="4"/></g>
+      <g fill="rgb(149,130,250)"><rect x="24" y="28" width="4" height="4"/></g>
+      <g fill="rgb(153,137,252)"><rect x="28" y="28" width="4" height="4"/></g>
+      <g fill="rgb(154,136,250)"><rect x="32" y="28" width="4" height="4"/></g>
+      <g fill="rgb(154,138,250)"><rect x="36" y="28" width="4" height="4"/></g>
+      <g fill="rgb(157,141,249)"><rect x="40" y="28" width="4" height="4"/></g>
+      <g fill="rgb(82,62,230)"><rect x="44" y="28" width="4" height="4"/></g>
+      <g fill="rgb(29,34,113)"><rect x="12" y="32" width="4" height="4"/></g>
+      <g fill="rgb(21,32,104)"><rect x="16" y="32" width="4" height="4"/></g>
+      <g fill="rgb(146,127,251)"><rect x="20" y="32" width="4" height="4"/></g>
+      <g fill="rgb(157,145,248)"><rect x="24" y="32" width="4" height="4"/></g>
+      <g fill="rgb(20,31,101)"><rect x="28" y="32" width="4" height="4"/></g>
+      <g fill="rgb(152,138,249)"><rect x="32" y="32" width="4" height="4"/></g>
+      <g fill="rgb(154,141,248)"><rect x="36" y="32" width="4" height="4"/></g>
+      <g fill="rgb(78,62,218)"><rect x="40" y="32" width="4" height="4"/></g>
+      <g fill="rgb(124,107,250)"><rect x="44" y="32" width="4" height="4"/></g>
+      <g fill="rgb(38,41,148)"><rect x="48" y="32" width="4" height="4"/></g>
+      <g fill="rgb(147,129,252)"><rect x="16" y="36" width="4" height="4"/></g>
+      <g fill="rgb(147,125,251)"><rect x="20" y="36" width="4" height="4"/></g>
+      <g fill="rgb(147,127,251)"><rect x="24" y="36" width="4" height="4"/></g>
+      <g fill="rgb(149,131,251)"><rect x="28" y="36" width="4" height="4"/></g>
+      <g fill="rgb(120,104,251)"><rect x="32" y="36" width="4" height="4"/></g>
+      <g fill="rgb(121,109,252)"><rect x="36" y="36" width="4" height="4"/></g>
+      <g fill="rgb(109,90,247)"><rect x="40" y="36" width="4" height="4"/></g>
+      <g fill="rgb(113,92,249)"><rect x="44" y="36" width="4" height="4"/></g>
+      <g fill="rgb(97,88,247)"><rect x="20" y="40" width="4" height="4"/></g>
+      <g fill="rgb(96,85,243)"><rect x="24" y="40" width="4" height="4"/></g>
+      <g fill="rgb(71,58,216)"><rect x="28" y="40" width="4" height="4"/></g>
+      <g fill="rgb(90,71,238)"><rect x="32" y="40" width="4" height="4"/></g>
+      <g fill="rgb(115,103,249)"><rect x="36" y="40" width="4" height="4"/></g>
+      <g fill="rgb(80,61,228)"><rect x="40" y="40" width="4" height="4"/></g>
+      <g fill="rgb(16,18,94)"><rect x="44" y="40" width="4" height="4"/></g>
+      <g fill="rgb(69,52,218)"><rect x="24" y="44" width="4" height="4"/></g>
+      <g fill="rgb(17,28,102)"><rect x="32" y="44" width="4" height="4"/></g>
+      <g fill="rgb(20,31,99)"><rect x="36" y="44" width="4" height="4"/></g>
+      <g fill="rgb(160,163,251)"><rect x="20" y="48" width="4" height="4"/></g>
+      <g fill="rgb(34,34,140)"><rect x="24" y="48" width="4" height="4"/></g>
+      <g fill="rgb(159,159,250)"><rect x="28" y="48" width="4" height="4"/></g>
+      <g fill="rgb(26,36,133)"><rect x="32" y="48" width="4" height="4"/></g>
+      <g fill="rgb(26,41,132)"><rect x="36" y="48" width="4" height="4"/></g>
+      <g fill="rgb(159,165,249)"><rect x="40" y="48" width="4" height="4"/></g>
     </svg>
     <span style="letter-spacing:0.04em;font-weight:500">phren</span>
   </div>

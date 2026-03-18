@@ -1,9 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <!-- Phren character - blob with eyes, monochrome for VS Code theming -->
-  <!-- Body silhouette with eye holes using fill-rule evenodd -->
+  <!-- Phren pixel-art brain mascot, monochrome for VS Code activity bar -->
   <path fill="currentColor" fill-rule="evenodd" d="
-    M7 3 h10 v2 h2 v2 h2 v10 h-2 v2 h-2 v2 h-3 v2 h-4 v-2 H7 v-2 H5 v-2 H3 V7 h2 V5 h2 V3z
-    M7 9 h3 v3 H7 V9z
-    M14 9 h3 v3 h-3 V9z
+    M16.5 4.5h1.5v1.5h-1.5z
+    M7.5 6h9v1.5h1.5v4.5h1.5v1.5h-1.5v3h-10.5v-1.5h-1.5v-1.5h-1.5v-3h1.5v-1.5h1.5v-3z
+    M6 12h1.5v1.5h-1.5z
+    M10.5 12h1.5v1.5h-1.5z
+    M9 16.5h1.5v3h-3v-1.5h1.5z
+    M15 16.5h1.5v3h-1.5z
   "/>
 </svg>
