@@ -591,9 +591,7 @@ export function renderProjectReferenceEnhancementScript(_authToken: string): str
   })();`;
 }
 
-export function renderReviewQueueEditSyncScript(): string {
-  return "";
-}
+// renderReviewQueueEditSyncScript removed — was dead code returning ""
 
 export function renderTasksAndSettingsScript(authToken: string): string {
   const safeToken = JSON.stringify(authToken).slice(1, -1);

@@ -15,6 +15,7 @@ const importPayloadSchema = z.object({
   summary: z.string().optional(),
   claudeMd: z.string().optional(),
   taskRaw: z.string().optional(),
+  findingsRaw: z.string().optional(),
   learnings: z
     .array(
       z.object({
@@ -155,8 +156,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         const buildTaskContent = () => {
           // Prefer the raw task string (lossless: preserves priority/pinned/stable IDs)
-          const taskRaw = (parsed as Record<string, unknown>).taskRaw;
-          if (typeof taskRaw === "string") return taskRaw;
+          if (typeof parsed.taskRaw === "string") return parsed.taskRaw;
           if (!parsed.task) return null;
           const sections = ["Active", "Queue", "Done"] as const;
           const lines = [`# ${projectName} tasks`, ""];
@@ -197,8 +197,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push("CLAUDE.md");
           }
 
-          const findingsRaw = (parsed as Record<string, unknown>).findingsRaw;
-          const findingsContent = typeof findingsRaw === "string" ? findingsRaw : buildFindingsContent();
+          const findingsContent = typeof parsed.findingsRaw === "string" ? parsed.findingsRaw : buildFindingsContent();
           if (findingsContent) {
             fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), findingsContent);
             imported.push("FINDINGS.md");

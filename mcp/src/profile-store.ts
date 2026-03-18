@@ -12,21 +12,9 @@ import {
   readRootManifest,
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
-import { withFileLock as withFileLockRaw } from "./shared-governance.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
 import { TASK_FILE_ALIASES } from "./data-tasks.js";
-
-function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
-  try {
-    return withFileLockRaw(filePath, fn);
-  } catch (err: unknown) {
-    const msg = errorMessage(err);
-    if (msg.includes("could not acquire lock")) {
-      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
-    }
-    throw err;
-  }
-}
+import { withSafeLock } from "./shared-data-utils.js";
 
 export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";

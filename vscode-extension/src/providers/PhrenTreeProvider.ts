@@ -450,6 +450,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         item.description = element.brief ? truncate(element.brief, 72) : undefined;
         item.iconPath = themeIcon("folder");
         item.id = `phren.project.${element.projectName}`;
+        item.contextValue = "phren.project";
         return item;
       }
       case "category": {
