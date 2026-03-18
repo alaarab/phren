@@ -6,7 +6,6 @@ import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
   renderProjectReferenceEnhancementScript,
-  renderReviewQueueEditSyncScript,
   renderTasksAndSettingsScript,
   renderSearchScript,
   renderEventWiringScript,
@@ -325,9 +324,6 @@ ${renderGraphScript()}
 </script>
 <script${nonceAttr}>
 ${renderGraphHostScript()}
-</script>
-<script${nonceAttr}>
-${renderReviewQueueEditSyncScript()}
 </script>
 <script${nonceAttr}>
 ${renderSharedWebUiHelpers(authToken || "")}

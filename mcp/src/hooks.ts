@@ -71,8 +71,14 @@ function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
 
+/** Shell-escape a value by wrapping in single quotes with proper escaping of embedded single quotes. */
+export function shellEscape(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/** @deprecated Use shellEscape instead */
 function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+  return shellEscape(value);
 }
 
 export interface LifecycleCommands {
@@ -379,7 +385,7 @@ export function validateCustomHookCommand(command: string): string | null {
   if (!trimmed) return "Command cannot be empty.";
   if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
   if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
-    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < >";
+    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < > # \\n \\r";
   }
   if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
   if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
@@ -444,27 +450,55 @@ export function validateCustomWebhookUrl(webhook: string): string | null {
   return blockedWebhookHostnameReason(parsed.hostname);
 }
 
-async function validateWebhookAtExecution(webhook: string): Promise<string | null> {
+/**
+ * Validate a webhook URL at execution time and return the resolved IP address
+ * to use for the fetch. Resolving once and re-using the IP prevents DNS
+ * rebinding attacks where the hostname resolves to a safe IP during validation
+ * but a private/loopback IP when fetch performs its own lookup.
+ *
+ * Returns { error } if blocked, or { resolvedUrl, host } if safe.
+ */
+async function validateAndResolveWebhook(webhook: string): Promise<
+  | { error: string; resolvedUrl?: undefined; host?: undefined }
+  | { error?: undefined; resolvedUrl: string; host: string }
+> {
   let parsed: URL;
   try {
     parsed = new URL(webhook);
   } catch {
-    return "webhook is not a valid URL.";
+    return { error: "webhook is not a valid URL." };
   }
 
   const literalBlock = blockedWebhookHostnameReason(parsed.hostname);
-  if (literalBlock) return literalBlock;
+  if (literalBlock) return { error: literalBlock };
+
+  // If the hostname is already a literal IP, validate it directly
+  if (isIP(parsed.hostname)) {
+    if (isPrivateOrLoopbackAddress(parsed.hostname)) {
+      return { error: `webhook hostname "${parsed.hostname}" is a private or loopback address.` };
+    }
+    return { resolvedUrl: webhook, host: parsed.hostname };
+  }
 
   try {
     const records = await lookup(parsed.hostname, { all: true, verbatim: true });
-    if (records.some((record) => isPrivateOrLoopbackAddress(record.address))) {
-      return `webhook hostname "${parsed.hostname}" resolved to a private or loopback address.`;
+    if (records.length === 0) {
+      return { error: `webhook hostname "${parsed.hostname}" did not resolve to any address.` };
     }
+    if (records.some((record) => isPrivateOrLoopbackAddress(record.address))) {
+      return { error: `webhook hostname "${parsed.hostname}" resolved to a private or loopback address.` };
+    }
+    // Use the first resolved IP to build a pinned URL, preventing DNS rebinding
+    const resolvedIp = records[0].address;
+    const pinnedUrl = new URL(webhook);
+    pinnedUrl.hostname = records[0].family === 6 ? `[${resolvedIp}]` : resolvedIp;
+    return { resolvedUrl: pinnedUrl.href, host: parsed.host };
   } catch (err: unknown) {
-    debugLog(`validateWebhookAtExecution lookup failed for ${parsed.hostname}: ${errorMessage(err)}`);
+    debugLog(`validateAndResolveWebhook lookup failed for ${parsed.hostname}: ${errorMessage(err)}`);
+    // DNS resolution failed; allow the fetch to proceed with the original URL
+    // (fetch will do its own resolution and may fail with a network error)
+    return { resolvedUrl: webhook, host: parsed.host };
   }
-
-  return null;
 }
 
 const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
@@ -531,17 +565,24 @@ export function runCustomHooks(
       if (hook.secret) {
         headers["X-Phren-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
       }
-      void validateWebhookAtExecution(hook.webhook)
-        .then((blockReason) => {
-          if (blockReason) {
-            const message = `${event}: skipped webhook ${hook.webhook}: ${blockReason}`;
+      void validateAndResolveWebhook(hook.webhook)
+        .then((result) => {
+          if ("error" in result && result.error) {
+            const message = `${event}: skipped webhook ${hook.webhook}: ${result.error}`;
             debugLog(`runCustomHooks webhook: ${message}`);
             appendHookErrorLog(phrenPath, event, message);
             return;
           }
-          return fetch(hook.webhook, {
+          // Use the pinned resolved URL to prevent DNS rebinding;
+          // set Host header to the original hostname for correct routing.
+          const { resolvedUrl, host } = result as { resolvedUrl: string; host: string };
+          const fetchHeaders = { ...headers };
+          if (host) {
+            fetchHeaders["Host"] = host;
+          }
+          return fetch(resolvedUrl, {
             method: "POST",
-            headers,
+            headers: fetchHeaders,
             body: payload,
             redirect: "manual",
             signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT),

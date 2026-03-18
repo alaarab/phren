@@ -695,18 +695,9 @@ function hideTooltip(): void {
   state.tooltip.textContent = "";
 }
 
-function showTooltip(nodeId: string, event: { x: number; y: number }): void {
-  if (!state.tooltip || !state.container) return;
-  const detail = nodeDetail(nodeId);
-  if (!detail) return;
-  const maxWidth = Math.max(180, Math.min(360, state.container.clientWidth - 24));
-  const left = clamp(event.x + 14, 10, Math.max(10, state.container.clientWidth - maxWidth - 12));
-  const top = clamp(event.y + 14, 10, Math.max(10, state.container.clientHeight - 120));
-  state.tooltip.style.left = `${left}px`;
-  state.tooltip.style.top = `${top}px`;
-  state.tooltip.style.maxWidth = `${maxWidth}px`;
-  state.tooltip.textContent = detail.fullLabel || detail.label;
-  state.tooltip.classList.add("visible");
+function showTooltip(_nodeId: string, _event: { x: number; y: number }): void {
+  // Disabled: sigma already renders node labels on canvas via drawCustomLabel.
+  // Showing the tooltip too caused duplicate label text on hover.
 }
 
 function notifySelection(nodeId: string): void {
@@ -1171,7 +1162,7 @@ const mascot = {
   currentNodeId: null as string | null,
   lastVisited: null as string | null,
   idleTimer: 0,
-  idlePause: 5.0,
+  idlePause: 30.0,
   userTarget: false,
 };
 
@@ -1251,14 +1242,14 @@ function mascotUpdate(dt: number): void {
         mascot.currentNodeId = mascot.targetNodeId;
       }
       mascot.idleTimer = 0;
-      mascot.idlePause = mascot.userTarget ? 3.0 + Math.random() * 2.0 : 3.0 + Math.random() * 3.0;
+      mascot.idlePause = mascot.userTarget ? 30.0 + Math.random() * 5.0 : 30.0 + Math.random() * 10.0;
     } else {
-      // User clicks: ~1s to cross. Auto-wander: ~2s leisurely stroll.
-      const divisor = mascot.userTarget ? 50 : 90;
+      // User clicks: ~0.4s to cross. Auto-wander: ~0.7s brisk walk.
+      const divisor = mascot.userTarget ? 20 : 35;
       const t = mascot.tripDist > 0 ? Math.min(1, mascot.tripProgress / mascot.tripDist) : 1;
       const easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
-      const baseSpeed = Math.max(mascot.userTarget ? 0.008 : 0.003, mascot.tripDist / divisor);
-      const speed = Math.min(dist, Math.max(0.002, baseSpeed * (0.25 + 0.75 * easeInOut)));
+      const baseSpeed = Math.max(mascot.userTarget ? 0.020 : 0.008, mascot.tripDist / divisor);
+      const speed = Math.min(dist, Math.max(0.005, baseSpeed * (0.25 + 0.75 * easeInOut)));
       mascot.gx += (dx / dist) * speed;
       mascot.gy += (dy / dist) * speed;
       mascot.tripProgress += speed;

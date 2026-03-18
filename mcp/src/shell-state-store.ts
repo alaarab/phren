@@ -1,20 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import { phrenErr, PhrenError, phrenOk, type PhrenResult, shellStateFile } from "./shared.js";
-import { withFileLock as withFileLockRaw } from "./shared-governance.js";
+import { phrenOk, type PhrenResult, shellStateFile } from "./shared.js";
+import { withSafeLock } from "./shared-data-utils.js";
 import { errorMessage } from "./utils.js";
-
-function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
-  try {
-    return withFileLockRaw(filePath, fn);
-  } catch (err: unknown) {
-    const msg = errorMessage(err);
-    if (msg.includes("could not acquire lock")) {
-      return phrenErr(`Could not acquire write lock for "${path.basename(filePath)}". Another write may be in progress; please retry.`, PhrenError.LOCK_TIMEOUT);
-    }
-    throw err;
-  }
-}
 
 export interface ShellState {
   version: number;

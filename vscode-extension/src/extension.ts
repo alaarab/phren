@@ -456,39 +456,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
-  // --- Pin Memory command ---
-  const pinMemoryDisposable = vscode.commands.registerCommand("phren.pinMemory", async () => {
-    let project = statusBar.getActiveProjectName();
-    if (!project) {
-      const projectsRaw = await phrenClient.listProjects();
-      const projectsData = asRecord(asRecord(projectsRaw)?.data);
-      const projects = asArraySafe(projectsData?.projects);
-      const projectNames: string[] = [];
-      for (const p of projects) {
-        const rec = asRecord(p);
-        const name = typeof rec?.name === "string" ? rec.name : undefined;
-        if (name) projectNames.push(name);
-      }
-      if (projectNames.length === 0) {
-        await vscode.window.showWarningMessage("No Phren projects found.");
-        return;
-      }
-      project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
-      if (!project) return;
-    }
-
-    const memoryText = await vscode.window.showInputBox({ prompt: "Enter memory text to pin" });
-    const trimmedMemoryText = memoryText?.trim();
-    if (!trimmedMemoryText) return;
-
-    try {
-      await phrenClient.pinMemory(project, trimmedMemoryText);
-      await vscode.window.showInformationMessage(`Memory pinned to ${project}`);
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to pin memory: ${toErrorMessage(error)}`);
-    }
-  });
-
   // --- Supersede Finding command ---
   const supersedeFindingDisposable = vscode.commands.registerCommand(
     "phren.supersedeFinding",
@@ -736,115 +703,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  // --- Hooks Status command ---
-  const hooksStatusDisposable = vscode.commands.registerCommand("phren.hooksStatus", async () => {
-    try {
-      const raw = await phrenClient.listHooks();
-      const data = asRecord(asRecord(raw)?.data);
-      outputChannel.clear();
-      outputChannel.appendLine("=== Phren Hooks Status ===");
-      outputChannel.appendLine("");
-      if (data) {
-        if (data.globalEnabled !== undefined) {
-          outputChannel.appendLine(`Global: ${data.globalEnabled ? "enabled" : "disabled"}`);
-        }
-        outputChannel.appendLine("");
-        const tools = asArraySafe(data.tools);
-        for (const t of tools) {
-          const rec = asRecord(t);
-          if (!rec?.tool) continue;
-          const status = rec.enabled ? "enabled" : "disabled";
-          const exists = rec.exists ? "" : " (config not found)";
-          outputChannel.appendLine(`  ${rec.tool}: ${status}${exists}`);
-          if (rec.configPath) outputChannel.appendLine(`    Path: ${rec.configPath}`);
-        }
-        const customHooks = asArraySafe(data.customHooks);
-        if (customHooks.length > 0) {
-          outputChannel.appendLine("");
-          outputChannel.appendLine("Custom Hooks:");
-          for (const h of customHooks) {
-            const rec = asRecord(h);
-            if (rec) outputChannel.appendLine(`  ${rec.event}: ${rec.command}`);
-          }
-        }
-      } else {
-        outputChannel.appendLine(JSON.stringify(raw, null, 2));
-      }
-      outputChannel.appendLine("");
-      outputChannel.appendLine("=== End ===");
-      outputChannel.show(true);
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to get hooks status: ${toErrorMessage(error)}`);
-    }
-  });
-
-  // --- Toggle Hooks command ---
-  const toggleHooksCommandDisposable = vscode.commands.registerCommand("phren.toggleHooksCommand", async () => {
-    try {
-      const raw = await phrenClient.listHooks();
-      const data = asRecord(asRecord(raw)?.data);
-      const tools = asArraySafe(data?.tools);
-      const picks: vscode.QuickPickItem[] = [];
-      for (const t of tools) {
-        const rec = asRecord(t);
-        if (!rec?.tool) continue;
-        const toolName = String(rec.tool);
-        const enabled = rec.enabled === true;
-        picks.push({
-          label: toolName,
-          description: enabled ? "enabled" : "disabled",
-          detail: `Click to ${enabled ? "disable" : "enable"} hooks for ${toolName}`,
-        });
-      }
-      if (picks.length === 0) {
-        await vscode.window.showInformationMessage("No hook tools configured.");
+  // --- Toggle Project command (archive/unarchive from tree view) ---
+  const toggleProjectDisposable = vscode.commands.registerCommand(
+    "phren.toggleProject",
+    async (node?: { projectName: string; archived?: boolean }) => {
+      if (!node?.projectName) {
+        await vscode.window.showWarningMessage("Toggle Project is available from the Phren explorer project context menu.");
         return;
       }
-      const choice = await vscode.window.showQuickPick(picks, { placeHolder: "Select a tool to toggle hooks" });
-      if (!choice) return;
-      const currentlyEnabled = choice.description === "enabled";
-      await phrenClient.toggleHooks(!currentlyEnabled, choice.label);
-      treeDataProvider.refresh();
-      await vscode.window.showInformationMessage(`Hooks for "${choice.label}" ${currentlyEnabled ? "disabled" : "enabled"}.`);
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to toggle hooks: ${toErrorMessage(error)}`);
-    }
-  });
-
-  // --- Manage Project command ---
-  const manageProjectDisposable = vscode.commands.registerCommand("phren.manageProject", async () => {
-    try {
-      const projectsRaw = await phrenClient.listProjects();
-      const projectsData = asRecord(asRecord(projectsRaw)?.data);
-      const projects = asArraySafe(projectsData?.projects);
-      const projectNames: string[] = [];
-      for (const p of projects) {
-        const rec = asRecord(p);
-        const name = typeof rec?.name === "string" ? rec.name : undefined;
-        if (name) projectNames.push(name);
-      }
-      if (projectNames.length === 0) {
-        await vscode.window.showInformationMessage("No projects found.");
-        return;
-      }
-      const projectChoice = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project to manage" });
-      if (!projectChoice) return;
-      const actionChoice = await vscode.window.showQuickPick(
-        [
-          { label: "Archive", description: "Archive this project" },
-          { label: "Unarchive", description: "Restore this project" },
-        ],
-        { placeHolder: `Action for "${projectChoice}"` },
+      const action = node.archived ? "unarchive" : "archive";
+      const label = node.archived ? "Restore" : "Archive";
+      const confirmed = await vscode.window.showWarningMessage(
+        `${label} project "${node.projectName}"?`,
+        { modal: false },
+        label,
       );
-      if (!actionChoice) return;
-      const action = actionChoice.label.toLowerCase() as "archive" | "unarchive";
-      await phrenClient.manageProject(projectChoice, action);
-      treeDataProvider.refresh();
-      await vscode.window.showInformationMessage(`Project "${projectChoice}" ${action}d.`);
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to manage project: ${toErrorMessage(error)}`);
-    }
-  });
+      if (confirmed !== label) return;
+      try {
+        await phrenClient.manageProject(node.projectName, action);
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage(`Project "${node.projectName}" ${action}d.`);
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to ${action} project: ${toErrorMessage(error)}`);
+      }
+    },
+  );
 
   const uninstallDisposable = vscode.commands.registerCommand("phren.uninstall", async () => {
     const proceed = await vscode.window.showWarningMessage(
@@ -1158,9 +1041,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     doctorFixDisposable,
     sessionStartDisposable,
     sessionEndDisposable,
-    hooksStatusDisposable,
-    toggleHooksCommandDisposable,
-    manageProjectDisposable,
+    toggleProjectDisposable,
     uninstallDisposable,
     addTaskDisposable,
     completeTaskDisposable,
@@ -1168,7 +1049,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     pinTaskDisposable,
     updateTaskDisposable,
     removeFindingDisposable,
-    pinMemoryDisposable,
     supersedeFindingDisposable,
     retractFindingDisposable,
     resolveContradictionDisposable,

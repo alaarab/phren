@@ -59,32 +59,12 @@
         "title": "Phren: Set Active Project"
       },
       {
-        "command": "phren.openFinding",
-        "title": "Phren: Open Finding"
-      },
-      {
-        "command": "phren.openProjectFile",
-        "title": "Phren: Open Project File"
-      },
-      {
-        "command": "phren.openSkill",
-        "title": "Phren: Open Skill"
-      },
-      {
         "command": "phren.toggleSkill",
         "title": "Phren: Toggle Skill"
       },
       {
         "command": "phren.toggleHook",
         "title": "Phren: Toggle Hook"
-      },
-      {
-        "command": "phren.openTask",
-        "title": "Phren: Open Task"
-      },
-      {
-        "command": "phren.openQueueItem",
-        "title": "Phren: Open Queue Item"
       },
       {
         "command": "phren.openSessionOverview",
@@ -112,32 +92,8 @@
         "icon": "$(checklist)"
       },
       {
-        "command": "phren.hooksStatus",
-        "title": "Phren: Hooks Status"
-      },
-      {
-        "command": "phren.toggleHooksCommand",
-        "title": "Phren: Toggle Hooks"
-      },
-      {
-        "command": "phren.manageProject",
-        "title": "Phren: Manage Project"
-      },
-      {
-        "command": "phren.uninstall",
-        "title": "Phren: Uninstall Phren"
-      },
-      {
         "command": "phren.switchProfile",
         "title": "Phren: Set This Machine's Profile"
-      },
-      {
-        "command": "phren.configureMachine",
-        "title": "Phren: Set Machine Alias"
-      },
-      {
-        "command": "phren.openMachinesConfig",
-        "title": "Phren: Open machines.yaml"
       },
       {
         "command": "phren.addTask",
@@ -170,10 +126,6 @@
         "icon": "$(trash)"
       },
       {
-        "command": "phren.pinMemory",
-        "title": "Phren: Pin Memory"
-      },
-      {
         "command": "phren.supersedeFinding",
         "title": "Phren: Supersede Finding",
         "icon": "$(replace)"
@@ -202,6 +154,11 @@
         "command": "phren.projectConfig",
         "title": "Phren: Project Config",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "phren.toggleProject",
+        "title": "Phren: Toggle Project",
+        "icon": "$(archive)"
       }
     ],
     "keybindings": [
@@ -212,6 +169,24 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "phren.toggleSkill", "when": "false" },
+        { "command": "phren.toggleHook", "when": "false" },
+        { "command": "phren.openSessionOverview", "when": "false" },
+        { "command": "phren.copySessionId", "when": "false" },
+        { "command": "phren.filterFindingsByDate", "when": "false" },
+        { "command": "phren.completeTask", "when": "false" },
+        { "command": "phren.removeTask", "when": "false" },
+        { "command": "phren.pinTask", "when": "false" },
+        { "command": "phren.updateTask", "when": "false" },
+        { "command": "phren.removeFinding", "when": "false" },
+        { "command": "phren.supersedeFinding", "when": "false" },
+        { "command": "phren.retractFinding", "when": "false" },
+        { "command": "phren.resolveContradiction", "when": "false" },
+        { "command": "phren.linkTaskIssue", "when": "false" },
+        { "command": "phren.createTaskIssue", "when": "false" },
+        { "command": "phren.toggleProject", "when": "false" }
+      ],
       "editor/context": [
         {
           "command": "phren.addFinding",
@@ -288,6 +263,11 @@
           "command": "phren.copySessionId",
           "when": "viewItem == phren.session",
           "group": "navigation"
+        },
+        {
+          "command": "phren.toggleProject",
+          "when": "viewItem == phren.project",
+          "group": "inline"
         }
       ],
       "view/title": [

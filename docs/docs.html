@@ -238,6 +238,39 @@
       overflow-x: auto;
     }
 
+    /* Collapsible sidebar groups */
+    .sidebar-group {
+      margin-bottom: 2px;
+    }
+
+    .sidebar-group-toggle {
+      display: flex !important;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .sidebar-chevron {
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+      opacity: 0.5;
+    }
+
+    .sidebar-group.open > .sidebar-group-toggle .sidebar-chevron,
+    .sidebar-group-toggle.active .sidebar-chevron {
+      transform: rotate(90deg);
+      opacity: 0.8;
+    }
+
+    .sidebar-group-items {
+      display: none;
+      overflow: hidden;
+    }
+
+    .sidebar-group.open > .sidebar-group-items {
+      display: block;
+    }
+
     @media (max-width: 900px) {
       body.docs-page .docs-layout.docs-consolidated {
         grid-template-columns: 1fr;
@@ -254,10 +287,17 @@
       <span class="nav-wordmark">phren</span>
     </a>
     <div class="nav-links">
-      <a href="index.html" class="nav-link">Home</a>
+      <a href="index.html#how" class="nav-link">How it works</a>
+      <a href="index.html#hooks" class="nav-link">Hooks</a>
+      <a href="index.html#why" class="nav-link">Why</a>
+      <a href="index.html#demo" class="nav-link">Shell</a>
+      <a href="index.html#web-ui" class="nav-link">Graph</a>
       <a href="docs.html" class="nav-link active">Docs</a>
       <a href="community.html" class="nav-link">Community</a>
-      <a href="https://github.com/alaarab/phren" class="nav-link" target="_blank">GitHub</a>
+      <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
     </div>
   </nav>
 
@@ -266,15 +306,146 @@
     <aside class="docs-sidebar" id="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-heading">Documentation</div>
-        <a href="#getting-started" class="sidebar-section-link">Getting Started</a>
-        <a href="#concepts" class="sidebar-section-link">Concepts</a>
-        <a href="#configuration" class="sidebar-section-link">Configuration</a>
-        <a href="#cli" class="sidebar-section-link">CLI Reference</a>
-        <a href="#mcp-tools" class="sidebar-section-link">MCP Tools</a>
-        <a href="#skills" class="sidebar-section-link">Skills</a>
-        <a href="#shell" class="sidebar-section-link">Interactive Shell</a>
-        <a href="#vscode" class="sidebar-section-link">VS Code Extension</a>
-        <a href="#architecture" class="sidebar-section-link">Architecture</a>
+
+        <div class="sidebar-group">
+          <a href="#getting-started" class="sidebar-section-link sidebar-group-toggle" data-group="gs">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Getting Started
+          </a>
+          <div class="sidebar-group-items" data-group="gs">
+            <a href="#gs-installation" class="sidebar-link sub">Installation</a>
+            <a href="#gs-quickstart" class="sidebar-link sub">Quickstart</a>
+            <a href="#gs-how-it-works" class="sidebar-link sub">How It Works</a>
+            <a href="#gs-multi-repo" class="sidebar-link sub">Multi-Repo Setup</a>
+            <a href="#gs-profiles" class="sidebar-link sub">Profiles &amp; Machines</a>
+            <a href="#gs-agents" class="sidebar-link sub">Agent Setup</a>
+            <a href="#gs-troubleshooting" class="sidebar-link sub">Troubleshooting</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#concepts" class="sidebar-section-link sidebar-group-toggle" data-group="concepts">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Concepts
+          </a>
+          <div class="sidebar-group-items" data-group="concepts">
+            <a href="#c-findings" class="sidebar-link sub">Findings</a>
+            <a href="#c-trust-decay" class="sidebar-link sub">Trust &amp; Decay</a>
+            <a href="#c-consolidation" class="sidebar-link sub">Consolidation</a>
+            <a href="#c-fragments" class="sidebar-link sub">Fragment Graph</a>
+            <a href="#c-sessions" class="sidebar-link sub">Session Continuity</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#configuration" class="sidebar-section-link sidebar-group-toggle" data-group="config">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Configuration
+          </a>
+          <div class="sidebar-group-items" data-group="config">
+            <a href="#cfg-env" class="sidebar-link sub">Environment Variables</a>
+            <a href="#cfg-governance" class="sidebar-link sub">Governance Files</a>
+            <a href="#cfg-hooks" class="sidebar-link sub">Hook Configuration</a>
+            <a href="#cfg-proactivity" class="sidebar-link sub">Proactivity</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#cli" class="sidebar-section-link sidebar-group-toggle" data-group="cli">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            CLI Reference
+          </a>
+          <div class="sidebar-group-items" data-group="cli">
+            <a href="#cli-general" class="sidebar-link sub">General</a>
+            <a href="#cli-search" class="sidebar-link sub">Search</a>
+            <a href="#cli-tasks" class="sidebar-link sub">Tasks</a>
+            <a href="#cli-findings" class="sidebar-link sub">Findings</a>
+            <a href="#cli-projects" class="sidebar-link sub">Projects</a>
+            <a href="#cli-skills" class="sidebar-link sub">Skills</a>
+            <a href="#cli-hooks" class="sidebar-link sub">Hooks</a>
+            <a href="#cli-config" class="sidebar-link sub">Config</a>
+            <a href="#cli-maintenance" class="sidebar-link sub">Maintenance</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#mcp-tools" class="sidebar-section-link sidebar-group-toggle" data-group="mcp">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            MCP Tools
+          </a>
+          <div class="sidebar-group-items" data-group="mcp">
+            <a href="#mcp-search" class="sidebar-link sub">Search &amp; Browse</a>
+            <a href="#mcp-tasks" class="sidebar-link sub">Task Management</a>
+            <a href="#mcp-findings" class="sidebar-link sub">Finding Capture</a>
+            <a href="#mcp-memory" class="sidebar-link sub">Memory Quality</a>
+            <a href="#mcp-data" class="sidebar-link sub">Data Management</a>
+            <a href="#mcp-graph" class="sidebar-link sub">Fragment Graph</a>
+            <a href="#mcp-sessions" class="sidebar-link sub">Sessions</a>
+            <a href="#mcp-skills-mgmt" class="sidebar-link sub">Skills</a>
+            <a href="#mcp-hooks-mgmt" class="sidebar-link sub">Hooks</a>
+            <a href="#mcp-config" class="sidebar-link sub">Configuration</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#skills" class="sidebar-section-link sidebar-group-toggle" data-group="skills">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Skills
+          </a>
+          <div class="sidebar-group-items" data-group="skills">
+            <a href="#sk-what" class="sidebar-link sub">What Are Skills</a>
+            <a href="#sk-anatomy" class="sidebar-link sub">Anatomy</a>
+            <a href="#sk-scoping" class="sidebar-link sub">Global vs Project</a>
+            <a href="#sk-resolution" class="sidebar-link sub">Resolution Order</a>
+            <a href="#sk-built-in" class="sidebar-link sub">Built-in Skills</a>
+            <a href="#sk-managing" class="sidebar-link sub">Managing Skills</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#shell" class="sidebar-section-link sidebar-group-toggle" data-group="shell">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Interactive Shell
+          </a>
+          <div class="sidebar-group-items" data-group="shell">
+            <a href="#sh-views" class="sidebar-link sub">Views</a>
+            <a href="#sh-keybindings" class="sidebar-link sub">Keybindings</a>
+            <a href="#sh-palette" class="sidebar-link sub">Palette Commands</a>
+            <a href="#sh-state" class="sidebar-link sub">State Persistence</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#vscode" class="sidebar-section-link sidebar-group-toggle" data-group="vscode">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            VS Code Extension
+          </a>
+          <div class="sidebar-group-items" data-group="vscode">
+            <a href="#vs-overview" class="sidebar-link sub">Overview</a>
+            <a href="#vs-installation" class="sidebar-link sub">Installation</a>
+            <a href="#vs-tree" class="sidebar-link sub">Tree View</a>
+            <a href="#vs-search" class="sidebar-link sub">Search</a>
+            <a href="#vs-settings" class="sidebar-link sub">Settings</a>
+            <a href="#vs-commands" class="sidebar-link sub">Commands</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#architecture" class="sidebar-section-link sidebar-group-toggle" data-group="arch">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Architecture
+          </a>
+          <div class="sidebar-group-items" data-group="arch">
+            <a href="#arch-overview" class="sidebar-link sub">System Overview</a>
+            <a href="#arch-retrieval" class="sidebar-link sub">Retrieval Pipeline</a>
+            <a href="#arch-governance" class="sidebar-link sub">Governance</a>
+            <a href="#arch-hooks" class="sidebar-link sub">Hook Lifecycle</a>
+            <a href="#arch-directory" class="sidebar-link sub">Directory Structure</a>
+            <a href="#arch-indexing" class="sidebar-link sub">FTS5 Indexing</a>
+            <a href="#arch-key-patterns" class="sidebar-link sub">Key Patterns</a>
+          </div>
+        </div>
+
       </div>
     </aside>
 
@@ -1493,29 +1664,64 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
   sidebar.classList.toggle('open');
 });
 
-// Active sidebar link on scroll (IntersectionObserver)
-const sidebarLinks = document.querySelectorAll('.sidebar-section-link');
-const sections = document.querySelectorAll('.docs-section');
-
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      sidebarLinks.forEach(l => l.classList.remove('active'));
-      const link = document.querySelector(`.sidebar-section-link[href="#${entry.target.id}"]`);
-      if (link) link.classList.add('active');
-    }
-  });
-}, { rootMargin: '-80px 0px -60% 0px' });
-
-sections.forEach(el => observer.observe(el));
-
-// Smooth scroll for sidebar links
-sidebarLinks.forEach(link => {
-  link.addEventListener('click', (e) => {
+// Collapsible sidebar groups
+const groupToggles = document.querySelectorAll('.sidebar-group-toggle');
+groupToggles.forEach(toggle => {
+  toggle.addEventListener('click', (e) => {
+    const group = toggle.closest('.sidebar-group');
+    // If clicking to navigate, let it happen but also toggle
+    group.classList.toggle('open');
     // Close mobile sidebar on click
     sidebar.classList.remove('open');
   });
 });
+
+// Sub-links close mobile sidebar
+document.querySelectorAll('.sidebar-group-items .sidebar-link').forEach(link => {
+  link.addEventListener('click', () => {
+    sidebar.classList.remove('open');
+  });
+});
+
+// Active sidebar link on scroll (IntersectionObserver)
+// Track both section-level and sub-item-level elements
+const allSidebarLinks = document.querySelectorAll('.sidebar-section-link, .sidebar-group-items .sidebar-link');
+const sections = document.querySelectorAll('.docs-section');
+const allTargets = document.querySelectorAll('.docs-section, .docs-section h2[id]');
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const id = entry.target.id;
+      // Clear all active states
+      allSidebarLinks.forEach(l => l.classList.remove('active'));
+
+      // Try to find a sub-link first
+      let link = document.querySelector(`.sidebar-group-items .sidebar-link[href="#${id}"]`);
+      if (link) {
+        link.classList.add('active');
+        // Expand the parent group
+        const group = link.closest('.sidebar-group');
+        if (group) group.classList.add('open');
+      }
+
+      // Also highlight the section-level link
+      const sectionEl = entry.target.closest('.docs-section') || entry.target;
+      const sectionLink = document.querySelector(`.sidebar-section-link[href="#${sectionEl.id}"]`);
+      if (sectionLink) {
+        sectionLink.classList.add('active');
+        const group = sectionLink.closest('.sidebar-group');
+        if (group) group.classList.add('open');
+      }
+    }
+  });
+}, { rootMargin: '-80px 0px -60% 0px' });
+
+allTargets.forEach(el => observer.observe(el));
+
+// Open the first group by default
+const firstGroup = document.querySelector('.sidebar-group');
+if (firstGroup) firstGroup.classList.add('open');
 
 // Nav scroll effect
 const nav = document.getElementById('nav');
