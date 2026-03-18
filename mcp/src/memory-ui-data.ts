@@ -374,7 +374,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       db,
       `SELECT e.id, e.name, e.type, COUNT(DISTINCT el.source_doc) as ref_count
        FROM entities e JOIN entity_links el ON el.target_id = e.id WHERE e.type != 'document'
-       GROUP BY e.id, e.name, e.type ORDER BY ref_count DESC LIMIT 500`,
+       GROUP BY e.id, e.name, e.type ORDER BY ref_count DESC LIMIT 5000`,
       [],
     );
     const refRows = queryRows(
