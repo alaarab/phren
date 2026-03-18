@@ -3,6 +3,33 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.20] - 2026-03-17
+
+### Changed
+- **Graph renderer migrated to Sigma.js v3 + graphology**: replaced custom Canvas2D renderer with Sigma.js v3 and ForceAtlas2 layout; esbuild browser bundle pipeline added
+- **Vibrant neon color palette**: high-contrast neon colors; dark pill label backgrounds fix text flickering
+- **Node glow and hover effects**: radial gradient halo on hover/selection
+- **Phren mascot ported to sigma.js**: PNG sprite with auto-wander, click-to-walk, trail, bob/bounce/idle animations
+- **Node dragging**: grab/grabbing cursor; nodes are freely draggable
+- **Clickable fragment reference doc chips**: detail panel doc references now search the graph on click
+- **Docs hero gif updated**: dark-theme graph walk gif (200 KB, was 2 MB)
+
+### Fixed
+- **`graphToViewport` coordinate bug**: was double-transforming positions on high-DPR displays; now reads raw graph attributes directly
+- **Memory leaks**: MutationObserver, drag/keyboard listeners, and document click handlers cleaned up in destroy()
+- **Double mount() leak**: stopPhrenMascot guard prevents orphaned canvas and RAF loops
+- **Deleted node breaks auto-wander**: mascot relocates to random visible node if current node is removed
+- **Error handler on graph load failure**: no longer calls getContext('2d') on a div
+
+### Removed
+- **Dead `renderGraphPopupScript`** (450 lines): replaced by `renderGraphHostScript` + sigma popover
+- **Dead `stageCenter()` function** and unused graph variables from assets template
+
+### Internal
+- E2e graph tests fully rewritten for sigma.js (replaced Canvas2D pixel scanning with API calls)
+- Parity fixes: tool count 67 to 69 across docs; graph engine description updated in capabilities
+- VS Code extension v0.4.4: stale Barnes-Hut comment fixed, wrong asset copy removed
+
 ## [0.0.9] - 2026-03-14
 
 ### Added

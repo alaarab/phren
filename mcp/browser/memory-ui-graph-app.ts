@@ -529,15 +529,29 @@ function rebuildHostNodes(): void {
 
 function projectAnchors(nodes: RuntimeNode[]): Map<string, { x: number; y: number }> {
   const projects = nodes.filter((node) => node.kind === "project");
-  const radius = Math.max(260, projects.length * 48);
   const anchors = new Map<string, { x: number; y: number }>();
 
-  projects.forEach((node, index) => {
-    const angle = (Math.PI * 2 * index) / Math.max(1, projects.length);
-    anchors.set(node.id, {
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-    });
+  // Shuffle projects using deterministic seeded hash so layout is stable
+  const shuffled = [...projects].sort(
+    (a, b) => seeded(a.id, "shuffle") - seeded(b.id, "shuffle"),
+  );
+
+  const totalNodes = nodes.length;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(shuffled.length)));
+  const rows = Math.max(1, Math.ceil(shuffled.length / cols));
+  // Scale cell size based on total node count for appropriate density
+  const cellSize = Math.max(180, Math.sqrt(totalNodes) * 28);
+
+  shuffled.forEach((node, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    // Center the grid around origin
+    const baseX = (col - (cols - 1) / 2) * cellSize;
+    const baseY = (row - (rows - 1) / 2) * cellSize;
+    // Add ±30% jitter so it doesn't look like a perfect grid
+    const jitterX = (seeded(node.id, "jitterX") - 0.5) * cellSize * 0.6;
+    const jitterY = (seeded(node.id, "jitterY") - 0.5) * cellSize * 0.6;
+    anchors.set(node.id, { x: baseX + jitterX, y: baseY + jitterY });
   });
 
   return anchors;
@@ -578,12 +592,12 @@ function seedNodeCoordinates(nodes: RuntimeNode[]): Map<string, { x: number; y: 
     }
 
     const kindRadius = node.kind === "finding"
-      ? 100
+      ? 60
       : node.kind === "task"
-        ? 132
+        ? 80
         : node.kind === "entity"
           ? 190
-          : 74;
+          : 50;
     const radius = kindRadius + seeded(node.id, "radius") * 120 + (node.refCount || 0) * 1.2;
     const angle = seeded(node.id, "angle") * Math.PI * 2;
 
@@ -663,14 +677,38 @@ function buildGraph(nodes: RuntimeNode[], links: RawLink[]): Graph {
     });
   });
 
+  // Add weak inter-project edges for entities shared across projects
+  const projectPairsSeen = new Set<string>();
+  nodes.forEach((node) => {
+    if (node.kind !== "entity") return;
+    const projects = linkedProjects(node).filter((p) => graph.hasNode(p));
+    for (let i = 0; i < projects.length; i++) {
+      for (let j = i + 1; j < projects.length; j++) {
+        const key = [projects[i], projects[j]].sort().join("|");
+        if (projectPairsSeen.has(key)) continue;
+        projectPairsSeen.add(key);
+        if (!graph.hasEdge(projects[i], projects[j]) && !graph.hasEdge(projects[j], projects[i])) {
+          graph.addEdgeWithKey(`shared:${key}`, projects[i], projects[j], {
+            label: null,
+            size: 0.3,
+            weight: 0.3,
+            color: hexToRgba(currentTheme() === "dark" ? "#8ca0b6" : "#64748b", currentTheme() === "dark" ? 0.08 : 0.05),
+            zIndex: 0,
+          });
+        }
+      }
+    }
+  });
+
   if (graph.order > 1) {
     const settings = forceAtlas2.inferSettings(graph);
     forceAtlas2.assign(graph, {
-      iterations: graph.order < 80 ? 180 : graph.order < 240 ? 140 : 110,
+      iterations: graph.order < 80 ? 200 : graph.order < 240 ? 160 : 130,
       settings: {
         ...settings,
+        linLogMode: true,
         adjustSizes: true,
-        gravity: 0.45,
+        gravity: 0.3,
         scalingRatio: Math.max(4, settings.scalingRatio || 0, 7.5),
         slowDown: graph.order > 240 ? 8 : 5,
         barnesHutOptimize: graph.order > 120,
