@@ -1,7 +1,7 @@
 import { WEB_UI_STYLES, renderWebUiScript } from "./memory-ui-assets.js";
 import { renderGraphScript } from "./memory-ui-graph.js";
 import { readSyncSnapshot } from "./memory-ui-data.js";
-import { PROJECT_REFERENCE_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./memory-ui-styles.js";
+import { PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./memory-ui-styles.js";
 import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
@@ -45,6 +45,7 @@ ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
 ${SETTINGS_TAB_UI_STYLES}
 ${TASK_UI_STYLES}
+${REVIEW_UI_STYLES}
   </style>
 </head>
 <body>
@@ -127,7 +128,6 @@ ${TASK_UI_STYLES}
     <button class="nav-item" data-tab="search">Search</button>
     <button class="nav-item" data-tab="graph">Graph</button>
     <button class="nav-item" data-tab="tasks">Tasks</button>
-    <button class="nav-item" data-tab="sessions">Sessions</button>
     <button class="nav-item" data-tab="skills">Skills</button>
     <button class="nav-item" data-tab="hooks">Hooks</button>
     <button class="nav-item" data-tab="settings">Settings</button>
@@ -278,22 +278,8 @@ ${TASK_UI_STYLES}
       <span id="tasks-count" class="task-count-label"></span>
     </div>
     <div id="tasks-list">
-      <div class="task-empty-state"><svg viewBox="0 0 48 48" width="64" height="64" style="display:block;margin:0 auto 16px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink)">Loading tasks...</div></div>
+      <div class="task-empty-state"><svg viewBox="0 0 48 48" width="48" height="48" style="display:block;margin:0 auto 12px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink)">Loading tasks...</div></div>
     </div>
-  </div>
-
-  <!-- ── Sessions Tab ──────────────────────────────────────── -->
-  <div id="tab-sessions" class="tab-content">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <select id="sessions-filter-project" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
-        <option value="">All projects</option>
-      </select>
-      <span id="sessions-count" class="text-muted" style="font-size:var(--text-sm);margin-left:auto"></span>
-    </div>
-    <div id="sessions-list">
-      <div style="padding:40px;color:var(--muted);text-align:center"><svg viewBox="0 0 32 32" width="32" height="32" style="display:block;margin:0 auto 12px"><ellipse cx="16" cy="16" rx="10" ry="9.5" fill="#7B68AE" opacity="0.5"/><path d="M12 15l1-1 1 1-1 1z" fill="#2D2255"/><path d="M18 15l1-1 1 1-1 1z" fill="#2D2255"/><path d="M14 18c0.7 0.5 1.6 0.6 2.6 0.1" stroke="#2D2255" stroke-width="0.6" fill="none"/></svg>Loading sessions...</div>
-    </div>
-    <div id="session-detail" style="display:none"></div>
   </div>
 
   <!-- ── Settings Tab ───────────────────────────────────────── -->

@@ -608,25 +608,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       return fetch(url).then(function(r) { return r.json(); });
     }
 
-    var _taskViewMode = 'list';
-
     function priorityBadge(p) {
       if (!p) return '';
-      var colors = { high: '#ef4444', medium: '#f59e0b', low: '#6b7280' };
-      var color = colors[p] || '#6b7280';
       return '<span class="task-priority-badge task-priority-' + esc(p) + '">' + esc(p) + '</span>';
-    }
-
-    function sessionBadge(sessionId) {
-      if (!sessionId) return '';
-      var short = sessionId.length > 8 ? sessionId.slice(0, 8) : sessionId;
-      return '<span class="task-session-badge" title="Session ' + esc(sessionId) + '">' + esc(short) + '</span>';
-    }
-
-    function statusChip(section, checked) {
-      if (checked || section === 'Done') return '<span class="task-status-chip task-status-done" title="Done"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</span>';
-      if (section === 'Active') return '<span class="task-status-chip task-status-active" title="In Progress">In Progress</span>';
-      return '<span class="task-status-chip task-status-pending" title="Pending">Pending</span>';
     }
 
     function projectBadge(proj) {
@@ -735,55 +719,40 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var container = document.getElementById('tasks-list');
       if (!container) return;
       if (!tasks.length && !doneTasks.length) {
-        container.innerHTML = '<div class="task-empty-state"><svg viewBox="0 0 48 48" width="64" height="64" style="display:block;margin:0 auto 16px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink);margin-bottom:4px">Nothing to do!</div><div style="color:var(--muted);font-size:var(--text-sm)">Add a task to get started.</div></div>';
+        container.innerHTML = '<div class="task-empty-state"><svg viewBox="0 0 48 48" width="48" height="48" style="display:block;margin:0 auto 12px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink);margin-bottom:4px">Nothing to do!</div><div style="color:var(--muted);font-size:var(--text-sm)">Add a task to get started.</div></div>';
         return;
       }
 
-      // Group by priority within sections
       var priorityOrder = { high: 0, medium: 1, low: 2 };
       function sortByPriority(a, b) {
-        // Unchecked before checked
-        var aChecked = a.checked || a.section === 'Done' ? 1 : 0;
-        var bChecked = b.checked || b.section === 'Done' ? 1 : 0;
-        if (aChecked !== bChecked) return aChecked - bChecked;
-        // Pinned first
         if (a.pinned && !b.pinned) return -1;
         if (!a.pinned && b.pinned) return 1;
-        // Then by priority
         var pa = priorityOrder[a.priority] !== undefined ? priorityOrder[a.priority] : 1;
         var pb = priorityOrder[b.priority] !== undefined ? priorityOrder[b.priority] : 1;
         return pa - pb;
       }
 
-      // Separate into priority groups (exclude checked tasks even if not in Done section)
-      function isActive(t) { return t.section !== 'Done' && !t.checked; }
-      var high = tasks.filter(function(t) { return t.priority === 'high' && isActive(t); }).sort(sortByPriority);
-      var medium = tasks.filter(function(t) { return t.priority === 'medium' && isActive(t); }).sort(sortByPriority);
-      var low = tasks.filter(function(t) { return t.priority === 'low' && isActive(t); }).sort(sortByPriority);
-      var noPriority = tasks.filter(function(t) { return !t.priority && isActive(t); }).sort(sortByPriority);
-      var doneVisible = tasks.filter(function(t) { return t.section === 'Done' || t.checked; });
+      function isNotDone(t) { return t.section !== 'Done' && !t.checked; }
 
-      function renderTaskCard(t) {
-        var borderClass = t.priority === 'high' ? ' task-card-high' : t.priority === 'medium' ? ' task-card-medium' : t.priority === 'low' ? ' task-card-low' : '';
-        var doneClass = (t.section === 'Done' || t.checked) ? ' task-card-done' : '';
-        var html = '<div class="task-card' + borderClass + doneClass + '">';
-        html += '<div class="task-card-top">';
-        html += statusChip(t.section, t.checked);
-        html += projectBadge(t.project);
+      function renderTaskRow(t) {
+        var isDone = t.section === 'Done' || t.checked;
+        var priClass = t.priority ? 'task-row-priority-' + esc(t.priority) : 'task-row-priority-none';
+        var html = '<div class="task-row' + (isDone ? ' task-row-done' : '') + '">';
+        html += '<div class="task-row-priority ' + priClass + '"></div>';
+        html += '<div class="task-row-content">';
+        html += '<span class="task-row-text">' + esc(t.line) + '</span>';
+        html += '</div>';
+        html += '<div class="task-row-meta">';
         html += pinIndicator(t.pinned);
         html += githubBadge(t.githubIssue, t.githubUrl);
         html += priorityBadge(t.priority);
-        html += sessionBadge(t.sessionId);
+        html += projectBadge(t.project);
         html += '</div>';
-        html += '<div class="task-card-body">';
-        html += '<span class="task-card-text">' + esc(t.line) + '</span>';
-        if (t.context) html += '<span class="task-card-context">' + esc(t.context) + '</span>';
-        html += '</div>';
-        html += '<div class="task-card-actions">';
-        if (t.section !== 'Done' && !t.checked) {
-          html += '<button class="task-done-btn" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Done</button>';
+        html += '<div class="task-row-actions">';
+        if (!isDone) {
+          html += '<button class="task-action-btn task-action-complete" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
         }
-        html += '<button class="task-remove-btn" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Delete task" style="background:none;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;cursor:pointer;color:var(--muted);font-size:var(--text-xs)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+        html += '<button class="task-action-btn task-action-delete" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Delete task"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
         html += '</div>';
         html += '</div>';
         return html;
@@ -809,49 +778,42 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         topProjects.forEach(function(p) { html += '<span class="task-summary-project">' + esc(p) + ' (' + projectCounts[p] + ')</span>'; });
         html += '</span>';
       }
-      html += '<span class="task-view-toggle" style="margin-left:auto">';
-      html += '<button class="task-view-btn' + (_taskViewMode === 'list' ? ' active' : '') + '" data-ts-action="setTaskView" data-mode="list" title="List view"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>';
-      html += '<button class="task-view-btn' + (_taskViewMode === 'compact' ? ' active' : '') + '" data-ts-action="setTaskView" data-mode="compact" title="Compact view"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg></button>';
-      html += '</span>';
       html += '</div>';
 
       // Add task input at top (only when a specific project is selected)
-      var projects = projectFilter ? [projectFilter] : [];
-      projects.forEach(function(proj) {
+      if (projectFilter) {
         html += '<div class="task-add-bar">';
-        html += '<input id="task-add-input-' + esc(proj) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(proj) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(proj) + '">';
-        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(proj) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
+        html += '<input id="task-add-input-' + esc(projectFilter) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(projectFilter) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(projectFilter) + '">';
+        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(projectFilter) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
         html += '</div>';
-      });
+      }
 
-      // Priority sections
-      function renderSection(title, items, icon) {
+      // Group by section: Active first, then Queue
+      var activeTasks = tasks.filter(function(t) { return t.section === 'Active' && isNotDone(t); }).sort(sortByPriority);
+      var queueTasks = tasks.filter(function(t) { return t.section !== 'Active' && isNotDone(t); }).sort(sortByPriority);
+
+      function renderSection(title, items) {
         if (!items.length) return '';
-        var gridClass = _taskViewMode === 'compact' ? 'task-card-grid task-card-grid-compact' : 'task-card-grid';
-        var shtml = '<div class="task-priority-section">';
-        shtml += '<div class="task-section-header"><span class="task-section-icon">' + icon + '</span> ' + title + ' <span class="task-section-count">' + items.length + '</span></div>';
-        shtml += '<div class="' + gridClass + '">';
-        items.forEach(function(t) { shtml += renderTaskCard(t); });
+        var shtml = '<div class="task-section-group">';
+        shtml += '<div class="task-section-header">' + title + ' <span class="task-section-count">' + items.length + '</span></div>';
+        shtml += '<div class="task-list">';
+        items.forEach(function(t) { shtml += renderTaskRow(t); });
         shtml += '</div></div>';
         return shtml;
       }
 
-      html += renderSection('High Priority', high, '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#ef4444"/></svg>');
-      html += renderSection('Medium Priority', medium, '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#f59e0b"/></svg>');
-      html += renderSection('Low Priority', low, '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#6b7280"/></svg>');
-      if (noPriority.length) {
-        html += renderSection('Tasks', noPriority, '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>');
-      }
+      html += renderSection('Active', activeTasks);
+      html += renderSection('Queue', queueTasks);
 
       // Done section (collapsible)
-      var allDone = showDone ? doneVisible : doneTasks;
+      var allDone = showDone ? tasks.filter(function(t) { return t.section === 'Done' || t.checked; }) : doneTasks;
       if (allDone.length) {
         html += '<div class="task-done-section">';
         html += '<button class="task-done-toggle" data-ts-action="toggleDoneSection">';
         html += '<span class="task-toggle-arrow">\u25B6</span> Completed <span class="task-section-count">' + allDone.length + '</span></button>';
         html += '<div class="task-done-list" style="display:none">';
-        html += '<div class="task-card-grid">';
-        allDone.forEach(function(t) { html += renderTaskCard(t); });
+        html += '<div class="task-list">';
+        allDone.forEach(function(t) { html += renderTaskRow(t); });
         html += '</div></div></div>';
       }
 
@@ -1174,122 +1136,13 @@ export function renderTasksAndSettingsScript(authToken: string): string {
     var _origSwitchTab = window.switchTab;
     var _tasksLoaded = false;
     var _settingsLoaded = false;
-    var _sessionsLoaded = false;
     window.switchTab = function(tab) {
       if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
       if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
       if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
-      if (tab === 'sessions' && !_sessionsLoaded) { _sessionsLoaded = true; loadSessions(); }
     };
 
-    var _sessionsData = [];
-    window.loadSessions = function() {
-      var projectFilter = document.getElementById('sessions-filter-project');
-      var project = projectFilter ? projectFilter.value : '';
-      var apiUrl = _tsAuthToken ? tsAuthUrl('/api/sessions') : '/api/sessions';
-      if (project) apiUrl += (apiUrl.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
-      loadJson(apiUrl).then(function(data) {
-        if (!data.ok) throw new Error(data.error || 'Failed to load sessions');
-        _sessionsData = data.sessions || [];
-        renderSessionsList(_sessionsData);
-        // Populate project filter
-        if (projectFilter && projectFilter.options.length <= 1) {
-          var projects = {};
-          _sessionsData.forEach(function(s) { if (s.project) projects[s.project] = true; });
-          Object.keys(projects).sort().forEach(function(p) {
-            var opt = document.createElement('option');
-            opt.value = p; opt.textContent = p;
-            projectFilter.appendChild(opt);
-          });
-        }
-      }).catch(function(err) {
-        var list = document.getElementById('sessions-list');
-        if (list) list.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">' + esc(err.message) + '</div>';
-      });
-    };
-
-    function renderSessionsList(sessions) {
-      var list = document.getElementById('sessions-list');
-      var detail = document.getElementById('session-detail');
-      var countEl = document.getElementById('sessions-count');
-      if (detail) detail.style.display = 'none';
-      if (countEl) countEl.textContent = sessions.length + ' session(s)';
-      if (!list) return;
-      if (sessions.length === 0) {
-        list.innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center"><svg viewBox="0 0 32 32" width="32" height="32" style="display:block;margin:0 auto 12px"><ellipse cx="16" cy="16" rx="10" ry="9.5" fill="#7B68AE" opacity="0.4"/><path d="M12 15l1-1 1 1-1 1z" fill="#2D2255"/><path d="M18 15l1-1 1 1-1 1z" fill="#2D2255"/><path d="M15 18.5c0.3-0.3 0.7-0.3 1 0" stroke="#2D2255" stroke-width="0.6" fill="none"/></svg>No sessions found.</div>';
-        return;
-      }
-      list.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">' +
-        '<thead><tr style="border-bottom:1px solid var(--border);text-align:left">' +
-        '<th style="padding:8px">Session</th><th style="padding:8px">Project</th><th style="padding:8px">Started</th>' +
-        '<th style="padding:8px">Ended</th><th style="padding:8px">Duration</th><th style="padding:8px">Findings</th></tr></thead><tbody>' +
-        sessions.map(function(s) {
-          var id = s.sessionId.slice(0, 8);
-          var startDate = (s.startedAt || '').slice(0, 16).replace('T', ' ');
-          var endDate = s.endedAt ? (s.endedAt || '').slice(0, 16).replace('T', ' ') : '<span style="color:var(--green)">active</span>';
-          var dur = s.durationMins != null ? s.durationMins + 'm' : '—';
-          var summarySnip = s.summary ? '<div class="text-muted" style="font-size:var(--text-xs);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.summary.slice(0, 80)) + '</div>' : '';
-          return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" data-ts-action="showSessionDetail" data-session-id="' + esc(s.sessionId) + '">' +
-            '<td style="padding:8px;font-family:monospace">' + esc(id) + summarySnip + '</td>' +
-            '<td style="padding:8px">' + esc(s.project || '—') + '</td>' +
-            '<td style="padding:8px">' + esc(startDate) + '</td>' +
-            '<td style="padding:8px">' + endDate + '</td>' +
-            '<td style="padding:8px">' + esc(dur) + '</td>' +
-            '<td style="padding:8px">' + (s.findingsAdded || 0) + '</td></tr>';
-        }).join('') + '</tbody></table>';
-    }
-
-    window.showSessionDetail = function(sessionId) {
-      var apiUrl = _tsAuthToken ? tsAuthUrl('/api/sessions') : '/api/sessions';
-      apiUrl += (apiUrl.includes('?') ? '&' : '?') + 'sessionId=' + encodeURIComponent(sessionId);
-      var list = document.getElementById('sessions-list');
-      var detail = document.getElementById('session-detail');
-      if (list) list.style.display = 'none';
-      if (detail) { detail.style.display = 'block'; detail.innerHTML = '<div style="padding:20px;color:var(--muted)">Loading session...</div>'; }
-      loadJson(apiUrl).then(function(data) {
-        if (!data.ok) throw new Error(data.error || 'Session not found');
-        var s = data.session;
-        var findings = data.findings || [];
-        var tasks = data.tasks || [];
-        var date = (s.startedAt || '').slice(0, 16).replace('T', ' ');
-        var dur = s.durationMins != null ? s.durationMins + ' min' : '—';
-        var html = '<div style="margin-bottom:12px"><button class="btn btn-sm" data-ts-action="backToSessionsList">← Back</button></div>' +
-          '<div class="card" style="margin-bottom:16px"><div class="card-body">' +
-          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px">' +
-          '<div><strong>Session</strong><div class="text-muted" style="font-family:monospace">' + esc(s.sessionId.slice(0, 8)) + '</div></div>' +
-          '<div><strong>Project</strong><div class="text-muted">' + esc(s.project || '—') + '</div></div>' +
-          '<div><strong>Date</strong><div class="text-muted">' + esc(date) + '</div></div>' +
-          '<div><strong>Duration</strong><div class="text-muted">' + esc(dur) + '</div></div>' +
-          '<div><strong>Findings</strong><div class="text-muted">' + findings.length + '</div></div>' +
-          '<div><strong>Tasks</strong><div class="text-muted">' + tasks.length + '</div></div>' +
-          '<div><strong>Status</strong><div class="text-muted">' + esc(s.status) + '</div></div>' +
-          '</div>' +
-          (s.summary ? '<div style="margin-top:12px;padding:12px;background:var(--bg);border-radius:var(--radius-sm)"><strong>Summary</strong><div style="margin-top:4px">' + esc(s.summary) + '</div></div>' : '') +
-          '</div></div>';
-        if (findings.length > 0) {
-          html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Findings (' + findings.length + ')</h3></div><div class="card-body"><ul style="margin:0;padding-left:20px">';
-          findings.forEach(function(f) { html += '<li style="margin-bottom:4px"><span class="text-muted">[' + esc(f.project) + ']</span> ' + esc(f.text) + '</li>'; });
-          html += '</ul></div></div>';
-        }
-        if (tasks.length > 0) {
-          html += '<div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Tasks (' + tasks.length + ')</h3></div><div class="card-body"><ul style="margin:0;padding-left:20px">';
-          tasks.forEach(function(t) { html += '<li style="margin-bottom:4px"><span class="text-muted">[' + esc(t.project) + '/' + esc(t.section) + ']</span> ' + esc(t.text) + '</li>'; });
-          html += '</ul></div></div>';
-        }
-        if (detail) detail.innerHTML = html;
-      }).catch(function(err) {
-        if (detail) detail.innerHTML = '<div style="padding:20px;color:var(--muted)">' + esc(err.message) + '</div>';
-      });
-    };
-
-    window.backToSessionsList = function() {
-      var list = document.getElementById('sessions-list');
-      var detail = document.getElementById('session-detail');
-      if (list) list.style.display = 'block';
-      if (detail) detail.style.display = 'none';
-    };
-
-    // Event delegation for dynamically generated tasks/settings/sessions UI
+    // Event delegation for dynamically generated tasks/settings UI
     document.addEventListener('click', function(e) {
       var target = e.target;
       if (!target || typeof target.closest !== 'function') return;
@@ -1300,15 +1153,12 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       else if (action === 'completeTask') { completeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'removeTask') { removeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'addTask') { addTaskFromUi(actionEl.getAttribute('data-project')); }
-      else if (action === 'setTaskView') { _taskViewMode = actionEl.getAttribute('data-mode') || 'list'; filterTasks(); }
       else if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleAutoCapture') { setAutoCapture(actionEl.getAttribute('data-enabled') !== 'true'); }
       else if (action === 'setTaskMode') { setTaskMode(actionEl.getAttribute('data-mode')); }
       else if (action === 'setProactivity') { setProactivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleMcpEnabled') { setMcpEnabled(actionEl.getAttribute('data-enabled') !== 'true'); }
       else if (action === 'toggleIntegrationTool') { toggleIntegrationTool(actionEl.getAttribute('data-tool')); }
-      else if (action === 'showSessionDetail') { showSessionDetail(actionEl.getAttribute('data-session-id')); }
-      else if (action === 'backToSessionsList') { backToSessionsList(); }
       else if (action === 'setProjectFindingSensitivity') {
         var proj = getSettingsProject();
         var level = actionEl.getAttribute('data-level');
@@ -1571,370 +1421,6 @@ export function renderSearchScript(authToken: string): string {
 })();`;
 }
 
-// renderGraphPopupScript removed — replaced by renderGraphHostScript + sigma popover
-
-function __removed_renderGraphPopupScript(): string {
-  return `(function() {
-  var popup = document.getElementById('graph-popup');
-  var popupCard = document.getElementById('graph-popup-card');
-  var popupLabel = document.getElementById('graph-popup-label');
-  var popupTitle = document.getElementById('graph-popup-title');
-  var popupMeta = document.getElementById('graph-popup-meta');
-  var popupBody = document.getElementById('graph-popup-body');
-  var popupClose = document.getElementById('graph-popup-close');
-  var esc = window._phrenEsc || function(s) { return String(s); };
-  var authUrl = window._phrenAuthUrl || function(path) { return path; };
-  var authBody = window._phrenAuthBody || function(body) { return body; };
-  var fetchCsrfToken = window._phrenFetchCsrfToken || function(cb) { cb(null); };
-  var currentDetail = null;
-  var isEditing = false;
-
-  function showToast(msg, type) {
-    var container = document.getElementById('toast-container');
-    if (!container) return;
-    var toast = document.createElement('div');
-    toast.className = 'toast' + (type ? ' ' + type : '');
-    toast.textContent = msg;
-    container.appendChild(toast);
-    setTimeout(function() {
-      if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 2800);
-  }
-
-  function typeLabel(kind) {
-    if (kind === 'finding') return 'Finding';
-    if (kind === 'task') return 'Task';
-    if (kind === 'entity') return 'Fragment';
-    if (kind === 'reference') return 'Reference';
-    return 'Project';
-  }
-
-  function popupPoint(point) {
-    return point || { x: 28, y: 28 };
-  }
-
-  function renderMeta(detail) {
-    if (!popupMeta) return;
-    var parts = [];
-    if (detail.project) parts.push('<span class="graph-pill">' + esc(detail.project) + '</span>');
-    if (detail.section) parts.push('<span class="graph-pill">' + esc(detail.section) + '</span>');
-    if (detail.priority) parts.push('<span class="graph-pill">' + esc(detail.priority + ' priority') + '</span>');
-    if (detail.entityType) parts.push('<span class="graph-pill">' + esc(detail.entityType) + '</span>');
-    if (detail.topicLabel) parts.push('<span class="graph-pill">' + esc(detail.topicLabel) + '</span>');
-    if (detail.health) parts.push('<span class="graph-pill graph-pill-' + esc(detail.health) + '">' + esc(detail.health) + '</span>');
-    popupMeta.innerHTML = parts.join('');
-  }
-
-  function statLine(label, value) {
-    return '<div class="graph-popup-line"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong></div>';
-  }
-
-  function renderDocs(detail) {
-    if (!detail.refDocs || !detail.refDocs.length) return '';
-    var docs = detail.refDocs.slice(0, 8).map(function(ref) {
-      var doc = typeof ref === 'string' ? ref : (ref.doc || '');
-      return '<div class="graph-popup-doc">' + esc(doc) + '</div>';
-    }).join('');
-    return '<div class="graph-popup-section"><h4>Linked docs</h4><div class="graph-popup-docs">' + docs + '</div></div>';
-  }
-
-  function renderProject(detail) {
-    var counts = detail.connections || {};
-    return '' +
-      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label || detail.id) + '</div>' +
-      '<div class="graph-popup-stats">' +
-        statLine('Neighbors', counts.total || 0) +
-        statLine('Findings', counts.findings || 0) +
-        statLine('Tasks', counts.tasks || 0) +
-        statLine('Fragments', counts.entities || 0) +
-        statLine('References', counts.references || 0) +
-      '</div>';
-  }
-
-  function renderFinding(detail) {
-    return '' +
-      '<div class="graph-popup-summary" id="graph-popup-text">' + esc(detail.fullLabel || detail.label) + '</div>' +
-      '<div class="graph-popup-actions">' +
-        '<button class="btn btn-sm" data-graph-action="edit">Edit</button>' +
-        '<button class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>' +
-      '</div>' +
-      renderDocs(detail);
-  }
-
-  function renderTask(detail) {
-    var section = detail.section || 'Queue';
-    var priority = detail.priority || 'none';
-    return '' +
-      '<div class="graph-popup-summary" id="graph-popup-text">' + esc(detail.fullLabel || detail.label) + '</div>' +
-      '<div class="graph-popup-section"><h4>Status</h4><div class="graph-popup-actions">' +
-        '<button class="btn btn-sm' + (section === 'Active' ? ' active' : '') + '" data-graph-action="task-status" data-status="Active">Active</button>' +
-        '<button class="btn btn-sm' + (section === 'Queue' ? ' active' : '') + '" data-graph-action="task-status" data-status="Queue">Queue</button>' +
-        '<button class="btn btn-sm" data-graph-action="task-status" data-status="Done">Done</button>' +
-      '</div></div>' +
-      '<div class="graph-popup-section"><h4>Priority</h4><div class="graph-popup-actions">' +
-        '<button class="btn btn-sm' + (priority === 'high' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="high">High</button>' +
-        '<button class="btn btn-sm' + (priority === 'medium' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="medium">Medium</button>' +
-        '<button class="btn btn-sm' + (priority === 'low' ? ' active' : '') + '" data-graph-action="task-priority" data-priority="low">Low</button>' +
-      '</div></div>' +
-      '<div class="graph-popup-actions">' +
-        '<button class="btn btn-sm" data-graph-action="edit">Edit</button>' +
-        '<button class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>' +
-      '</div>';
-  }
-
-  function renderEntity(detail) {
-    var projects = (detail.connectedProjects || []).map(function(project) {
-      return '<span class="graph-pill">' + esc(project) + '</span>';
-    }).join('');
-    return '' +
-      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label) + '</div>' +
-      '<div class="graph-popup-stats">' +
-        statLine('References', detail.refCount || 0) +
-        statLine('Projects', (detail.connectedProjects || []).length) +
-        statLine('Neighbors', (detail.connections && detail.connections.total) || 0) +
-      '</div>' +
-      (projects ? '<div class="graph-popup-section"><h4>Projects</h4><div class="graph-popup-pills">' + projects + '</div></div>' : '') +
-      renderDocs(detail);
-  }
-
-  function renderReference(detail) {
-    return '' +
-      '<div class="graph-popup-summary">' + esc(detail.fullLabel || detail.label) + '</div>' +
-      '<div class="graph-popup-stats">' +
-        statLine('Project', detail.project || 'shared') +
-        statLine('Neighbors', (detail.connections && detail.connections.total) || 0) +
-      '</div>' +
-      renderDocs(detail);
-  }
-
-  function renderEditor(detail) {
-    return '' +
-      '<div class="graph-popup-editor">' +
-        '<textarea id="graph-popup-editor-input">' + esc(detail.fullLabel || detail.label) + '</textarea>' +
-        '<div class="graph-popup-actions">' +
-          '<button class="btn btn-sm btn-primary" data-graph-action="save-edit">Save</button>' +
-          '<button class="btn btn-sm" data-graph-action="cancel-edit">Cancel</button>' +
-        '</div>' +
-      '</div>';
-  }
-
-  function renderBody(detail) {
-    if (!popupBody) return;
-    if (isEditing && (detail.kind === 'finding' || detail.kind === 'task')) {
-      popupBody.innerHTML = renderEditor(detail);
-      return;
-    }
-    if (detail.kind === 'project') popupBody.innerHTML = renderProject(detail);
-    else if (detail.kind === 'finding') popupBody.innerHTML = renderFinding(detail);
-    else if (detail.kind === 'task') popupBody.innerHTML = renderTask(detail);
-    else if (detail.kind === 'entity') popupBody.innerHTML = renderEntity(detail);
-    else popupBody.innerHTML = renderReference(detail);
-  }
-
-  function positionPopup(point) {
-    if (!popupCard) return;
-    var container = document.querySelector('#tab-graph .graph-container');
-    if (!container) return;
-    var rect = container.getBoundingClientRect();
-    var width = popupCard.offsetWidth || 360;
-    var height = popupCard.offsetHeight || 260;
-    var safe = popupPoint(point);
-    var left = Math.max(14, Math.min(safe.x + 18, rect.width - width - 14));
-    var top = Math.max(14, Math.min(safe.y + 18, rect.height - height - 14));
-    popupCard.style.left = left + 'px';
-    popupCard.style.top = top + 'px';
-  }
-
-  function renderPopup(detail, point) {
-    if (!popup || !popupLabel || !popupTitle) return;
-    currentDetail = detail;
-    popupLabel.textContent = typeLabel(detail.kind);
-    popupTitle.textContent = detail.label || detail.fullLabel || detail.id;
-    renderMeta(detail);
-    renderBody(detail);
-    popup.classList.add('open');
-    requestAnimationFrame(function() { positionPopup(point); });
-  }
-
-  function closePopup(skipSelectionClear) {
-    currentDetail = null;
-    isEditing = false;
-    if (popup) popup.classList.remove('open');
-    if (!skipSelectionClear && typeof window.graphClearSelection === 'function') window.graphClearSelection();
-  }
-
-  function refetchGraph(keepNodeId) {
-    if (typeof window.loadGraph !== 'function') return;
-    window.loadGraph();
-    if (keepNodeId && window.phrenGraph && typeof window.phrenGraph.selectNode === 'function') {
-      var attempts = 0;
-      var timer = setInterval(function() {
-        attempts++;
-        if (window.phrenGraph.selectNode(keepNodeId) || attempts > 18) clearInterval(timer);
-      }, 120);
-    }
-  }
-
-  function postForm(url, method, body, onOk) {
-    fetchCsrfToken(function(csrfToken) {
-      var nextBody = authBody(body);
-      if (csrfToken) nextBody += '&_csrf=' + encodeURIComponent(csrfToken);
-      fetch(url, {
-        method: method,
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: nextBody
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (!data.ok) throw new Error(data.error || 'Request failed');
-        onOk(data);
-      }).catch(function(err) {
-        showToast(String((err && err.message) || err || 'Request failed'), 'err');
-      });
-    });
-  }
-
-  function saveFindingEdit(nextText) {
-    postForm(authUrl('/api/findings/' + encodeURIComponent(currentDetail.project)), 'PUT',
-      'old_text=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label) + '&new_text=' + encodeURIComponent(nextText),
-      function() {
-        currentDetail.fullLabel = nextText;
-        currentDetail.label = nextText.length > 55 ? nextText.slice(0, 52) + '...' : nextText;
-        isEditing = false;
-        renderPopup(currentDetail);
-        refetchGraph(currentDetail.id);
-        showToast('Finding updated', 'ok');
-      }
-    );
-  }
-
-  function saveTaskEdit(nextText) {
-    postForm('/api/tasks/update', 'POST',
-      'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label) + '&text=' + encodeURIComponent(nextText),
-      function() {
-        currentDetail.fullLabel = nextText;
-        currentDetail.label = nextText.length > 55 ? nextText.slice(0, 52) + '...' : nextText;
-        isEditing = false;
-        renderPopup(currentDetail);
-        refetchGraph(currentDetail.id);
-        showToast('Task updated', 'ok');
-      }
-    );
-  }
-
-  function updateTask(payload) {
-    var body = 'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label);
-    Object.keys(payload).forEach(function(key) {
-      body += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(payload[key]);
-    });
-    postForm('/api/tasks/update', 'POST', body, function() {
-      if (payload.section) currentDetail.section = payload.section;
-      if (payload.priority) currentDetail.priority = payload.priority;
-      renderPopup(currentDetail);
-      refetchGraph(payload.section === 'Done' ? null : currentDetail.id);
-      if (payload.section === 'Done') closePopup(true);
-      showToast('Task updated', 'ok');
-    });
-  }
-
-  function completeTask() {
-    postForm('/api/tasks/complete', 'POST',
-      'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
-      function() {
-        closePopup(true);
-        refetchGraph(null);
-        showToast('Task completed', 'ok');
-      }
-    );
-  }
-
-  function deleteCurrent() {
-    if (!currentDetail) return;
-    if (currentDetail.kind === 'finding') {
-      postForm(authUrl('/api/findings/' + encodeURIComponent(currentDetail.project)), 'DELETE',
-        'text=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
-        function() {
-          closePopup(true);
-          refetchGraph(null);
-          showToast('Finding deleted', 'ok');
-        }
-      );
-    } else if (currentDetail.kind === 'task') {
-      postForm('/api/tasks/remove', 'POST',
-        'project=' + encodeURIComponent(currentDetail.project) + '&item=' + encodeURIComponent(currentDetail.fullLabel || currentDetail.label),
-        function() {
-          closePopup(true);
-          refetchGraph(null);
-          showToast('Task deleted', 'ok');
-        }
-      );
-    }
-  }
-
-  if (popupClose) popupClose.addEventListener('click', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    closePopup(false);
-  });
-
-  if (popupCard) {
-    popupCard.addEventListener('click', function(e) {
-      var target = e.target;
-      if (!target || typeof target.closest !== 'function' || !currentDetail) return;
-      var actionEl = target.closest('[data-graph-action]');
-      if (!actionEl) return;
-      var action = actionEl.getAttribute('data-graph-action');
-      if (action === 'edit') {
-        isEditing = true;
-        renderPopup(currentDetail);
-      } else if (action === 'cancel-edit') {
-        isEditing = false;
-        renderPopup(currentDetail);
-      } else if (action === 'save-edit') {
-        var input = document.getElementById('graph-popup-editor-input');
-        var nextText = input ? input.value.trim() : '';
-        if (!nextText) {
-          showToast('Text cannot be empty', 'err');
-          return;
-        }
-        if (currentDetail.kind === 'finding') saveFindingEdit(nextText);
-        else if (currentDetail.kind === 'task') saveTaskEdit(nextText);
-      } else if (action === 'delete') {
-        deleteCurrent();
-      } else if (action === 'task-status') {
-        var status = actionEl.getAttribute('data-status') || 'Queue';
-        if (status === 'Done') completeTask();
-        else updateTask({ section: status });
-      } else if (action === 'task-priority') {
-        updateTask({ priority: actionEl.getAttribute('data-priority') || 'medium' });
-      }
-    });
-  }
-
-  document.addEventListener('pointerdown', function(e) {
-    if (!popup || !popup.classList.contains('open')) return;
-    var target = e.target;
-    if (!target || typeof target.closest !== 'function') return;
-    if (popupCard && popupCard.contains(target)) return;
-    if (target.closest('.graph-filters') || target.closest('.graph-controls')) return;
-    closePopup(false);
-  });
-
-  if (window.phrenGraph && typeof window.phrenGraph.onNodeSelect === 'function') {
-    window.phrenGraph.onNodeSelect(function(detail, point) {
-      isEditing = false;
-      renderPopup(detail, point);
-    });
-  }
-
-  if (window.phrenGraph && typeof window.phrenGraph.onSelectionClear === 'function') {
-    window.phrenGraph.onSelectionClear(function() {
-      currentDetail = null;
-      isEditing = false;
-      if (popup) popup.classList.remove('open');
-    });
-  }
-})();`;
-}
-
 export function renderEventWiringScript(): string {
   return `(function() {
   // --- Navigation tabs ---
@@ -1992,10 +1478,6 @@ export function renderEventWiringScript(): string {
   if (tasksFilterProject) tasksFilterProject.addEventListener('change', function() { filterTasks(); });
   var tasksFilterSection = document.getElementById('tasks-filter-section');
   if (tasksFilterSection) tasksFilterSection.addEventListener('change', function() { filterTasks(); });
-
-  // --- Sessions filter ---
-  var sessionsFilterProject = document.getElementById('sessions-filter-project');
-  if (sessionsFilterProject) sessionsFilterProject.addEventListener('change', function() { loadSessions(); });
 
   // --- Mascot click animation ---
   var mascotSvg = document.querySelector('.header-brand svg');
