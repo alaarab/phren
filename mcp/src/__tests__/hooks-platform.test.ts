@@ -74,8 +74,12 @@ describe("hooks platform compatibility", () => {
       fs.mkdirSync(spacedPath, { recursive: true });
       const cmds = buildLifecycleCommands(spacedPath);
       expect(cmds.sessionStart).toContain("my phren path");
-      // Path should be quoted
-      expect(cmds.sessionStart).toContain("PHREN_PATH='");
+      // Path should be quoted — single quotes on POSIX, double quotes on Windows
+      if (process.platform === "win32") {
+        expect(cmds.sessionStart).toContain('set "PHREN_PATH=');
+      } else {
+        expect(cmds.sessionStart).toContain("PHREN_PATH='");
+      }
     });
 
     it("handles paths with backslashes", () => {
