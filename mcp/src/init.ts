@@ -262,11 +262,14 @@ function parseRiskySectionsAnswer(raw: string | undefined | null, fallback: Work
 }
 
 function hasInstallMarkers(phrenPath: string): boolean {
-  return fs.existsSync(phrenPath) && (
-    fs.existsSync(path.join(phrenPath, "machines.yaml")) ||
-    fs.existsSync(path.join(phrenPath, ".config")) ||
-    fs.existsSync(path.join(phrenPath, "global"))
-  );
+  // Require at least two markers to consider this a real install.
+  // A partial clone or failed init may create one directory but not finish.
+  if (!fs.existsSync(phrenPath)) return false;
+  let found = 0;
+  if (fs.existsSync(path.join(phrenPath, "machines.yaml"))) found++;
+  if (fs.existsSync(path.join(phrenPath, ".config"))) found++;
+  if (fs.existsSync(path.join(phrenPath, "global"))) found++;
+  return found >= 2;
 }
 
 function resolveInitPhrenPath(opts: InitOptions): string {
