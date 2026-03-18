@@ -1166,7 +1166,9 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
 
   outputChannel.appendLine("Running first-time Phren onboarding...");
 
+  let setupSucceeded = false;
   try {
+    // Step 1: Global install (optional — npx fallback works without it)
     const globallyInstalled = await isGlobalPhrenInstalled();
     if (!globallyInstalled) {
       const installChoice = await vscode.window.showInformationMessage(
@@ -1188,72 +1190,68 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
       }
     }
 
-    if (!pathExists(GLOBAL_PHREN_STORE_PATH)) {
+    // Step 2: Initialize phren store — run automatically if missing or incomplete
+    // A partial ~/.phren (e.g. from a failed clone) is not sufficient;
+    // we check for the store AND MCP config before considering setup done.
+    const needsInit = !pathExists(GLOBAL_PHREN_STORE_PATH) || !hasPhrenMcpEntry();
+    if (needsInit) {
       const initChoice = await vscode.window.showInformationMessage(
-        `${GLOBAL_PHREN_STORE_PATH} was not found. Initialize Phren now?`,
+        "Phren needs to be initialized. Set up now?",
         "Initialize Phren",
         "Skip",
       );
       if (initChoice === "Initialize Phren") {
         const result = await runCommandWithProgress(
-          "Initializing Phren store...",
+          "Initializing Phren...",
           getNpxCommand(),
           [PHREN_PACKAGE_NAME, "init", "--yes"],
         );
         if (result.ok) {
-          await vscode.window.showInformationMessage("Phren store initialized.");
+          await vscode.window.showInformationMessage("Phren initialized successfully.");
+          setupSucceeded = true;
         } else {
           await vscode.window.showErrorMessage(`Phren init failed: ${summarizeCommandError(result)}`);
         }
       }
+    } else {
+      setupSucceeded = true;
     }
 
-    if (!hasPhrenMcpEntry()) {
-      const configureChoice = await vscode.window.showInformationMessage(
-        "Phren MCP entry is missing in ~/.claude/settings.json. Configure it now?",
-        "Configure MCP",
-        "Skip",
-      );
-      if (configureChoice === "Configure MCP") {
-        const result = await runCommandWithProgress(
-          "Configuring Phren MCP entry...",
-          getNpxCommand(),
-          [PHREN_PACKAGE_NAME, "init", "--yes"],
+    // Step 3: Track workspace (only offer if init succeeded)
+    if (setupSucceeded) {
+      const workspaceFolder = getPrimaryWorkspaceFolderPath();
+      if (workspaceFolder) {
+        const addProjectChoice = await vscode.window.showInformationMessage(
+          `Track this workspace in Phren?\n${workspaceFolder}`,
+          "Track Project",
+          "Skip",
         );
-        if (result.ok) {
-          await vscode.window.showInformationMessage("Phren MCP configuration updated.");
-        } else {
-          await vscode.window.showErrorMessage(`Phren MCP configuration failed: ${summarizeCommandError(result)}`);
-        }
-      }
-    }
-
-    const workspaceFolder = getPrimaryWorkspaceFolderPath();
-    if (workspaceFolder) {
-      const addProjectChoice = await vscode.window.showInformationMessage(
-        `Track this workspace in Phren?\n${workspaceFolder}`,
-        "Track Project",
-        "Skip",
-      );
-      if (addProjectChoice === "Track Project") {
-        const result = await runCommandWithProgress(
-          "Adding workspace to Phren projects...",
-          getNpxCommand(),
-          [PHREN_PACKAGE_NAME, "add", workspaceFolder],
-        );
-        if (result.ok) {
-          await vscode.window.showInformationMessage("Workspace added to Phren projects.");
-        } else {
-          await vscode.window.showErrorMessage(`Failed to add project: ${summarizeCommandError(result)}`);
+        if (addProjectChoice === "Track Project") {
+          const result = await runCommandWithProgress(
+            "Adding workspace to Phren projects...",
+            getNpxCommand(),
+            [PHREN_PACKAGE_NAME, "add", workspaceFolder],
+          );
+          if (result.ok) {
+            await vscode.window.showInformationMessage("Workspace added to Phren projects.");
+          } else {
+            await vscode.window.showErrorMessage(`Failed to add project: ${summarizeCommandError(result)}`);
+          }
         }
       }
     }
   } finally {
-    try {
-      await config.update(ONBOARDING_COMPLETE_SETTING, true, vscode.ConfigurationTarget.Global);
-      outputChannel.appendLine("Phren onboarding complete (phren.onboardingComplete=true).");
-    } catch (error) {
-      outputChannel.appendLine(`Failed to persist onboarding flag: ${toErrorMessage(error)}`);
+    // Only mark onboarding complete if setup actually succeeded.
+    // If it failed or was skipped, we'll ask again next activation.
+    if (setupSucceeded) {
+      try {
+        await config.update(ONBOARDING_COMPLETE_SETTING, true, vscode.ConfigurationTarget.Global);
+        outputChannel.appendLine("Phren onboarding complete (phren.onboardingComplete=true).");
+      } catch (error) {
+        outputChannel.appendLine(`Failed to persist onboarding flag: ${toErrorMessage(error)}`);
+      }
+    } else {
+      outputChannel.appendLine("Phren onboarding incomplete — will retry on next activation.");
     }
   }
 }
