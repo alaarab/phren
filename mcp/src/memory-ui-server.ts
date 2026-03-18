@@ -49,7 +49,6 @@ import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolic
 import { readProjectConfig, updateProjectConfigOverrides } from "./project-config.js";
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
-import { listAllSessions, getSessionArtifacts } from "./mcp-session.js";
 import { repairPreexistingInstall } from "./init-setup.js";
 
 export interface WebUiOptions {
@@ -1033,37 +1032,6 @@ export function createWebUiHttpServer(
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
       });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/sessions") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      try {
-        const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-        const sessionId = typeof qs.sessionId === "string" ? qs.sessionId : undefined;
-        const project = typeof qs.project === "string" ? qs.project : undefined;
-        const limit = parseInt(typeof qs.limit === "string" ? qs.limit : "50", 10) || 50;
-        if (sessionId) {
-          const sessions = listAllSessions(phrenPath, 200);
-          const session = sessions.find(s => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
-          if (!session) {
-            res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-            res.end(JSON.stringify({ ok: false, error: "Session not found" }));
-            return;
-          }
-          const artifacts = getSessionArtifacts(phrenPath, session.sessionId, project);
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: true, session, ...artifacts }));
-        } else {
-          const sessions = listAllSessions(phrenPath, limit);
-          const filtered = project ? sessions.filter(s => s.project === project) : sessions;
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: true, sessions: filtered }));
-        }
-      } catch (err: unknown) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: errorMessage(err), sessions: [] }));
-      }
       return;
     }
 
