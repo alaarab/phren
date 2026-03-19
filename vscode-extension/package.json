@@ -102,6 +102,31 @@
         "icon": "$(add)"
       },
       {
+        "command": "phren.pinMemory",
+        "title": "Phren: Pin Memory"
+      },
+      {
+        "command": "phren.hooksStatus",
+        "title": "Phren: Hooks Status",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "phren.toggleHooks",
+        "title": "Phren: Toggle Hooks"
+      },
+      {
+        "command": "phren.uninstall",
+        "title": "Phren: Uninstall Phren"
+      },
+      {
+        "command": "phren.setMachineAlias",
+        "title": "Phren: Set Machine Alias"
+      },
+      {
+        "command": "phren.openMachinesYaml",
+        "title": "Phren: Open machines.yaml"
+      },
+      {
         "command": "phren.completeTask",
         "title": "Phren: Complete Task",
         "icon": "$(check)"

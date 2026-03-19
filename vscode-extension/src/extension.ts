@@ -378,6 +378,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
+  // --- Pin Memory command ---
+  const pinMemoryDisposable = vscode.commands.registerCommand("phren.pinMemory", async () => {
+    let project = statusBar.getActiveProjectName();
+    if (!project) {
+      const projectsRaw = await phrenClient.listProjects();
+      const projectsData = asRecord(asRecord(projectsRaw)?.data);
+      const projects = asArraySafe(projectsData?.projects);
+      const projectNames: string[] = [];
+      for (const p of projects) {
+        const rec = asRecord(p);
+        const name = typeof rec?.name === "string" ? rec.name : undefined;
+        if (name) projectNames.push(name);
+      }
+      if (projectNames.length === 0) {
+        await vscode.window.showWarningMessage("No Phren projects found.");
+        return;
+      }
+      project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
+      if (!project) return;
+    }
+
+    const memoryText = await vscode.window.showInputBox({ prompt: "Enter memory text" });
+    const trimmedMemoryText = memoryText?.trim();
+    if (!trimmedMemoryText) return;
+
+    try {
+      await phrenClient.pinMemory(project, trimmedMemoryText);
+      treeDataProvider.refresh();
+      await vscode.window.showInformationMessage(`Memory pinned in ${project}`);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to pin memory: ${toErrorMessage(error)}`);
+    }
+  });
+
   // --- Complete Task command (from tree view context menu) ---
   const completeTaskDisposable = vscode.commands.registerCommand(
     "phren.completeTask",
@@ -679,6 +713,65 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
+  // --- Hooks Status command ---
+  const hooksStatusDisposable = vscode.commands.registerCommand("phren.hooksStatus", async () => {
+    try {
+      const raw = await phrenClient.listHooks();
+      const data = asRecord(asRecord(raw)?.data);
+      const hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
+      hooksOutputChannel.clear();
+      hooksOutputChannel.appendLine("=== Phren Hooks Status ===");
+      hooksOutputChannel.appendLine("");
+
+      if (!data) {
+        hooksOutputChannel.appendLine(JSON.stringify(raw, null, 2));
+      } else {
+        const globalEnabled = data.globalEnabled;
+        if (typeof globalEnabled === "boolean") {
+          hooksOutputChannel.appendLine(`Global: ${globalEnabled ? "enabled" : "disabled"}`);
+        }
+
+        const tools = asArraySafe(data.tools);
+        if (tools.length > 0) {
+          hooksOutputChannel.appendLine("");
+          hooksOutputChannel.appendLine("Tools:");
+          for (const toolEntry of tools) {
+            const record = asRecord(toolEntry);
+            const tool = typeof record?.tool === "string" ? record.tool : "unknown";
+            const enabled = record?.enabled === true ? "enabled" : "disabled";
+            hooksOutputChannel.appendLine(`  ${tool}: ${enabled}`);
+          }
+        } else {
+          hooksOutputChannel.appendLine("No hooks reported.");
+        }
+      }
+
+      hooksOutputChannel.appendLine("");
+      hooksOutputChannel.appendLine("=== End ===");
+      hooksOutputChannel.show(true);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to load hooks status: ${toErrorMessage(error)}`);
+    }
+  });
+
+  // --- Toggle Hooks command ---
+  const toggleHooksDisposable = vscode.commands.registerCommand("phren.toggleHooks", async () => {
+    const choice = await vscode.window.showQuickPick(
+      ["Enable All Hooks", "Disable All Hooks"],
+      { placeHolder: "Select hook action" },
+    );
+    if (!choice) return;
+
+    const enabled = choice === "Enable All Hooks";
+    try {
+      await phrenClient.toggleHooks(enabled);
+      treeDataProvider.refresh();
+      await vscode.window.showInformationMessage(`Phren hooks ${enabled ? "enabled" : "disabled"}.`);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to toggle hooks: ${toErrorMessage(error)}`);
+    }
+  });
+
   // --- Doctor command ---
   const doctorDisposable = vscode.commands.registerCommand("phren.doctor", async () => {
     try {
@@ -895,94 +988,113 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const uninstallDisposable = vscode.commands.registerCommand("phren.uninstall", async () => {
-    const proceed = await vscode.window.showWarningMessage(
-      "Uninstall Phren from this machine?",
-      {
-        modal: true,
-        detail: "This removes Phren MCP entries from editor configs, uninstalls the global npm package, and resets VS Code Phren settings.",
-      },
-      "Uninstall Phren",
+    const confirmed = await vscode.window.showWarningMessage(
+      "This will remove Phren config and hooks from this machine. Are you sure?",
+      { modal: true },
+      "Uninstall",
     );
-    if (proceed !== "Uninstall Phren") {
+    if (confirmed !== "Uninstall") {
       return;
     }
 
-    const deleteStoreChoice = await vscode.window.showWarningMessage(
-      `Also delete ${GLOBAL_PHREN_STORE_PATH}?`,
-      {
-        modal: true,
-        detail: "This permanently deletes Phren memory and project data on this machine.",
-      },
-      "Delete ~/.phren",
-      "Keep Data",
-    );
-    const deleteStore = deleteStoreChoice === "Delete ~/.phren";
-
-    const summary = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: "Phren: Uninstalling...", cancellable: false },
-      async (progress) => {
-        progress.report({ message: "Clearing Phren MCP entries from editor configs..." });
-        const cleanupResult = clearPhrenMcpEntries();
-
-        progress.report({ message: `Running npm uninstall -g ${PHREN_PACKAGE_NAME}...` });
-        const npmResult = uninstallGlobalPhrenPackage();
-
-        progress.report({ message: "Resetting VS Code Phren extension settings..." });
-        const resetResult = await resetPhrenExtensionSettings(context);
-
-        let storeRemoval: { removed: boolean; skipped: boolean; error?: string } = { removed: false, skipped: true };
-        if (deleteStore) {
-          progress.report({ message: `Deleting ${GLOBAL_PHREN_STORE_PATH}...` });
-          storeRemoval = removePhrenStore(GLOBAL_PHREN_STORE_PATH);
-        }
-
-        return { cleanupResult, npmResult, resetResult, storeRemoval };
-      },
-    );
-
-    outputChannel.appendLine("=== Phren Uninstall ===");
-    for (const filePath of summary.cleanupResult.cleanedFiles) {
-      outputChannel.appendLine(`Cleaned MCP entry: ${filePath}`);
-    }
-    for (const warning of summary.cleanupResult.warnings) {
-      outputChannel.appendLine(`Warning: ${warning}`);
-    }
-    if (summary.npmResult.stdout) {
-      outputChannel.appendLine(summary.npmResult.stdout.trim());
-    }
-    if (summary.npmResult.stderr) {
-      outputChannel.appendLine(summary.npmResult.stderr.trim());
-    }
-    for (const warning of summary.resetResult.warnings) {
-      outputChannel.appendLine(`Warning: ${warning}`);
-    }
-    if (deleteStore) {
-      if (summary.storeRemoval.removed) {
-        outputChannel.appendLine(`Removed ${GLOBAL_PHREN_STORE_PATH}`);
-      } else if (summary.storeRemoval.error) {
-        outputChannel.appendLine(`Warning: ${summary.storeRemoval.error}`);
-      }
-    }
-    outputChannel.appendLine("=== End ===");
-
-    const failedSteps: string[] = [];
-    if (!summary.npmResult.ok) failedSteps.push("global npm uninstall");
-    if (summary.storeRemoval.error) failedSteps.push("~/.phren deletion");
-    if (summary.resetResult.warnings.length > 0) failedSteps.push("settings reset (partial)");
-
-    treeDataProvider.refresh();
-
-    if (failedSteps.length > 0) {
-      await vscode.window.showWarningMessage(
-        `Phren uninstall finished with warnings (${failedSteps.join(", ")}). See the Phren output channel for details.`,
+    try {
+      const result = await runCommandWithProgress(
+        "Phren: Uninstalling...",
+        getNpxCommand(),
+        [PHREN_PACKAGE_NAME, "uninstall"],
       );
-      outputChannel.show(true);
+      if (result.ok) {
+        treeDataProvider.refresh();
+        await vscode.window.showInformationMessage("Phren uninstall complete.");
+      } else {
+        await vscode.window.showErrorMessage(`Phren uninstall failed: ${summarizeCommandError(result)}`);
+      }
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Phren uninstall failed: ${toErrorMessage(error)}`);
+    }
+  });
+
+  const openMachinesYamlDisposable = vscode.commands.registerCommand("phren.openMachinesYaml", async () => {
+    try {
+      const machinesPath = path.join(os.homedir(), ".phren", "machines.yaml");
+      if (!fs.existsSync(machinesPath)) {
+        await vscode.window.showInformationMessage("No machines.yaml found at ~/.phren/machines.yaml.");
+        return;
+      }
+      const document = await vscode.workspace.openTextDocument(machinesPath);
+      await vscode.window.showTextDocument(document);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to open machines.yaml: ${toErrorMessage(error)}`);
+    }
+  });
+
+  const setMachineAliasDisposable = vscode.commands.registerCommand("phren.setMachineAlias", async () => {
+    const alias = await vscode.window.showInputBox({
+      prompt: "Enter machine alias",
+      placeHolder: "e.g. work-laptop",
+      validateInput: (value) => {
+        const trimmed = value.trim();
+        if (!trimmed) return "Machine alias cannot be empty.";
+        if (/[:#]/.test(trimmed)) return "Machine alias cannot contain ':' or '#'.";
+        return null;
+      },
+    });
+    const trimmedAlias = alias?.trim();
+    if (!trimmedAlias) return;
+
+    const machinesPath = path.join(os.homedir(), ".phren", "machines.yaml");
+    if (!fs.existsSync(machinesPath)) {
+      await vscode.window.showInformationMessage("No machines.yaml found at ~/.phren/machines.yaml.");
       return;
     }
 
-    await vscode.window.showInformationMessage(
-      `Phren uninstall complete. Removed ${summary.cleanupResult.cleanedFiles.length} MCP entr${summary.cleanupResult.cleanedFiles.length === 1 ? "y" : "ies"}${deleteStore ? " and deleted ~/.phren" : ""}.`,
-    );
+    try {
+      const currentHostname = os.hostname();
+      if (trimmedAlias === currentHostname) {
+        await vscode.window.showInformationMessage(`Machine alias is already "${trimmedAlias}".`);
+        return;
+      }
+
+      const raw = fs.readFileSync(machinesPath, "utf8");
+      const lines = raw.split(/\r?\n/);
+
+      for (const line of lines) {
+        const match = line.match(/^(\s*)([^:#]+?)(\s*:\s*.+)$/);
+        if (!match) continue;
+        const machine = cleanYamlScalar(match[2]);
+        if (machine === trimmedAlias && machine !== currentHostname) {
+          await vscode.window.showWarningMessage(`machines.yaml already contains an entry for "${trimmedAlias}".`);
+          return;
+        }
+      }
+
+      let updated = false;
+      const nextLines = lines.map((line) => {
+        const match = line.match(/^(\s*)([^:#]+?)(\s*:\s*.+)$/);
+        if (!match) return line;
+        const machine = cleanYamlScalar(match[2]);
+        if (machine !== currentHostname) return line;
+        updated = true;
+        return `${match[1]}${trimmedAlias}${match[3]}`;
+      });
+
+      if (!updated) {
+        await vscode.window.showWarningMessage(
+          `No machines.yaml entry found for hostname "${currentHostname}".`,
+        );
+        return;
+      }
+
+      const contentWithoutTrailingBlankLines = nextLines.join("\n").replace(/\n+$/, "");
+      const nextContent = raw.endsWith("\n")
+        ? `${contentWithoutTrailingBlankLines}\n`
+        : contentWithoutTrailingBlankLines;
+      fs.writeFileSync(machinesPath, nextContent, "utf8");
+      treeDataProvider.refresh();
+      await vscode.window.showInformationMessage(`Updated machine alias to "${trimmedAlias}".`);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to set machine alias: ${toErrorMessage(error)}`);
+    }
   });
 
   const openMachinesConfigDisposable = vscode.commands.registerCommand("phren.openMachinesConfig", async () => {
@@ -1200,8 +1312,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     filterFindingsByDateDisposable,
     switchProfileDisposable,
     configureMachineDisposable,
+    setMachineAliasDisposable,
     openMachinesConfigDisposable,
+    openMachinesYamlDisposable,
     syncDisposable,
+    hooksStatusDisposable,
+    toggleHooksDisposable,
     doctorDisposable,
     doctorFixDisposable,
     sessionStartDisposable,
@@ -1209,6 +1325,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     toggleProjectDisposable,
     uninstallDisposable,
     addTaskDisposable,
+    pinMemoryDisposable,
     completeTaskDisposable,
     removeTaskDisposable,
     pinTaskDisposable,
@@ -1428,6 +1545,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asArraySafe(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function cleanYamlScalar(value: string): string {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Promise<void> {

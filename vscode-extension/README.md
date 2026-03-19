@@ -48,8 +48,7 @@ Once set, open the Phren activity bar item and the extension loads your projects
 
 ## Commands
 
-### Command Palette (16)
-
+### Command Palette (17)
 
 These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 
@@ -66,25 +65,21 @@ These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 | `Phren: Pin Memory` | — | Pin a canonical memory entry that never decays. |
 | `Phren: Hooks Status` | — | Show hook enable/disable status for all registered tools. |
 | `Phren: Toggle Hooks` | — | Enable or disable all phren hooks globally. |
-| `Phren: Manage Project` | — | Archive or restore a project. |
+| `Phren: Add Project` | — | Track a folder as a Phren project. Also available in the Explorer context menu. |
 | `Phren: Uninstall Phren` | — | Remove Phren config and hooks from this machine. |
 | `Phren: Set This Machine's Profile` | — | Switch the active profile for this machine. |
 | `Phren: Set Machine Alias` | — | Set a friendly name for this machine in `machines.yaml`. |
 | `Phren: Open machines.yaml` | — | Open the machines config file directly. |
+| `Phren: Project Config` | — | View and edit project-level configuration. |
 
-### Sidebar and Context Menu (20)
+### Sidebar and Context Menu (16)
 
 These commands fire from the Phren sidebar or editor context menu. They are not shown in the command palette by default:
 
 | Command | Where it appears | Description |
 |---------|-----------------|-------------|
-| `Phren: Open Finding` | Click on a finding in the sidebar | Open a finding in a read-only detail panel. |
-| `Phren: Open Project File` | Click on a project file | Open a project file (CLAUDE.md, summary.md, etc.) in a panel. |
-| `Phren: Open Skill` | Click on a skill in the sidebar | Open a skill in an editable webview with inline save and enable/disable. |
 | `Phren: Toggle Skill` | Skill context menu | Enable or disable a skill without deleting it. |
 | `Phren: Toggle Hook` | Hook item context menu | Toggle a specific hook from the sidebar. |
-| `Phren: Open Task` | Click on a task in the sidebar | Open a task in a detail view where you can edit it or mark it done. |
-| `Phren: Open Queue Item` | Click on a queue item | Open a review queue item in a detail panel. |
 | `Phren: Open Session Overview` | Session item inline action | Open a session overview panel showing findings and tasks from that session. |
 | `Phren: Copy Session ID` | Session item context menu | Copy the session ID to clipboard. |
 | `Phren: Filter Findings by Date` | Findings category inline action | Filter the findings list to a specific date range. |
@@ -98,6 +93,9 @@ These commands fire from the Phren sidebar or editor context menu. They are not 
 | `Phren: Resolve Contradiction` | Finding item context menu | Resolve a contradiction between two conflicting findings. |
 | `Phren: Link GitHub Issue` | Task item inline action | Link or unlink an existing GitHub issue on a task. |
 | `Phren: Create GitHub Issue` | Task item inline action | Create a GitHub issue from a task item and link it back. |
+| `Phren: Toggle Project` | Project item context menu | Archive or restore a project. |
+
+Tree item clicks (findings, tasks, skills, queue items, project files) open detail panels directly — no separate command needed.
 
 ## Core Workflows
 
