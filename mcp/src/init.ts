@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { configureAllHooks } from "./hooks.js";
 import { getMachineName, machineFilePath, persistMachineName } from "./machine-identity.js";
 import {
@@ -140,6 +140,15 @@ type WorkflowRiskSection = "Review" | "Stale" | "Conflicts";
 type StorageLocationChoice = "global" | "project" | "custom";
 type SkillsScope = "global" | "project";
 
+const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
+
+interface SyncCommandResult {
+  ok: boolean;
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
 function parseVersion(version: string): { major: number; minor: number; patch: number; pre: string } {
   const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
   if (!match) return { major: 0, minor: 0, patch: 0, pre: "" };
@@ -167,6 +176,57 @@ export function isVersionNewer(current: string, previous?: string): boolean {
   if (c.pre && !p.pre) return false;
   if (!c.pre && p.pre) return true;
   return c.pre > p.pre;
+}
+
+function getNpmCommand(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function runSyncCommand(command: string, args: string[]): SyncCommandResult {
+  try {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      ok: result.status === 0,
+      status: result.status,
+      stdout: typeof result.stdout === "string" ? result.stdout : "",
+      stderr: typeof result.stderr === "string" ? result.stderr : "",
+    };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      status: null,
+      stdout: "",
+      stderr: errorMessage(err),
+    };
+  }
+}
+
+function shouldUninstallCurrentGlobalPackage(): boolean {
+  const entryScript = process.argv[1];
+  if (!entryScript) return false;
+  const npmRootResult = runSyncCommand(getNpmCommand(), ["root", "-g"]);
+  if (!npmRootResult.ok) return false;
+  const npmRoot = npmRootResult.stdout.trim();
+  if (!npmRoot) return false;
+  const resolvedEntryScript = path.resolve(entryScript);
+  const resolvedGlobalPackageRoot = path.resolve(path.join(npmRoot, PHREN_NPM_PACKAGE_NAME));
+  return resolvedEntryScript === resolvedGlobalPackageRoot
+    || resolvedEntryScript.startsWith(`${resolvedGlobalPackageRoot}${path.sep}`);
+}
+
+function uninstallCurrentGlobalPackage(): void {
+  const result = runSyncCommand(getNpmCommand(), ["uninstall", "-g", PHREN_NPM_PACKAGE_NAME]);
+  if (result.ok) {
+    log(`  Removed global npm package (${PHREN_NPM_PACKAGE_NAME})`);
+    return;
+  }
+
+  const detail = result.stderr.trim() || result.stdout.trim() || (result.status === null ? "failed to start command" : `exit code ${result.status}`);
+  log(`  Warning: could not remove global npm package (${PHREN_NPM_PACKAGE_NAME})`);
+  debugLog(`uninstall: global npm cleanup failed: ${detail}`);
 }
 
 export function parseMcpMode(raw?: string): McpMode | undefined {
@@ -2043,6 +2103,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
   }
 
   log("\nUninstalling phren...\n");
+  const shouldRemoveGlobalPackage = shouldUninstallCurrentGlobalPackage();
 
   // Confirmation prompt (shared-mode only — project-local is low-stakes)
   if (!opts.yes) {
@@ -2220,6 +2281,16 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${machineFile}: ${errorMessage(err)}`); }
 
+  const contextFile = homePath(".phren-context.md");
+  try {
+    if (fs.existsSync(contextFile)) {
+      fs.unlinkSync(contextFile);
+      log(`  Removed machine context file (${contextFile})`);
+    }
+  } catch (err: unknown) {
+    debugLog(`uninstall: cleanup failed for ${contextFile}: ${errorMessage(err)}`);
+  }
+
   // Sweep agent skill directories for symlinks pointing into the phren store
   if (phrenPath) {
     try {
@@ -2237,6 +2308,10 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
       debugLog(`uninstall: cleanup failed for ${phrenPath}: ${errorMessage(err)}`);
       log(`  Warning: could not remove phren root (${phrenPath})`);
     }
+  }
+
+  if (shouldRemoveGlobalPackage) {
+    uninstallCurrentGlobalPackage();
   }
 
   log(`\nPhren config, hooks, and installed data removed.`);
