@@ -139,6 +139,10 @@ export class PhrenClient {
     return this.callTool("get_project_summary", { name: project });
   }
 
+  async getTopicConfig(project: string): Promise<unknown> {
+    return this.callTool("get_topic_config", { project });
+  }
+
   async listSkills(): Promise<unknown> {
     return this.callTool("list_skills", {});
   }
@@ -257,6 +261,13 @@ export class PhrenClient {
 
   async manageProject(project: string, action: "archive" | "unarchive"): Promise<unknown> {
     return this.callTool("manage_project", { project, action });
+  }
+
+  async addProject(targetPath: string, profile?: string, ownership?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { path: targetPath };
+    if (profile) args.profile = profile;
+    if (ownership) args.ownership = ownership;
+    return this.callTool("add_project", args);
   }
 
   async healthCheck(): Promise<unknown> {

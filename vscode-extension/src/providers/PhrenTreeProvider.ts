@@ -1239,7 +1239,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     try {
       const projects = await this.fetchProjects();
       if (projects.length === 0) {
-        return [{ kind: "message", label: "No projects found", description: "Index projects to populate Phren.", iconId: "info" }];
+        return [{ kind: "message", label: "No projects yet \u2014 click + to add one", description: "", iconId: "add" }];
       }
       const ctx = this.readDeviceContext();
       if (ctx.activeProjects.size === 0) {

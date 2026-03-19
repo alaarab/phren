@@ -196,12 +196,47 @@ export function register(server: McpServer, ctx: McpContext): void {
       } catch (err: unknown) {
         if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${errorMessage(err)}\n`);
       }
+      let syncIntent: string | undefined;
       try {
         const { readInstallPreferences } = await import("./init-preferences.js");
         const prefs = readInstallPreferences(phrenPath);
         proactivity = prefs.proactivity || "high";
+        syncIntent = prefs.syncIntent;
       } catch (err: unknown) {
         if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${errorMessage(err)}\n`);
+      }
+
+      // Determine sync status from intent + git remote state
+      let syncStatus: "synced" | "local-only" | "broken" = "local-only";
+      let syncDetail = "no git remote configured";
+      try {
+        const { execFileSync } = await import("child_process");
+        const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 5_000,
+        }).trim();
+        if (remote) {
+          try {
+            execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+              stdio: ["ignore", "ignore", "ignore"],
+              timeout: 10_000,
+            });
+            syncStatus = "synced";
+            syncDetail = `origin=${remote}`;
+          } catch {
+            syncStatus = syncIntent === "sync" ? "broken" : "local-only";
+            syncDetail = `origin=${remote} (unreachable)`;
+          }
+        } else if (syncIntent === "sync") {
+          syncStatus = "broken";
+          syncDetail = "sync was configured but no remote found";
+        }
+      } catch {
+        if (syncIntent === "sync") {
+          syncStatus = "broken";
+          syncDetail = "sync was configured but no remote found";
+        }
       }
 
       const lines = [
@@ -214,6 +249,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
         `Proactivity: ${proactivity}`,
         `Task mode: ${taskMode}`,
+        `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
         `Path: ${phrenPath}`,
       ].filter(Boolean);
 
@@ -230,6 +266,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           hooksEnabled,
           proactivity,
           taskMode,
+          syncStatus,
+          syncDetail,
           phrenPath,
         },
       });

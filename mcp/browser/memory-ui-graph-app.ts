@@ -1008,7 +1008,7 @@ function buildFilterBar(): void {
     `<input type="number" data-limit-input min="50" max="50000" value="${state.nodeLimit}" style="width:120px;padding:7px 9px;border-radius:8px;background:var(--surface);color:var(--ink);border:1px solid var(--border);font-size:12px" />`,
     '</div>',
     '</div>',
-    `<span style="flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap">${state.visibleNodes.length} / ${state.rawNodes.length}</span>`,
+    `<span data-filter-counter style="flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap">${state.visibleNodes.length} / ${state.rawNodes.length}</span>`,
     "</div>",
   ].join("");
 
@@ -1080,6 +1080,13 @@ function buildFilterBar(): void {
   }
 }
 
+function updateFilterBarCounter(): void {
+  const filterEl = document.getElementById("graph-filter");
+  if (!filterEl) return;
+  const counter = filterEl.querySelector<HTMLElement>("[data-filter-counter]");
+  if (counter) counter.textContent = `${state.visibleNodes.length} / ${state.rawNodes.length}`;
+}
+
 function applyFilters(options: { resetCamera?: boolean; emitSelection?: boolean } = {}): void {
   const visibleData = buildVisibleData();
   state.visibleNodes = visibleData.nodes;
@@ -1087,7 +1094,7 @@ function applyFilters(options: { resetCamera?: boolean; emitSelection?: boolean 
   rebuildHostNodes();
   state.graph = buildGraph(visibleData.nodes, visibleData.links);
   refreshRenderer(Boolean(options.resetCamera));
-  buildFilterBar();
+  updateFilterBarCounter();
 
   if (state.selectedNodeId && !state.graph.hasNode(state.selectedNodeId)) {
     state.selectedNodeId = null;
@@ -1121,6 +1128,7 @@ function mount(payload: GraphPayload): void {
   state.nodeById = new Map();
   state.rawNodes.forEach((node) => state.nodeById.set(node.id, node));
   buildFullAdjacency();
+  buildFilterBar();
   applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
   startPhrenMascot();
 }

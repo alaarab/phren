@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onView:phren.explorer"
+    "onView:phren.explorer",
+    "onStartupFinished"
   ],
   "keywords": [
     "phren",
@@ -159,6 +160,23 @@
         "command": "phren.toggleProject",
         "title": "Phren: Toggle Project",
         "icon": "$(archive)"
+      },
+      {
+        "command": "phren.addProject",
+        "title": "Phren: Add Project",
+        "icon": "$(add)"
+      },
+      {
+        "command": "phren.installBackend",
+        "title": "Phren: Install Backend"
+      },
+      {
+        "command": "phren.initStore",
+        "title": "Phren: Initialize Store"
+      },
+      {
+        "command": "phren.openSetupWizard",
+        "title": "Phren: Advanced Setup"
       }
     ],
     "keybindings": [
@@ -318,7 +336,19 @@
           "group": "inline"
         }
       ],
+      "explorer/context": [
+        {
+          "command": "phren.addProject",
+          "when": "explorerResourceIsFolder",
+          "group": "phren@1"
+        }
+      ],
       "view/title": [
+        {
+          "command": "phren.addProject",
+          "when": "view == phren.explorer",
+          "group": "navigation"
+        },
         {
           "command": "phren.showGraph",
           "when": "view == phren.explorer",
@@ -358,6 +388,75 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "phren.explorer",
+        "contents": "Phren is not set up yet.\n[Install Phren](command:phren.installBackend)\n[Open Walkthrough](command:workbench.action.openWalkthrough?%22alaarab.phren-vscode%23phren.gettingStarted%22)",
+        "when": "!phren.backendInstalled"
+      },
+      {
+        "view": "phren.explorer",
+        "contents": "No projects tracked yet.\n[Add Project](command:phren.addProject)",
+        "when": "phren.backendInstalled && !phren.firstProjectAdded"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "phren.gettingStarted",
+        "title": "Get Started with Phren",
+        "description": "Set up persistent AI memory in 3 steps.",
+        "steps": [
+          {
+            "id": "installBackend",
+            "title": "Install Phren",
+            "description": "Install the phren CLI so the extension can run.\n\n[Install Phren](command:phren.installBackend)",
+            "completionEvents": [
+              "onContext:phren.backendInstalled"
+            ],
+            "media": {
+              "svg": "media/walkthrough-install.svg",
+              "altText": "Install phren"
+            }
+          },
+          {
+            "id": "initStore",
+            "title": "Initialize Memory Store",
+            "description": "Create the ~/.phren directory with default settings.\n\n[Initialize](command:phren.initStore)",
+            "completionEvents": [
+              "onContext:phren.storeInitialized"
+            ],
+            "media": {
+              "svg": "media/walkthrough-init.svg",
+              "altText": "Initialize store"
+            }
+          },
+          {
+            "id": "addFirstProject",
+            "title": "Add Your First Project",
+            "description": "Track your workspace so findings and tasks persist.\n\n[Add Project](command:phren.addProject)",
+            "completionEvents": [
+              "onContext:phren.firstProjectAdded"
+            ],
+            "media": {
+              "svg": "media/walkthrough-project.svg",
+              "altText": "Add project"
+            }
+          },
+          {
+            "id": "exploreSidebar",
+            "title": "Explore the Sidebar",
+            "description": "Browse projects, findings, tasks, and the knowledge graph.\n\n[Open Sidebar](command:phren.explorer.focus)",
+            "completionEvents": [
+              "onView:phren.explorer"
+            ],
+            "media": {
+              "svg": "media/walkthrough-explore.svg",
+              "altText": "Explore sidebar"
+            }
+          }
+        ]
+      }
+    ],
     "configuration": [
       {
         "title": "Setup",

@@ -22,6 +22,8 @@ export interface InstallPreferences {
   installedVersion?: string;
   updatedAt?: string;
   customHooks?: CustomHookEntry[];
+  /** Whether the user intended cross-machine sync ("sync") or local-only ("local"). */
+  syncIntent?: "sync" | "local";
 }
 
 function preferencesFile(phrenPath: string): string {

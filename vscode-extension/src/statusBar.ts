@@ -12,6 +12,8 @@ export class PhrenStatusBar implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private activeProjectName?: string;
   private healthOk: boolean | undefined;
+  private syncStatus?: "synced" | "local-only" | "broken";
+  private syncBrokenWarned = false;
   private healthTimer?: ReturnType<typeof setInterval>;
   private onHealthChanged?: (ok: boolean) => void;
 
@@ -95,9 +97,33 @@ export class PhrenStatusBar implements vscode.Disposable {
       const ok = data !== undefined;
       const changed = this.healthOk !== ok;
       this.healthOk = ok;
+
+      // Extract sync status from health check response
+      const rawSync = asString(data?.syncStatus);
+      const newSyncStatus = rawSync === "synced" || rawSync === "local-only" || rawSync === "broken" ? rawSync : undefined;
+      const prevSyncStatus = this.syncStatus;
+      this.syncStatus = newSyncStatus;
+
       this.render();
       if (changed && this.onHealthChanged) {
         this.onHealthChanged(ok);
+      }
+
+      // One-time warning when sync transitions to broken
+      if (newSyncStatus === "broken" && prevSyncStatus !== "broken" && !this.syncBrokenWarned) {
+        this.syncBrokenWarned = true;
+        const syncDetail = asString(data?.syncDetail) || "remote unreachable";
+        vscode.window.showWarningMessage(
+          `Phren sync is broken: ${syncDetail}. Your data is local-only.`,
+          "How to Fix",
+        ).then((action) => {
+          if (action === "How to Fix") {
+            const phrenStorePath = asString(data?.phrenPath) || "~/.phren";
+            vscode.window.showInformationMessage(
+              `Run in terminal:\n  cd ${phrenStorePath}\n  git remote add origin <YOUR_REPO_URL>\n  git push -u origin main`,
+            );
+          }
+        });
       }
     } catch {
       const changed = this.healthOk !== false;
@@ -136,11 +162,17 @@ export class PhrenStatusBar implements vscode.Disposable {
   private render(): void {
     const projectName = this.activeProjectName ?? "No project";
     const healthIcon = this.healthOk === true ? "$(pass-filled)" : this.healthOk === false ? "$(error)" : "$(loading~spin)";
-    this.statusItem.text = `$(hubot) ${projectName} ${healthIcon}`;
+    const syncIcon = this.syncStatus === "synced" ? " $(cloud)"
+      : this.syncStatus === "broken" ? " $(cloud-offline)"
+      : "";
+    this.statusItem.text = `$(hubot) ${projectName} ${healthIcon}${syncIcon}`;
+    const syncTooltip = this.syncStatus === "broken" ? " | Sync broken" : this.syncStatus === "synced" ? " | Synced" : "";
     this.statusItem.tooltip = this.healthOk === false
-      ? "Phren is unhealthy — click for Doctor"
-      : `Phren: ${projectName} — click for Doctor`;
-    this.statusItem.color = this.healthOk === false ? new vscode.ThemeColor("errorForeground") : undefined;
+      ? `Phren is unhealthy — click for Doctor${syncTooltip}`
+      : `Phren: ${projectName}${syncTooltip} — click for Doctor`;
+    this.statusItem.color = this.healthOk === false || this.syncStatus === "broken"
+      ? new vscode.ThemeColor("errorForeground")
+      : undefined;
   }
 }
 
