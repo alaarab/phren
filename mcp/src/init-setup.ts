@@ -372,8 +372,9 @@ export function repairPreexistingInstall(phrenPath: string): RepairInstallResult
 
 function isExpectedVerifyFailure(phrenPath: string, check: Pick<PostInitCheck, "name" | "ok">): boolean {
   if (check.ok) return false;
-  if (check.name === "git-remote") return true;
   const prefs = readInstallPreferences(phrenPath);
+  // git-remote failure is only expected when the user chose local-only (no clone URL)
+  if (check.name === "git-remote") return prefs.syncIntent !== "sync";
   if (check.name === "mcp-config" && prefs.mcpEnabled === false) return true;
   if (check.name === "hooks-registered" && prefs.hooksEnabled === false) return true;
   return false;
@@ -423,15 +424,27 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   } catch {
     return { ok: false, detail: "phren path is not a git repository" };
   }
+  let remote: string;
   try {
-    const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    return remote ? { ok: true, detail: `origin=${remote}` } : { ok: false, detail: "git origin remote not configured" };
+    if (!remote) return { ok: false, detail: "git origin remote not configured" };
   } catch {
     return { ok: false, detail: "git origin remote not configured" };
+  }
+
+  // Connectivity test: verify the remote is reachable (10s timeout)
+  try {
+    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 10_000,
+    });
+    return { ok: true, detail: `origin=${remote}` };
+  } catch {
+    return { ok: false, detail: `origin=${remote} (configured but unreachable)` };
   }
 }
 
@@ -1332,14 +1345,22 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
   } else {
 
     const gitRemote = gitRemoteStatus(phrenPath);
+    const wantSync = prefs.syncIntent === "sync";
     const gitRemoteDetail = gitRemote.ok
       ? gitRemote.detail
-      : `${gitRemote.detail} (optional unless you want cross-machine sync)`;
+      : wantSync
+        ? `${gitRemote.detail} — sync was configured but remote is missing or unreachable`
+        : `${gitRemote.detail} (optional unless you want cross-machine sync)`;
+    const gitRemoteFix = gitRemote.ok
+      ? undefined
+      : wantSync
+        ? `Your clone URL didn't work. Fix: cd ${phrenPath} && git remote add origin <URL> && git push -u origin main`
+        : "Optional: initialize a repo and add an origin remote for cross-machine sync.";
     checks.push({
       name: "git-remote",
       ok: gitRemote.ok,
       detail: gitRemoteDetail,
-      fix: gitRemote.ok ? undefined : "Optional: initialize a repo and add an origin remote for cross-machine sync.",
+      fix: gitRemoteFix,
     });
 
     const settingsPath = hookConfigPath("claude");

@@ -123,11 +123,18 @@ interface MemoryScores {
   entries: Record<string, MemoryScoreEntry>;
 }
 
+interface TopicMeta {
+  slug: string;
+  label: string;
+  keywords?: string[];
+}
+
 interface GraphPayload {
   nodes: GraphNode[];
   edges: GraphEdge[];
   summaries: Record<string, ProjectSummaryData>;
   scores: MemoryScores;
+  topics: TopicMeta[];
 }
 
 /* ── Main entry ──────────────────────────────────────────── */
@@ -263,15 +270,16 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
 async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const projects = await fetchProjects(client);
 
-  // Parallel per-project fetches
+  // Parallel per-project fetches (including topic configs)
   const perProjectResults = await Promise.all(
     projects.map(async (p) => {
+      const topicConfig = await fetchTopicConfig(client, p.name);
       const [summary, findings, tasks] = await Promise.all([
         fetchProjectSummary(client, p.name),
-        fetchFindings(client, p.name),
+        fetchFindings(client, p.name, topicConfig),
         fetchTasks(client, p.name),
       ]);
-      return { projectName: p.name, summary, findings, tasks };
+      return { projectName: p.name, summary, findings, tasks, topicConfig };
     }),
   );
 
@@ -282,11 +290,22 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const scores = loadMemoryScores();
   const scoreLookup = buildScoreLookup(scores);
 
+  // Merge all project topics into a deduplicated list
+  const topicMetaMap = new Map<string, TopicMeta>();
+  for (const { topicConfig } of perProjectResults) {
+    for (const topic of topicConfig) {
+      if (!topicMetaMap.has(topic.slug)) {
+        topicMetaMap.set(topic.slug, topic);
+      }
+    }
+  }
+  const allTopics = Array.from(topicMetaMap.values());
+
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const summaryMap: Record<string, ProjectSummaryData> = {};
   // Build project nodes (skip empty orphans)
-  for (const { projectName, summary, findings, tasks } of perProjectResults) {
+  for (const { projectName, summary, findings, tasks, topicConfig } of perProjectResults) {
     if (findings.length === 0 && tasks.length === 0) continue;
 
     const projectNodeId = `project:${projectName}`;
@@ -440,7 +459,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
     }
   }
 
-  return { nodes, edges: uniqueEdges, summaries: summaryMap, scores };
+  return { nodes, edges: uniqueEdges, summaries: summaryMap, scores, topics: allTopics };
 }
 
 /* ── Fetch helpers ───────────────────────────────────────── */
@@ -484,7 +503,7 @@ async function fetchProjectSummary(client: PhrenClient, project: string): Promis
   };
 }
 
-async function fetchFindings(client: PhrenClient, project: string): Promise<FindingData[]> {
+async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingData[]> {
   const raw = await client.getFindings(project);
   const data = responseData(raw);
   const parsed: FindingData[] = [];
@@ -493,7 +512,7 @@ async function fetchFindings(client: PhrenClient, project: string): Promise<Find
     const id = asString(record?.id) ?? asString(record?.stableId) ?? String(parsed.length);
     const text = asString(record?.text) ?? "";
     if (!text) continue;
-    const topic = classifyFindingTopic(text);
+    const topic = classifyFindingTopic(text, projectTopics);
     parsed.push({
       id,
       date: asString(record?.date) ?? "",
@@ -504,6 +523,29 @@ async function fetchFindings(client: PhrenClient, project: string): Promise<Find
     });
   }
   return parsed;
+}
+
+async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
+  try {
+    const raw = await client.getTopicConfig(project);
+    const data = responseData(raw);
+    const topics: TopicMeta[] = [];
+    for (const entry of asArray(data?.topics)) {
+      const record = asRecord(entry);
+      const slug = asString(record?.slug);
+      const label = asString(record?.label);
+      if (slug) {
+        const keywords: string[] = [];
+        for (const kw of asArray(record?.keywords)) {
+          if (typeof kw === "string") keywords.push(kw);
+        }
+        topics.push({ slug, label: label ?? slug, keywords: keywords.length ? keywords : undefined });
+      }
+    }
+    return topics;
+  } catch {
+    return [];
+  }
 }
 
 async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
@@ -624,12 +666,27 @@ const BUILTIN_TOPIC_KEYWORDS: Array<{ slug: string; label: string; keywords: str
   { slug: "ai_ml", label: "AI / ML", keywords: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"] },
 ];
 
-function classifyFindingTopic(text: string): { slug: string; label: string } {
+function classifyFindingTopic(text: string, projectTopics?: TopicMeta[]): { slug: string; label: string } {
   const lower = text.toLowerCase();
   let bestSlug = "general";
   let bestLabel = "General";
   let bestScore = 0;
-  for (const topic of BUILTIN_TOPIC_KEYWORDS) {
+
+  // Use project topics (with keywords) when available, fall back to builtins
+  const topicsToMatch: Array<{ slug: string; label: string; keywords: string[] }> = [];
+  if (projectTopics?.length) {
+    for (const t of projectTopics) {
+      topicsToMatch.push({ slug: t.slug, label: t.label, keywords: t.keywords ?? [] });
+    }
+  }
+  // Always include builtins as fallback (project topics may not have keywords for all categories)
+  for (const t of BUILTIN_TOPIC_KEYWORDS) {
+    if (!topicsToMatch.some((pt) => pt.slug === t.slug)) {
+      topicsToMatch.push(t);
+    }
+  }
+
+  for (const topic of topicsToMatch) {
     let score = 0;
     for (const kw of topic.keywords) {
       if (lower.includes(kw)) score++;
@@ -1005,9 +1062,16 @@ ${graphScript}
   }
 
   var topics = [];
-  var topicSlugs = Object.keys(topicMap);
-  for (var topicIndex = 0; topicIndex < topicSlugs.length; topicIndex++) {
-    topics.push({ slug: topicSlugs[topicIndex], label: topicMap[topicSlugs[topicIndex]] });
+  if (payload.topics && payload.topics.length) {
+    for (var topicIndex = 0; topicIndex < payload.topics.length; topicIndex++) {
+      var pt = payload.topics[topicIndex];
+      topics.push({ slug: pt.slug, label: pt.label || pt.slug });
+    }
+  } else {
+    var topicSlugs = Object.keys(topicMap);
+    for (var topicIndex = 0; topicIndex < topicSlugs.length; topicIndex++) {
+      topics.push({ slug: topicSlugs[topicIndex], label: topicMap[topicSlugs[topicIndex]] });
+    }
   }
 
   var graphLinks = payload.edges.map(function(edge) {

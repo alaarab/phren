@@ -49,6 +49,7 @@ import {
   mergeFindings,
 } from "./shared-content.js";
 import { runGit } from "./utils.js";
+import { readInstallPreferences } from "./init-preferences.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -146,6 +147,7 @@ export function getUntrackedProjectNotice(phrenPath: string, cwd: string): strin
 }
 
 const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
+const SYNC_WARN_MARKER = "sync-broken-warned-v1";
 
 function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
   const projectDir = path.join(phrenPath, project);
@@ -686,6 +688,34 @@ export async function handleHookSessionStart() {
     "hook_session_start",
     `pull=${hasRemote ? (pull.ok ? "ok" : "fail") : "skipped-local"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
+
+  // Sync intent warning: if the user intended sync but remote is missing or pull failed, warn once
+  try {
+    const syncPrefs = readInstallPreferences(phrenPath);
+    const syncBroken = syncPrefs.syncIntent === "sync" && (!hasRemote || !pull.ok);
+    if (syncBroken) {
+      const syncWarnPath = sessionMarker(phrenPath, SYNC_WARN_MARKER);
+      if (!fs.existsSync(syncWarnPath)) {
+        const reason = !hasRemote
+          ? "no git remote is connected"
+          : `pull failed: ${pull.error || "unknown error"}`;
+        process.stdout.write([
+          "<phren-notice>",
+          `Sync is configured but ${reason}. Your phren data is local-only.`,
+          `To fix: cd ${phrenPath} && git remote add origin <YOUR_REPO_URL> && git push -u origin main`,
+          "<phren-notice>",
+          "",
+        ].join("\n"));
+        try {
+          fs.writeFileSync(syncWarnPath, `${startedAt}\n`);
+        } catch (err: unknown) {
+          debugLog(`sync-warn marker write failed: ${errorMessage(err)}`);
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`sync-intent check failed: ${errorMessage(err)}`);
+  }
 
   // Untracked project detection: suggest `phren add` if CWD looks like a project but isn't tracked
   try {

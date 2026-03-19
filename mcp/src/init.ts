@@ -1340,9 +1340,24 @@ export async function runInit(opts: InitOptions = {}) {
       hasExistingInstall = true;
     } catch (e: unknown) {
       log(`  Clone failed: ${e instanceof Error ? e.message : String(e)}`);
-      log(`  Continuing with fresh install instead.`);
+      log("");
+      log("  ┌──────────────────────────────────────────────────────────────────┐");
+      log("  │  WARNING: Sync is NOT configured. Your phren data is local-only. │");
+      log("  │                                                                  │");
+      log("  │  To fix later:                                                   │");
+      log(`  │    cd ${phrenPath}`);
+      log("  │    git remote add origin <YOUR_REPO_URL>                         │");
+      log("  │    git push -u origin main                                       │");
+      log("  └──────────────────────────────────────────────────────────────────┘");
+      log("");
+      log(`  Continuing with fresh local-only install.`);
     }
   }
+
+  // Record sync intent: "sync" if a clone URL was provided (regardless of success), "local" otherwise.
+  // On re-runs of existing installs, preserve the existing syncIntent unless the user provided a new clone URL.
+  const existingSyncIntent = hasExistingInstall ? readInstallPreferences(phrenPath).syncIntent : undefined;
+  const syncIntent: "sync" | "local" = opts._walkthroughCloneUrl ? "sync" : (existingSyncIntent ?? "local");
 
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(phrenPath);
   const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(phrenPath);
@@ -1506,7 +1521,7 @@ export async function runInit(opts: InitOptions = {}) {
           log(`  No starter template updates were applied (starter files not found).`);
         }
       }
-      writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
+      writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
       if (repaired.removedLegacyProjects > 0) {
         log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
       }
@@ -1703,7 +1718,7 @@ export async function runInit(opts: InitOptions = {}) {
   configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Configured");
   configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured");
 
-  writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION });
+  writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
 
   // Post-init verification
   log(`\nVerifying setup...`);

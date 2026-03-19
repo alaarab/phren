@@ -15,6 +15,7 @@ import { showTaskDetail } from "./taskViewer";
 import { showQueueItemDetail, type QueueItemData } from "./queueViewer";
 import { showSessionOverview } from "./sessionViewer";
 import { showProjectConfigPanel } from "./configPanel";
+import { showSetupWizard } from "./setupWizard";
 import { pathExists, resolveRuntimeConfig } from "./runtimeConfig";
 import {
   listProfileConfigs,
@@ -54,24 +55,103 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     `MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; configure phren.mcpServerPath or install Phren globally)"}`,
   );
 
+  // --- Register onboarding commands (available even without backend) ---
+  context.subscriptions.push(
+    vscode.commands.registerCommand("phren.installBackend", async () => {
+      try {
+        const result = await runCommandWithProgress(
+          "Installing Phren globally...",
+          getNpmCommand(),
+          ["install", "-g", PHREN_PACKAGE_NAME],
+        );
+        if (result.ok) {
+          await vscode.commands.executeCommand("setContext", "phren.backendInstalled", true);
+          await vscode.window.showInformationMessage(
+            "Phren installed successfully. Reload to activate.",
+            "Reload Window",
+          ).then(async (choice) => {
+            if (choice === "Reload Window") {
+              await vscode.commands.executeCommand("workbench.action.reloadWindow");
+            }
+          });
+        } else {
+          await vscode.window.showErrorMessage(
+            `Phren install failed: ${summarizeCommandError(result)}. Try running 'npm install -g @phren/cli' in your terminal.`,
+          );
+        }
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Phren install failed: ${toErrorMessage(error)}`);
+      }
+    }),
+    vscode.commands.registerCommand("phren.initStore", async () => {
+      try {
+        const result = await runCommandWithProgress(
+          "Initializing Phren...",
+          getNpxCommand(),
+          [PHREN_PACKAGE_NAME, "init", "--yes"],
+        );
+        if (result.ok) {
+          await vscode.commands.executeCommand("setContext", "phren.storeInitialized", true);
+          await vscode.window.showInformationMessage(
+            "Phren initialized. Reload to activate.",
+            "Reload Window",
+          ).then(async (choice) => {
+            if (choice === "Reload Window") {
+              await vscode.commands.executeCommand("workbench.action.reloadWindow");
+            }
+          });
+        } else {
+          await vscode.window.showErrorMessage(`Phren init failed: ${summarizeCommandError(result)}`);
+        }
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Phren init failed: ${toErrorMessage(error)}`);
+      }
+    }),
+  );
+
+  // --- Set walkthrough context keys for already-completed steps ---
+  const backendInstalled = !!runtimeConfig.mcpServerPath;
+  const storeInitialized = pathExists(GLOBAL_PHREN_STORE_PATH) && hasPhrenMcpEntry();
+  await vscode.commands.executeCommand("setContext", "phren.backendInstalled", backendInstalled);
+  await vscode.commands.executeCommand("setContext", "phren.storeInitialized", storeInitialized);
+
   if (!runtimeConfig.mcpServerPath) {
     const choice = await vscode.window.showErrorMessage(
-      "Phren MCP server entrypoint could not be auto-detected. Set phren.mcpServerPath or install Phren globally.",
+      "Phren backend not detected.",
+      "Install Phren",
+      "Run Doctor",
       "Open Settings",
     );
-    if (choice === "Open Settings") {
+    if (choice === "Install Phren") {
+      await vscode.commands.executeCommand("phren.installBackend");
+    } else if (choice === "Run Doctor") {
+      // Doctor requires backend — offer init instead
+      await vscode.commands.executeCommand("phren.initStore");
+    } else if (choice === "Open Settings") {
       await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
     }
+    // Open walkthrough for new users
+    await vscode.commands.executeCommand(
+      "workbench.action.openWalkthrough",
+      "alaarab.phren-vscode#phren.gettingStarted",
+      false,
+    );
     return;
   }
 
   if (!pathExists(runtimeConfig.mcpServerPath)) {
     const basename = path.basename(runtimeConfig.mcpServerPath);
     const choice = await vscode.window.showErrorMessage(
-      `Configured Phren MCP server entrypoint does not exist: ${basename}`,
+      `Phren entrypoint not found: ${basename}. The CLI may need reinstalling.`,
+      "Reinstall Phren",
+      "Run Doctor",
       "Open Settings",
     );
-    if (choice === "Open Settings") {
+    if (choice === "Reinstall Phren") {
+      await vscode.commands.executeCommand("phren.installBackend");
+    } else if (choice === "Run Doctor") {
+      await vscode.commands.executeCommand("phren.initStore");
+    } else if (choice === "Open Settings") {
       await vscode.commands.executeCommand("workbench.action.openSettings", "phren.mcpServerPath");
     }
     return;
@@ -729,6 +809,91 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   );
 
+  // --- Add Project command ---
+  const addProjectDisposable = vscode.commands.registerCommand("phren.addProject", async (uri?: vscode.Uri) => {
+    try {
+      let selectedPath: string | undefined;
+
+      if (uri) {
+        // Called from explorer context menu with a folder URI
+        selectedPath = uri.fsPath;
+      } else {
+        // Build QuickPick with untracked workspace folders + Browse option
+        const projectsRaw = await phrenClient.listProjects();
+        const projectsData = asRecord(asRecord(projectsRaw)?.data);
+        const projects = asArraySafe(projectsData?.projects);
+        const trackedPaths = new Set<string>();
+        for (const p of projects) {
+          const rec = asRecord(p);
+          const src = typeof rec?.source === "string" ? rec.source : undefined;
+          if (src) trackedPaths.add(src);
+        }
+
+        const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+        const untrackedFolders = workspaceFolders.filter((f) => !trackedPaths.has(f.uri.fsPath));
+
+        const picks: vscode.QuickPickItem[] = untrackedFolders.map((f) => ({
+          label: f.name,
+          description: f.uri.fsPath,
+        }));
+        picks.push({ label: "$(folder-opened) Browse...", description: "Choose a folder from disk" });
+
+        const choice = await vscode.window.showQuickPick(picks, {
+          placeHolder: "Select a folder to track in Phren",
+        });
+        if (!choice) return;
+
+        if (choice.label.includes("Browse...")) {
+          const folders = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            openLabel: "Add Project",
+          });
+          if (!folders || folders.length === 0) return;
+          selectedPath = folders[0].fsPath;
+        } else {
+          selectedPath = choice.description;
+        }
+      }
+
+      if (!selectedPath) return;
+
+      // Ask for ownership mode
+      const ownershipPick = await vscode.window.showQuickPick(
+        [
+          { label: "detached", description: "Phren tracks the project but doesn't own it (recommended)" },
+          { label: "phren-managed", description: "Phren manages project files and config" },
+          { label: "repo-managed", description: "Project config lives in the repo" },
+        ],
+        { placeHolder: "Select ownership mode" },
+      );
+      const ownership = ownershipPick?.label;
+
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: "Adding project to Phren...", cancellable: false },
+        async () => {
+          await phrenClient.addProject(selectedPath!, undefined, ownership);
+        },
+      );
+
+      treeDataProvider.refresh();
+      await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", true);
+      await vscode.window.showInformationMessage(`Project added: ${path.basename(selectedPath)}`);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to add project: ${toErrorMessage(error)}`);
+    }
+  });
+
+  // --- Open Setup Wizard command ---
+  const openSetupWizardDisposable = vscode.commands.registerCommand("phren.openSetupWizard", async () => {
+    try {
+      showSetupWizard(phrenClient, context, { hostname: os.hostname() });
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to open setup wizard: ${toErrorMessage(error)}`);
+    }
+  });
+
   const uninstallDisposable = vscode.commands.registerCommand("phren.uninstall", async () => {
     const proceed = await vscode.window.showWarningMessage(
       "Uninstall Phren from this machine?",
@@ -1055,6 +1220,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     linkTaskIssueDisposable,
     createTaskIssueDisposable,
     projectConfigDisposable,
+    addProjectDisposable,
+    openSetupWizardDisposable,
   );
 
   // --- Sync VS Code settings to phren preference files ---
@@ -1132,6 +1299,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     outputChannel.appendLine(`Status bar init failed: ${toErrorMessage(error)}`);
     await vscode.window.showErrorMessage(`Failed to initialize active Phren project: ${toErrorMessage(error)}`);
   }
+
+  // --- Set firstProjectAdded context key ---
+  try {
+    const projectsRaw = await phrenClient.listProjects();
+    const projectsData = asRecord(asRecord(projectsRaw)?.data);
+    const projects = asArraySafe(projectsData?.projects);
+    const hasProjects = projects.length > 0;
+    await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", hasProjects);
+  } catch {
+    // Non-critical — walkthrough step just won't auto-complete
+  }
+
+  // --- Workspace folder detection: offer to track untracked folders ---
+  detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider);
+    }),
+  );
 }
 
 export async function deactivate(): Promise<void> {
@@ -1141,6 +1327,92 @@ export async function deactivate(): Promise<void> {
 
   await client.dispose();
   client = undefined;
+}
+
+async function detectAndOfferWorkspaceFolders(
+  phrenClient: PhrenClient,
+  context: vscode.ExtensionContext,
+  treeDataProvider: PhrenTreeProvider,
+): Promise<void> {
+  try {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) return;
+
+    const projectsRaw = await phrenClient.listProjects();
+    const projectsData = asRecord(asRecord(projectsRaw)?.data);
+    const projects = asArraySafe(projectsData?.projects);
+    const trackedPaths = new Set<string>();
+    for (const p of projects) {
+      const rec = asRecord(p);
+      const src = typeof rec?.source === "string" ? rec.source : undefined;
+      if (src) trackedPaths.add(src);
+    }
+
+    const dismissed: string[] = context.globalState.get("phren.dismissedFolders", []);
+    const dismissedSet = new Set(dismissed);
+
+    const untracked = workspaceFolders.filter(
+      (f) => !trackedPaths.has(f.uri.fsPath) && !dismissedSet.has(f.uri.fsPath),
+    );
+    if (untracked.length === 0) return;
+
+    if (untracked.length === 1) {
+      const folder = untracked[0];
+      const choice = await vscode.window.showInformationMessage(
+        `Track "${folder.name}" in Phren?`,
+        "Track Project",
+        "Not Now",
+      );
+      if (choice === "Track Project") {
+        await phrenClient.addProject(folder.uri.fsPath);
+        treeDataProvider.refresh();
+        await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", true);
+        await vscode.window.showInformationMessage(`Project "${folder.name}" added to Phren.`);
+      } else {
+        await context.globalState.update("phren.dismissedFolders", [...dismissed, folder.uri.fsPath]);
+      }
+    } else {
+      const choice = await vscode.window.showInformationMessage(
+        `${untracked.length} workspace folders aren't tracked in Phren.`,
+        "Choose...",
+        "Not Now",
+      );
+      if (choice === "Choose...") {
+        const picks = untracked.map((f) => ({
+          label: f.name,
+          description: f.uri.fsPath,
+          picked: true,
+        }));
+        const selected = await vscode.window.showQuickPick(picks, {
+          canPickMany: true,
+          placeHolder: "Select folders to track in Phren",
+        });
+        if (selected && selected.length > 0) {
+          for (const pick of selected) {
+            await phrenClient.addProject(pick.description!);
+          }
+          treeDataProvider.refresh();
+          await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", true);
+          await vscode.window.showInformationMessage(`${selected.length} project(s) added to Phren.`);
+        }
+        // Dismiss folders not selected
+        const selectedPaths = new Set(selected?.map((s) => s.description) ?? []);
+        const nowDismissed = untracked
+          .filter((f) => !selectedPaths.has(f.uri.fsPath))
+          .map((f) => f.uri.fsPath);
+        if (nowDismissed.length > 0) {
+          await context.globalState.update("phren.dismissedFolders", [...dismissed, ...nowDismissed]);
+        }
+      } else if (choice === "Not Now") {
+        await context.globalState.update(
+          "phren.dismissedFolders",
+          [...dismissed, ...untracked.map((f) => f.uri.fsPath)],
+        );
+      }
+    }
+  } catch (error) {
+    outputChannel.appendLine(`Workspace folder detection failed: ${toErrorMessage(error)}`);
+  }
 }
 
 function toErrorMessage(error: unknown): string {
@@ -1209,6 +1481,32 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
         if (result.ok) {
           await vscode.window.showInformationMessage("Phren initialized successfully.");
           setupSucceeded = true;
+
+          // Post-init: check if sync is broken (user intended sync but remote isn't working)
+          try {
+            const verifyResult = await runCommand(getNpxCommand(), [PHREN_PACKAGE_NAME, "verify"]);
+            // verify exits non-zero when checks fail; look for git-remote FAIL in stdout
+            if (verifyResult.stdout.includes("FAIL git-remote")) {
+              // Read syncIntent from preferences to distinguish broken sync from intentional local
+              const prefsPath = path.join(GLOBAL_PHREN_STORE_PATH, ".runtime", "install-preferences.json");
+              if (fs.existsSync(prefsPath)) {
+                const prefsData = safeParseJson(fs.readFileSync(prefsPath, "utf8"));
+                if (prefsData?.syncIntent === "sync") {
+                  const action = await vscode.window.showWarningMessage(
+                    "Phren sync isn't working — your data is local-only. The clone URL may have been wrong or the remote is unreachable.",
+                    "How to Fix",
+                  );
+                  if (action === "How to Fix") {
+                    await vscode.window.showInformationMessage(
+                      `Run in terminal:\n  cd ${GLOBAL_PHREN_STORE_PATH}\n  git remote add origin <YOUR_REPO_URL>\n  git push -u origin main`,
+                    );
+                  }
+                }
+              }
+            }
+          } catch {
+            outputChannel.appendLine("Post-init sync verification skipped (non-critical).");
+          }
         } else {
           await vscode.window.showErrorMessage(`Phren init failed: ${summarizeCommandError(result)}`);
         }
