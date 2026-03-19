@@ -41,6 +41,10 @@ interface CommandResult {
   stderr: string;
 }
 
+interface CommandOptions {
+  env?: NodeJS.ProcessEnv;
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("Phren");
   context.subscriptions.push(outputChannel);
@@ -1000,12 +1004,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
       const result = await runCommandWithProgress(
         "Phren: Uninstalling...",
-        getNpxCommand(),
-        [PHREN_PACKAGE_NAME, "uninstall"],
+        runtimeConfig.nodePath,
+        [runtimeConfig.mcpServerPath!, "uninstall", "--yes"],
+        { env: { PHREN_PATH: runtimeConfig.storePath } },
       );
       if (result.ok) {
+        const warnings: string[] = [];
+        const storeCleanup = removePhrenStore(runtimeConfig.storePath);
+        if (storeCleanup.error) {
+          warnings.push(`Store cleanup failed: ${storeCleanup.error}`);
+        }
+
+        if (await isGlobalPhrenInstalled()) {
+          const packageCleanup = uninstallGlobalPhrenPackage();
+          if (!packageCleanup.ok) {
+            warnings.push(`Global package cleanup failed: ${summarizeCommandError(packageCleanup)}`);
+          }
+        }
+
         treeDataProvider.refresh();
-        await vscode.window.showInformationMessage("Phren uninstall complete.");
+        if (warnings.length > 0) {
+          for (const warning of warnings) {
+            outputChannel.appendLine(`Phren uninstall warning: ${warning}`);
+          }
+          await vscode.window.showWarningMessage("Phren uninstall complete with warnings. See the Phren output channel.");
+        } else {
+          await vscode.window.showInformationMessage("Phren uninstall complete.");
+        }
       } else {
         await vscode.window.showErrorMessage(`Phren uninstall failed: ${summarizeCommandError(result)}`);
       }
@@ -1724,16 +1749,24 @@ function hasPhrenMcpEntry(): boolean {
   }
 }
 
-async function runCommandWithProgress(title: string, command: string, args: string[]): Promise<CommandResult> {
+async function runCommandWithProgress(
+  title: string,
+  command: string,
+  args: string[],
+  options: CommandOptions = {},
+): Promise<CommandResult> {
   return vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title, cancellable: false },
-    async () => runCommand(command, args),
+    async () => runCommand(command, args, options),
   );
 }
 
-async function runCommand(command: string, args: string[]): Promise<CommandResult> {
+async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { shell: false });
+    const child = spawn(command, args, {
+      shell: false,
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+    });
     let stdout = "";
     let stderr = "";
 
@@ -1876,7 +1909,7 @@ function removeTomlMcpServer(filePath: string): boolean {
 
 function uninstallGlobalPhrenPackage(): NpmUninstallResult {
   try {
-    const result = spawnSync("npm", ["uninstall", "-g", PHREN_PACKAGE_NAME], {
+    const result = spawnSync(getNpmCommand(), ["uninstall", "-g", PHREN_PACKAGE_NAME], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -1896,8 +1929,18 @@ function uninstallGlobalPhrenPackage(): NpmUninstallResult {
   }
 }
 
+function hasPhrenStoreMarkers(storePath: string): boolean {
+  return [
+    path.join(storePath, "phren.root.yaml"),
+    path.join(storePath, "machines.yaml"),
+    path.join(storePath, ".config"),
+    path.join(storePath, "global"),
+  ].some((candidate) => fs.existsSync(candidate));
+}
+
 function removePhrenStore(storePath: string): { removed: boolean; skipped: boolean; error?: string } {
   if (!fs.existsSync(storePath)) return { removed: false, skipped: true };
+  if (!hasPhrenStoreMarkers(storePath)) return { removed: false, skipped: true };
   try {
     fs.rmSync(storePath, { recursive: true, force: true });
     return { removed: true, skipped: false };

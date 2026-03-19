@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.24
+0.0.25
 
 ## MCP Tools (69)
 
