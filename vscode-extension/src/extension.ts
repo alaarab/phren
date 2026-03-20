@@ -161,6 +161,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     return;
   }
 
+  // Don't start the MCP client until the store is fully initialized.
+  // The backend may be installed but ~/.phren may not exist yet (user still
+  // needs to run "Initialize Store" from the walkthrough).
+  if (!storeInitialized) {
+    await vscode.commands.executeCommand(
+      "workbench.action.openWalkthrough",
+      "alaarab.phren-vscode#phren.gettingStarted",
+      false,
+    );
+    return;
+  }
+
   const phrenClient = new PhrenClient({
     mcpServerPath: runtimeConfig.mcpServerPath,
     storePath: runtimeConfig.storePath,
