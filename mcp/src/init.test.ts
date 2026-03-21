@@ -97,20 +97,20 @@ describe.sequential("mcp mode configuration", () => {
   });
 
   it("stages starter updates for modified global skills instead of overwriting them", () => {
-    const targetSkill = path.join(phrenPath, "global", "skills", "pipeline.md");
+    const targetSkill = path.join(phrenPath, "global", "skills", "audit.md");
     fs.mkdirSync(path.dirname(targetSkill), { recursive: true });
-    fs.writeFileSync(targetSkill, "# custom pipeline\n");
+    fs.writeFileSync(targetSkill, "# custom audit\n");
 
     const updates = applyStarterTemplateUpdates(phrenPath);
-    const stagedSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.new");
-    const currentSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "pipeline.md.current");
+    const stagedSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "audit.md.new");
+    const currentSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "audit.md.current");
 
-    expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom pipeline\n");
+    expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom audit\n");
     expect(fs.existsSync(`${targetSkill}.bak`)).toBe(false);
     expect(fs.existsSync(`${targetSkill}.new`)).toBe(false);
     expect(fs.existsSync(stagedSkill)).toBe(true);
     expect(fs.existsSync(currentSkill)).toBe(true);
-    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "skills", "pipeline.md.new"));
+    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "skills", "audit.md.new"));
   });
 
   it("ships starter gitignore entries for local governance runtime state", () => {
@@ -615,7 +615,7 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     // canonical-locks.json removed (canonical locks feature was stripped)
     expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(phrenPath, "global", "skills", "pipeline.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "skills", "audit.md"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, "phren.SKILL.md"))).toBe(true);
     expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);

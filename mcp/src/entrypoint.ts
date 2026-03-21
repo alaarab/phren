@@ -339,6 +339,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       console.error(`Invalid --task-proactivity value "${taskArg}". Use one of: high, medium, low.`);
       return finish(1);
     }
+    const cloneUrl = getOptionValue(initArgs, "--clone-url");
     await runInit({
       mode: modeArg as "shared" | "project-local" | undefined,
       machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
@@ -352,6 +353,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       applyStarterUpdate: initArgs.includes("--apply-starter-update"),
       dryRun: initArgs.includes("--dry-run"),
       yes: initArgs.includes("--yes") || initArgs.includes("-y"),
+      _walkthroughCloneUrl: cloneUrl,
     });
     return finish();
   }
