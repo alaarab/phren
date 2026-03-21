@@ -6,6 +6,28 @@ import { fileURLToPath } from "url";
 import { findPhrenPath } from "./phren-paths.js";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 
+// Lazy import of logDebug to break circular dependency:
+// utils.ts -> phren-paths.ts -> logger.ts -> phren-paths.ts -> utils.ts
+let _logDebug: ((tool: string, msg: string) => void) | undefined;
+async function ensureLogDebug(): Promise<void> {
+  if (!_logDebug) {
+    try {
+      const mod = await import("./logger.js");
+      _logDebug = mod.logDebug;
+    } catch {
+      _logDebug = () => {};
+    }
+  }
+}
+function getLogDebug(): (tool: string, msg: string) => void {
+  if (!_logDebug) {
+    // Kick off the async import for future calls; fall back to no-op for this call
+    void ensureLogDebug();
+    return () => {};
+  }
+  return _logDebug;
+}
+
 const _moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 function loadSynonymsJson(fileName: string): Record<string, string[]> {
@@ -13,7 +35,7 @@ function loadSynonymsJson(fileName: string): Record<string, string[]> {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] ${fileName} load failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    getLogDebug()("loadSynonymsJson", `${fileName} load failed: ${err instanceof Error ? err.message : String(err)}`);
     return {};
   }
 }
@@ -291,7 +313,7 @@ function parseSynonymsYaml(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    getLogDebug()("parseSynonymsYaml", `synonyms.yaml parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}`);
     return {};
   }
 }
@@ -328,7 +350,7 @@ function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
     }
     return loaded;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}\n`);
+    getLogDebug()("parseLearnedSynonymsJson", `learned-synonyms parse failed (${filePath}): ${err instanceof Error ? err.message : String(err)}`);
     return {};
   }
 }
