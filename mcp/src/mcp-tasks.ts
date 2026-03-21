@@ -271,9 +271,12 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
       const addTaskDenied = permissionDeniedError(phrenPath, "add_task", project);
       if (addTaskDenied) return mcpResponse({ ok: false, error: addTaskDenied });
 
+      const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+      if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
+
       if (Array.isArray(item)) {
         return withWriteQueue(async () => {
-          const result = addTasksBatch(phrenPath, project, item);
+          const result = addTasksBatch(phrenPath, project, item, { scope: normalizedScope });
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           const { added, errors } = result.data;
           if (added.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
@@ -281,8 +284,6 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         });
       }
 
-      const normalizedScope = normalizeMemoryScope(scope ?? "shared");
-      if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
         const result = addTaskStore(phrenPath, project, item, { scope: normalizedScope });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });

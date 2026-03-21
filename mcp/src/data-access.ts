@@ -452,20 +452,27 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
   if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(findingsPath, () => {
-    let lines = fs.readFileSync(findingsPath, "utf8").split("\n");
+    const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
     const removed: string[] = [];
     const errors: string[] = [];
+    const bulletLines = collectFindingBulletLines(lines);
+    const activeBullets = bulletLines.filter(({ archived }) => !archived);
+    const archivedBullets = bulletLines.filter(({ archived }) => archived);
 
+    // Collect indices to remove (with citation lines) in one pass over matches
+    const indicesToRemove = new Set<number>();
     for (const match of matches) {
       const needle = normalizeFindingText(match);
-      const bulletLines = collectFindingBulletLines(lines);
-      const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match);
+      const activeMatch = findMatchingFindingBullet(
+        activeBullets.filter(({ i }) => !indicesToRemove.has(i)),
+        needle, match,
+      );
       if (activeMatch.kind === "ambiguous") {
         errors.push(match);
         continue;
       }
       if (activeMatch.kind === "not_found") {
-        const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, match);
+        const archivedMatch = findMatchingFindingBullet(archivedBullets, needle, match);
         if (archivedMatch.kind === "ambiguous" || archivedMatch.kind === "found") {
           errors.push(match);
           continue;
@@ -474,13 +481,14 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
         continue;
       }
       const idx = activeMatch.idx;
-      const removeCount = isCitationLine(lines[idx + 1] || "") ? 2 : 1;
+      indicesToRemove.add(idx);
+      if (isCitationLine(lines[idx + 1] || "")) indicesToRemove.add(idx + 1);
       removed.push(lines[idx]);
-      lines.splice(idx, removeCount);
     }
 
     if (removed.length > 0) {
-      const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+      const filtered = lines.filter((_, i) => !indicesToRemove.has(i));
+      const normalized = filtered.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
       fs.writeFileSync(findingsPath, normalized);
     }
 
