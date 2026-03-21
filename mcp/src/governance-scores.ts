@@ -195,7 +195,7 @@ function aggregateJournalScores(entries: ScoreJournalEntry[]): Record<string, { 
     if (entry.delta.helpful) current.helpful += entry.delta.helpful;
     if (entry.delta.repromptPenalty) current.repromptPenalty += entry.delta.repromptPenalty;
     if (entry.delta.regressionPenalty) current.regressionPenalty += entry.delta.regressionPenalty;
-    // Q24: carry the max journal timestamp so lastUsedAt is persisted correctly during flush
+    // Q24: see docs/decisions/Q24-journal-timestamp-recency-boost.md
     if (entry.at && entry.at > current.lastUsedAt) current.lastUsedAt = entry.at;
   }
   return aggregated;
@@ -243,7 +243,7 @@ export function flushEntryScores(phrenPath: string): void {
       entry.helpful += deltas.helpful;
       entry.repromptPenalty += deltas.repromptPenalty;
       entry.regressionPenalty += deltas.regressionPenalty;
-      // Q24: persist the max journal timestamp into lastUsedAt so recency boost advances correctly
+      // Q24: see docs/decisions/Q24-journal-timestamp-recency-boost.md
       if (deltas.lastUsedAt && deltas.lastUsedAt > entry.lastUsedAt) {
         entry.lastUsedAt = deltas.lastUsedAt;
       }

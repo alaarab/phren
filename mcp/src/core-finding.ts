@@ -4,6 +4,7 @@ import {
 } from "./shared-content.js";
 import {
   removeFinding as removeFindingStore,
+  removeFindings as removeFindingsStore,
 } from "./data-access.js";
 import { MAX_FINDING_LENGTH } from "./content-validate.js";
 
@@ -60,6 +61,7 @@ export function removeFinding(
 
 /**
  * Remove multiple findings by partial text match.
+ * Uses a single file lock for the entire batch (not N separate locks).
  */
 export function removeFindings(
   phrenPath: string,
@@ -69,15 +71,18 @@ export function removeFindings(
   if (!isValidProjectName(project)) {
     return { ok: false, message: `Invalid project name: "${project}"` };
   }
-  const results: { finding: string; ok: boolean; message: string }[] = [];
-  for (const finding of findings) {
-    const result = removeFindingStore(phrenPath, project, finding);
-    results.push({ finding, ok: result.ok, message: result.ok ? result.data : result.error ?? "unknown error" });
+  const result = removeFindingsStore(phrenPath, project, findings);
+  if (!result.ok) {
+    return { ok: false, message: result.error };
   }
-  const succeeded = results.filter(r => r.ok).length;
+  const { removed, errors } = result.data;
+  const results = [
+    ...removed.map(r => ({ finding: r, ok: true, message: `Removed from ${project}: ${r}` })),
+    ...errors.map(e => ({ finding: e, ok: false, message: `No match or error for "${e}"` })),
+  ];
   return {
-    ok: succeeded > 0,
-    message: `Removed ${succeeded}/${findings.length} findings`,
+    ok: removed.length > 0,
+    message: `Removed ${removed.length}/${findings.length} findings`,
     data: { project, results },
   };
 }

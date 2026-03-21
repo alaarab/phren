@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { logWarn } from "./logger.js";
 
 // Acquire the file lock, returning true on success or throwing on timeout.
 function acquireFileLock(lockPath: string): void {
@@ -20,7 +21,7 @@ function acquireFileLock(lockPath: string): void {
       hasLock = true;
       break;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock lockWrite: ${errorMessage(err)}\n`);
+      logWarn("acquireFileLock", `lockWrite: ${errorMessage(err)}`);
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
@@ -46,7 +47,7 @@ function acquireFileLock(lockPath: string): void {
           }
         }
       } catch (statErr: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] acquireFileLock staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}\n`);
+        logWarn("acquireFileLock", `staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}`);
         sleep(pollInterval);
         waited += pollInterval;
         continue;
@@ -65,13 +66,11 @@ function acquireFileLock(lockPath: string): void {
 
 function releaseFileLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] releaseFileLock: ${errorMessage(err)}\n`);
+    logWarn("releaseFileLock", errorMessage(err));
   }
 }
 
-// Q10: withFileLock now accepts both sync and async callbacks.
-// When the callback returns a Promise, the lock file is held until the
-// Promise settles — preventing concurrent processes from seeing partial state.
+// Q10: see docs/decisions/Q10-file-lock-async.md
 export function withFileLock<T>(filePath: string, fn: () => T): T extends Promise<infer U> ? Promise<U> : T {
   const lockPath = filePath + ".lock";
   acquireFileLock(lockPath);

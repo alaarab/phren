@@ -265,10 +265,7 @@ export function sanitizeFts5Query(raw: string): string {
   let q = raw.replace(/[^a-zA-Z0-9 \-"*]/g, " ");
   q = q.replace(/\s+/g, " ");
   q = q.trim();
-  // Q83: FTS5 only accepts * as a prefix operator directly attached to a token
-  // (e.g. "foo*").  A bare trailing asterisk (or lone "*") produces invalid
-  // FTS5 syntax.  Strip any asterisk that is not immediately preceded by a
-  // word character so the query remains valid.
+  // Q83: see docs/decisions/Q83-fts5-asterisk-validation.md
   q = q.replace(/(?<!\w)\*/g, "");
   // Also strip a trailing asterisk that is preceded only by whitespace at word
   // end of the whole query (handles "foo *" → "foo").

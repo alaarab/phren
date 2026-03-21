@@ -17,6 +17,7 @@ import { stripTaskDoneSection } from "./shared-content.js";
 import { isInactiveFindingLine } from "./finding-lifecycle.js";
 import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "./utils.js";
+import { logWarn, logError } from "./logger.js";
 import {
   beginUserFragmentBuildCache,
   endUserFragmentBuildCache,
@@ -94,7 +95,7 @@ async function _drainEmbQueue(): Promise<void> {
   for (const [phrenPath, docs] of byPhrenPath) {
     const cache = getEmbeddingCache(phrenPath);
     try { await cache.load(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheLoad: ${errorMessage(err)}\n`);
+      logWarn("embeddingQueue", `cacheLoad: ${errorMessage(err)}`);
     }
     const model = getEmbeddingModel();
     for (const { docPath, content } of docs) {
@@ -103,11 +104,11 @@ async function _drainEmbQueue(): Promise<void> {
         const vec = await embedText(content);
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue embedText: ${errorMessage(err)}\n`);
+        logWarn("embeddingQueue", `embedText: ${errorMessage(err)}`);
       }
     }
     try { await cache.flush(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheFlush: ${errorMessage(err)}\n`);
+      logWarn("embeddingQueue", `cacheFlush: ${errorMessage(err)}`);
     }
   }
 }
@@ -178,7 +179,7 @@ function _resolveImportsRecursive(
     try {
       normalized = fs.realpathSync.native(resolved);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports realpath: ${errorMessage(err)}\n`);
+      logWarn("resolveImports", `realpath: ${errorMessage(err)}`);
       return `<!-- @import not found: ${trimmed} -->`;
     }
 
@@ -206,7 +207,7 @@ function _resolveImportsRecursive(
       const imported = fs.readFileSync(normalized, "utf-8");
       return _resolveImportsRecursive(imported, phrenPath, childSeen, depth + 1);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports fileRead: ${errorMessage(err)}\n`);
+      logWarn("resolveImports", `fileRead: ${errorMessage(err)}`);
       return `<!-- @import error: ${trimmed} -->`;
     }
   });
@@ -549,7 +550,7 @@ function insertFileIntoIndex(
     }
     return true;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] insertFileIntoIndex: ${errorMessage(err)}\n`);
+    logError("insertFileIntoIndex", errorMessage(err));
     return false;
   }
 }
@@ -622,12 +623,11 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, phrenPath: string, docPa
   const filename = docRows?.[0]?.filename ?? fallbackFilename;
   const sourceDoc = buildSourceDocKey(project, docPath, phrenPath, filename);
   db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDoc]);
-  // Q19: also purge global_entities rows for this doc so cross_project_entities
-  // never returns deleted/stale documents.
+  // Q19: see docs/decisions/Q19-global-entities-sync.md
   try {
     db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDoc]);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] deleteEntityLinksForDocPath globalEntities: ${errorMessage(err)}\n`);
+    logWarn("deleteEntityLinksForDocPath", `globalEntities: ${errorMessage(err)}`);
   }
 }
 
@@ -641,10 +641,10 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
 
   // Delete old record
   try { deleteEntityLinksForDocPath(db, phrenPath, resolvedPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteEntityLinks: ${errorMessage(err)}\n`);
+    logWarn("updateFileInIndex", `deleteEntityLinks: ${errorMessage(err)}`);
   }
   try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteDocs: ${errorMessage(err)}\n`);
+    logWarn("updateFileInIndex", `deleteDocs: ${errorMessage(err)}`);
   }
 
   // Re-insert if file still exists
@@ -663,7 +663,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
           const content = fs.readFileSync(resolvedPath, "utf-8");
           extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex entityExtraction: ${errorMessage(err)}\n`);
+          logWarn("updateFileInIndex", `entityExtraction: ${errorMessage(err)}`);
         }
       }
     }
@@ -674,7 +674,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(phrenPath, hashData.hashes);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex hashMap: ${errorMessage(err)}\n`);
+      logWarn("updateFileInIndex", `hashMap: ${errorMessage(err)}`);
     }
   } else {
     // Remove stale embedding if file was deleted
@@ -685,7 +685,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
         c.delete(resolvedPath);
         await c.flush();
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex embeddingDelete: ${errorMessage(err)}\n`);
+        logWarn("updateFileInIndex", `embeddingDelete: ${errorMessage(err)}`);
       }
     })();
   }
@@ -764,8 +764,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
         if (sourceDoc && !validDocKeys.has(sourceDoc)) continue;
         db.run("INSERT OR IGNORE INTO entity_links (source_id, target_id, rel_type, source_doc) VALUES (?, ?, ?, ?)", [sourceId, targetId, relType, sourceDoc]);
       }
-      // Q19: also restore global_entities from cached graph so cross_project_entities
-      // is not empty after a cached-graph rebuild path.
+      // Q19: see docs/decisions/Q19-global-entities-sync.md
       if (Array.isArray(graph.globalEntities)) {
         for (const [entity, project, docKey] of graph.globalEntities) {
           // Skip global fragments whose source doc no longer exists
@@ -1023,17 +1022,17 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           try {
             for (const missingPath of missingFromIndex) {
               try { deleteEntityLinksForDocPath(db, phrenPath, missingPath); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteEntityLinksForMissing: ${errorMessage(err)}\n`);
+                logWarn("buildIndex", `deleteEntityLinksForMissing: ${errorMessage(err)}`);
               }
               try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteDocForMissing: ${errorMessage(err)}\n`);
+                logWarn("buildIndex", `deleteDocForMissing: ${errorMessage(err)}`);
               }
             }
             db.run("COMMIT");
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteCommit: ${errorMessage(err)}\n`);
+            logError("buildIndex", `incrementalDeleteCommit: ${errorMessage(err)}`);
             try { db.run("ROLLBACK"); } catch (e2: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+              logError("buildIndex", `incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}`);
             }
           }
 
@@ -1044,7 +1043,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               if (changedPaths.has(entry.fullPath)) {
                 const sourceDocKey = getEntrySourceDocKey(entry, phrenPath);
                 db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDocKey]);
-                // Q19: keep global_entities in sync with entity_links on updates
+                // Q19: see docs/decisions/Q19-global-entities-sync.md
                 try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch { /* table may not exist in older cached DBs */ }
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
@@ -1062,7 +1061,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               db.run("COMMIT");
             } catch (err: unknown) {
               try { db.run("ROLLBACK"); } catch (e2: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+                logError("buildIndex", `perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}`);
               }
               throw err;
             }
@@ -1077,7 +1076,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             fs.mkdirSync(cacheDir, { recursive: true });
             fs.writeFileSync(cacheFile, db.export());
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalCacheSave: ${errorMessage(err)}\n`);
+            logError("buildIndex", `incrementalCacheSave: ${errorMessage(err)}`);
           }
 
           const incMs = Date.now() - t0;
@@ -1122,7 +1121,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   // Fragment graph tables for lightweight reference graph
   db.run(`CREATE TABLE IF NOT EXISTS entities (id INTEGER PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, first_seen_at TEXT, UNIQUE(name, type))`);
   db.run(`CREATE TABLE IF NOT EXISTS entity_links (source_id INTEGER REFERENCES entities(id), target_id INTEGER REFERENCES entities(id), rel_type TEXT NOT NULL, source_doc TEXT, PRIMARY KEY (source_id, target_id, rel_type))`);
-  // Q20: Cross-project fragment index
+  // Q20: see docs/decisions/Q20-cross-project-fragment-index.md
   ensureGlobalEntitiesTable(db);
 
   const allFiles = globResult.entries;
@@ -1156,12 +1155,11 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     try {
       const entityRows = db.exec("SELECT id, name, type FROM entities")[0]?.values ?? [];
       const linkRows = db.exec("SELECT source_id, target_id, rel_type, source_doc FROM entity_links")[0]?.values ?? [];
-      // Q19: also persist global_entities so the cached-graph rebuild path can
-      // restore it without re-running extraction on every file.
+      // Q19: see docs/decisions/Q19-global-entities-sync.md
       const globalEntityRows = db.exec("SELECT entity, project, doc_key FROM global_entities")[0]?.values ?? [];
       fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, globalEntities: globalEntityRows, ts: Date.now() }));
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex entityGraphPersist: ${errorMessage(err)}\n`);
+      logWarn("buildIndex", `entityGraphPersist: ${errorMessage(err)}`);
     }
   }
 
@@ -1192,7 +1190,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     for (const f of fs.readdirSync(cacheDir)) {
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
       try { fs.unlinkSync(path.join(cacheDir, f)); } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex staleCacheCleanup: ${errorMessage(err)}\n`);
+        logWarn("buildIndex", `staleCacheCleanup: ${errorMessage(err)}`);
       }
     }
     debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);

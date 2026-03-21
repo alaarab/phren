@@ -62,6 +62,7 @@ import {
 } from "./shared-index.js";
 import type { SelectedSnippet } from "./shared-retrieval.js";
 import { filterTaskByPriority } from "./shared-retrieval.js";
+import { resolveSubprocessArgs as _resolveSubprocessArgs } from "./cli-hooks-git.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getPhrenPath());
@@ -70,6 +71,9 @@ function getRuntimeProfile(): string {
 // Re-export HookContext types for consumers
 export type { HookContext } from "./cli-hooks-context.js";
 export { buildHookContext, checkHookGuard, handleGuardSkip } from "./cli-hooks-context.js";
+
+// Re-export functions extracted to sub-modules for backward compatibility
+export { type GitContext, getGitContext, trackSessionMetrics, resolveSubprocessArgs } from "./cli-hooks-git.js";
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 function readStdinJson<T>(): T | null {
@@ -203,127 +207,18 @@ export function getSessionStartOnboardingNotice(
   ].join("\n");
 }
 
-// ── Git helpers ──────────────────────────────────────────────────────────────
-
-export interface GitContext {
-  branch: string;
-  changedFiles: Set<string>;
-}
-
-export function getGitContext(cwd?: string): GitContext | null {
-  if (!cwd) return null;
-  const git = (args: string[]) => runGit(cwd, args, EXEC_TIMEOUT_MS, debugLog);
-  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
-  if (!branch) return null;
-  const changedFiles = new Set<string>();
-  for (const changed of [
-    git(["diff", "--name-only"]),
-    git(["diff", "--name-only", "--cached"]),
-  ]) {
-    if (!changed) continue;
-    for (const line of changed.split("\n").map((s) => s.trim()).filter(Boolean)) {
-      changedFiles.add(line);
-      const basename = path.basename(line);
-      if (basename) changedFiles.add(basename);
-    }
-  }
-  return { branch, changedFiles };
-}
-
-// ── Session metrics ──────────────────────────────────────────────────────────
-
-interface SessionMetric {
-  prompts: number;
-  keys: Record<string, number>;
-  lastChangedCount: number;
-  lastKeys: string[];
-  lastSeen?: string;
-}
-
-function parseSessionMetrics(phrenPathLocal: string): Record<string, SessionMetric> {
-  const file = sessionMetricsFile(phrenPathLocal);
-  if (!fs.existsSync(file)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, SessionMetric>;
-  } catch (err: unknown) {
-    debugLog(`parseSessionMetrics: failed to read ${file}: ${errorMessage(err)}`);
-    return {};
-  }
-}
-
-function writeSessionMetrics(phrenPathLocal: string, data: Record<string, SessionMetric>) {
-  const file = sessionMetricsFile(phrenPathLocal);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
-}
-
-function updateSessionMetrics(
-  phrenPathLocal: string,
-  updater: (data: Record<string, SessionMetric>) => void
-): void {
-  const file = sessionMetricsFile(phrenPathLocal);
-  withFileLock(file, () => {
-    const metrics = parseSessionMetrics(phrenPathLocal);
-    updater(metrics);
-    writeSessionMetrics(phrenPathLocal, metrics);
-  });
-}
-
-export function trackSessionMetrics(
-  phrenPathLocal: string,
-  sessionId: string,
-  selected: SelectedSnippet[]
-): void {
-  updateSessionMetrics(phrenPathLocal, (metrics) => {
-    if (!metrics[sessionId]) metrics[sessionId] = { prompts: 0, keys: {}, lastChangedCount: 0, lastKeys: [] };
-    metrics[sessionId].prompts += 1;
-    const injectedKeys: string[] = [];
-    for (const injected of selected) {
-      injectedKeys.push(injected.key);
-      const key = injected.key;
-      const seen = metrics[sessionId].keys[key] || 0;
-      metrics[sessionId].keys[key] = seen + 1;
-      if (seen >= 1) recordFeedback(phrenPathLocal, key, "reprompt");
-    }
-
-    const relevantCount = selected.filter((s) => getQualityMultiplier(phrenPathLocal, s.key) > 0.5).length;
-    const prevRelevant = metrics[sessionId].lastChangedCount || 0;
-    const prevKeys = metrics[sessionId].lastKeys || [];
-    if (relevantCount > prevRelevant) {
-      for (const prevKey of prevKeys) {
-        recordFeedback(phrenPathLocal, prevKey, "helpful");
-      }
-    }
-    metrics[sessionId].lastChangedCount = relevantCount;
-    metrics[sessionId].lastKeys = injectedKeys;
-    metrics[sessionId].lastSeen = new Date().toISOString();
-
-    const thirtyDaysAgo = Date.now() - 30 * 86400000;
-    for (const sid of Object.keys(metrics)) {
-      const seen = metrics[sid].lastSeen;
-      if (seen && new Date(seen).getTime() < thirtyDaysAgo) {
-        delete metrics[sid];
-      }
-    }
-  });
-}
-
-// ── Background maintenance ───────────────────────────────────────────────────
+// ── Hook handlers ────────────────────────────────────────────────────────────
+// (Git helpers, session metrics, background operations, and tool finding
+//  extraction have been extracted to cli-hooks-git.ts, cli-hooks-background.ts,
+//  and cli-hooks-tool.ts respectively.)
 
 
-export function resolveSubprocessArgs(command: string): string[] | null {
-  const distEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
-  if (fs.existsSync(distEntry)) return [distEntry, command];
-  const sourceEntry = process.argv.find((a) => /[\\/]index\.(ts|js)$/.test(a) && fs.existsSync(a));
-  const runner = process.argv[1];
-  if (sourceEntry && runner) return [runner, sourceEntry, command];
-  return null;
-}
+
 
 function scheduleBackgroundSync(phrenPathLocal: string): boolean {
   const lockPath = runtimeFile(phrenPathLocal, "background-sync.lock");
   const logPath = runtimeFile(phrenPathLocal, "background-sync.log");
-  const spawnArgs = resolveSubprocessArgs("background-sync");
+  const spawnArgs = _resolveSubprocessArgs("background-sync");
   if (!spawnArgs) return false;
 
   try {
@@ -376,7 +271,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
 }
   }
 
-  const spawnArgs = resolveSubprocessArgs("background-maintenance");
+  const spawnArgs = _resolveSubprocessArgs("background-maintenance");
   if (!spawnArgs) return false;
 
   try {
@@ -1162,7 +1057,7 @@ function scheduleWeeklyGovernance(): void {
     const lastRun = fs.existsSync(lastGovPath) ? parseInt(fs.readFileSync(lastGovPath, "utf8"), 10) : 0;
     const daysSince = (Date.now() - lastRun) / 86_400_000;
     if (daysSince >= 7) {
-      const spawnArgs = resolveSubprocessArgs("background-maintenance");
+      const spawnArgs = _resolveSubprocessArgs("background-maintenance");
       if (spawnArgs) {
         const child = spawn(process.execPath, spawnArgs, { detached: true, stdio: "ignore" });
         child.unref();
