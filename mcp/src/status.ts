@@ -20,6 +20,7 @@ import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell-render.js";
+import { logDebug } from "./logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +30,7 @@ function readPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${errorMessage(err)}\n`);
+    logDebug("readPackageVersion", errorMessage(err));
     return "unknown";
   }
 }
@@ -101,7 +102,7 @@ export async function runStatus() {
         console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusConfig: ${errorMessage(err)}\n`);
+      logDebug("statusConfig", errorMessage(err));
     }
   }
 
@@ -136,7 +137,7 @@ export async function runStatus() {
         const servers = isRecord(settings.servers) ? settings.servers : undefined;
         mcpConfigured = Boolean(servers?.phren || servers?.phren);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${errorMessage(err)}\n`);
+        logDebug("statusWorkspaceMcp parse", errorMessage(err));
       }
     }
   } else {
@@ -151,7 +152,7 @@ export async function runStatus() {
         const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
         hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${errorMessage(err)}\n`);
+        logDebug("statusHooks settingsParse", errorMessage(err));
       }
     }
   }
@@ -180,7 +181,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${errorMessage(err)}\n`);
+    logDebug("statusFtsIndex", errorMessage(err));
   }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
@@ -211,7 +212,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${errorMessage(err)}\n`);
+    logDebug("statusSemantic", errorMessage(err));
   }
 
   // Agent integration status
@@ -221,7 +222,7 @@ export async function runStatus() {
       const raw = fs.readFileSync(filePath, "utf8");
       return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${errorMessage(err)}\n`);
+      logDebug("hasPhrenEntry", errorMessage(err));
       return false;
     }
   }

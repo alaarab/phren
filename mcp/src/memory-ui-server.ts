@@ -50,6 +50,7 @@ import { readProjectConfig, updateProjectConfigOverrides } from "./project-confi
 import { findSkill } from "./skill-registry.js";
 import { setSkillEnabledAndSync } from "./skill-files.js";
 import { repairPreexistingInstall } from "./init-setup.js";
+import { logDebug } from "./logger.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -361,7 +362,7 @@ export function createWebUiHttpServer(
   try {
     repairPreexistingInstall(phrenPath);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] web-ui repair: ${errorMessage(err)}\n`);
+    logDebug("web-ui repair", errorMessage(err));
   }
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;

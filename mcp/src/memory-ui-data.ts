@@ -19,6 +19,7 @@ import { buildIndex, queryDocBySourceKey, queryRows } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import { readProjectTopics, classifyTopicForText } from "./project-topics.js";
 import { entryScoreKey } from "./governance-scores.js";
+import { logDebug } from "./logger.js";
 
 interface EntryScore {
   impressions: number;
@@ -545,7 +546,7 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
       }
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] memory-ui filterByProfile: ${errorMessage(err)}\n`);
+    logDebug("memory-ui filterByProfile", errorMessage(err));
   }
 
   const results: ProjectInfo[] = [];

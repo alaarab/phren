@@ -49,6 +49,7 @@ import {
   queueByFilter,
 } from "./shell-palette.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 /** Interface for the shell methods that executePalette needs */
 export interface PaletteHost {
@@ -383,7 +384,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell status gitStatus: ${errorMessage(err)}\n`);
+        logDebug("shell status gitStatus", errorMessage(err));
       }
 
       const auditPathNew = runtimeFile(host.phrenPath, "audit.log");

@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
-import { logWarn } from "./logger.js";
+import { logWarn, logDebug } from "./logger.js";
 import { withFileLock } from "./shared-governance.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "./project-topics.js";
 import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./content-metadata.js";
@@ -96,7 +96,7 @@ function buildArchivedBulletSet(referenceDir: string): Set<string> {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildArchivedBulletSet: ${errorMessage(err)}\n`);
+    logDebug("buildArchivedBulletSet", errorMessage(err));
   }
   return bulletSet;
 }

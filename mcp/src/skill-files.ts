@@ -5,6 +5,7 @@ import { findProjectDir } from "./project-locator.js";
 import { buildSkillManifest, type SkillManifest } from "./skill-registry.js";
 import { setSkillEnabled } from "./skill-state.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 import { isManagedSymlink } from "./link-skills.js";
 
 function normalizeSkillRemovalTarget(skillPath: string): string {
@@ -40,8 +41,8 @@ function removeManagedSkillLink(dest: string, managedRoot: string): void {
     if (!isManagedSymlink(dest, managedRoot)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT" && (process.env.PHREN_DEBUG)) {
-      process.stderr.write(`[phren] removeManagedSkillLink: ${errorMessage(err)}\n`);
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      logDebug("removeManagedSkillLink", errorMessage(err));
     }
   }
 }

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { runtimeDir } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 interface TelemetryConfig {
   enabled: boolean;
@@ -45,7 +46,7 @@ function loadFromDisk(phrenPath: string): TelemetryData {
       stats: { ...defaults.stats, ...raw.stats },
     };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry loadFromDisk: ${errorMessage(err)}\n`);
+    logDebug("telemetry loadFromDisk", errorMessage(err));
     return defaults;
   }
 }
@@ -76,7 +77,7 @@ function flushTelemetryForPath(phrenPath: string): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] telemetry flush: ${errorMessage(err)}\n`);
+    logDebug("telemetry flush", errorMessage(err));
   }
   pendingCounts.set(phrenPath, 0);
 }

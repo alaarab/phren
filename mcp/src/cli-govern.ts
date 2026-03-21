@@ -18,7 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
-import { logWarn } from "./logger.js";
+import { logWarn, logDebug } from "./logger.js";
 import { compactFindingJournals } from "./finding-journal.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
@@ -182,7 +182,7 @@ export async function handlePruneMemories(args: string[] = []) {
         .map(line => { try { return JSON.parse(line); } catch { return null; } }) // null filtered below
         .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli-govern retrievalLog readParse: ${errorMessage(err)}\n`);
+      logDebug("cli-govern retrievalLog readParse", errorMessage(err));
     }
   }
 

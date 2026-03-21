@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { capCache } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 // ── Glob matching and project frontmatter ────────────────────────────────────
 
@@ -43,7 +44,7 @@ function parseProjectGlobs(phrenPathLocal: string, project: string): string[] | 
       }
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] getProjectGlobs: ${errorMessage(err)}\n`);
+    logDebug("getProjectGlobs", errorMessage(err));
   }
   projectGlobCache.set(project, globs);
   capCache(projectGlobCache);

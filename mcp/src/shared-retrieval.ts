@@ -32,7 +32,7 @@ import { vectorFallback, deterministicSeed } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { debugLog } from "./shared.js";
-import { logWarn } from "./logger.js";
+import { logWarn, logDebug } from "./logger.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -649,9 +649,7 @@ export async function searchFederatedStores(
         }
       }
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) {
-        process.stderr.write(`[phren] federatedSearch storePath=${storePath}: ${errorMessage(err)}\n`);
-      }
+      logDebug("federatedSearch", `storePath=${storePath}: ${errorMessage(err)}`);
       // Federation errors are non-fatal — continue with other stores
     }
   }
@@ -950,7 +948,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${errorMessage(err)}\n`);
+              logDebug("applyCitationAnnotations fileRead", errorMessage(err));
               stale = true;
             }
           }

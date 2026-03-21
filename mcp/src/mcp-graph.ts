@@ -7,6 +7,7 @@ import { isValidProjectName, errorMessage } from "./utils.js";
 import { queryDocBySourceKey, queryRows, queryFragmentLinks, queryCrossProjectFragments, ensureGlobalEntitiesTable, logFragmentMiss } from "./shared-index.js";
 import { runtimeFile } from "./shared.js";
 import { withFileLock } from "./shared-governance.js";
+import { logDebug } from "./logger.js";
 
 
 
@@ -257,7 +258,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [fragmentName, resolvedFragmentType, new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings fragmentInsert: ${errorMessage(err)}\n`);
+          logDebug("link_findings fragmentInsert", errorMessage(err));
         }
         const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [fragmentName, resolvedFragmentType]);
         if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) {
@@ -280,7 +281,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings docFragmentInsert: ${errorMessage(err)}\n`);
+          logDebug("link_findings docFragmentInsert", errorMessage(err));
         }
         const docFragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
         if (!docFragmentResult?.length || !docFragmentResult[0]?.values?.length) {
@@ -295,7 +296,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
             [sourceId, targetId, relType, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings linkInsert: ${errorMessage(err)}\n`);
+          logDebug("link_findings linkInsert", errorMessage(err));
           return mcpResponse({ ok: false, error: "Failed to insert fragment link." });
         }
 
@@ -307,7 +308,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
             [fragmentName, project, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings globalFragments: ${errorMessage(err)}\n`);
+          logDebug("link_findings globalFragments", errorMessage(err));
         }
 
         // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)

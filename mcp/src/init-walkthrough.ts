@@ -18,6 +18,7 @@ import {
 import { type ProactivityLevel } from "./proactivity.js";
 import { log } from "./init-shared.js";
 import * as path from "path";
+import { logDebug } from "./logger.js";
 
 export type WorkflowRiskSection = "Review" | "Stale" | "Conflicts";
 export type StorageLocationChoice = "global" | "project" | "custom";
@@ -442,7 +443,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaCheck: ${errorMessage(err)}\n`);
+    logDebug("init ollamaCheck", errorMessage(err));
   }
 
   printSection("Auto-Capture (Optional)");

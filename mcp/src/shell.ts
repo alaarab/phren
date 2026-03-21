@@ -38,6 +38,7 @@ import {
   type NavigationHost,
 } from "./shell-input.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ export class PhrenShell {
         if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell pushUndo: ${errorMessage(err)}\n`);
+      logDebug("shell pushUndo", errorMessage(err));
     }
   }
 

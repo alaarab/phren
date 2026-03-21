@@ -10,6 +10,7 @@ import {
   parseProjectOwnershipMode,
   type ProjectOwnershipMode,
 } from "./project-config.js";
+import { logDebug } from "./logger.js";
 
 
 const HELP_TEXT = `phren - persistent knowledge for your agents
@@ -435,7 +436,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       const { trackCliCommand } = await import("./telemetry.js");
       trackCliCommand(defaultPhrenPath(), argvCommand);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli trackCliCommand: ${errorMessage(err)}\n`);
+      logDebug("cli trackCliCommand", errorMessage(err));
     }
     await runCliCommand(argvCommand, argv.slice(1));
     return finish();
