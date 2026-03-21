@@ -482,7 +482,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
   });
 }
 
-export function addTasks(phrenPath: string, project: string, items: string[]): PhrenResult<{ added: string[]; errors: string[] }> {
+export function addTasks(phrenPath: string, project: string, items: string[], opts?: Pick<AddTaskOptions, "scope">): PhrenResult<{ added: string[]; errors: string[] }> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(phrenPath, project);
@@ -507,6 +507,7 @@ export function addTasks(phrenPath: string, project: string, items: string[]): P
         line,
         checked: false,
         priority: normalizePriority(line),
+        scope: opts?.scope,
       });
       added.push(line);
     }
