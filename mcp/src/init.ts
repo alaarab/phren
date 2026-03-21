@@ -312,7 +312,7 @@ function writeWalkthroughEnvDefaults(phrenPath: string, opts: InitOptions): stri
       flag: `PHREN_FEATURE_AUTO_CAPTURE=${autoCaptureChoice ? "1" : "0"}`,
       label: `Auto-capture ${autoCaptureChoice ? "enabled" : "disabled"}`,
     });
-  } else if (autoCaptureChoice !== false && !hasAutoCaptureFlag) {
+  } else if (!hasAutoCaptureFlag) {
     // Default to enabled on fresh installs and non-walkthrough init.
     envFlags.push({ flag: "PHREN_FEATURE_AUTO_CAPTURE=1", label: "Auto-capture enabled" });
   }

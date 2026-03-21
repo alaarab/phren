@@ -95,7 +95,7 @@ Errors gated behind `PHREN_DEBUG` mean real issues go unnoticed.
 
 ## 5. Large Files
 
-### init.ts (96K lines)
+### init.ts (~1.2K lines)
 Split into focused modules:
 - `init-detect.ts` — agent/tool detection logic
 - `init-mcp.ts` — MCP config generation for each agent
@@ -116,7 +116,7 @@ Split by hook event:
 ## 6. Design Question Comments (// Q<n>)
 
 ### Current state
-19 `// Q<n>` comments scattered across the codebase documenting design decisions inline.
+20 `// Q<n>` comments scattered across the codebase documenting design decisions inline.
 
 ### Fix
 - Create `docs/decisions/` directory

@@ -225,8 +225,11 @@ async function main() {
   };
 
   const unlockedDomains = new Set<string>();
+  const calledRegisterFns = new Set<Function>();
 
-  server.registerTool(
+  // Use origRegisterTool to bypass the indexReady guard — unlock_tools
+  // only registers tool domains and never touches the search index.
+  origRegisterTool(
     "unlock_tools",
     {
       title: "◆ phren · unlock tools",
@@ -261,20 +264,16 @@ async function main() {
         if (unlockedDomains.has("all")) {
           return mcpResponse({ ok: true, message: "All tool domains already unlocked." });
         }
-        // Register all advanced tools from every module
+        // Register all advanced tools from every module (skip already-called fns)
         const advancedOnly: RegisterOptions = { tier: new Set(["advanced"]) };
-        registerSearch(server, ctx, advancedOnly);
-        registerTask(server, ctx, advancedOnly);
-        registerFinding(server, ctx, advancedOnly);
-        registerMemory(server, ctx, advancedOnly);
-        registerData(server, ctx, advancedOnly);
-        registerGraph(server, ctx, advancedOnly);
-        registerSession(server, ctx, advancedOnly);
-        registerOps(server, ctx, advancedOnly);
-        registerSkills(server, ctx, advancedOnly);
-        registerHooks(server, ctx, advancedOnly);
-        registerExtract(server, ctx, advancedOnly);
-        registerConfig(server, ctx, advancedOnly);
+        for (const fn of [registerSearch, registerTask, registerFinding, registerMemory,
+          registerData, registerGraph, registerSession, registerOps, registerSkills,
+          registerHooks, registerExtract, registerConfig]) {
+          if (!calledRegisterFns.has(fn)) {
+            fn(server, ctx, advancedOnly);
+            calledRegisterFns.add(fn);
+          }
+        }
         unlockedDomains.add("all");
         return mcpResponse({
           ok: true,
@@ -296,7 +295,10 @@ async function main() {
 
       const advancedOnly: RegisterOptions = { tier: new Set(["advanced"]) };
       for (const registerFn of DOMAIN_REGISTER_MAP[d]) {
-        registerFn(server, ctx, advancedOnly);
+        if (!calledRegisterFns.has(registerFn)) {
+          registerFn(server, ctx, advancedOnly);
+          calledRegisterFns.add(registerFn);
+        }
       }
       unlockedDomains.add(d);
 

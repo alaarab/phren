@@ -142,7 +142,7 @@ phren maintain prune         # delete expired entries
 phren maintain govern        # queue stale items for review
 ```
 
-Consider archiving inactive projects with `phren projects configure <name> --ownership=archived` to remove them from the index entirely.
+Consider archiving inactive projects with `phren projects configure <name> --ownership=detached` to remove them from the index entirely.
 
 ## 6. Monitoring
 
