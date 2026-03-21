@@ -33,6 +33,7 @@ import {
 import { claudeProjectKey } from "./link-context.js";
 import type { DoctorResult } from "./link.js";
 import { getProjectOwnershipMode, readProjectConfig } from "./project-config.js";
+import { readInstallPreferences } from "./init-preferences.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ function isWrapperActive(tool: string): boolean {
   }
 }
 
-function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
+function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok: boolean; detail: string } {
   try {
     execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
       stdio: ["ignore", "ignore", "ignore"],
@@ -61,17 +62,40 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   } catch {
     return { ok: false, detail: "phren path is not a git repository" };
   }
+
+  let remote: string | undefined;
   try {
-    const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    return remote
-      ? { ok: true, detail: `origin=${remote}` }
-      : { ok: true, detail: "no remote configured (local-only sync mode)" };
   } catch {
+    // no remote configured
+  }
+
+  if (!remote) {
+    if (syncIntent === "sync") {
+      return {
+        ok: false,
+        detail: "sync configured but no git remote found. Run: cd ~/.phren && git remote add origin <YOUR_REPO_URL> && git push -u origin main",
+      };
+    }
     return { ok: true, detail: "no remote configured (local-only sync mode)" };
+  }
+
+  // Remote exists — verify it's reachable
+  try {
+    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 10_000,
+    });
+    return { ok: true, detail: `origin=${remote}` };
+  } catch {
+    if (syncIntent === "sync") {
+      return { ok: false, detail: `origin=${remote} (unreachable) — check your network or SSH keys` };
+    }
+    return { ok: true, detail: `origin=${remote} (unreachable, local-only mode)` };
   }
 }
 
@@ -140,7 +164,8 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     ok: versionAtLeast(nodeVersion, 20),
     detail: nodeVersion || "node not found in PATH",
   });
-  const gitRemote = gitRemoteStatus(phrenPath);
+  const prefs = readInstallPreferences(phrenPath);
+  const gitRemote = gitRemoteStatus(phrenPath, prefs.syncIntent);
   checks.push({
     name: "git-remote",
     ok: gitRemote.ok,
