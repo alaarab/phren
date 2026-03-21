@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -10,10 +10,16 @@ import { withFileLock } from "./shared-governance.js";
 
 
 
-export function register(server: McpServer, ctx: McpContext): void {
+function shouldRegister(_toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  // All graph tools are advanced
+  return options.tier.has("advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
 
   // ── search_fragments ──────────────────────────────────────────────────
-  server.registerTool(
+  if (shouldRegister("search_fragments", options)) server.registerTool(
     "search_fragments",
     {
       title: "◆ phren · search fragments",
@@ -75,7 +81,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   // ── get_related_docs ──────────────────────────────────────────────────
-  server.registerTool(
+  if (shouldRegister("get_related_docs", options)) server.registerTool(
     "get_related_docs",
     {
       title: "phren : related docs",
@@ -118,7 +124,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   // ── read_graph ────────────────────────────────────────────────────────
-  server.registerTool(
+  if (shouldRegister("read_graph", options)) server.registerTool(
     "read_graph",
     {
       title: "phren : knowledge graph",
@@ -221,7 +227,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   // ── link_findings ─────────────────────────────────────────────────────
-  server.registerTool(
+  if (shouldRegister("link_findings", options)) server.registerTool(
     "link_findings",
     {
       title: "phren : link findings",
@@ -346,7 +352,7 @@ export function register(server: McpServer, ctx: McpContext): void {
   );
 
   // ── cross_project_fragments ───────────────────────────────────────────
-  server.registerTool(
+  if (shouldRegister("cross_project_fragments", options)) server.registerTool(
     "cross_project_fragments",
     {
       title: "phren : cross-project fragments",

@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -8,12 +8,17 @@ import { parseSkillFrontmatter, validateSkillFrontmatter } from "./link-skills.j
 import { removeSkillPath, setSkillEnabledAndSync } from "./skill-files.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "./skill-registry.js";
 
-export function register(server: McpServer, ctx: McpContext): void {
+function shouldRegister(_toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has("advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
   // ── list_skills ──────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("list_skills", options)) server.registerTool(
     "list_skills",
     {
       title: "◆ phren · skills",
@@ -75,7 +80,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── read_skill ───────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("read_skill", options)) server.registerTool(
     "read_skill",
     {
       title: "◆ phren · read skill",
@@ -112,7 +117,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── write_skill ──────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("write_skill", options)) server.registerTool(
     "write_skill",
     {
       title: "◆ phren · write skill",
@@ -175,7 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── remove_skill ─────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("remove_skill", options)) server.registerTool(
     "remove_skill",
     {
       title: "◆ phren · remove skill",
@@ -210,6 +215,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     { tool: "enable_skill", enabled: true, verb: "Enable" },
     { tool: "disable_skill", enabled: false, verb: "Disable" },
   ] as const) {
+    if (!shouldRegister(action.tool, options)) continue;
     server.registerTool(
       action.tool,
       {

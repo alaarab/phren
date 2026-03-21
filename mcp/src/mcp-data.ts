@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -34,7 +34,10 @@ const importPayloadSchema = z.object({
     .optional(),
 }).passthrough();
 
-export function register(server: McpServer, ctx: McpContext): void {
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
+  // All data tools are advanced
+  if (options?.tier && !options.tier.has("advanced")) return;
+
   const { phrenPath, withWriteQueue, rebuildIndex } = ctx;
 
   server.registerTool(

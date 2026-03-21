@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -484,10 +484,22 @@ export function computeSessionDiff(phrenPath: string, project: string, lastSessi
   return { newFindings, superseded, tasksCompleted };
 }
 
-export function register(server: McpServer, ctx: McpContext): void {
+const TOOL_TIER: Record<string, ToolTier> = {
+  session_start: "core",
+  session_end: "core",
+  session_context: "core",
+  session_history: "advanced",
+};
+
+function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath } = ctx;
 
-  server.registerTool("session_start", {
+  if (shouldRegister("session_start", options)) server.registerTool("session_start", {
     title: "◆ phren · session start",
     description: "Mark the start of a new session and retrieve context from prior sessions. Call this at the start of a conversation when not using hooks. Returns prior session summary and recent project findings. The returned sessionId should be passed to session_end and session_context to avoid cross-client collisions.",
     inputSchema: z.object({
@@ -627,7 +639,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject, agentScope: activeScope } });
   });
 
-  server.registerTool("session_end", {
+  if (shouldRegister("session_end", options)) server.registerTool("session_end", {
     title: "◆ phren · session end",
     description: "Mark the end of a session and save a summary for the next session to pick up. Call this before ending a conversation to preserve context. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
@@ -738,7 +750,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     });
   });
 
-  server.registerTool("session_context", {
+  if (shouldRegister("session_context", options)) server.registerTool("session_context", {
     title: "◆ phren · session context",
     description: "Get the current session context -- active project, session duration, findings added, and prior session summary. Pass the sessionId returned by session_start, or a stable connectionId bound at session_start.",
     inputSchema: z.object({
@@ -770,7 +782,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     return mcpResponse({ ok: true, message: parts.join("\n"), data: state });
   });
 
-  server.registerTool("session_history", {
+  if (shouldRegister("session_history", options)) server.registerTool("session_history", {
     title: "◆ phren · session history",
     description: "List past sessions with their duration, findings count, and summary. Optionally drill into a specific session to see all findings and tasks created during it.",
     inputSchema: z.object({
