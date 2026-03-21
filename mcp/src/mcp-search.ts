@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import { createHash } from "crypto";
@@ -143,10 +143,23 @@ function filterTaskContentByScope(content: string, activeScope: string): string 
   return out.join("\n");
 }
 
-export function register(server: McpServer, ctx: McpContext): void {
+const TOOL_TIER: Record<string, ToolTier> = {
+  search_knowledge: "core",
+  get_findings: "core",
+  get_memory_detail: "advanced",
+  get_project_summary: "advanced",
+  list_projects: "advanced",
+};
+
+function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath, profile } = ctx;
 
-  server.registerTool(
+  if (shouldRegister("get_memory_detail", options)) server.registerTool(
     "get_memory_detail",
     {
       title: "◆ phren · memory detail",
@@ -227,7 +240,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("search_knowledge", options)) server.registerTool(
     "search_knowledge",
     {
       title: "◆ phren · search",
@@ -532,7 +545,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("get_project_summary", options)) server.registerTool(
     "get_project_summary",
     {
       title: "◆ phren · project",
@@ -580,7 +593,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("list_projects", options)) server.registerTool(
     "list_projects",
     {
       title: "◆ phren · projects",
@@ -644,7 +657,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("get_findings", options)) server.registerTool(
     "get_findings",
     {
       title: "◆ phren · findings",

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import {
   getRetentionPolicy,
@@ -72,12 +72,29 @@ const projectParam = z.string().optional().describe(
 
 // ── Registration ────────────────────────────────────────────────────────────
 
-export function register(server: McpServer, ctx: McpContext): void {
+const TOOL_TIER: Record<string, ToolTier> = {
+  get_config: "core",
+  set_proactivity: "advanced",
+  set_task_mode: "advanced",
+  set_finding_sensitivity: "advanced",
+  set_retention_policy: "advanced",
+  set_workflow_policy: "advanced",
+  set_index_policy: "advanced",
+  get_topic_config: "advanced",
+  set_topic_config: "advanced",
+};
+
+function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath } = ctx;
 
   // ── get_config ────────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("get_config", options)) server.registerTool(
     "get_config",
     {
       title: "◆ phren · get config",
@@ -206,7 +223,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_proactivity ───────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_proactivity", options)) server.registerTool(
     "set_proactivity",
     {
       title: "◆ phren · set proactivity",
@@ -261,7 +278,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_task_mode ─────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_task_mode", options)) server.registerTool(
     "set_task_mode",
     {
       title: "◆ phren · set task mode",
@@ -307,7 +324,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_finding_sensitivity ───────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_finding_sensitivity", options)) server.registerTool(
     "set_finding_sensitivity",
     {
       title: "◆ phren · set finding sensitivity",
@@ -356,7 +373,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_retention_policy ──────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_retention_policy", options)) server.registerTool(
     "set_retention_policy",
     {
       title: "◆ phren · set retention policy",
@@ -427,7 +444,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_workflow_policy ───────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_workflow_policy", options)) server.registerTool(
     "set_workflow_policy",
     {
       title: "◆ phren · set workflow policy",
@@ -501,7 +518,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_index_policy ──────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_index_policy", options)) server.registerTool(
     "set_index_policy",
     {
       title: "◆ phren · set index policy",
@@ -536,7 +553,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── get_topic_config ──────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("get_topic_config", options)) server.registerTool(
     "get_topic_config",
     {
       title: "◆ phren · get topic config",
@@ -578,7 +595,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── set_topic_config ──────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("set_topic_config", options)) server.registerTool(
     "set_topic_config",
     {
       title: "◆ phren · set topic config",
