@@ -3,6 +3,7 @@ import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } fro
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { logDebug } from "./logger.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import {
   removeFinding as removeFindingCore,
@@ -125,10 +126,12 @@ const TOOL_TIER: Record<string, ToolTier> = {
   edit_finding: "core",
   remove_finding: "core",
   push_changes: "core",
+  add_findings: "advanced",
   supersede_finding: "advanced",
   retract_finding: "advanced",
   resolve_contradiction: "advanced",
   get_contradictions: "advanced",
+  remove_findings: "advanced",
 };
 
 function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
@@ -144,17 +147,13 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     {
       title: "◆ phren · save finding",
       description:
-        "Tell phren one or more insights for a project's FINDINGS.md. Call this the moment you discover " +
+        "Tell phren a single insight for a project's FINDINGS.md. Call this the moment you discover " +
         "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
         "save time in a future session. Do not wait until the end of the session." +
-        " Pass a single string or an array of strings." +
         " Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren store)."),
-        finding: z.union([
-          z.string().describe("A single insight, written as a bullet point."),
-          z.array(z.string()).describe("Multiple insights to record in one call."),
-        ]).describe("The insight(s) to save. Pass a string for one finding, or an array for bulk."),
+        finding: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
         citation: z.object({
           file: z.string().optional().describe("Source file path that supports this finding."),
           line: z.number().int().positive().optional().describe("1-based line number in file."),
@@ -299,7 +298,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
             const conflicts = await checkSemanticConflicts(phrenPath, project, f);
             extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] add_findings semanticConflict: ${errorMessage(err)}\n`);
+            logDebug("add_findings", `semanticConflict: ${errorMessage(err)}`);
             extraAnnotationsByFinding.push([]);
           }
         }
