@@ -441,6 +441,53 @@ export function removeFinding(phrenPath: string, project: string, match: string)
   });
 }
 
+export function removeFindings(phrenPath: string, project: string, matches: string[]): PhrenResult<{ removed: string[]; errors: string[] }> {
+  const ensured = ensureProject(phrenPath, project);
+  if (!ensured.ok) return forwardErr(ensured);
+
+  const findingsPath = path.resolve(path.join(ensured.data, 'FINDINGS.md'));
+  if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+    return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+  }
+  if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
+
+  return withSafeLock(findingsPath, () => {
+    let lines = fs.readFileSync(findingsPath, "utf8").split("\n");
+    const removed: string[] = [];
+    const errors: string[] = [];
+
+    for (const match of matches) {
+      const needle = normalizeFindingText(match);
+      const bulletLines = collectFindingBulletLines(lines);
+      const activeMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => !archived), needle, match);
+      if (activeMatch.kind === "ambiguous") {
+        errors.push(match);
+        continue;
+      }
+      if (activeMatch.kind === "not_found") {
+        const archivedMatch = findMatchingFindingBullet(bulletLines.filter(({ archived }) => archived), needle, match);
+        if (archivedMatch.kind === "ambiguous" || archivedMatch.kind === "found") {
+          errors.push(match);
+          continue;
+        }
+        errors.push(match);
+        continue;
+      }
+      const idx = activeMatch.idx;
+      const removeCount = isCitationLine(lines[idx + 1] || "") ? 2 : 1;
+      removed.push(lines[idx]);
+      lines.splice(idx, removeCount);
+    }
+
+    if (removed.length > 0) {
+      const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+      fs.writeFileSync(findingsPath, normalized);
+    }
+
+    return phrenOk({ removed, errors });
+  });
+}
+
 export function editFinding(phrenPath: string, project: string, oldText: string, newText: string): PhrenResult<string> {
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);

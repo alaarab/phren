@@ -21,6 +21,7 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";
+import { logWarn } from "./logger.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "./content-dedup.js";
 import type { PhrenResult } from "./phren-core.js";
 import { runCustomHooks } from "./hooks.js";
@@ -608,7 +609,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             const remotes = runGit(["remote"]);
             hasRemote = remotes.length > 0;
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes remoteCheck: ${errorMessage(err)}\n`);
+            logWarn("push_changes", `remoteCheck: ${errorMessage(err)}`);
           }
 
           if (!hasRemote) {
@@ -633,7 +634,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 try {
                   runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
                 } catch (pullErr: unknown) {
-                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}\n`);
+                  logWarn("push_changes", `pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}`);
                   const resolved = autoMergeConflicts(phrenPath);
                   if (resolved) {
                     try {
@@ -642,15 +643,15 @@ export function register(server: McpServer, ctx: McpContext): void {
                         env: { ...process.env, GIT_EDITOR: "true" },
                       });
                     } catch (continueErr: unknown) {
-                      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}\n`);
+                      logWarn("push_changes", `rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}`);
                       try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                        logWarn("push_changes", `rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
                       }
                       break;
                     }
                   } else {
                     try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                      logWarn("push_changes", `rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
                     }
                     break;
                   }

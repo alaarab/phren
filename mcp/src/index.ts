@@ -9,7 +9,7 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { log as structuredLog } from "./logger.js";
+import { log as structuredLog, logWarn } from "./logger.js";
 import {
   buildIndex,
   updateFileInIndex as updateFileInIndexFn,
@@ -58,11 +58,11 @@ function cleanStaleLocks(phrenPath: string): void {
           debugLog(`Cleaned stale lock: ${entry}`);
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks statFile: ${errorMessage(err)}\n`);
+        logWarn("cleanStaleLocks", `statFile: ${errorMessage(err)}`);
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanStaleLocks readdir: ${errorMessage(err)}\n`);
+    logWarn("cleanStaleLocks", `readdir: ${errorMessage(err)}`);
   }
 }
 
@@ -93,7 +93,7 @@ async function main() {
     runCustomHooks(phrenPath, "pre-index");
     indexReady = false;
     try { db?.close(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] rebuildIndex dbClose: ${errorMessage(err)}\n`);
+      logWarn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
     }
     db = await buildIndex(phrenPath, profile);
     indexReady = true;
@@ -163,7 +163,7 @@ async function main() {
         };
       }
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] trackToolCall: ${errorMessage(err)}\n`);
+        logWarn("trackToolCall", errorMessage(err));
       }
       return handler(...args);
     };

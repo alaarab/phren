@@ -32,6 +32,7 @@ import { vectorFallback, deterministicSeed } from "./shared-search-fallback.js";
 import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
 import { keywordFallbackSearch } from "./core-search.js";
 import { debugLog } from "./shared.js";
+import { logWarn } from "./logger.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────
 
@@ -462,7 +463,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${errorMessage(err)}\n`);
+    logWarn("hybridSearch", `vectorFallback: ${errorMessage(err)}`);
     return syncResult;
   }
 }
@@ -598,9 +599,7 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) {
-        process.stderr.write(`[phren] vectorFallback: ${errorMessage(err)}\n`);
-      }
+      logWarn("vectorFallback", errorMessage(err));
     }
   }
 
