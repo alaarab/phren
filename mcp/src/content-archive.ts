@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "./shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
+import { logWarn } from "./logger.js";
 import { withFileLock } from "./shared-governance.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "./project-topics.js";
 import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./content-metadata.js";
@@ -63,9 +64,7 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 
   // Sort oldest first: earliest date first; within the same date, higher
   // lineIndex = earlier in the file (newest findings are prepended at top).
-  // Q25: use descending lineIndex within the same day so that when we slice
-  // `toArchive = entries.slice(0, N)` we archive the truly oldest entries
-  // (lowest in the file = largest lineIndex for that date).
+  // Q25: see docs/decisions/Q25-descending-lineindex-archive.md
   entries.sort((a, b) => a.date.localeCompare(b.date) || b.lineIndex - a.lineIndex);
   return entries;
 }
@@ -155,8 +154,7 @@ export function autoArchiveToReference(
     } else { throw e; }
   }
 
-  // Q11: Hold the per-file lock on FINDINGS.md for the entire read-modify-write
-  // cycle so finding writers and the archive pass see a consistent file.
+  // Q11: see docs/decisions/Q11-findings-lock-read-modify-write.md
   try {
   return withFileLock(learningsPath, () => {
   const content = fs.readFileSync(learningsPath, "utf8");
@@ -269,7 +267,7 @@ export function autoArchiveToReference(
   });
   } finally {
     try { fs.unlinkSync(lockFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
+      logWarn("autoArchiveToReference", `unlockFile: ${errorMessage(err)}`);
     }
   }
 }

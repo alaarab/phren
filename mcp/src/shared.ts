@@ -4,6 +4,7 @@ import * as yaml from "js-yaml";
 import { PhrenError, phrenErr, phrenOk, isRecord, type PhrenResult } from "./phren-core.js";
 import { collectNativeMemoryFiles, debugLog, normalizeProjectNameForCreate, runtimeFile } from "./phren-paths.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
+import { logWarn } from "./logger.js";
 
 export type { HookToolName } from "./provider-adapters.js";
 export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";
@@ -117,9 +118,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
   const pollMs = 50;
   const staleMs = 30_000;
   const waiter = new Int32Array(new SharedArrayBuffer(4));
-  // Q82: use an inline lock (same protocol as withFileLock) to guard the
-  // append + conditional rotation so concurrent processes don't read the same
-  // old content and race to write a truncated version each.
+  // Q82: see docs/decisions/Q82-audit-log-inline-lock.md
   let waited = 0;
   let hasLock = false;
   try {
@@ -130,7 +129,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
         hasLock = true;
         break;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog lockWrite: ${errorMessage(err)}\n`);
+        logWarn("appendAuditLog", `lockWrite: ${errorMessage(err)}`);
         try {
           const stat = fs.statSync(lockPath);
           if (Date.now() - stat.mtimeMs > staleMs) {
@@ -145,7 +144,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
             continue;
           }
         } catch (statErr: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog staleStat: ${errorMessage(statErr)}\n`);
+          logWarn("appendAuditLog", `staleStat: ${errorMessage(statErr)}`);
         }
         Atomics.wait(waiter, 0, 0, pollMs);
         waited += pollMs;
@@ -169,7 +168,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
       try {
         fs.unlinkSync(lockPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendAuditLog unlock: ${errorMessage(err)}\n`);
+        logWarn("appendAuditLog", `unlock: ${errorMessage(err)}`);
       }
     }
   }

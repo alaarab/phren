@@ -27,6 +27,7 @@ import {
   atomicWriteText,
 } from "./shared.js";
 import { errorMessage } from "./utils.js";
+import { logWarn } from "./logger.js";
 import { log } from "./init-shared.js";
 import {
   listMachines as listMachinesShared,
@@ -183,7 +184,7 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
+    logWarn("setupSparseCheckout", `notAGitRepo: ${errorMessage(err)}`);
     return;
   }
 
@@ -327,7 +328,7 @@ function linkGlobal(phrenPath: string, tools: Set<string>) {
         fs.mkdirSync(copilotInstrDir, { recursive: true });
         symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
+        logWarn("linkGlobal", `copilotInstructions: ${errorMessage(err)}`);
       }
     }
   }
@@ -371,7 +372,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
             fs.mkdirSync(copilotDir, { recursive: true });
             symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), phrenPath);
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject copilotInstructions: ${errorMessage(err)}\n`);
+            logWarn("linkProject", `copilotInstructions: ${errorMessage(err)}`);
           }
         }
       }
@@ -392,7 +393,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
   const claudeFile = path.join(phrenPath, project, "CLAUDE.md");
   if (fs.existsSync(claudeFile)) {
     try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
+      logWarn("linkProject", `tokenAnnotation: ${errorMessage(err)}`);
     }
   }
 
@@ -408,7 +409,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
       const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
       if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, phrenPath)) excludeEntries.push("AGENTS.md");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject agentsMd: ${errorMessage(err)}\n`);
+      logWarn("linkProject", `agentsMd: ${errorMessage(err)}`);
     }
   }
 
@@ -557,7 +558,7 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
     writeSkillMd(phrenPath);
     log(`  phren.SKILL.md written (agentskills-compatible tools)`);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link writeSkillMd: ${errorMessage(err)}\n`);
+    logWarn("link", `writeSkillMd: ${errorMessage(err)}`);
   }
   log("");
 

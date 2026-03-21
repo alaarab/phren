@@ -6,6 +6,7 @@ import * as path from "path";
 import { isValidProjectName, errorMessage, safeProjectPath } from "./utils.js";
 import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
 import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
+import { logWarn } from "./logger.js";
 
 
 
@@ -254,7 +255,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 fs.renameSync(backupDir, projectDir);
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${errorMessage(err)}\n`);
+              logWarn("import_project", `backupRestore: ${errorMessage(err)}`);
             }
           }
           return mcpResponse({
@@ -269,7 +270,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           try {
             fs.rmSync(backupDir, { recursive: true, force: true });
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${errorMessage(err)}\n`);
+            logWarn("import_project", `backupCleanup: ${errorMessage(err)}`);
           }
         }
         return mcpResponse({

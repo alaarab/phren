@@ -783,7 +783,7 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
   for (const dir of dirs) {
     const file = resolveFindingsPath(dir);
     if (!file) continue;
-    // Q23: wrap read-modify-write in per-file lock to prevent races with concurrent finding writers
+    // Q23: see docs/decisions/Q23-per-file-lock-concurrent-writers.md
     withFileLock(file, () => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
       let currentDate: string | null = null;
@@ -869,14 +869,12 @@ export function consolidateProjectFindings(phrenPath: string, project: string, d
   const file = resolveFindingsPath(path.join(phrenPath, project));
   if (!file) return phrenErr(`No FINDINGS.md found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
-  // Q23: wrap entire read-modify-write in per-file lock to prevent races with concurrent finding writers
+  // Q23: see docs/decisions/Q23-per-file-lock-concurrent-writers.md
   const result = withFileLock(file, (): PhrenResult<string> => {
     const raw = fs.readFileSync(file, "utf8");
     const lines = raw.split("\n");
 
-    // Q12: Separate the file into "active" lines and verbatim archive/details blocks.
-    // Archive blocks (<!-- phren:archive:start/end --> and <details>...</details>) are
-    // collected verbatim and appended unchanged after the consolidated active section.
+    // Q12: see docs/decisions/Q12-active-vs-archive-separation.md
     const archiveBlocks: string[] = [];
     const activeLines: string[] = [];
     let inArchive = false;

@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
+import { logWarn } from "./logger.js";
 import { compactFindingJournals } from "./finding-journal.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
@@ -577,7 +578,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     appendAuditLog(getPhrenPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli-govern backgroundMaintenance unlockFinal: ${errorMessage(err)}\n`);
+      logWarn("backgroundMaintenance", `unlockFinal: ${errorMessage(err)}`);
     }
   }
 }
