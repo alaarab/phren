@@ -2,7 +2,7 @@
 
 How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
 
-Current public surface: 72 MCP tools across 12 modules.
+Current public surface: 67 MCP tools across 12 modules.
 
 ## System Overview
 
@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 72 tools across 12 modules    |
+| 67 tools across 12 modules    |
 +---------------+---------------+
                 |
                 v

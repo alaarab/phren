@@ -126,12 +126,10 @@ const TOOL_TIER: Record<string, ToolTier> = {
   edit_finding: "core",
   remove_finding: "core",
   push_changes: "core",
-  add_findings: "advanced",
   supersede_finding: "advanced",
   retract_finding: "advanced",
   resolve_contradiction: "advanced",
   get_contradictions: "advanced",
-  remove_findings: "advanced",
 };
 
 function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
@@ -147,13 +145,17 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     {
       title: "◆ phren · save finding",
       description:
-        "Tell phren a single insight for a project's FINDINGS.md. Call this the moment you discover " +
+        "Tell phren one or more insights for a project's FINDINGS.md. Call this the moment you discover " +
         "a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would " +
         "save time in a future session. Do not wait until the end of the session." +
+        " Pass a single string or an array of strings." +
         " Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren store)."),
-        finding: z.string().describe("The insight, written as a single bullet point. Be specific enough that someone could act on it without extra context."),
+        finding: z.union([
+          z.string().describe("A single insight, written as a bullet point."),
+          z.array(z.string()).describe("Multiple insights to record in one call."),
+        ]).describe("The insight(s) to save. Pass a string for one finding, or an array for bulk."),
         citation: z.object({
           file: z.string().optional().describe("Source file path that supports this finding."),
           line: z.number().int().positive().optional().describe("1-based line number in file."),
@@ -161,7 +163,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
-        }).optional().describe("Optional source citation for traceability."),
+        }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         source: z.enum(FINDING_PROVENANCE_SOURCES)
           .optional()
@@ -176,6 +178,55 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const addFindingDenied = permissionDeniedError(phrenPath, "add_finding", project);
       if (addFindingDenied) return mcpResponse({ ok: false, error: addFindingDenied });
+
+      if (Array.isArray(finding)) {
+        const findings = finding;
+        if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
+        if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
+        return withWriteQueue(async () => {
+          runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
+
+          const allPotentialDuplicates: Array<{ finding: string; candidates: PotentialDuplicate[] }> = [];
+          const extraAnnotationsByFinding: string[][] = [];
+
+          for (const f of findings) {
+            const candidates = findJaccardCandidates(phrenPath, project, f);
+            if (candidates.length > 0) allPotentialDuplicates.push({ finding: f, candidates });
+            try {
+              const conflicts = await checkSemanticConflicts(phrenPath, project, f);
+              extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
+            } catch (err: unknown) {
+              logDebug("add_finding", `bulk semanticConflict: ${errorMessage(err)}`);
+              extraAnnotationsByFinding.push([]);
+            }
+          }
+
+          const result = addFindingsToFile(phrenPath, project, findings, {
+            extraAnnotationsByFinding,
+            sessionId,
+          });
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { added, skipped, rejected } = result.data;
+          if (added.length > 0) {
+            runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
+            incrementSessionFindings(phrenPath, added.length, sessionId, project);
+            updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
+          }
+          const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
+          return mcpResponse({
+            ok: true,
+            message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`,
+            data: {
+              project,
+              added,
+              skipped,
+              rejected,
+              ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
+            },
+          });
+        });
+      }
+
       if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
       if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
@@ -263,70 +314,6 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
           }
           return mcpResponse({ ok: false, error: `Unexpected error saving finding: ${errorMessage(err)}` });
         }
-      });
-    }
-  );
-
-  if (shouldRegister("add_findings", options)) server.registerTool(
-    "add_findings",
-    {
-      title: "◆ phren · save findings (bulk)",
-      description: "Tell phren multiple insights for a project's FINDINGS.md in one call.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name (must match a directory in your phren store)."),
-        findings: z.array(z.string()).describe("List of insights to record."),
-        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
-      }),
-    },
-    async ({ project, findings, sessionId }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const addFindingsDenied = permissionDeniedError(phrenPath, "add_finding", project);
-      if (addFindingsDenied) return mcpResponse({ ok: false, error: addFindingsDenied });
-      if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
-      if (findings.some((f) => f.length > 5000)) return mcpResponse({ ok: false, error: "One or more findings exceed 5000 character limit." });
-      return withWriteQueue(async () => {
-        runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
-
-        // Jaccard "maybe zone" scan per finding — free, no LLM. Agent sees candidates and decides.
-        const allPotentialDuplicates: Array<{ finding: string; candidates: PotentialDuplicate[] }> = [];
-        const extraAnnotationsByFinding: string[][] = [];
-
-        for (const f of findings) {
-          const candidates = findJaccardCandidates(phrenPath, project, f);
-          if (candidates.length > 0) allPotentialDuplicates.push({ finding: f, candidates });
-          try {
-            const conflicts = await checkSemanticConflicts(phrenPath, project, f);
-            extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
-          } catch (err: unknown) {
-            logDebug("add_findings", `semanticConflict: ${errorMessage(err)}`);
-            extraAnnotationsByFinding.push([]);
-          }
-        }
-
-        const result = addFindingsToFile(phrenPath, project, findings, {
-          extraAnnotationsByFinding,
-          sessionId,
-        });
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const { added, skipped, rejected } = result.data;
-        if (added.length > 0) {
-          runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
-          incrementSessionFindings(phrenPath, added.length, sessionId, project);
-          updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
-        }
-        const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
-        // ok:true whenever the operation completed without error — use counts to distinguish outcomes.
-        return mcpResponse({
-          ok: true,
-          message: `Added ${added.length}/${findings.length} findings (${skipped.length} duplicates skipped${rejectedMsg})`,
-          data: {
-            project,
-            added,
-            skipped,
-            rejected,
-            ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
-          },
-        });
       });
     }
   );
@@ -529,51 +516,38 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     {
       title: "◆ phren · remove finding",
       description:
-        "Remove a finding from a project's FINDINGS.md by matching text. Use this when a " +
-        "previously captured insight turns out to be wrong, outdated, or no longer relevant.",
+        "Remove one or more findings from a project's FINDINGS.md by matching text. Use this when a " +
+        "previously captured insight turns out to be wrong, outdated, or no longer relevant." +
+        " Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        finding: z.string().describe("Partial text to match against existing findings."),
+        finding: z.union([
+          z.string().describe("Partial text to match against existing findings."),
+          z.array(z.string()).describe("List of partial texts to match and remove."),
+        ]).describe("Text(s) to match and remove. Pass a string for one, or an array for bulk."),
       }),
     },
     async ({ project, finding }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const removeDenied = permissionDeniedError(phrenPath, "remove_finding", project);
       if (removeDenied) return mcpResponse({ ok: false, error: removeDenied });
+
+      if (Array.isArray(finding)) {
+        return withWriteQueue(async () => {
+          const result = removeFindingsCore(phrenPath, project, finding);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.message });
+          const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+          return mcpResponse({ ok: true, message: result.message, data: result.data });
+        });
+      }
+
       return withWriteQueue(async () => {
         const result = removeFindingCore(phrenPath, project, finding);
-        if (result.ok) {
-          const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-        }
         if (!result.ok) return mcpResponse({ ok: false, error: result.message });
+        const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+        if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
         return mcpResponse({ ok: true, message: result.message, data: result.data });
-      });
-    }
-  );
-
-  if (shouldRegister("remove_findings", options)) server.registerTool(
-    "remove_findings",
-    {
-      title: "◆ phren · remove findings (bulk)",
-      description: "Remove multiple findings from a project's FINDINGS.md in one call.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        findings: z.array(z.string()).describe("List of partial texts to match and remove."),
-      }),
-    },
-    async ({ project, findings }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const removeFindingsDenied = permissionDeniedError(phrenPath, "remove_finding", project);
-      if (removeFindingsDenied) return mcpResponse({ ok: false, error: removeFindingsDenied });
-      return withWriteQueue(async () => {
-        const result = removeFindingsCore(phrenPath, project, findings);
-        if (result.ok) {
-          const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-          if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
-        }
-        if (!result.ok) return mcpResponse({ ok: false, error: result.message });
-        return mcpResponse({ ok: result.ok, message: result.message, data: result.data });
       });
     }
   );
