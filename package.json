@@ -20,7 +20,7 @@
     "glob": "^13.0.6",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
-    "inquirer": "^12.10.0",
+    "inquirer": "^13.3.2",
     "js-yaml": "^4.1.1",
     "sigma": "^3.0.2",
     "sql.js-fts5": "^1.4.0",
@@ -29,14 +29,14 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.3.5",
-    "@typescript-eslint/eslint-plugin": "^8.56.1",
-    "@typescript-eslint/parser": "^8.56.1",
-    "@vitest/coverage-v8": "^4.0.18",
-    "eslint": "^10.0.3",
+    "@types/node": "^25.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^10.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -69,5 +69,9 @@
     "type": "git",
     "url": "git+https://github.com/alaarab/phren.git"
   },
-  "homepage": "https://github.com/alaarab/phren#readme"
+  "homepage": "https://github.com/alaarab/phren#readme",
+  "overrides": {
+    "flatted": "^3.4.2",
+    "undici": "^7.10.0"
+  }
 }
