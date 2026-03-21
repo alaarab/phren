@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.27",
+  "version": "0.0.28",
   "description": "Knowledge layer for AI agents. Phren learns and recalls.",
   "type": "module",
   "bin": {
@@ -10,7 +10,8 @@
     "mcp/dist",
     "icon.svg",
     "starter",
-    "skills"
+    "skills",
+    "scripts/preuninstall.mjs"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
@@ -49,6 +50,7 @@
     "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
     "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
     "bench:retrieval:synthetic": "tsx scripts/bench-retrieval-synthetic.ts",
+    "preuninstall": "node scripts/preuninstall.mjs",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {

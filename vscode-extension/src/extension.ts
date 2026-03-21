@@ -89,10 +89,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.commands.registerCommand("phren.initStore", async () => {
       try {
+        const cloneResult = await promptForCloneUrl();
+        if (cloneResult.cancelled) return;
+
+        const initArgs = [PHREN_PACKAGE_NAME, "init", "--yes"];
+        if (cloneResult.url) {
+          initArgs.push("--clone-url", cloneResult.url);
+        }
         const result = await runCommandWithProgress(
-          "Initializing Phren...",
+          cloneResult.url ? "Cloning existing Phren store..." : "Initializing Phren...",
           getNpxCommand(),
-          [PHREN_PACKAGE_NAME, "init", "--yes"],
+          initArgs,
         );
         if (result.ok) {
           await vscode.commands.executeCommand("setContext", "phren.storeInitialized", true);
@@ -111,6 +118,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.window.showErrorMessage(`Phren init failed: ${toErrorMessage(error)}`);
       }
     }),
+    vscode.commands.registerCommand("phren.openGettingStarted", () =>
+      vscode.commands.executeCommand("workbench.action.openWalkthrough", "alaarab.phren-vscode#phren.gettingStarted", false),
+    ),
   );
 
   // --- Set walkthrough context keys for already-completed steps ---
@@ -941,18 +951,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
         const untrackedFolders = workspaceFolders.filter((f) => !trackedPaths.has(f.uri.fsPath));
 
-        const picks: vscode.QuickPickItem[] = untrackedFolders.map((f) => ({
-          label: f.name,
-          description: f.uri.fsPath,
-        }));
-        picks.push({ label: "$(folder-opened) Browse...", description: "Choose a folder from disk" });
-
-        const choice = await vscode.window.showQuickPick(picks, {
-          placeHolder: "Select a folder to track in Phren",
-        });
-        if (!choice) return;
-
-        if (choice.label.includes("Browse...")) {
+        if (workspaceFolders.length === 0) {
+          // No workspace folders open — offer Browse directly
+          const action = await vscode.window.showInformationMessage(
+            "No workspace folders open. Browse to add a project folder.",
+            "Browse...",
+          );
+          if (action !== "Browse...") return;
           const folders = await vscode.window.showOpenDialog({
             canSelectFolders: true,
             canSelectFiles: false,
@@ -962,7 +967,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if (!folders || folders.length === 0) return;
           selectedPath = folders[0].fsPath;
         } else {
-          selectedPath = choice.description;
+          const picks: vscode.QuickPickItem[] = untrackedFolders.map((f) => ({
+            label: f.name,
+            description: f.uri.fsPath,
+          }));
+          const browseDescription = untrackedFolders.length === 0
+            ? "All workspace folders already tracked — browse for another"
+            : "Choose a folder from disk";
+          picks.push({ label: "$(folder-opened) Browse...", description: browseDescription });
+
+          const choice = await vscode.window.showQuickPick(picks, {
+            placeHolder: "Select a folder to track in Phren",
+          });
+          if (!choice) return;
+
+          if (choice.label.includes("Browse...")) {
+            const folders = await vscode.window.showOpenDialog({
+              canSelectFolders: true,
+              canSelectFiles: false,
+              canSelectMany: false,
+              openLabel: "Add Project",
+            });
+            if (!folders || folders.length === 0) return;
+            selectedPath = folders[0].fsPath;
+          } else {
+            selectedPath = choice.description;
+          }
         }
       }
 
@@ -971,9 +1001,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // Ask for ownership mode
       const ownershipPick = await vscode.window.showQuickPick(
         [
-          { label: "detached", description: "Phren tracks the project but doesn't own it (recommended)" },
-          { label: "phren-managed", description: "Phren manages project files and config" },
-          { label: "repo-managed", description: "Project config lives in the repo" },
+          { label: "detached", description: "Phren stores findings & tasks; your repo keeps its own CLAUDE.md (recommended)" },
+          { label: "phren-managed", description: "Phren creates and manages CLAUDE.md, skills, and agents in ~/.phren" },
+          { label: "repo-managed", description: "Phren reads CLAUDE.md from your repo instead of creating its own copy" },
         ],
         { placeHolder: "Select ownership mode" },
       );
@@ -1595,6 +1625,40 @@ function cleanYamlScalar(value: string): string {
   return trimmed;
 }
 
+/**
+ * Ask the user if they want to clone an existing phren store or create a new one.
+ * Returns { url, cancelled } — url is undefined for "create new", a string for clone, cancelled if dismissed.
+ */
+async function promptForCloneUrl(): Promise<{ url?: string; cancelled: boolean }> {
+  if (pathExists(GLOBAL_PHREN_STORE_PATH)) {
+    // Store already exists — skip the prompt
+    return { cancelled: false };
+  }
+  const choice = await vscode.window.showQuickPick(
+    [
+      { label: "Create new store", description: "Start fresh on this machine" },
+      { label: "Clone existing store", description: "I have a phren store on GitHub/GitLab" },
+    ],
+    { placeHolder: "Do you have an existing phren store?" },
+  );
+  if (!choice) return { cancelled: true };
+  if (choice.label === "Create new store") return { cancelled: false };
+
+  const url = await vscode.window.showInputBox({
+    prompt: "Paste the git clone URL for your existing phren store",
+    placeHolder: "https://github.com/you/phren-store.git",
+    validateInput: (value) => {
+      if (!value.trim()) return "Clone URL is required";
+      if (!value.includes(".git") && !value.startsWith("git@") && !value.startsWith("https://")) {
+        return "Enter a valid git clone URL";
+      }
+      return undefined;
+    },
+  });
+  if (url === undefined) return { cancelled: true };
+  return { url, cancelled: false };
+}
+
 async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Promise<void> {
   const completed = config.get<boolean>(ONBOARDING_COMPLETE_SETTING, false);
   if (completed) {
@@ -1638,10 +1702,17 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
         "Skip",
       );
       if (initChoice === "Initialize Phren") {
+        const cloneResult = await promptForCloneUrl();
+        if (cloneResult.cancelled) return;
+
+        const initArgs = [PHREN_PACKAGE_NAME, "init", "--yes"];
+        if (cloneResult.url) {
+          initArgs.push("--clone-url", cloneResult.url);
+        }
         const result = await runCommandWithProgress(
-          "Initializing Phren...",
+          cloneResult.url ? "Cloning existing Phren store..." : "Initializing Phren...",
           getNpxCommand(),
-          [PHREN_PACKAGE_NAME, "init", "--yes"],
+          initArgs,
         );
         if (result.ok) {
           await vscode.window.showInformationMessage("Phren initialized successfully.");

@@ -202,6 +202,10 @@
       {
         "command": "phren.openSetupWizard",
         "title": "Phren: Advanced Setup"
+      },
+      {
+        "command": "phren.openGettingStarted",
+        "title": "Phren: Getting Started"
       }
     ],
     "keybindings": [
@@ -446,7 +450,7 @@
           {
             "id": "initStore",
             "title": "Initialize Memory Store",
-            "description": "Create the ~/.phren directory with default settings.\n\n[Initialize](command:phren.initStore)",
+            "description": "Create a new ~/.phren store or clone an existing one from git.\n\n[Initialize](command:phren.initStore)",
             "completionEvents": [
               "onContext:phren.storeInitialized"
             ],

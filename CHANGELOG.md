@@ -3,6 +3,11 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.28] - 2026-03-20
+
+### Fixed
+- **npm preuninstall hook**: `npm uninstall -g @phren/cli` now cleans up hooks and MCP server entries from Claude Code, Cursor, Copilot, and VS Code config files automatically — previously these were orphaned when uninstalling via npm directly instead of `phren uninstall`
+
 ## [0.0.21] - 2026-03-17
 
 ### Changed
