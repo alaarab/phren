@@ -332,7 +332,7 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
       if (entry.name.toLowerCase() === needle) return entry.name;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    _logDebug("findProjectNameCaseInsensitive", errorMessage(err));
   }
   return null;
 }
@@ -346,7 +346,7 @@ export function findArchivedProjectNameCaseInsensitive(phrenPath: string, name: 
       if (archivedName.toLowerCase() === needle) return archivedName;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findArchivedProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    _logDebug("findArchivedProjectNameCaseInsensitive", errorMessage(err));
   }
   return null;
 }

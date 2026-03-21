@@ -13,6 +13,7 @@ import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getMachineName } from "./machine-identity.js";
 
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
+import { logDebug } from "./logger.js";
 
 const TOOL_TIER: Record<string, ToolTier> = {
   add_project: "core",
@@ -163,7 +164,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck version: ${errorMessage(err)}\n`);
+        logDebug("healthCheck version", errorMessage(err));
       }
 
       // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
@@ -171,7 +172,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
       try {
         indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck ftsCacheCheck: ${errorMessage(err)}\n`);
+        logDebug("healthCheck ftsCacheCheck", errorMessage(err));
       }
 
       // Hook registration
@@ -180,7 +181,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         const { getHooksEnabledPreference } = await import("./init-preferences.js");
         hooksEnabled = getHooksEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck hooksEnabled: ${errorMessage(err)}\n`);
+        logDebug("healthCheck hooksEnabled", errorMessage(err));
       }
 
       let mcpEnabled = false;
@@ -188,7 +189,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         const { getMcpEnabledPreference } = await import("./init-preferences.js");
         mcpEnabled = getMcpEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck mcpEnabled: ${errorMessage(err)}\n`);
+        logDebug("healthCheck mcpEnabled", errorMessage(err));
       }
 
       // Profile/machine info
@@ -196,7 +197,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         try {
           return getMachineName();
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck machineName: ${errorMessage(err)}\n`);
+          logDebug("healthCheck machineName", errorMessage(err));
         }
         return undefined;
       })();
@@ -211,7 +212,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         const workflowPolicy = getWorkflowPolicy(phrenPath);
         taskMode = workflowPolicy.taskMode;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${errorMessage(err)}\n`);
+        logDebug("healthCheck taskMode", errorMessage(err));
       }
       let syncIntent: string | undefined;
       try {
@@ -220,7 +221,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         proactivity = prefs.proactivity || "high";
         syncIntent = prefs.syncIntent;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${errorMessage(err)}\n`);
+        logDebug("healthCheck proactivity", errorMessage(err));
       }
 
       // Determine sync status from intent + git remote state
@@ -363,7 +364,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readErrorLines: ${errorMessage(err)}\n`);
+          logDebug("readErrorLines", errorMessage(err));
           return [];
         }
       }
