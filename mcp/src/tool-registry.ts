@@ -59,7 +59,7 @@ function parseModuleTools(moduleName: string, source: string): ToolMetadata[] {
   }
 
   // Handle loop-registered tools: { tool: "name", ... } patterns followed by registerTool(action.tool, ...)
-  const loopPattern = /for\s*\(const\s+(\w+)\s+of\s+\[([\s\S]*?)\]\s*(?:as\s+const\s*)?\)\s*\{\s*server\.registerTool\(\s*\1\.tool\s*,\s*\{([\s\S]*?)\}\s*,/g;
+  const loopPattern = /for\s*\(const\s+(\w+)\s+of\s+\[([\s\S]*?)\]\s*(?:as\s+const\s*)?\)\s*\{[\s\S]*?server\.registerTool\(\s*\1\.tool\s*,\s*\{([\s\S]*?)\}\s*,/g;
   for (const loopMatch of source.matchAll(loopPattern)) {
     const [, , itemsBlock, configBlock] = loopMatch;
     const itemPattern = /\{\s*tool:\s*"([^"]+)"[^}]*verb:\s*"([^"]+)"/g;
