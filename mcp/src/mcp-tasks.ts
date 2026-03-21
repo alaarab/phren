@@ -128,9 +128,6 @@ const TOOL_TIER: Record<string, ToolTier> = {
   complete_task: "core",
   remove_task: "core",
   work_next_task: "core",
-  add_tasks: "advanced",
-  complete_tasks: "advanced",
-  remove_tasks: "advanced",
   update_task: "advanced",
   link_task_issue: "advanced",
   promote_task_to_issue: "advanced",
@@ -259,10 +256,13 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     "add_task",
     {
       title: "◆ phren · add task",
-      description: "Append a task to a project's tasks.md file. Adds to the Queue section.",
+      description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren)."),
-        item: z.string().describe("The task to add."),
+        item: z.union([
+          z.string().describe("A single task to add."),
+          z.array(z.string()).describe("Multiple tasks to add in one call."),
+        ]).describe("The task(s) to add. Pass a string for one task, or an array for bulk."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },
@@ -270,6 +270,17 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const addTaskDenied = permissionDeniedError(phrenPath, "add_task", project);
       if (addTaskDenied) return mcpResponse({ ok: false, error: addTaskDenied });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const result = addTasksBatch(phrenPath, project, item);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { added, errors } = result.data;
+          if (added.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${item.length} tasks to ${project}`, data: { project, added, errors } });
+        });
+      }
+
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
       if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
       return withWriteQueue(async () => {
@@ -281,38 +292,17 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("add_tasks", options)) server.registerTool(
-    "add_tasks",
-    {
-      title: "◆ phren · add tasks (bulk)",
-      description: "Append multiple tasks to a project's tasks.md file in one call. Adds to the Queue section.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        items: z.array(z.string()).describe("List of tasks to add."),
-      }),
-    },
-    async ({ project, items }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const addTasksDenied = permissionDeniedError(phrenPath, "add_task", project);
-      if (addTasksDenied) return mcpResponse({ ok: false, error: addTasksDenied });
-      return withWriteQueue(async () => {
-        const result = addTasksBatch(phrenPath, project, items);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const { added, errors } = result.data;
-        if (added.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${items.length} tasks to ${project}`, data: { project, added, errors } });
-      });
-    }
-  );
-
   if (shouldRegister("complete_task", options)) server.registerTool(
     "complete_task",
     {
       title: "◆ phren · done",
-      description: "Move a task to the Done section by matching text.",
+      description: "Move one or more tasks to the Done section by matching text. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Exact or partial text of the item to complete."),
+        item: z.union([
+          z.string().describe("Exact or partial text of the item to complete."),
+          z.array(z.string()).describe("List of partial item texts to complete."),
+        ]).describe("The task(s) to complete. Pass a string for one, or an array for bulk."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
       }),
     },
@@ -320,6 +310,37 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const completeTaskDenied = permissionDeniedError(phrenPath, "complete_task", project);
       if (completeTaskDenied) return mcpResponse({ ok: false, error: completeTaskDenied });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const resolvedItems = item
+            .map((match) => {
+              const resolved = resolveTaskItem(phrenPath, project, match);
+              return resolved.ok ? resolved.data : null;
+            })
+            .filter((task): task is TaskItem => task !== null);
+          const result = completeTasksBatch(phrenPath, project, item);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { completed, errors } = result.data;
+          if (completed.length > 0) {
+            const completedSet = new Set(completed);
+            for (const task of resolvedItems) {
+              if (!completedSet.has(task.line)) continue;
+              clearTaskCheckpoint(phrenPath, {
+                project,
+                taskId: task.stableId ?? task.id,
+                stableId: task.stableId,
+                positionalId: task.id,
+                taskLine: task.line,
+              });
+            }
+            incrementSessionTasksCompleted(phrenPath, completed.length, sessionId, project);
+          }
+          if (completed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({ ok: completed.length > 0, ...(completed.length === 0 ? { error: `No tasks completed: ${errors.join("; ")}` } : {}), message: `Completed ${completed.length}/${item.length} items`, data: { project, completed, errors } });
+        });
+      }
+
       return withWriteQueue(async () => {
         const before = resolveTaskItem(phrenPath, project, item);
         const result = completeTaskStore(phrenPath, project, item);
@@ -340,94 +361,39 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("complete_tasks", options)) server.registerTool(
-    "complete_tasks",
-    {
-      title: "◆ phren · done (bulk)",
-      description: "Move multiple tasks to Done in one call. Pass an array of partial item texts.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        items: z.array(z.string()).describe("List of partial item texts to complete."),
-        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
-      }),
-    },
-    async ({ project, items, sessionId }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const completeTasksDenied = permissionDeniedError(phrenPath, "complete_task", project);
-      if (completeTasksDenied) return mcpResponse({ ok: false, error: completeTasksDenied });
-      return withWriteQueue(async () => {
-        const resolvedItems = items
-          .map((match) => {
-            const resolved = resolveTaskItem(phrenPath, project, match);
-            return resolved.ok ? resolved.data : null;
-          })
-          .filter((task): task is TaskItem => task !== null);
-        const result = completeTasksBatch(phrenPath, project, items);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const { completed, errors } = result.data;
-        if (completed.length > 0) {
-          const completedSet = new Set(completed);
-          for (const task of resolvedItems) {
-            if (!completedSet.has(task.line)) continue;
-            clearTaskCheckpoint(phrenPath, {
-              project,
-              taskId: task.stableId ?? task.id,
-              stableId: task.stableId,
-              positionalId: task.id,
-              taskLine: task.line,
-            });
-          }
-          incrementSessionTasksCompleted(phrenPath, completed.length, sessionId, project);
-        }
-        if (completed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: completed.length > 0, ...(completed.length === 0 ? { error: `No tasks completed: ${errors.join("; ")}` } : {}), message: `Completed ${completed.length}/${items.length} items`, data: { project, completed, errors } });
-      });
-    }
-  );
-
   if (shouldRegister("remove_task", options)) server.registerTool(
     "remove_task",
     {
       title: "◆ phren · remove task",
-      description: "Remove a task from a project's tasks.md file by matching text or ID.",
+      description: "Remove one or more tasks from a project's tasks.md file by matching text or ID. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Exact or partial text of the task, or a task ID like A1/Q3/D2."),
+        item: z.union([
+          z.string().describe("Exact or partial text of the task, or a task ID like A1/Q3/D2."),
+          z.array(z.string()).describe("List of partial item texts or IDs to remove."),
+        ]).describe("The task(s) to remove. Pass a string for one, or an array for bulk."),
       }),
     },
     async ({ project, item }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const removeTaskDenied = permissionDeniedError(phrenPath, "remove_task", project);
       if (removeTaskDenied) return mcpResponse({ ok: false, error: removeTaskDenied });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const result = removeTasksBatch(phrenPath, project, item);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { removed, errors } = result.data;
+          if (removed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({ ok: removed.length > 0, ...(removed.length === 0 ? { error: `No tasks removed: ${errors.join("; ")}` } : {}), message: `Removed ${removed.length}/${item.length} items`, data: { project, removed, errors } });
+        });
+      }
+
       return withWriteQueue(async () => {
         const result = removeTaskStore(phrenPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, phrenPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
-      });
-    }
-  );
-
-  if (shouldRegister("remove_tasks", options)) server.registerTool(
-    "remove_tasks",
-    {
-      title: "◆ phren · remove tasks (bulk)",
-      description: "Remove multiple tasks in one call. Pass an array of partial item texts or IDs.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        items: z.array(z.string()).describe("List of partial item texts or IDs to remove."),
-      }),
-    },
-    async ({ project, items }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const removeTasksDenied = permissionDeniedError(phrenPath, "remove_task", project);
-      if (removeTasksDenied) return mcpResponse({ ok: false, error: removeTasksDenied });
-      return withWriteQueue(async () => {
-        const result = removeTasksBatch(phrenPath, project, items);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const { removed, errors } = result.data;
-        if (removed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: removed.length > 0, ...(removed.length === 0 ? { error: `No tasks removed: ${errors.join("; ")}` } : {}), message: `Removed ${removed.length}/${items.length} items`, data: { project, removed, errors } });
       });
     }
   );

@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 72 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 67 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -94,15 +94,6 @@ Append a task to a project's task. Adds to the Queue section.
 | `item` | string | yes | The task to add. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
-### `add_tasks`
-
-Append multiple tasks to a project's task in one call. Adds to the Queue section.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `items` | string[] | yes | List of tasks to add. |
-
 ### `complete_task`
 
 Move a task item to the Done section by matching text.
@@ -115,18 +106,6 @@ Move a task item to the Done section by matching text.
 
 When a task is completed, phren clears any checkpoint file associated with that task.
 
-### `complete_tasks`
-
-Move multiple task items to Done in one call.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `items` | string[] | yes | List of partial item texts to complete. |
-| `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
-
-When tasks are completed, phren clears matching checkpoint files for those task IDs.
-
 ### `remove_task`
 
 Remove a task from a project's `tasks.md` by matching text or task ID.
@@ -135,15 +114,6 @@ Remove a task from a project's `tasks.md` by matching text or task ID.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Exact/partial task text, or task ID like `A1`, `Q3`, `D2`. |
-
-### `remove_tasks`
-
-Remove multiple tasks in one call. Pass an array of partial item texts or IDs.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `items` | string[] | yes | List of partial item texts or IDs to remove. |
 
 ### `update_task`
 
@@ -248,16 +218,6 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
-### `add_findings`
-
-Record multiple insights to a project's FINDINGS.md in one call. FTS index rebuilds once at the end.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `findings` | string[] | yes | List of insights to record. |
-| `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include these writes. |
-
 ### `supersede_finding`
 
 Mark an existing finding as superseded by a newer finding.
@@ -316,15 +276,6 @@ Remove a finding from FINDINGS.md by matching text.
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string | yes | Partial text to match against existing findings. |
-
-### `remove_findings`
-
-Remove multiple findings from a project's FINDINGS.md in one call.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `findings` | string[] | yes | List of partial texts to match and remove. |
 
 ### `push_changes`
 

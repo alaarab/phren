@@ -502,6 +502,7 @@ export function addTasks(phrenPath: string, project: string, items: string[]): P
       }
       parsed.data.items.Queue.push({
         id: `Q${parsed.data.items.Queue.length + 1}`,
+        stableId: newBid(),
         section: "Queue",
         line,
         checked: false,

@@ -42,7 +42,7 @@ const SAMPLE_TASKS = `# testproj tasks
 
 `;
 
-describe("add_tasks bulk: error field when nothing is added", () => {
+describe("add_task bulk (array): error field when nothing is added", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
 
@@ -72,7 +72,7 @@ describe("add_tasks bulk: error field when nothing is added", () => {
   it("returns ok:false and an error field when all items are empty strings", async () => {
     // Empty strings produce no line after trim, so added.length === 0
     const res = parseResult(
-      await server.call("add_tasks", { project: PROJECT, items: ["", "   "] })
+      await server.call("add_task", { project: PROJECT, item: ["", "   "] })
     );
 
     expect(res.ok).toBe(false);
@@ -82,7 +82,7 @@ describe("add_tasks bulk: error field when nothing is added", () => {
   });
 });
 
-describe("complete_tasks bulk: error field when nothing is completed", () => {
+describe("complete_task bulk (array): error field when nothing is completed", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
 
@@ -111,9 +111,9 @@ describe("complete_tasks bulk: error field when nothing is completed", () => {
 
   it("returns ok:false and an error field when no items match", async () => {
     const res = parseResult(
-      await server.call("complete_tasks", {
+      await server.call("complete_task", {
         project: PROJECT,
-        items: ["nonexistent-task-xyz-123", "another-nonexistent-abc"],
+        item: ["nonexistent-task-xyz-123", "another-nonexistent-abc"],
       })
     );
 

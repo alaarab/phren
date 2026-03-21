@@ -39,7 +39,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (72)
+## MCP Tools (67)
 
 ### Search and Browse
 
@@ -56,12 +56,9 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `get_tasks` | `project?`, `id?`, `item?`, `status?`, `limit?`, `done_limit?`, `offset?`, `summary?` | Read tasks with pagination, summary mode, and section filtering. |
-| `add_task` | `project`, `item` | Append a task to a project's Queue section in `tasks.md`. |
-| `add_tasks` | `project`, `items[]` | Bulk add multiple tasks in one call. |
-| `complete_task` | `project`, `item` | Move a task to Done by text match. |
-| `complete_tasks` | `project`, `items[]` | Bulk complete multiple items in one call. |
-| `remove_task` | `project`, `item` | Remove a task by matching text. |
-| `remove_tasks` | `project`, `items[]` | Bulk remove multiple tasks in one call. |
+| `add_task` | `project`, `item: string \| string[]` | Add one or more tasks to a project's Queue section. Pass a string or array. |
+| `complete_task` | `project`, `item: string \| string[]` | Move one or more tasks to Done by text match. Pass a string or array. |
+| `remove_task` | `project`, `item: string \| string[]` | Remove one or more tasks by matching text or ID. Pass a string or array. |
 | `update_task` | `project`, `item`, `updates` | Update an item's text, priority, context, section, or linked GitHub issue. |
 | `link_task_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
 | `promote_task_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
@@ -74,15 +71,13 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_finding` | `project`, `finding`, `citation?: { file?, line?, repo?, commit?, task_item? }`, `sessionId?`, `source?`, `findingType?`, `scope?` | Append an insight with optional citation, provenance (`human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`), type tag, and scope. |
-| `add_findings` | `project`, `findings[]`, `sessionId?` | Bulk add multiple findings in one call. Pass `sessionId` to update session metrics. |
+| `add_finding` | `project`, `finding: string \| string[]`, `citation?`, `sessionId?`, `source?`, `findingType?`, `scope?` | Append one or more insights. Pass a string or array. Citation, provenance, type tag, and scope apply to single-string mode. |
 | `supersede_finding` | `project`, `finding_text`, `superseded_by` | Mark a finding as superseded by a newer one. |
 | `retract_finding` | `project`, `finding_text`, `reason` | Retract a finding and store lifecycle reason metadata. |
 | `resolve_contradiction` | `project`, `finding_text`, `finding_text_other`, `resolution` | Resolve contradiction status between two findings (`keep_a`, `keep_b`, `keep_both`, `retract_both`). |
 | `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
 | `edit_finding` | `project`, `old_text`, `new_text` | Edit a finding in place while preserving inline metadata such as `fid` and citations. |
-| `remove_finding` | `project`, `finding` | Remove a finding by text match. Use when an insight is wrong or outdated. |
-| `remove_findings` | `project`, `findings[]` | Bulk remove multiple findings in one call. |
+| `remove_finding` | `project`, `finding: string \| string[]` | Remove one or more findings by text match. Pass a string or array. |
 | `push_changes` | `message?` | Commit and push all phren changes. Retries with rebase on push conflicts. |
 | `auto_extract_findings` | `project`, `text`, `model?`, `dryRun?` | Extract findings from text (max 10000 chars). |
 

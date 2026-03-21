@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 72 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 67 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |
@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.29
 
-## MCP Tools (72)
+## MCP Tools (67)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -63,30 +63,25 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 
 **Task management:**
 - `get_tasks(project?, id?, item?)` : read tasks, or fetch a single item by ID or text
-- `add_task(project, item)` : add task to queue
-- `add_tasks(project, items[])` : bulk add multiple tasks in one call
-- `complete_task(project, item)` : move task to done by text match
-- `complete_tasks(project, items[])` : bulk complete multiple items in one call
+- `add_task(project, item: string | string[])` : add one or more tasks to queue
+- `complete_task(project, item: string | string[])` : move task(s) to done by text match
 - `update_task(project, item, updates)` : update text, priority, context, section, or linked GitHub issue
 - `link_task_issue(project, item, issue_number?, issue_url?, unlink?)` : link or unlink an existing GitHub issue on a task item
 - `promote_task_to_issue(project, item, repo?, title?, body?, mark_done?)` : create a GitHub issue from a task item and link it back
-- `remove_task(project, item)` : remove a task by matching text
-- `remove_tasks(project, items[])` : bulk remove multiple tasks in one call
+- `remove_task(project, item: string | string[])` : remove one or more tasks by matching text
 - `pin_task(project, item)` : pin a task so it stays visible across sessions
 - `work_next_task(project?)` : pick the next highest-priority task to work on
 - `promote_task(project, item)` : promote a task to a higher priority section
 - `tidy_done_tasks(project?)` : archive completed tasks to keep the list clean
 
 **Finding capture:**
-- `add_finding(project, finding, citation?: { file?, line?, repo?, commit? })` : append finding with optional citation
-- `add_findings(project, findings[])` : bulk add multiple findings in one call
+- `add_finding(project, finding: string | string[], citation?: { file?, line?, repo?, commit? })` : append one or more findings with optional citation
 - `supersede_finding(project, finding_text, superseded_by)` : mark a finding as superseded by a newer one
 - `retract_finding(project, finding_text, reason)` : retract a finding with lifecycle reason metadata
 - `resolve_contradiction(project, finding_text, finding_text_other, resolution)` : resolve contradiction between two findings
 - `get_contradictions(project?, finding_text?)` : list unresolved contradicted findings
 - `edit_finding(project, old_text, new_text)` : edit a finding in place while preserving inline metadata
-- `remove_finding(project, text)` : remove a finding by match
-- `remove_findings(project, findings[])` : bulk remove multiple findings in one call
+- `remove_finding(project, finding: string | string[])` : remove one or more findings by match
 - `push_changes(message?)` : commit and push phren changes
 - `auto_extract_findings(context)` : extract findings from conversation context automatically
 
