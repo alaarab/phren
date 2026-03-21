@@ -4,6 +4,7 @@ import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { errorMessage } from "./utils.js";
 import { PACKAGE_NAME, PACKAGE_SPEC } from "./package-metadata.js";
+import { logDebug } from "./logger.js";
 
 function shellCommand(bin: "npm" | "npx"): string {
   return process.platform === "win32" ? `${bin}.cmd` : bin;
@@ -75,7 +76,7 @@ export async function runPhrenUpdate(opts: RunPhrenUpdateOptions = {}): Promise<
           process.stderr.write(`Note: uncommitted changes detected, autostash will preserve them.\n`);
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPhrenUpdate gitStatus: ${errorMessage(err)}\n`);
+        logDebug("runPhrenUpdate gitStatus", errorMessage(err));
       }
       const pull = run("git", ["pull", "--rebase", "--autostash"], root);
       run(shellCommand("npm"), ["install"], root);

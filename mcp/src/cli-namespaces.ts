@@ -33,6 +33,7 @@ import { addFinding, removeFinding } from "./core-finding.js";
 import { supersedeFinding, retractFinding, resolveFindingContradiction } from "./finding-lifecycle.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, type CustomHookEntry } from "./hooks.js";
 import { runtimeFile } from "./shared.js";
+import { logDebug } from "./logger.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -97,7 +98,7 @@ function openInEditor(filePath: string): void {
   try {
     execFileSync(editor, [filePath], { stdio: "inherit" });
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] openInEditor: ${errorMessage(err)}\n`);
+    logDebug("openInEditor", errorMessage(err));
     console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
     process.exit(1);
   }
@@ -171,7 +172,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.symlinkSync(source, dest);
       console.log(`Linked skill ${fileName} into ${project}.`);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skill add symlinkFailed: ${errorMessage(err)}\n`);
+      logDebug("skill add symlinkFailed", errorMessage(err));
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
@@ -507,7 +508,7 @@ export function handleDetectSkills(args: string[], profile: string) {
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] skillList lstat: ${errorMessage(err)}\n`);
+      logDebug("skillList lstat", errorMessage(err));
     }
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
@@ -923,7 +924,7 @@ function handleProjectsList(profile: string) {
     try {
       dirFiles = new Set(fs.readdirSync(projectDir));
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects list readdir: ${errorMessage(err)}\n`);
+      logDebug("projects list readdir", errorMessage(err));
       dirFiles = new Set();
     }
     const tags: string[] = [];
@@ -964,7 +965,7 @@ async function handleProjectsRemove(name: string, profile: string) {
   try {
     countFiles(projectDir);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] projects remove countFiles: ${errorMessage(err)}\n`);
+    logDebug("projects remove countFiles", errorMessage(err));
   }
 
   const readline = await import("readline");

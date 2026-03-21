@@ -13,6 +13,7 @@ import { isFeatureEnabled, errorMessage } from "./utils.js";
 import { annotateStale } from "./cli-hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "./shared-retrieval.js";
 import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "./shared-retrieval.js";
+import { logDebug } from "./logger.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrieval: ${errorMessage(err)}\n`);
+        logDebug("injectContext recordRetrieval", errorMessage(err));
       }
     }
   } else {
@@ -129,7 +130,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, doc.path ?? doc.filename, doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrievalOrdered: ${errorMessage(err)}\n`);
+        logDebug("injectContext recordRetrievalOrdered", errorMessage(err));
       }
       parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));

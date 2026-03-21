@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import { createHash } from "crypto";
 import { isValidProjectName, errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 import { readFindings } from "./data-access.js";
 import {
   debugLog,
@@ -55,7 +56,7 @@ export function logSearchMiss(phrenPath: string, query: string, project?: string
     const missFile = runtimeFile(phrenPath, "search-misses.jsonl");
     fs.appendFileSync(missFile, entry + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] logSearchMiss: ${errorMessage(err)}\n`);
+    logDebug("logSearchMiss", errorMessage(err));
   }
 }
 
@@ -205,7 +206,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         updatedAt = stat.mtime.toISOString();
         createdAt = stat.birthtime.toISOString();
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge statFile: ${errorMessage(err)}\n`);
+        logDebug("search_knowledge statFile", errorMessage(err));
       }
 
       // Extract tags from content (e.g. [decision], [pitfall], [pattern])
@@ -312,9 +313,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
               rows = [...rows, ...uniqueFederated];
             }
           } catch (err: unknown) {
-            if (process.env.PHREN_DEBUG) {
-              process.stderr.write(`[phren] search_knowledge federation: ${errorMessage(err)}\n`);
-            }
+            logDebug("search_knowledge", `federation: ${errorMessage(err)}`);
           }
         }
 
@@ -486,7 +485,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
           }
           relatedFragments = [...new Set(relatedFragments)].slice(0, 10);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] fragment query: ${errorMessage(err)}\n`);
+          logDebug("fragment query", errorMessage(err));
         }
 
         const formatted = results.map((r) => {
@@ -502,7 +501,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
             const synthCachePath = runtimeFile(phrenPath, "synth-cache.json");
             let synthCache: Record<string, { result: string; ts: number }> = {};
             try { synthCache = JSON.parse(fs.readFileSync(synthCachePath, "utf8")); } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search_knowledge synthCacheRead: ${errorMessage(err)}\n`);
+              logDebug("search_knowledge synthCacheRead", errorMessage(err));
             }
             const cached = synthCache[synthKey];
             const SYNTH_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -521,7 +520,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
                   for (const k of oldest) delete synthCache[k];
                 }
                 try { fs.writeFileSync(synthCachePath, JSON.stringify(synthCache)); } catch (err: unknown) {
-                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] synthCache write: ${errorMessage(err)}\n`);
+                  logDebug("synthCache write", errorMessage(err));
                 }
               }
             }

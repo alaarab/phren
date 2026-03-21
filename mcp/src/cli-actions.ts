@@ -18,6 +18,7 @@ import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, 
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 import { listAllSessions } from "./mcp-session.js";
+import { logDebug } from "./logger.js";
 
 async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
   const result = await fn();
@@ -166,7 +167,7 @@ export async function handleDoctor(args: string[]) {
               tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissParse: ${errorMessage(err)}\n`);
+            logDebug("doctor searchMissParse", errorMessage(err));
           }
         }
         const topMisses = [...tokenCounts.entries()]
@@ -181,7 +182,7 @@ export async function handleDoctor(args: string[]) {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
+    logDebug("doctor searchMissAnalysis", errorMessage(err));
   }
 
   const semStatus = await getSemanticSearchStatus(getPhrenPath(), profile || undefined);
@@ -221,7 +222,7 @@ async function getSemanticSearchStatus(phrenPath: string, profile: string | unde
     const coverage = formatEmbeddingCoverage(cache.coverage(listIndexedDocumentPaths(phrenPath, profile)));
     return { ollamaUrl, available: true, modelReady: true, model, coverage };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getSemanticSearchStatus: ${errorMessage(err)}\n`);
+    logDebug("getSemanticSearchStatus", errorMessage(err));
     return { ollamaUrl: null, status: "error", error: errorMessage(err) };
   }
 }

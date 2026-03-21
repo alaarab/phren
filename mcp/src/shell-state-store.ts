@@ -3,6 +3,7 @@ import * as path from "path";
 import { phrenOk, type PhrenResult, shellStateFile } from "./shared.js";
 import { withSafeLock } from "./shared-data-utils.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 export interface ShellState {
   version: number;
@@ -46,7 +47,7 @@ export function loadShellState(phrenPath: string): ShellState {
       introSeenVersion: typeof raw.introSeenVersion === "string" ? raw.introSeenVersion : undefined,
     };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadShellState parse: ${errorMessage(err)}\n`);
+    logDebug("loadShellState parse", errorMessage(err));
     return fallback;
   }
 }

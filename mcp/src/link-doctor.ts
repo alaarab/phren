@@ -14,6 +14,7 @@ import {
 import { commandVersion, versionAtLeast, nearestWritableTarget } from "./init-shared.js";
 import { validateGovernanceJson } from "./shared-governance.js";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { validateTaskFormat, validateFindingsFormat } from "./shared-content.js";
 import { detectInstalledTools } from "./hooks.js";
@@ -204,10 +205,10 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     fs.unlinkSync(fsBenchFile);
     fsMs = Date.now() - t0;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmark: ${errorMessage(err)}\n`);
+    logDebug("doctor fsBenchmark", errorMessage(err));
     fsMs = -1;
     try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      logDebug("doctor", `fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}`);
     }
   }
   const fsSlow = fsMs > 500 || fsMs < 0;
@@ -344,7 +345,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor runtimeHealth: ${errorMessage(err)}\n`);
+      logDebug("doctor runtimeHealth", errorMessage(err));
       runtime = null;
     }
   }

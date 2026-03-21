@@ -6,7 +6,7 @@ import * as path from "path";
 import { isValidProjectName, errorMessage, safeProjectPath } from "./utils.js";
 import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "./data-access.js";
 import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "./shared.js";
-import { logWarn } from "./logger.js";
+import { logWarn, logDebug } from "./logger.js";
 
 
 
@@ -96,7 +96,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
         try {
           decoded = JSON.parse(rawData);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${errorMessage(err)}\n`);
+          logDebug("import_project jsonParse", errorMessage(err));
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 

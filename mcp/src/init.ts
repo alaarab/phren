@@ -133,6 +133,7 @@ import {
 export type { McpMode } from "./init-walkthrough.js";
 export { isVersionNewer } from "./init-npm.js";
 import { isVersionNewer } from "./init-npm.js";
+import { logDebug } from "./logger.js";
 type SkillsScope = "global" | "project";
 
 export function parseMcpMode(raw?: string): McpMode | undefined {
@@ -1071,7 +1072,7 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaInstallHint: ${errorMessage(err)}\n`);
+      logDebug("init ollamaInstallHint", errorMessage(err));
     }
   }
 

@@ -7,6 +7,7 @@ import { buildSharedLifecycleCommands } from "./hooks.js";
 import { VERSION } from "./package-metadata.js";
 import { getToolCount, renderToolCatalogMarkdown } from "./tool-registry.js";
 import { isSkillEnabled } from "./skill-state.js";
+import { logDebug } from "./logger.js";
 
 // ── Skill frontmatter parsing and validation ────────────────────────────────
 
@@ -227,7 +228,7 @@ function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, m
       if (!isManagedSymlink(destPath, managedRoot)) continue;
       fs.unlinkSync(destPath);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
+      logDebug("cleanupManagedSkillLinks", errorMessage(err));
     }
   }
 }

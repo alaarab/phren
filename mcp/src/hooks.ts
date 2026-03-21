@@ -9,6 +9,7 @@ import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, ins
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
+import { logDebug } from "./logger.js";
 
 export interface HookError {
   code: PhrenErrorCode;
@@ -541,7 +542,7 @@ function appendHookErrorLog(phrenPath: string, event: string, message: string): 
       atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] appendHookErrorLog rotate: ${errorMessage(err)}\n`);
+    logDebug("appendHookErrorLog rotate", errorMessage(err));
   }
 }
 
@@ -594,7 +595,7 @@ export function runCustomHooks(
           try {
             appendHookErrorLog(phrenPath, event, message);
           } catch (logErr: unknown) {
-            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] runCustomHooks webhookErrorLog: ${errorMessage(logErr)}\n`);
+            logDebug("runCustomHooks webhookErrorLog", errorMessage(logErr));
           }
         });
       continue;
@@ -623,7 +624,7 @@ export function runCustomHooks(
       try {
         appendHookErrorLog(phrenPath, event, errorMessage(err));
       } catch (logErr: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] runCustomHooks hookErrorLog: ${errorMessage(logErr)}\n`);
+        logDebug("runCustomHooks hookErrorLog", errorMessage(logErr));
       }
     }
   }
@@ -678,7 +679,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] configureAllHooks cursorRead: ${errorMessage(err)}\n`);
+        logDebug("configureAllHooks cursorRead", errorMessage(err));
       }
       const config: CursorHookConfig = {
         ...existing,
@@ -704,7 +705,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       const codexLifecycle = withHookToolLifecycleCommands(buildSharedLifecycleCommands(), "codex");
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] configureAllHooks codexRead: ${errorMessage(err)}\n`);
+        logDebug("configureAllHooks codexRead", errorMessage(err));
       }
       const config: CodexHookConfig = {
         ...existing,

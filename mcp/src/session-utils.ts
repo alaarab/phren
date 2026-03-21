@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 
 /**
  * Write JSON to a file atomically using temp-file + rename.
@@ -14,15 +15,11 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
 }
 
 /**
- * Log an error to stderr when PHREN_DEBUG is enabled.
- * Centralises the repeated `if (PHREN_DEBUG) stderr.write(...)` pattern.
+ * Log an error via the structured debug logger.
+ * Centralises the repeated debug error pattern.
  */
 export function debugError(scope: string, err: unknown): void {
-  if ((process.env.PHREN_DEBUG)) {
-    process.stderr.write(
-      `[phren] ${scope}: ${errorMessage(err)}\n`,
-    );
-  }
+  logDebug(scope, errorMessage(err));
 }
 
 interface SessionFileEntry<T> {

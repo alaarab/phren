@@ -23,6 +23,7 @@ import {
   GOVERNANCE_SCHEMA_VERSION,
 } from "./shared-governance.js";
 import { STOP_WORDS, errorMessage } from "./utils.js";
+import { logDebug } from "./logger.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./init-shared.js";
 import { readInstallPreferences } from "./init-preferences.js";
 import { TASKS_FILENAME } from "./data-tasks.js";
@@ -1238,14 +1239,14 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateMachinesYaml parse: ${errorMessage(err)}\n`);
+    logDebug("updateMachinesYaml parse", errorMessage(err));
   }
 
   // Passive init/link refreshes should keep an existing mapping; explicit overrides can remap.
   if (hasExistingMapping && !machine && !profile) return;
   const mapping = setMachineProfile(phrenPath, machineName, profileName);
-  if (!mapping.ok && (process.env.PHREN_DEBUG)) {
-    process.stderr.write(`[phren] updateMachinesYaml setMachineProfile: ${mapping.error}\n`);
+  if (!mapping.ok) {
+    logDebug("updateMachinesYaml", `setMachineProfile: ${mapping.error}`);
   }
 }
 
@@ -1449,7 +1450,7 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     const entries = fs.readdirSync(phrenPath, { withFileTypes: true });
     ftsOk = entries.some(d => d.isDirectory() && !d.name.startsWith("."));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPostInitVerify projectScan: ${errorMessage(err)}\n`);
+    logDebug("runPostInitVerify projectScan", errorMessage(err));
     ftsOk = false;
   }
   checks.push({
