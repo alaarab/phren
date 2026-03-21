@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -14,12 +14,29 @@ import { getMachineName } from "./machine-identity.js";
 
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 
-export function register(server: McpServer, ctx: McpContext): void {
+const TOOL_TIER: Record<string, ToolTier> = {
+  add_project: "core",
+  health_check: "core",
+  get_review_queue: "core",
+  get_consolidation_status: "advanced",
+  doctor_fix: "advanced",
+  list_hook_errors: "advanced",
+  approve_queue_item: "advanced",
+  reject_queue_item: "advanced",
+  edit_queue_item: "advanced",
+};
+
+function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath, profile, withWriteQueue } = ctx;
 
   // ── add_project ────────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("add_project", options)) server.registerTool(
     "add_project",
     {
       title: "◆ phren · add project",
@@ -64,7 +81,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("get_consolidation_status", options)) server.registerTool(
     "get_consolidation_status",
     {
       title: "◆ phren · consolidation status",
@@ -122,7 +139,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── health_check ───────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("health_check", options)) server.registerTool(
     "health_check",
     {
       title: "◆ phren · health",
@@ -276,7 +293,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── doctor_fix ─────────────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("doctor_fix", options)) server.registerTool(
     "doctor_fix",
     {
       title: "◆ phren · doctor fix",
@@ -311,7 +328,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── list_hook_errors ───────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("list_hook_errors", options)) server.registerTool(
     "list_hook_errors",
     {
       title: "◆ phren · hook errors",
@@ -377,7 +394,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── get_review_queue ─────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("get_review_queue", options)) server.registerTool(
     "get_review_queue",
     {
       title: "◆ phren · get review queue",
@@ -419,7 +436,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── approve_queue_item ──────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("approve_queue_item", options)) server.registerTool(
     "approve_queue_item",
     {
       title: "◆ phren · approve queue item",
@@ -446,7 +463,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── reject_queue_item ───────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("reject_queue_item", options)) server.registerTool(
     "reject_queue_item",
     {
       title: "◆ phren · reject queue item",
@@ -473,7 +490,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
   // ── edit_queue_item ─────────────────────────────────────────────────────
 
-  server.registerTool(
+  if (shouldRegister("edit_queue_item", options)) server.registerTool(
     "edit_queue_item",
     {
       title: "◆ phren · edit queue item",

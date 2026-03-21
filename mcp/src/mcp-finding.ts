@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -120,10 +120,28 @@ function withLifecycleMutation<T>(
   });
 }
 
-export function register(server: McpServer, ctx: McpContext): void {
+const TOOL_TIER: Record<string, ToolTier> = {
+  add_finding: "core",
+  edit_finding: "core",
+  remove_finding: "core",
+  push_changes: "core",
+  add_findings: "advanced",
+  supersede_finding: "advanced",
+  retract_finding: "advanced",
+  resolve_contradiction: "advanced",
+  get_contradictions: "advanced",
+  remove_findings: "advanced",
+};
+
+function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
+  if (!options?.tier) return true;
+  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
+}
+
+export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
   const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
 
-  server.registerTool(
+  if (shouldRegister("add_finding", options)) server.registerTool(
     "add_finding",
     {
       title: "◆ phren · save finding",
@@ -248,7 +266,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("add_findings", options)) server.registerTool(
     "add_findings",
     {
       title: "◆ phren · save findings (bulk)",
@@ -312,7 +330,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("supersede_finding", options)) server.registerTool(
     "supersede_finding",
     {
       title: "◆ phren · supersede finding",
@@ -335,7 +353,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("retract_finding", options)) server.registerTool(
     "retract_finding",
     {
       title: "◆ phren · retract finding",
@@ -358,7 +376,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("resolve_contradiction", options)) server.registerTool(
     "resolve_contradiction",
     {
       title: "◆ phren · resolve contradiction",
@@ -414,7 +432,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("get_contradictions", options)) server.registerTool(
     "get_contradictions",
     {
       title: "◆ phren · contradictions",
@@ -476,7 +494,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("edit_finding", options)) server.registerTool(
     "edit_finding",
     {
       title: "◆ phren · edit finding",
@@ -505,7 +523,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("remove_finding", options)) server.registerTool(
     "remove_finding",
     {
       title: "◆ phren · remove finding",
@@ -533,7 +551,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("remove_findings", options)) server.registerTool(
     "remove_findings",
     {
       title: "◆ phren · remove findings (bulk)",
@@ -559,7 +577,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
+  if (shouldRegister("push_changes", options)) server.registerTool(
     "push_changes",
     {
       title: "◆ phren · push",
