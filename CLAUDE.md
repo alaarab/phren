@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 69 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 72 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |
@@ -40,9 +40,9 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.28
+0.0.29
 
-## MCP Tools (69)
+## MCP Tools (72)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -56,6 +56,9 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `health_check()` : run doctor checks and return results
 - `list_hook_errors()` : show recent hook errors and failures
 - `get_review_queue(project?)` : read items waiting for review
+- `approve_queue_item(project, line)` : approve a review queue item (removes from queue, finding stays in FINDINGS.md)
+- `reject_queue_item(project, line)` : reject a review queue item (removes from queue AND from FINDINGS.md)
+- `edit_queue_item(project, line, new_text)` : edit a review queue item's text in both queue and FINDINGS.md
 - `doctor_fix()` : run doctor self-heal checks and apply fixes
 
 **Task management:**

@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { PhrenClient } from "./phrenClient";
-import { showPreview } from "./previewPanel";
+import { showPreview, closePreview } from "./previewPanel";
 
 interface FindingData {
   projectName: string;
@@ -34,6 +34,7 @@ export function showFindingDetail(client: PhrenClient, finding: FindingData, onR
         try {
           await client.removeFinding(finding.projectName, finding.text);
           vscode.window.showInformationMessage(`Finding "${finding.id}" removed.`);
+          closePreview();
           onRefresh();
         } catch (e) {
           vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -48,6 +49,7 @@ export function showFindingDetail(client: PhrenClient, finding: FindingData, onR
         try {
           await client.supersedeFinding(finding.projectName, finding.text, replacementText.trim());
           vscode.window.showInformationMessage(`Finding "${finding.id}" superseded.`);
+          closePreview();
           onRefresh();
         } catch (e) {
           vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -62,6 +64,7 @@ export function showFindingDetail(client: PhrenClient, finding: FindingData, onR
         try {
           await client.retractFinding(finding.projectName, finding.text, reason.trim());
           vscode.window.showInformationMessage(`Finding "${finding.id}" retracted.`);
+          closePreview();
           onRefresh();
         } catch (e) {
           vscode.window.showErrorMessage(`Failed: ${e instanceof Error ? e.message : String(e)}`);

@@ -283,6 +283,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private dateFilter: DateFilter | undefined;
 
+  private cache = new Map<string, unknown>();
+
   constructor(
     private readonly client: PhrenClient,
     private readonly storePath: string,
@@ -290,6 +292,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   setDateFilter(filter: DateFilter | undefined): void {
     this.dateFilter = filter;
+    this.cache.clear();
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -302,6 +305,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   }
 
   refresh(): void {
+    this.cache.clear();
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -731,7 +735,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private async getHookSectionDescription(): Promise<string | undefined> {
     try {
-      const raw = await this.client.listHooks();
+      const raw = await this.fetchHooks();
       const data = responseData(raw);
       const tools = asArray(data?.tools);
       const globalEnabled = asBoolean(data?.globalEnabled) ?? true;
@@ -1174,7 +1178,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private async getHookNodes(): Promise<PhrenNode[]> {
     try {
-      const raw = await this.client.listHooks();
+      const raw = await this.fetchHooks();
       const data = responseData(raw);
       const tools = asArray(data?.tools);
 
@@ -1206,7 +1210,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
       // Hook errors summary
       try {
-        const errRaw = await this.client.listHookErrors();
+        const errRaw = await this.fetchHookErrors();
         const errData = responseData(errRaw);
         const errors = asArray(errData?.errors);
         if (errors.length > 0) {
@@ -1304,235 +1308,265 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   setHealthStatus(ok: boolean): void {
     if (this.lastHealthOk === ok) return;
     this.lastHealthOk = ok;
+    this.cache.clear();
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
-  // --- Raw fetch helpers ---
-
-  private async fetchProjects(): Promise<ProjectSummary[]> {
-    const raw = await this.client.listProjects();
-    const data = responseData(raw);
-    const projects = asArray(data?.projects);
-    const parsed: ProjectSummary[] = [];
-
-    for (const entry of projects) {
-      const record = asRecord(entry);
-      const name = asString(record?.name);
-      if (!name) {
-        continue;
-      }
-
-      const brief = asString(record?.brief);
-      parsed.push(brief ? { name, brief } : { name });
+  private async cachedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+    if (this.cache.has(key)) {
+      return this.cache.get(key) as T;
     }
-
-    return parsed;
+    const result = await fetcher();
+    this.cache.set(key, result);
+    return result;
   }
 
-  private async fetchFindings(projectName: string): Promise<FindingSummary[]> {
-    const raw = await this.client.getFindings(projectName);
-    const data = responseData(raw);
-    const findings = asArray(data?.findings);
-    const parsed: FindingSummary[] = [];
+  private fetchProjects(): Promise<ProjectSummary[]> {
+    return this.cachedFetch("projects", async () => {
+      const raw = await this.client.listProjects();
+      const data = responseData(raw);
+      const projects = asArray(data?.projects);
+      const parsed: ProjectSummary[] = [];
 
-    for (const entry of findings) {
-      const record = asRecord(entry);
-      const id = asString(record?.id);
-      const text = asString(record?.text);
-      if (!id || !text) {
-        continue;
-      }
-
-      const contradictsRaw = record?.contradicts;
-      const contradicts = Array.isArray(contradictsRaw)
-        ? contradictsRaw.filter((v): v is string => typeof v === "string")
-        : undefined;
-      const potentialDuplicatesRaw = record?.potentialDuplicates;
-      const potentialDuplicates = Array.isArray(potentialDuplicatesRaw)
-        ? potentialDuplicatesRaw.filter((v): v is string => typeof v === "string")
-        : undefined;
-      parsed.push({
-        id,
-        date: asString(record?.date) ?? "unknown",
-        text,
-        type: asString(record?.type),
-        confidence: asNumber(record?.confidence),
-        supersededBy: asString(record?.supersededBy),
-        supersedes: asString(record?.supersedes),
-        contradicts: contradicts?.length ? contradicts : undefined,
-        potentialDuplicates: potentialDuplicates?.length ? potentialDuplicates : undefined,
-      });
-    }
-
-    return parsed;
-  }
-
-  private async fetchTasks(projectName: string): Promise<TaskSummary[]> {
-    const raw = await this.client.getTasks(projectName, { status: "all", done_limit: 50 });
-    const data = responseData(raw);
-    const items = asRecord(data?.items);
-    const sections: TaskSection[] = ["Active", "Queue", "Done"];
-    const tasks: TaskSummary[] = [];
-
-    for (const section of sections) {
-      const sectionItems = asArray(items?.[section]);
-      for (const entry of sectionItems) {
+      for (const entry of projects) {
         const record = asRecord(entry);
-        const line = asString(record?.line);
-        if (!line) {
+        const name = asString(record?.name);
+        if (!name) {
           continue;
         }
 
+        const brief = asString(record?.brief);
+        parsed.push(brief ? { name, brief } : { name });
+      }
+
+      return parsed;
+    });
+  }
+
+  private fetchFindings(projectName: string): Promise<FindingSummary[]> {
+    return this.cachedFetch(`findings:${projectName}`, async () => {
+      const raw = await this.client.getFindings(projectName);
+      const data = responseData(raw);
+      const findings = asArray(data?.findings);
+      const parsed: FindingSummary[] = [];
+
+      for (const entry of findings) {
+        const record = asRecord(entry);
+        const id = asString(record?.id);
+        const text = asString(record?.text);
+        if (!id || !text) {
+          continue;
+        }
+
+        const contradictsRaw = record?.contradicts;
+        const contradicts = Array.isArray(contradictsRaw)
+          ? contradictsRaw.filter((v): v is string => typeof v === "string")
+          : undefined;
+        const potentialDuplicatesRaw = record?.potentialDuplicates;
+        const potentialDuplicates = Array.isArray(potentialDuplicatesRaw)
+          ? potentialDuplicatesRaw.filter((v): v is string => typeof v === "string")
+          : undefined;
+        parsed.push({
+          id,
+          date: asString(record?.date) ?? "unknown",
+          text,
+          type: asString(record?.type),
+          confidence: asNumber(record?.confidence),
+          supersededBy: asString(record?.supersededBy),
+          supersedes: asString(record?.supersedes),
+          contradicts: contradicts?.length ? contradicts : undefined,
+          potentialDuplicates: potentialDuplicates?.length ? potentialDuplicates : undefined,
+        });
+      }
+
+      return parsed;
+    });
+  }
+
+  private fetchTasks(projectName: string): Promise<TaskSummary[]> {
+    return this.cachedFetch(`tasks:${projectName}`, async () => {
+      const raw = await this.client.getTasks(projectName, { status: "all", done_limit: 50 });
+      const data = responseData(raw);
+      const items = asRecord(data?.items);
+      const sections: TaskSection[] = ["Active", "Queue", "Done"];
+      const tasks: TaskSummary[] = [];
+
+      for (const section of sections) {
+        const sectionItems = asArray(items?.[section]);
+        for (const entry of sectionItems) {
+          const record = asRecord(entry);
+          const line = asString(record?.line);
+          if (!line) {
+            continue;
+          }
+
+          tasks.push({
+            id: asString(record?.id) ?? `${section}-${tasks.length + 1}`,
+            line,
+            section,
+            checked: asBoolean(record?.checked) ?? section === "Done",
+            priority: asString(record?.priority),
+            pinned: asBoolean(record?.pinned),
+            issueUrl: asString(record?.issueUrl),
+            issueNumber: asNumber(record?.issueNumber),
+          });
+        }
+      }
+
+      return tasks;
+    });
+  }
+
+  private fetchQueueItems(projectName?: string): Promise<QueueItemSummary[]> {
+    return this.cachedFetch(`queueItems:${projectName ?? "__all__"}`, async () => {
+      const raw = await this.client.getReviewQueue(projectName);
+      const data = responseData(raw);
+      const items = asArray(data?.items);
+      const parsed: QueueItemSummary[] = [];
+
+      for (const entry of items) {
+        const record = asRecord(entry);
+        const id = asString(record?.id);
+        const text = asString(record?.text);
+        const resolvedProjectName = asString(record?.project) ?? projectName;
+        if (!id || !text || !resolvedProjectName) {
+          continue;
+        }
+
+        const sectionRaw = asString(record?.section) ?? "Review";
+        const section = (["Review", "Stale", "Conflicts"].includes(sectionRaw) ? sectionRaw : "Review") as QueueSection;
+
+        parsed.push({
+          projectName: resolvedProjectName,
+          id,
+          section,
+          date: asString(record?.date) ?? "unknown",
+          text,
+          line: asString(record?.line) ?? text,
+          confidence: asNumber(record?.confidence),
+          risky: asBoolean(record?.risky) ?? false,
+          machine: asString(record?.machine),
+          model: asString(record?.model),
+        });
+      }
+
+      return parsed;
+    });
+  }
+
+  private fetchSkills(): Promise<SkillSummary[]> {
+    return this.cachedFetch("skills", async () => {
+      const raw = await this.client.listSkills();
+      const data = responseData(raw);
+      const skills = asArray(data?.skills);
+      const parsed: SkillSummary[] = [];
+
+      for (const entry of skills) {
+        const record = asRecord(entry);
+        const name = asString(record?.name);
+        const source = asString(record?.source);
+        if (!name || !source) {
+          continue;
+        }
+
+        parsed.push({
+          name,
+          source,
+          enabled: asBoolean(record?.enabled) ?? true,
+          path: asString(record?.path),
+        });
+      }
+
+      return parsed;
+    });
+  }
+
+  private fetchSessions(projectName: string): Promise<SessionSummary[]> {
+    return this.cachedFetch(`sessions:${projectName}`, async () => {
+      const raw = await this.client.sessionHistory({ limit: 50, project: projectName });
+      const response = asRecord(raw);
+      const sessions = asArray(response?.data);
+      const parsed: SessionSummary[] = [];
+
+      for (const entry of sessions) {
+        const record = asRecord(entry);
+        const sessionId = asString(record?.sessionId);
+        const startedAt = asString(record?.startedAt);
+        const status = asSessionStatus(record?.status);
+        if (!sessionId || !startedAt || !status) {
+          continue;
+        }
+
+        parsed.push({
+          projectName,
+          date: startedAt.includes("T") ? startedAt.slice(0, 10) : "unknown",
+          sessionId,
+          startedAt,
+          durationMins: asNumber(record?.durationMins),
+          summary: asString(record?.summary),
+          findingsAdded: asNumber(record?.findingsAdded) ?? 0,
+          status,
+        });
+      }
+
+      return parsed;
+    });
+  }
+
+  private fetchSessionArtifacts(projectName: string, sessionId: string): Promise<SessionArtifactSummary> {
+    return this.cachedFetch(`sessionArtifacts:${projectName}:${sessionId}`, async () => {
+      const raw = await this.client.sessionHistory({ sessionId, project: projectName });
+      const data = responseData(raw);
+      const findingsRaw = asArray(data?.findings);
+      const tasksRaw = asArray(data?.tasks);
+
+      const findings: SessionArtifactSummary["findings"] = [];
+      for (const entry of findingsRaw) {
+        const record = asRecord(entry);
+        const id = asString(record?.id);
+        const date = asString(record?.date) ?? "unknown";
+        const text = asString(record?.text);
+        if (!id || !text) {
+          continue;
+        }
+        findings.push({
+          id,
+          date,
+          text,
+          supersededBy: asString(record?.supersededBy),
+          supersedes: asString(record?.supersedes),
+          contradicts: asStringArray(record?.contradicts),
+          potentialDuplicates: asStringArray(record?.potentialDuplicates),
+        });
+      }
+
+      const tasks: SessionArtifactSummary["tasks"] = [];
+      for (const entry of tasksRaw) {
+        const record = asRecord(entry);
+        const id = asString(record?.id);
+        const line = asString(record?.text);
+        const section = asTaskSection(record?.section);
+        if (!id || !line || !section) {
+          continue;
+        }
         tasks.push({
-          id: asString(record?.id) ?? `${section}-${tasks.length + 1}`,
+          id,
           line,
           section,
           checked: asBoolean(record?.checked) ?? section === "Done",
-          priority: asString(record?.priority),
-          pinned: asBoolean(record?.pinned),
-          issueUrl: asString(record?.issueUrl),
-          issueNumber: asNumber(record?.issueNumber),
         });
       }
-    }
 
-    return tasks;
+      return { findings, tasks };
+    });
   }
 
-  private async fetchQueueItems(projectName?: string): Promise<QueueItemSummary[]> {
-    const raw = await this.client.getReviewQueue(projectName);
-    const data = responseData(raw);
-    const items = asArray(data?.items);
-    const parsed: QueueItemSummary[] = [];
-
-    for (const entry of items) {
-      const record = asRecord(entry);
-      const id = asString(record?.id);
-      const text = asString(record?.text);
-      const resolvedProjectName = asString(record?.project) ?? projectName;
-      if (!id || !text || !resolvedProjectName) {
-        continue;
-      }
-
-      const sectionRaw = asString(record?.section) ?? "Review";
-      const section = (["Review", "Stale", "Conflicts"].includes(sectionRaw) ? sectionRaw : "Review") as QueueSection;
-
-      parsed.push({
-        projectName: resolvedProjectName,
-        id,
-        section,
-        date: asString(record?.date) ?? "unknown",
-        text,
-        line: asString(record?.line) ?? text,
-        confidence: asNumber(record?.confidence),
-        risky: asBoolean(record?.risky) ?? false,
-        machine: asString(record?.machine),
-        model: asString(record?.model),
-      });
-    }
-
-    return parsed;
+  private fetchHooks(): Promise<unknown> {
+    return this.cachedFetch("hooks", () => this.client.listHooks());
   }
 
-  private async fetchSkills(): Promise<SkillSummary[]> {
-    const raw = await this.client.listSkills();
-    const data = responseData(raw);
-    const skills = asArray(data?.skills);
-    const parsed: SkillSummary[] = [];
-
-    for (const entry of skills) {
-      const record = asRecord(entry);
-      const name = asString(record?.name);
-      const source = asString(record?.source);
-      if (!name || !source) {
-        continue;
-      }
-
-      parsed.push({
-        name,
-        source,
-        enabled: asBoolean(record?.enabled) ?? true,
-        path: asString(record?.path),
-      });
-    }
-
-    return parsed;
-  }
-
-  private async fetchSessions(projectName: string): Promise<SessionSummary[]> {
-    const raw = await this.client.sessionHistory({ limit: 50, project: projectName });
-    const response = asRecord(raw);
-    const sessions = asArray(response?.data);
-    const parsed: SessionSummary[] = [];
-
-    for (const entry of sessions) {
-      const record = asRecord(entry);
-      const sessionId = asString(record?.sessionId);
-      const startedAt = asString(record?.startedAt);
-      const status = asSessionStatus(record?.status);
-      if (!sessionId || !startedAt || !status) {
-        continue;
-      }
-
-      parsed.push({
-        projectName,
-        date: startedAt.includes("T") ? startedAt.slice(0, 10) : "unknown",
-        sessionId,
-        startedAt,
-        durationMins: asNumber(record?.durationMins),
-        summary: asString(record?.summary),
-        findingsAdded: asNumber(record?.findingsAdded) ?? 0,
-        status,
-      });
-    }
-
-    return parsed;
-  }
-
-  private async fetchSessionArtifacts(projectName: string, sessionId: string): Promise<SessionArtifactSummary> {
-    const raw = await this.client.sessionHistory({ sessionId, project: projectName });
-    const data = responseData(raw);
-    const findingsRaw = asArray(data?.findings);
-    const tasksRaw = asArray(data?.tasks);
-
-    const findings: SessionArtifactSummary["findings"] = [];
-    for (const entry of findingsRaw) {
-      const record = asRecord(entry);
-      const id = asString(record?.id);
-      const date = asString(record?.date) ?? "unknown";
-      const text = asString(record?.text);
-      if (!id || !text) {
-        continue;
-      }
-      findings.push({
-        id,
-        date,
-        text,
-        supersededBy: asString(record?.supersededBy),
-        supersedes: asString(record?.supersedes),
-        contradicts: asStringArray(record?.contradicts),
-        potentialDuplicates: asStringArray(record?.potentialDuplicates),
-      });
-    }
-
-    const tasks: SessionArtifactSummary["tasks"] = [];
-    for (const entry of tasksRaw) {
-      const record = asRecord(entry);
-      const id = asString(record?.id);
-      const line = asString(record?.text);
-      const section = asTaskSection(record?.section);
-      if (!id || !line || !section) {
-        continue;
-      }
-      tasks.push({
-        id,
-        line,
-        section,
-        checked: asBoolean(record?.checked) ?? section === "Done",
-      });
-    }
-
-    return { findings, tasks };
+  private fetchHookErrors(): Promise<unknown> {
+    return this.cachedFetch("hookErrors", () => this.client.listHookErrors());
   }
 
   private errorNode(label: string, error: unknown): MessageNode {

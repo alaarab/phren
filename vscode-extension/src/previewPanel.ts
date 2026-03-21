@@ -51,3 +51,9 @@ export function showPreview(opts: PreviewOptions): void {
     messageDisposable = panel.webview.onDidReceiveMessage(opts.onMessage);
   }
 }
+
+export function closePreview(): void {
+  if (panel) {
+    panel.dispose();
+  }
+}
