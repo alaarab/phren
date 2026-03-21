@@ -39,7 +39,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (68)
+## MCP Tools (71)
 
 ### Search and Browse
 
@@ -61,6 +61,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `complete_task` | `project`, `item` | Move a task to Done by text match. |
 | `complete_tasks` | `project`, `items[]` | Bulk complete multiple items in one call. |
 | `remove_task` | `project`, `item` | Remove a task by matching text. |
+| `remove_tasks` | `project`, `items[]` | Bulk remove multiple tasks in one call. |
 | `update_task` | `project`, `item`, `updates` | Update an item's text, priority, context, section, or linked GitHub issue. |
 | `link_task_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
 | `promote_task_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
@@ -154,6 +155,9 @@ Skill system behavior:
 | `health_check` | (none) | Run doctor checks and return results. |
 | `list_hook_errors` | `limit?` | Show recent hook errors and failures. |
 | `get_review_queue` | `project?` | Read items waiting for review. The review queue is read-only. |
+| `approve_queue_item` | `project`, `line` | Approve a review queue item (removes from queue, finding stays in FINDINGS.md). |
+| `reject_queue_item` | `project`, `line` | Reject a review queue item (removes from queue AND from FINDINGS.md). |
+| `edit_queue_item` | `project`, `line`, `new_text` | Edit a review queue item's text in both queue and FINDINGS.md. |
 | `doctor_fix` | `check_data?` | Run doctor self-heal checks and apply fixes automatically. |
 
 ### Configuration
@@ -167,6 +171,8 @@ Skill system behavior:
 | `set_retention_policy` | `settings` | Configure retention and decay policy. |
 | `set_workflow_policy` | `settings` | Configure workflow approval gates. |
 | `set_index_policy` | `settings` | Configure indexer include/exclude globs. |
+| `get_topic_config` | `project` | Read topic-config.json for a project (topics, domain, pinned). |
+| `set_topic_config` | `project`, `topics`, `domain?` | Write topic-config.json for a project. |
 
 Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
