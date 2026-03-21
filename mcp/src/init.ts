@@ -205,16 +205,14 @@ function runSyncCommand(command: string, args: string[]): SyncCommandResult {
 }
 
 function shouldUninstallCurrentGlobalPackage(): boolean {
-  const entryScript = process.argv[1];
-  if (!entryScript) return false;
+  // Always attempt to remove the global package if it exists, regardless of
+  // whether the uninstaller was invoked from the global install or a local repo.
   const npmRootResult = runSyncCommand(getNpmCommand(), ["root", "-g"]);
   if (!npmRootResult.ok) return false;
   const npmRoot = npmRootResult.stdout.trim();
   if (!npmRoot) return false;
-  const resolvedEntryScript = path.resolve(entryScript);
-  const resolvedGlobalPackageRoot = path.resolve(path.join(npmRoot, PHREN_NPM_PACKAGE_NAME));
-  return resolvedEntryScript === resolvedGlobalPackageRoot
-    || resolvedEntryScript.startsWith(`${resolvedGlobalPackageRoot}${path.sep}`);
+  const globalPkgPath = path.join(npmRoot, PHREN_NPM_PACKAGE_NAME);
+  return fs.existsSync(globalPkgPath);
 }
 
 function uninstallCurrentGlobalPackage(): void {
@@ -2003,8 +2001,28 @@ function sweepSkillSymlinks(phrenPath: string): void {
           fs.unlinkSync(fullPath);
           log(`  Removed skill symlink: ${fullPath}`);
         }
+      } catch {
+        // Broken symlink (target no longer exists) — clean it up
+        try {
+          fs.unlinkSync(fullPath);
+          log(`  Removed broken skill symlink: ${fullPath}`);
+        } catch (err2: unknown) {
+          debugLog(`sweepSkillSymlinks: could not remove broken symlink ${fullPath}: ${errorMessage(err2)}`);
+        }
+      }
+    }
+
+    // Remove phren-generated manifest files from the skills parent directory
+    const parentDir = path.dirname(dir);
+    for (const manifestFile of ["skill-manifest.json", "skill-commands.json"]) {
+      const manifestPath = path.join(parentDir, manifestFile);
+      try {
+        if (fs.existsSync(manifestPath)) {
+          fs.unlinkSync(manifestPath);
+          log(`  Removed ${manifestFile} (${manifestPath})`);
+        }
       } catch (err: unknown) {
-        debugLog(`sweepSkillSymlinks: could not check/remove ${fullPath}: ${errorMessage(err)}`);
+        debugLog(`sweepSkillSymlinks: could not remove ${manifestPath}: ${errorMessage(err)}`);
       }
     }
   }
@@ -2312,6 +2330,31 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
 
   if (shouldRemoveGlobalPackage) {
     uninstallCurrentGlobalPackage();
+  }
+
+  // Remove VS Code extension if installed
+  try {
+    const codeResult = execFileSync("code", ["--list-extensions"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    });
+    const phrenExts = codeResult.split("\n").filter((ext) => ext.toLowerCase().includes("phren"));
+    for (const ext of phrenExts) {
+      const trimmed = ext.trim();
+      if (!trimmed) continue;
+      try {
+        execFileSync("code", ["--uninstall-extension", trimmed], {
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 15_000,
+        });
+        log(`  Removed VS Code extension (${trimmed})`);
+      } catch (err: unknown) {
+        debugLog(`uninstall: VS Code extension removal failed for ${trimmed}: ${errorMessage(err)}`);
+      }
+    }
+  } catch {
+    // code CLI not available — skip
   }
 
   log(`\nPhren config, hooks, and installed data removed.`);
