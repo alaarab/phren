@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 69 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 72 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 

@@ -105,4 +105,35 @@ if (fs.existsSync(copilotHooks)) {
   try { fs.unlinkSync(copilotHooks); } catch { /* best-effort */ }
 }
 
+// ── Codex MCP config (TOML + JSON) ──
+const codexToml = homePath(".codex", "config.toml");
+if (fs.existsSync(codexToml)) {
+  try {
+    const content = fs.readFileSync(codexToml, "utf8");
+    // Remove [mcp_servers.phren] section
+    const cleaned = content.replace(/\[mcp_servers\.phren\][^\[]*/, "").trim();
+    if (cleaned !== content.trim()) fs.writeFileSync(codexToml, cleaned + "\n");
+  } catch { /* best-effort */ }
+}
+
+// ── Session wrapper scripts ──
+const localBinDir = homePath(".local", "bin");
+for (const tool of ["copilot", "cursor", "codex"]) {
+  const wrapperPath = path.join(localBinDir, tool);
+  try {
+    if (fs.existsSync(wrapperPath)) {
+      const content = fs.readFileSync(wrapperPath, "utf8");
+      if (content.includes("PHREN_PATH") && content.includes("phren")) {
+        fs.unlinkSync(wrapperPath);
+      }
+    }
+  } catch { /* best-effort */ }
+}
+
+// ── Machine context file ──
+const contextFile = homePath(".phren-context.md");
+if (fs.existsSync(contextFile)) {
+  try { fs.unlinkSync(contextFile); } catch { /* best-effort */ }
+}
+
 console.log("phren: cleaned up hooks and MCP config from agent settings.");

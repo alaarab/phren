@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -206,6 +206,27 @@
       {
         "command": "phren.openGettingStarted",
         "title": "Phren: Getting Started"
+      },
+      {
+        "command": "phren.configureMachine",
+        "title": "Phren: Configure Machine"
+      },
+      {
+        "command": "phren.doctorFix",
+        "title": "Phren: Doctor Fix",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "phren.openMachinesConfig",
+        "title": "Phren: Open Machines Config"
+      },
+      {
+        "command": "phren.sessionStart",
+        "title": "Phren: Start Session"
+      },
+      {
+        "command": "phren.sessionEnd",
+        "title": "Phren: End Session"
       }
     ],
     "keybindings": [
@@ -279,6 +300,18 @@
         },
         {
           "command": "phren.toggleProject",
+          "when": "false"
+        },
+        {
+          "command": "phren.doctorFix",
+          "when": "false"
+        },
+        {
+          "command": "phren.configureMachine",
+          "when": "false"
+        },
+        {
+          "command": "phren.openMachinesConfig",
           "when": "false"
         }
       ],

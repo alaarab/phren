@@ -6,7 +6,7 @@ import * as path from "path";
 import { runtimeFile, getProjectDirs } from "./shared.js";
 import { findFtsCacheForPath } from "./shared-index.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
-import { readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
+import { readReviewQueue, readReviewQueueAcrossProjects, approveQueueItem, rejectQueueItem, editQueueItem } from "./data-access.js";
 import { addProjectFromPath } from "./core-project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "./project-config.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
@@ -413,6 +413,88 @@ export function register(server: McpServer, ctx: McpContext): void {
         ok: true,
         message: `${result.data.length} queue item(s) across all projects.`,
         data: { items: result.data },
+      });
+    }
+  );
+
+  // ── approve_queue_item ──────────────────────────────────────────────────
+
+  server.registerTool(
+    "approve_queue_item",
+    {
+      title: "◆ phren · approve queue item",
+      description:
+        "Approve a review queue item — removes it from the review queue (the finding stays in FINDINGS.md).",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
+      }),
+    },
+    async ({ project, line }) => {
+      if (!isValidProjectName(project)) {
+        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      }
+      return withWriteQueue(async () => {
+        const result = approveQueueItem(phrenPath, project, line);
+        if (!result.ok) {
+          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        }
+        return mcpResponse({ ok: true, message: result.data });
+      });
+    }
+  );
+
+  // ── reject_queue_item ───────────────────────────────────────────────────
+
+  server.registerTool(
+    "reject_queue_item",
+    {
+      title: "◆ phren · reject queue item",
+      description:
+        "Reject a review queue item — removes it from the review queue AND removes the corresponding finding from FINDINGS.md.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
+      }),
+    },
+    async ({ project, line }) => {
+      if (!isValidProjectName(project)) {
+        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      }
+      return withWriteQueue(async () => {
+        const result = rejectQueueItem(phrenPath, project, line);
+        if (!result.ok) {
+          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        }
+        return mcpResponse({ ok: true, message: result.data });
+      });
+    }
+  );
+
+  // ── edit_queue_item ─────────────────────────────────────────────────────
+
+  server.registerTool(
+    "edit_queue_item",
+    {
+      title: "◆ phren · edit queue item",
+      description:
+        "Edit a review queue item's text in both the review queue and FINDINGS.md.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
+        new_text: z.string().max(10000).describe("The new finding text."),
+      }),
+    },
+    async ({ project, line, new_text }) => {
+      if (!isValidProjectName(project)) {
+        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+      }
+      return withWriteQueue(async () => {
+        const result = editQueueItem(phrenPath, project, line, new_text);
+        if (!result.ok) {
+          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        }
+        return mcpResponse({ ok: true, message: result.data });
       });
     }
   );

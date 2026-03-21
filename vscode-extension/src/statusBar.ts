@@ -38,8 +38,10 @@ export class PhrenStatusBar implements vscode.Disposable {
     this.onHealthChanged = cb;
   }
 
-  async initialize(): Promise<void> {
-    const projectNames = await this.fetchProjectNames();
+  async initialize(prefetchedProjectsRaw?: unknown): Promise<void> {
+    const projectNames = prefetchedProjectsRaw !== undefined
+      ? this.parseProjects(prefetchedProjectsRaw).map((p) => p.name)
+      : await this.fetchProjectNames();
     this.activeProjectName = this.activeProjectName && projectNames.includes(this.activeProjectName)
       ? this.activeProjectName
       : projectNames[0];

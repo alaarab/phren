@@ -298,6 +298,18 @@ export class PhrenClient {
     return this.callTool("retract_finding", { project, finding_text, reason });
   }
 
+  async approveQueueItem(project: string, line: string): Promise<unknown> {
+    return this.callTool("approve_queue_item", { project, line });
+  }
+
+  async rejectQueueItem(project: string, line: string): Promise<unknown> {
+    return this.callTool("reject_queue_item", { project, line });
+  }
+
+  async editQueueItem(project: string, line: string, newText: string): Promise<unknown> {
+    return this.callTool("edit_queue_item", { project, line, new_text: newText });
+  }
+
   async resolveContradiction(
     project: string,
     finding_text: string,

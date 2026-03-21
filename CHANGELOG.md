@@ -3,10 +3,23 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.0.28] - 2026-03-20
+## [0.0.29] - 2026-03-21
+
+### Added
+- **Review queue approve/reject/edit** (MCP + VS Code): 3 new MCP tools (`approve_queue_item`, `reject_queue_item`, `edit_queue_item`) and interactive buttons in the VS Code queue viewer — previously queue items were read-only
+- **5 missing VS Code commands**: `configureMachine`, `doctorFix`, `openMachinesConfig`, `sessionStart`, `sessionEnd` now registered in package.json
 
 ### Fixed
-- **npm preuninstall hook**: `npm uninstall -g @phren/cli` now cleans up hooks and MCP server entries from Claude Code, Cursor, Copilot, and VS Code config files automatically — previously these were orphaned when uninstalling via npm directly instead of `phren uninstall`
+- **npm preuninstall hook**: `npm uninstall -g @phren/cli` now cleans up hooks, MCP servers, session wrappers, and machine context from all agent config files automatically
+- **Newline injection in editQueueItem/editFinding**: strip internal newlines from user input to prevent markdown line injection
+- **Input length validation**: MCP queue tool inputs capped at 10,000 chars to prevent DoS via oversized payloads
+- **Queue viewer stale panel**: panel now closes after approve/reject instead of showing stale content
+- **Silent failure reporting**: reject/edit queue item operations now surface informational notes when FINDINGS.md operations fail
+
+### Changed
+- **VS Code tree provider caching**: per-refresh-cycle cache eliminates duplicate MCP calls when expanding tree nodes (was 2x calls per expansion)
+- **Startup efficiency**: `listProjects()` called once on activation instead of 3 times
+- **Tool count**: 69 → 72 MCP tools
 
 ## [0.0.21] - 2026-03-17
 

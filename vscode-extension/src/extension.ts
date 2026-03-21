@@ -1476,8 +1476,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   context.subscriptions.push(configChangeDisposable);
 
+  let projectsRaw: unknown;
   try {
-    await statusBar.initialize();
+    projectsRaw = await phrenClient.listProjects();
+  } catch (error) {
+    outputChannel.appendLine(`Failed to fetch projects: ${toErrorMessage(error)}`);
+  }
+
+  try {
+    await statusBar.initialize(projectsRaw);
     outputChannel.appendLine("Status bar initialized successfully");
   } catch (error) {
     outputChannel.appendLine(`Status bar init failed: ${toErrorMessage(error)}`);
@@ -1486,7 +1493,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // --- Set firstProjectAdded context key ---
   try {
-    const projectsRaw = await phrenClient.listProjects();
     const projectsData = asRecord(asRecord(projectsRaw)?.data);
     const projects = asArraySafe(projectsData?.projects);
     const hasProjects = projects.length > 0;
@@ -1496,7 +1502,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // --- Workspace folder detection: offer to track untracked folders ---
-  detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider);
+  detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider, projectsRaw);
   context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider);
@@ -1517,12 +1523,13 @@ async function detectAndOfferWorkspaceFolders(
   phrenClient: PhrenClient,
   context: vscode.ExtensionContext,
   treeDataProvider: PhrenTreeProvider,
+  prefetchedProjectsRaw?: unknown,
 ): Promise<void> {
   try {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) return;
 
-    const projectsRaw = await phrenClient.listProjects();
+    const projectsRaw = prefetchedProjectsRaw ?? await phrenClient.listProjects();
     const projectsData = asRecord(asRecord(projectsRaw)?.data);
     const projects = asArraySafe(projectsData?.projects);
     const trackedPaths = new Set<string>();

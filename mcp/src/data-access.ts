@@ -549,6 +549,81 @@ export function readReviewQueue(phrenPath: string, project: string): PhrenResult
   return phrenOk(items);
 }
 
+/** Locate a queue line and apply a mutation within a file lock. */
+function withQueueLineOp<T>(
+  phrenPath: string, project: string, lineText: string,
+  op: (lines: string[], idx: number, file: string) => PhrenResult<T>,
+): PhrenResult<T> {
+  const ensured = ensureProject(phrenPath, project);
+  if (!ensured.ok) return forwardErr(ensured);
+
+  const file = queuePath(phrenPath, project);
+  if (!fs.existsSync(file)) return phrenErr(`No review queue found for "${project}".`, PhrenError.FILE_NOT_FOUND);
+
+  return withSafeLock(file, () => {
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    const idx = lines.findIndex((l) => l.trim() === lineText.trim());
+    if (idx === -1) return phrenErr(`Queue item not found in "${project}".`, PhrenError.NOT_FOUND);
+    return op(lines, idx, file);
+  });
+}
+
+function writeQueueLines(file: string, lines: string[]): void {
+  fs.writeFileSync(file, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+}
+
+/** Remove a queue item's line from review.md (finding stays in FINDINGS.md). */
+export function approveQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  return withQueueLineOp(phrenPath, project, lineText, (lines, idx, file) => {
+    lines.splice(idx, 1);
+    writeQueueLines(file, lines);
+    return phrenOk(`Approved queue item in ${project}`);
+  });
+}
+
+/** Remove a queue item from review.md AND remove the corresponding finding from FINDINGS.md. */
+export function rejectQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  const lockResult = withQueueLineOp(phrenPath, project, lineText, (lines, idx, file) => {
+    lines.splice(idx, 1);
+    writeQueueLines(file, lines);
+    return phrenOk("ok");
+  });
+  if (!lockResult.ok) return lockResult;
+
+  const parsed = parseQueueLine(lineText);
+  if (parsed.text) {
+    const removeResult = removeFinding(phrenPath, project, parsed.text);
+    if (!removeResult.ok) {
+      return phrenOk(`Rejected queue item from ${project} (note: finding not found in FINDINGS.md — may have already been removed)`);
+    }
+  }
+  return phrenOk(`Rejected and removed queue item from ${project}`);
+}
+
+/** Edit a queue item's text in review.md and the corresponding finding in FINDINGS.md. */
+export function editQueueItem(phrenPath: string, project: string, lineText: string, newText: string): PhrenResult<string> {
+  const trimmed = newText.replace(/[\r\n]+/g, " ").trim();
+  if (!trimmed) return phrenErr("New text cannot be empty.", PhrenError.EMPTY_INPUT);
+
+  const parsed = parseQueueLine(lineText);
+
+  const lockResult = withQueueLineOp(phrenPath, project, lineText, (lines, idx, file) => {
+    const dateMatch = lines[idx].match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*/);
+    lines[idx] = dateMatch ? `- [${dateMatch[1]}] ${trimmed}` : `- ${trimmed}`;
+    writeQueueLines(file, lines);
+    return phrenOk("ok");
+  });
+  if (!lockResult.ok) return lockResult;
+
+  if (parsed.text) {
+    const editResult = editFinding(phrenPath, project, parsed.text, trimmed);
+    if (!editResult.ok) {
+      return phrenOk(`Updated queue item in ${project} (note: corresponding finding not found in FINDINGS.md)`);
+    }
+  }
+  return phrenOk(`Updated queue item in ${project}`);
+}
+
 export function readReviewQueueAcrossProjects(phrenPath: string, profile?: string): PhrenResult<ProjectQueueItem[]> {
   const validation = validateAggregateQueueProfile(phrenPath, profile);
   if (!validation.ok) return validation;
