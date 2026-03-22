@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -11,16 +11,10 @@ import { logDebug } from "./logger.js";
 
 
 
-function shouldRegister(_toolName: string, options?: RegisterOptions): boolean {
-  if (!options?.tier) return true;
-  // All graph tools are advanced
-  return options.tier.has("advanced");
-}
-
-export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
+export function register(server: McpServer, ctx: McpContext): void {
 
   // ── search_fragments ──────────────────────────────────────────────────
-  if (shouldRegister("search_fragments", options)) server.registerTool(
+  server.registerTool(
     "search_fragments",
     {
       title: "◆ phren · search fragments",
@@ -82,7 +76,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
   );
 
   // ── get_related_docs ──────────────────────────────────────────────────
-  if (shouldRegister("get_related_docs", options)) server.registerTool(
+  server.registerTool(
     "get_related_docs",
     {
       title: "phren : related docs",
@@ -125,7 +119,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
   );
 
   // ── read_graph ────────────────────────────────────────────────────────
-  if (shouldRegister("read_graph", options)) server.registerTool(
+  server.registerTool(
     "read_graph",
     {
       title: "phren : knowledge graph",
@@ -228,7 +222,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
   );
 
   // ── link_findings ─────────────────────────────────────────────────────
-  if (shouldRegister("link_findings", options)) server.registerTool(
+  server.registerTool(
     "link_findings",
     {
       title: "phren : link findings",
@@ -353,7 +347,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
   );
 
   // ── cross_project_fragments ───────────────────────────────────────────
-  if (shouldRegister("cross_project_fragments", options)) server.registerTool(
+  server.registerTool(
     "cross_project_fragments",
     {
       title: "phren : cross-project fragments",
