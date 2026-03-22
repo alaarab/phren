@@ -10,7 +10,6 @@ import {
 import { style } from "./shell-render.js";
 import {
   MAX_UNDO_STACK,
-  TAB_ICONS,
   type UndoEntry,
   type ShellView,
   type ShellDeps,

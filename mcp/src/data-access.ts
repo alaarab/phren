@@ -269,7 +269,6 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const trimmed = line.trim();
     const archiveStartMatch = isArchiveStart(line);
     const archiveEnd = isArchiveEnd(line);
     if (archiveStartMatch) {

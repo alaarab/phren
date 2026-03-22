@@ -7,7 +7,6 @@ const LIFECYCLE_PREFIX = "phren";
 import { withFileLock } from "./shared-governance.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
 import {
-  METADATA_REGEX,
   isArchiveEnd,
   isArchiveStart,
   parseCreatedDate as parseCreatedDateMeta,

@@ -16,7 +16,6 @@ import {
 } from "./shared-governance.js";
 import {
   PROACTIVITY_LEVELS,
-  type ProactivityLevel,
 } from "./proactivity.js";
 import {
   writeGovernanceInstallPreferences,

@@ -1,6 +1,5 @@
 import { WEB_UI_STYLES, renderWebUiScript } from "./memory-ui-assets.js";
 import { renderGraphScript } from "./memory-ui-graph.js";
-import { readSyncSnapshot } from "./memory-ui-data.js";
 import { PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./memory-ui-styles.js";
 import {
   renderSharedWebUiHelpers,
@@ -21,15 +20,6 @@ function h(s: string): string {
 }
 
 export function renderWebUiPage(phrenPath: string, authToken?: string, nonce?: string): string {
-  const sync = readSyncSnapshot(phrenPath) as {
-    autoSaveStatus?: string;
-    lastPullAt?: string;
-    lastPullStatus?: string;
-    lastPushAt?: string;
-    lastPushStatus?: string;
-    unsyncedCommits?: number;
-  };
-
   const nonceAttr = nonce ? ` nonce="${h(nonce)}"` : "";
 
   return `<!doctype html>
