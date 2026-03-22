@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as shared from "./shared.js";
-import { EmbeddingCache, formatEmbeddingCoverage } from "./shared-embedding-cache.js";
+import { EmbeddingCache, formatEmbeddingCoverage } from "./shared/shared-embedding-cache.js";
 import { makeTempDir } from "./test-helpers.js";
 
 describe("EmbeddingCache.load", () => {

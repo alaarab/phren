@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { addFindingToFile } from "../shared-content.js";
-import { readFindings } from "../data-access.js";
+import { addFindingToFile } from "../shared/shared-content.js";
+import { readFindings } from "../data/data-access.js";
 
 const PROJECT = "myapp";
 

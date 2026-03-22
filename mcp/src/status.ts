@@ -11,15 +11,15 @@ import {
   homeDir,
   readRootManifest,
 } from "./shared.js";
-import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared-index.js";
-import { mergeConfig, getWorkflowPolicy } from "./shared-governance.js";
-import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
+import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared/shared-index.js";
+import { mergeConfig, getWorkflowPolicy } from "./shared/shared-governance.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
-import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
+import { readRuntimeHealth, resolveTaskFilePath } from "./data/data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
-import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell-render.js";
+import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/shell-render.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -188,8 +188,8 @@ export async function runStatus() {
   console.log(`  ${DIM}fts${RESET}      ${ftsLabel}`);
 
   try {
-    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
-    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared/shared-ollama.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared/shared-embedding-cache.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
       console.log(`  ${DIM}semantic${RESET} ${DIM}disabled (optional)${RESET}`);

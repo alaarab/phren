@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { buildIndex, type SqlJsDatabase } from "../shared-index.js";
-import { cosineFallback, invalidateDfCache } from "../shared-search-fallback.js";
+import { buildIndex, type SqlJsDatabase } from "../shared/shared-index.js";
+import { cosineFallback, invalidateDfCache } from "../shared/shared-search-fallback.js";
 
 function makeProject(phrenPath: string, name: string, files: Record<string, string>) {
   const dir = path.join(phrenPath, name);

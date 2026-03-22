@@ -13,8 +13,8 @@ import {
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { TASK_FILE_ALIASES } from "./data-tasks.js";
-import { withSafeLock } from "./shared-data-utils.js";
+import { TASK_FILE_ALIASES } from "./data/data-tasks.js";
+import { withSafeLock } from "./shared/shared-data-utils.js";
 
 export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";

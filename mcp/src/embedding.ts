@@ -5,9 +5,9 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { withFileLock } from "./shared-governance.js";
+import { withFileLock } from "./shared/shared-governance.js";
 import { errorMessage } from "./utils.js";
-import { bootstrapSqlJs } from "./shared-sqljs.js";
+import { bootstrapSqlJs } from "./shared/shared-sqljs.js";
 import type { SqlJsDatabase } from "./index-query.js";
 
 // ---------------------------------------------------------------------------

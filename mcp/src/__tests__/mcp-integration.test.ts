@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared-index.js";
-import { register as registerSearch } from "../mcp-search.js";
-import { register as registerFinding } from "../mcp-finding.js";
-import { register as registerTask } from "../mcp-tasks.js";
-import type { McpContext } from "../mcp-types.js";
+import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared/shared-index.js";
+import { register as registerSearch } from "../tools/mcp-search.js";
+import { register as registerFinding } from "../tools/mcp-finding.js";
+import { register as registerTask } from "../tools/mcp-tasks.js";
+import type { McpContext } from "../tools/mcp-types.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 
