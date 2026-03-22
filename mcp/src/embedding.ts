@@ -5,10 +5,11 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { withFileLock } from "./shared/shared-governance.js";
+import { withFileLock } from "./shared/governance.js";
 import { errorMessage } from "./utils.js";
-import { bootstrapSqlJs } from "./shared/shared-sqljs.js";
+import { bootstrapSqlJs } from "./shared/sqljs.js";
 import type { SqlJsDatabase } from "./index-query.js";
+import { logger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
 // SQLite cache (Q17) — replaces embed-cache.jsonl with O(1) lookup
@@ -97,7 +98,7 @@ async function openCacheDb(phrenPath: string): Promise<SqlJsDatabase> {
     return db;
   } catch (err) {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      logger.debug("embedding", `embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
     }
     throw err;
   }
@@ -146,9 +147,9 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${errorMessage(err)}\n`);
+        logger.debug("embedding", `embedding persistDb onDiskLoad: ${errorMessage(err)}`);
         try { onDisk?.close(); } catch (e2: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          logger.debug("embedding", `embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
         }
         onDisk = null;
       }
@@ -160,7 +161,7 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
         fs.renameSync(tmp, dbPath);
       } finally {
         if (onDisk) try { onDisk.close(); } catch (e2: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+          logger.debug("embedding", `embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}`);
         }
       }
     });
@@ -303,7 +304,7 @@ export async function getCachedEmbedding(
     return [];
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      logger.debug("embedding", `embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
     }
   }
 }
@@ -357,7 +358,7 @@ export async function getCachedEmbeddings(
     return texts.map(() => []);
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      logger.debug("embedding", `embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
     }
   }
 }

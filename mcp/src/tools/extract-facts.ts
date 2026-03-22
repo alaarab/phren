@@ -9,8 +9,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "../shared.js";
 import { safeProjectPath, isFeatureEnabled, errorMessage } from "../utils.js";
-import { callLlm } from "../content/content-dedup.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { callLlm } from "../content/dedup.js";
+import { withFileLock } from "../shared/governance.js";
+import { logger } from "../logger.js";
 
 const FACT_EXTRACT_FLAG = "PHREN_FEATURE_FACT_EXTRACT";
 const MAX_FACTS = 50;
@@ -33,7 +34,7 @@ export function readExtractedFacts(phrenPath: string, project: string): Extracte
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     return Array.isArray(data) ? data : [];
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readExtractedFacts: ${errorMessage(err)}\n`);
+    logger.debug("extract-facts", `readExtractedFacts: ${errorMessage(err)}`);
     return [];
   }
 }

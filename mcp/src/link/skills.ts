@@ -6,7 +6,8 @@ import { errorMessage } from "../utils.js";
 import { buildSharedLifecycleCommands } from "../hooks.js";
 import { VERSION } from "../package-metadata.js";
 import { getToolCount, renderToolCatalogMarkdown } from "../tool-registry.js";
-import { isSkillEnabled } from "../skill/skill-state.js";
+import { isSkillEnabled } from "../skill/state.js";
+import { logger } from "../logger.js";
 
 // ── Skill frontmatter parsing and validation ────────────────────────────────
 
@@ -227,7 +228,7 @@ function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, m
       if (!isManagedSymlink(destPath, managedRoot)) continue;
       fs.unlinkSync(destPath);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cleanupManagedSkillLinks: ${errorMessage(err)}\n`);
+      logger.debug("link-skills", `cleanupManagedSkillLinks: ${errorMessage(err)}`);
     }
   }
 }
@@ -261,7 +262,7 @@ export function linkSkillsDir(
           message: `Skipping skill '${skillName}' — user skill already exists at ${destPath}. To use phren's version, rename or remove your skill first.`,
         };
         collisions.push(collision);
-        process.stderr.write(`[phren] ${collision.message}\n`);
+        logger.warn("link-skills", collision.message);
         continue;
       }
       expectedNames.add(entry);
@@ -277,7 +278,7 @@ export function linkSkillsDir(
             message: `Skipping skill '${skillName}' — user skill already exists at ${destPath}. To use phren's version, rename or remove your skill first.`,
           };
           collisions.push(collision);
-          process.stderr.write(`[phren] ${collision.message}\n`);
+          logger.warn("link-skills", collision.message);
           continue;
         }
         expectedNames.add(entry);

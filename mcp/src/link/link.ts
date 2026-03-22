@@ -27,15 +27,15 @@ import {
   atomicWriteText,
 } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { log } from "../init/init-shared.js";
+import { log } from "../init/shared.js";
 import {
   listMachines as listMachinesShared,
   listProfiles as listProfilesShared,
   setMachineProfile,
 } from "../profile-store.js";
-import { writeSkillMd, isManagedSymlink } from "./link-skills.js";
-import { syncScopeSkillsToDir } from "../skill/skill-files.js";
-import { renderSkillInstructionsSection } from "../skill/skill-registry.js";
+import { writeSkillMd, isManagedSymlink } from "./skills.js";
+import { syncScopeSkillsToDir } from "../skill/files.js";
+import { renderSkillInstructionsSection } from "../skill/registry.js";
 import { findProjectDir } from "../project-locator.js";
 import {
   getProjectOwnershipMode,
@@ -49,23 +49,24 @@ import {
   writeContextClean,
   readBackNativeMemory,
   rebuildMemory,
-} from "./link-context.js";
+} from "./context.js";
+import { logger } from "../logger.js";
 
 // Re-export sub-modules so existing imports from "./link.js" continue to work
-export { runDoctor } from "./link-doctor.js";
-export { updateFileChecksums, verifyFileChecksums } from "./link-checksums.js";
+export { runDoctor } from "./doctor.js";
+export { updateFileChecksums, verifyFileChecksums } from "./checksums.js";
 export { findProjectDir } from "../project-locator.js";
 export {
   parseSkillFrontmatter,
   validateSkillFrontmatter,
   validateSkillsDir,
   readSkillManifestHooks,
-} from "./link-skills.js";
+} from "./skills.js";
 export type {
   ManifestHooks,
   SkillFrontmatter,
   SkillValidationResult,
-} from "./link-skills.js";
+} from "./skills.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -183,7 +184,7 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_QUICK_MS });
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] setupSparseCheckout notAGitRepo: ${errorMessage(err)}\n`);
+    logger.debug("link", `setupSparseCheckout notAGitRepo: ${errorMessage(err)}`);
     return;
   }
 
@@ -327,7 +328,7 @@ function linkGlobal(phrenPath: string, tools: Set<string>) {
         fs.mkdirSync(copilotInstrDir, { recursive: true });
         symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkGlobal copilotInstructions: ${errorMessage(err)}\n`);
+        logger.debug("link", `linkGlobal copilotInstructions: ${errorMessage(err)}`);
       }
     }
   }
@@ -371,7 +372,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
             fs.mkdirSync(copilotDir, { recursive: true });
             symlinkFile(src, path.join(copilotDir, "copilot-instructions.md"), phrenPath);
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject copilotInstructions: ${errorMessage(err)}\n`);
+            logger.debug("link", `linkProject copilotInstructions: ${errorMessage(err)}`);
           }
         }
       }
@@ -392,7 +393,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
   const claudeFile = path.join(phrenPath, project, "CLAUDE.md");
   if (fs.existsSync(claudeFile)) {
     try { addTokenAnnotation(claudeFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject tokenAnnotation: ${errorMessage(err)}\n`);
+      logger.debug("link", `linkProject tokenAnnotation: ${errorMessage(err)}`);
     }
   }
 
@@ -408,7 +409,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
       const agentsContent = `${fs.readFileSync(claudeFile, "utf8").trimEnd()}\n\n${GENERATED_AGENTS_MARKER}\n${renderSkillInstructionsSection(manifest)}\n`;
       if (writeManagedAgentsFile(claudeFile, path.join(target, "AGENTS.md"), agentsContent, phrenPath)) excludeEntries.push("AGENTS.md");
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] linkProject agentsMd: ${errorMessage(err)}\n`);
+      logger.debug("link", `linkProject agentsMd: ${errorMessage(err)}`);
     }
   }
 
@@ -557,7 +558,7 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
     writeSkillMd(phrenPath);
     log(`  phren.SKILL.md written (agentskills-compatible tools)`);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] link writeSkillMd: ${errorMessage(err)}\n`);
+    logger.debug("link", `link writeSkillMd: ${errorMessage(err)}`);
   }
   log("");
 

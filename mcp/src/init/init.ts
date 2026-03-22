@@ -29,9 +29,10 @@ import {
   cursorMcpCandidates,
   vscodeMcpCandidates,
 } from "../provider-adapters.js";
+import { logger } from "../logger.js";
 
 // Re-export everything consumers need from the helper modules
-export type { McpConfigStatus, McpRootKey, ToolStatus, HookEntry, HookMap } from "./init-config.js";
+export type { McpConfigStatus, McpRootKey, ToolStatus, HookEntry, HookMap } from "./config.js";
 export {
   configureClaude,
   configureVSCode,
@@ -41,15 +42,15 @@ export {
   logMcpTargetStatus,
   resetVSCodeProbeCache,
   patchJsonFile,
-} from "./init-config.js";
+} from "./config.js";
 
-export type { InstallPreferences } from "./init-preferences.js";
+export type { InstallPreferences } from "./preferences.js";
 export {
   getMcpEnabledPreference,
   setMcpEnabledPreference,
   getHooksEnabledPreference,
   setHooksEnabledPreference,
-} from "./init-preferences.js";
+} from "./preferences.js";
 export {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -65,7 +66,7 @@ export {
   getProactivityLevelForTask,
 } from "../proactivity.js";
 
-export type { PostInitCheck, InitProjectDomain, InferredInitScaffold } from "./init-setup.js";
+export type { PostInitCheck, InitProjectDomain, InferredInitScaffold } from "./setup.js";
 export {
   ensureGovernanceFiles,
   repairPreexistingInstall,
@@ -77,7 +78,7 @@ export {
   ensureLocalGitRepo,
   resolvePreferredHomeDir,
   inferInitScaffoldFromRepo,
-} from "./init-setup.js";
+} from "./setup.js";
 
 // Imports from helpers (used internally in this file)
 import {
@@ -91,8 +92,8 @@ import {
   removeTomlMcpServer,
   isPhrenCommand,
   patchJsonFile,
-} from "./init-config.js";
-import type { ToolStatus, HookEntry, HookMap } from "./init-config.js";
+} from "./config.js";
+import type { ToolStatus, HookEntry, HookMap } from "./config.js";
 
 import {
   getMcpEnabledPreference,
@@ -102,7 +103,7 @@ import {
   writeInstallPreferences,
   writeGovernanceInstallPreferences,
   readInstallPreferences,
-} from "./init-preferences.js";
+} from "./preferences.js";
 
 import {
   ensureGovernanceFiles,
@@ -122,9 +123,9 @@ import {
   type InitProjectDomain,
   type InferredInitScaffold,
   inferInitScaffoldFromRepo,
-} from "./init-setup.js";
+} from "./setup.js";
 
-import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
+import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./shared.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -132,7 +133,7 @@ import {
   getProjectOwnershipDefault,
 } from "../project-config.js";
 import { type ProactivityLevel } from "../proactivity.js";
-import { getWorkflowPolicy, updateWorkflowPolicy } from "../shared/shared-governance.js";
+import { getWorkflowPolicy, updateWorkflowPolicy } from "../shared/governance.js";
 import { addProjectToProfile } from "../profile-store.js";
 
 export type McpMode = "on" | "off";
@@ -701,7 +702,7 @@ async function runWalkthrough(phrenPath: string): Promise<{
   log("  Change later: set PHREN_OLLAMA_URL=off to disable");
   let ollamaEnabled = false;
   try {
-    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("../shared/shared-ollama.js");
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("../shared/ollama.js");
     if (getOllamaUrl()) {
       const ollamaUp = await checkOllamaAvailable();
       if (ollamaUp) {
@@ -730,7 +731,7 @@ async function runWalkthrough(phrenPath: string): Promise<{
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaCheck: ${errorMessage(err)}\n`);
+    logger.debug("init", `init ollamaCheck: ${errorMessage(err)}`);
   }
 
   printSection("Auto-Capture (Optional)");
@@ -963,7 +964,7 @@ async function runWalkthrough(phrenPath: string): Promise<{
 }
 
 export async function warmSemanticSearch(phrenPath: string, profile?: string): Promise<string> {
-  const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("../shared/shared-ollama.js");
+  const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("../shared/ollama.js");
   const ollamaUrl = getOllamaUrl();
   if (!ollamaUrl) return "Semantic search: disabled.";
 
@@ -975,10 +976,10 @@ export async function warmSemanticSearch(phrenPath: string, profile?: string): P
     return `Semantic search not warmed: model ${model} is not pulled yet.`;
   }
 
-  const { buildIndex, listIndexedDocumentPaths } = await import("../shared/shared-index.js");
-  const { getEmbeddingCache, formatEmbeddingCoverage } = await import("../shared/shared-embedding-cache.js");
+  const { buildIndex, listIndexedDocumentPaths } = await import("../shared/index.js");
+  const { getEmbeddingCache, formatEmbeddingCoverage } = await import("../shared/embedding-cache.js");
   const { backgroundEmbedMissingDocs } = await import("../startup-embedding.js");
-  const { getPersistentVectorIndex } = await import("../shared/shared-vector-index.js");
+  const { getPersistentVectorIndex } = await import("../shared/vector-index.js");
 
   const db = await buildIndex(phrenPath, profile);
   try {
@@ -1795,7 +1796,7 @@ export async function runInit(opts: InitOptions = {}) {
   const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);
   if (!walkthroughCoveredOllama) {
     try {
-      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("../shared/shared-ollama.js");
+      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("../shared/ollama.js");
       if (getOllamaUrl()) {
         const ollamaUp = await checkOllamaAvailable();
         if (ollamaUp) {
@@ -1813,7 +1814,7 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] init ollamaInstallHint: ${errorMessage(err)}\n`);
+      logger.debug("init", `init ollamaInstallHint: ${errorMessage(err)}`);
     }
   }
 

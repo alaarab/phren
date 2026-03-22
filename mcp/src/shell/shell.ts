@@ -6,8 +6,8 @@ import {
   loadShellState,
   saveShellState,
   ShellState,
-} from "../data/data-access.js";
-import { style } from "./shell-render.js";
+} from "../data/access.js";
+import { style } from "./render.js";
 import {
   MAX_UNDO_STACK,
   TAB_ICONS,
@@ -15,20 +15,21 @@ import {
   type ShellView,
   type ShellDeps,
   type DoctorResultLike,
-} from "./shell-types.js";
-export type { ShellView, ShellDeps } from "./shell-types.js";
+} from "./types.js";
+import { logger } from "../logger.js";
+export type { ShellView, ShellDeps } from "./types.js";
 import {
   resultMsg,
   defaultRunHooks,
   defaultRunUpdate,
   defaultRunRelink,
-} from "./shell-palette.js";
+} from "./palette.js";
 import { runDoctor } from "../link/link.js";
 import {
   renderShell,
   type SubsectionsCache,
   type ViewContext,
-} from "./shell-view.js";
+} from "./view.js";
 import {
   executePalette,
   completeInput as completeInputFn,
@@ -36,7 +37,7 @@ import {
   handleNavigateKey,
   applyViewShortcut,
   type NavigationHost,
-} from "./shell-input.js";
+} from "./input.js";
 import { errorMessage } from "../utils.js";
 
 // ── Shell class ──────────────────────────────────────────────────────────────
@@ -108,7 +109,7 @@ export class PhrenShell {
         if (this.undoStack.length > MAX_UNDO_STACK) this.undoStack.shift();
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell pushUndo: ${errorMessage(err)}\n`);
+      logger.debug("shell", `shell pushUndo: ${errorMessage(err)}`);
     }
   }
 
@@ -281,4 +282,4 @@ export class PhrenShell {
   }
 }
 
-export { startShell } from "./shell-entry.js";
+export { startShell } from "./entry.js";

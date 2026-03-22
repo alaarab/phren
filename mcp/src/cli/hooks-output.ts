@@ -1,18 +1,19 @@
 import {
   recordInjection,
   recordRetrieval,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import {
   getDocSourceKey,
-} from "../shared/shared-index.js";
+} from "../shared/index.js";
 import {
   logImpact,
   extractFindingIdsFromSnippet,
-} from "../finding/finding-impact.js";
+} from "../finding/impact.js";
 import { isFeatureEnabled, errorMessage } from "../utils.js";
-import { annotateStale } from "./cli-hooks-citations.js";
-import type { SelectedSnippet, GitContext } from "../shared/shared-retrieval.js";
-import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "../shared/shared-retrieval.js";
+import { annotateStale } from "./hooks-citations.js";
+import type { SelectedSnippet, GitContext } from "../shared/retrieval.js";
+import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "../shared/retrieval.js";
+import { logger } from "../logger.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, `${injected.doc.project}/${injected.doc.filename}`, injected.doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrieval: ${errorMessage(err)}\n`);
+        logger.debug("hooks-output", `injectContext recordRetrieval: ${errorMessage(err)}`);
       }
     }
   } else {
@@ -129,7 +130,7 @@ export function buildHookOutput(
       try {
         recordRetrieval(phrenPathLocal, doc.path ?? doc.filename, doc.type);
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] injectContext recordRetrievalOrdered: ${errorMessage(err)}\n`);
+        logger.debug("hooks-output", `injectContext recordRetrievalOrdered: ${errorMessage(err)}`);
       }
       parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
       parts.push(annotateStale(snippet));

@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -7,7 +7,7 @@ import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import {
   removeFinding as removeFindingCore,
   removeFindings as removeFindingsCore,
-} from "../core/core-finding.js";
+} from "../core/finding.js";
 import {
   debugLog,
   EXEC_TIMEOUT_MS,
@@ -20,23 +20,24 @@ import {
   addFindingsToFile,
   checkSemanticConflicts,
   autoMergeConflicts,
-} from "../shared/shared-content.js";
-import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "../content/content-dedup.js";
+} from "../shared/content.js";
+import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "../content/dedup.js";
 import type { PhrenResult } from "../phren-core.js";
 import { runCustomHooks } from "../hooks.js";
-import { incrementSessionFindings } from "./mcp-session.js";
-import { extractFragmentNames } from "../shared/shared-fragment-graph.js";
-import { extractFactFromFinding } from "./mcp-extract-facts.js";
-import { appendChildFinding, editFinding as editFindingCore, readFindings } from "../data/data-access.js";
-import { getActiveTaskForSession } from "../task/task-lifecycle.js";
-import { FINDING_PROVENANCE_SOURCES } from "../content/content-citation.js";
+import { incrementSessionFindings } from "./session.js";
+import { extractFragmentNames } from "../shared/fragment-graph.js";
+import { extractFactFromFinding } from "./extract-facts.js";
+import { appendChildFinding, editFinding as editFindingCore, readFindings } from "../data/access.js";
+import { getActiveTaskForSession } from "../task/lifecycle.js";
+import { FINDING_PROVENANCE_SOURCES } from "../content/citation.js";
 import {
   isInactiveFindingLine,
   supersedeFinding,
   retractFinding as retractFindingLifecycle,
   resolveFindingContradiction,
-} from "../finding/finding-lifecycle.js";
-import { permissionDeniedError } from "../governance/governance-rbac.js";
+} from "../finding/lifecycle.js";
+import { permissionDeniedError } from "../governance/rbac.js";
+import { logger } from "../logger.js";
 
 
 
@@ -278,7 +279,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             const conflicts = await checkSemanticConflicts(phrenPath, project, f);
             extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] add_findings semanticConflict: ${errorMessage(err)}\n`);
+            logger.debug("finding", `add_findings semanticConflict: ${errorMessage(err)}`);
             extraAnnotationsByFinding.push([]);
           }
         }
@@ -608,7 +609,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             const remotes = runGit(["remote"]);
             hasRemote = remotes.length > 0;
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes remoteCheck: ${errorMessage(err)}\n`);
+            logger.debug("finding", `push_changes remoteCheck: ${errorMessage(err)}`);
           }
 
           if (!hasRemote) {
@@ -633,7 +634,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 try {
                   runGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
                 } catch (pullErr: unknown) {
-                  if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}\n`);
+                  logger.debug("finding", `push_changes pullRebase: ${pullErr instanceof Error ? pullErr.message : String(pullErr)}`);
                   const resolved = autoMergeConflicts(phrenPath);
                   if (resolved) {
                     try {
@@ -642,15 +643,15 @@ export function register(server: McpServer, ctx: McpContext): void {
                         env: { ...process.env, GIT_EDITOR: "true" },
                       });
                     } catch (continueErr: unknown) {
-                      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}\n`);
+                      logger.debug("finding", `push_changes rebaseContinue: ${continueErr instanceof Error ? continueErr.message : String(continueErr)}`);
                       try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                        logger.debug("finding", `push_changes rebaseAbort: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
                       }
                       break;
                     }
                   } else {
                     try { runGit(["rebase", "--abort"]); } catch (abortErr: unknown) {
-                      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}\n`);
+                      logger.debug("finding", `push_changes rebaseAbort2: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`);
                     }
                     break;
                   }

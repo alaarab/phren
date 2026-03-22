@@ -3,9 +3,10 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "../shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "../project-topics.js";
-import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./content-metadata.js";
+import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./metadata.js";
+import { logger } from "../logger.js";
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
@@ -97,7 +98,7 @@ function buildArchivedBulletSet(referenceDir: string): Set<string> {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildArchivedBulletSet: ${errorMessage(err)}\n`);
+    logger.debug("archive", `buildArchivedBulletSet: ${errorMessage(err)}`);
   }
   return bulletSet;
 }
@@ -269,7 +270,7 @@ export function autoArchiveToReference(
   });
   } finally {
     try { fs.unlinkSync(lockFile); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] autoArchiveToReference unlockFile: ${errorMessage(err)}\n`);
+      logger.debug("archive", `autoArchiveToReference unlockFile: ${errorMessage(err)}`);
     }
   }
 }

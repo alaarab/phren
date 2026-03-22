@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import { isTaskFileName, readTasks } from "../data/data-tasks.js";
+import { isTaskFileName, readTasks } from "../data/tasks.js";
 import { STOP_WORDS, extractKeywords, errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 const TEXT_EXTENSIONS = new Set([
   ".cjs",
@@ -154,7 +155,7 @@ function collectCorpus(root: string): string[] {
       try {
         texts.push(fs.readFileSync(fullPath, "utf8").slice(0, MAX_TEXT_BYTES).toLowerCase());
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] task hygiene read ${fullPath}: ${errorMessage(err)}\n`);
+        logger.debug("task-hygiene", `task hygiene read ${fullPath}: ${errorMessage(err)}`);
       }
       if (filesSeen >= MAX_FILES_PER_ROOT) break;
     }

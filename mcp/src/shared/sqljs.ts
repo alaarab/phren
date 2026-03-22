@@ -3,6 +3,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 const require = createRequire(import.meta.url);
 
@@ -15,7 +16,7 @@ function findWasmBinary(): Buffer | undefined {
     const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm") as string;
     if (fs.existsSync(resolved)) return fs.readFileSync(resolved);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findWasmBinary requireResolve: ${errorMessage(err)}\n`);
+    logger.debug("sqljs", `findWasmBinary requireResolve: ${errorMessage(err)}`);
     // fall through to path probing
   }
 

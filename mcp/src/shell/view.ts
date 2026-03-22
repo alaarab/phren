@@ -14,7 +14,7 @@ import {
   readRuntimeHealth,
   resolveTaskFilePath,
   ShellState,
-} from "../data/data-access.js";
+} from "../data/access.js";
 import {
   style,
   badge,
@@ -26,28 +26,29 @@ import {
   lineViewport,
   shellHelpText,
   gradient,
-} from "./shell-render.js";
+} from "./render.js";
 import {
   formatSelectableLine,
   viewportWithStatus,
-} from "./shell-view-list.js";
+} from "./view-list.js";
 import {
   SUB_VIEWS,
   TAB_ICONS,
   type DoctorResultLike,
-} from "./shell-types.js";
+} from "./types.js";
 import {
   tasksByFilter,
   queueByFilter,
-} from "./shell-palette.js";
+} from "./palette.js";
 import {
   listMachines,
   listProfiles,
-} from "../data/data-access.js";
-import { readInstallPreferences } from "../init/init-preferences.js";
+} from "../data/access.js";
+import { readInstallPreferences } from "../init/preferences.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "../project-config.js";
-import { getScopedSkills } from "../skill/skill-registry.js";
+import { getScopedSkills } from "../skill/registry.js";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -347,7 +348,7 @@ function parseSubsections(taskPath: string, project: string, cache: SubsectionsC
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildSubsectionMap: ${errorMessage(err)}\n`);
+    logger.debug("shell-view", `buildSubsectionMap: ${errorMessage(err)}`);
   }
   const newCache = { project, map };
   return { map, cache: newCache };
@@ -762,7 +763,7 @@ function renderHooksView(ctx: ViewContext, cursor: number, height: number): stri
   return vp.lines;
 }
 
-export { writeInstallPreferences } from "../init/init-preferences.js";
+export { writeInstallPreferences } from "../init/preferences.js";
 
 // ── Machines/Profiles view ─────────────────────────────────────────────────
 

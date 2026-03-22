@@ -11,18 +11,18 @@ import {
   hookConfigPath,
   runtimeHealthFile,
 } from "../shared.js";
-import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/init-shared.js";
-import { validateGovernanceJson } from "../shared/shared-governance.js";
+import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/shared.js";
+import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
-import { buildIndex, queryRows } from "../shared/shared-index.js";
-import { validateTaskFormat, validateFindingsFormat } from "../shared/shared-content.js";
+import { buildIndex, queryRows } from "../shared/index.js";
+import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
 import { detectInstalledTools } from "../hooks.js";
-import { validateSkillFrontmatter, validateSkillsDir } from "./link-skills.js";
-import { verifyFileChecksums, updateFileChecksums } from "./link-checksums.js";
-import { buildSkillManifest } from "../skill/skill-registry.js";
-import { inspectTaskHygiene } from "../task/task-hygiene.js";
-import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/data-tasks.js";
-import { repairPreexistingInstall } from "../init/init-setup.js";
+import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
+import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
+import { buildSkillManifest } from "../skill/registry.js";
+import { inspectTaskHygiene } from "../task/hygiene.js";
+import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
+import { repairPreexistingInstall } from "../init/setup.js";
 import {
   getMachineName,
   lookupProfile,
@@ -30,10 +30,11 @@ import {
   getProfileProjects,
   findProjectDir,
 } from "./link.js";
-import { claudeProjectKey } from "./link-context.js";
+import { claudeProjectKey } from "./context.js";
 import type { DoctorResult } from "./link.js";
 import { getProjectOwnershipMode, readProjectConfig } from "../project-config.js";
-import { readInstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences } from "../init/preferences.js";
+import { logger } from "../logger.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -204,10 +205,10 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     fs.unlinkSync(fsBenchFile);
     fsMs = Date.now() - t0;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmark: ${errorMessage(err)}\n`);
+    logger.debug("doctor", `doctor fsBenchmark: ${errorMessage(err)}`);
     fsMs = -1;
     try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+      logger.debug("doctor", `doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}`);
     }
   }
   const fsSlow = fsMs > 500 || fsMs < 0;
@@ -344,7 +345,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   let runtime: Record<string, unknown> | null = null;
   if (fs.existsSync(runtimeHealthPath)) {
     try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor runtimeHealth: ${errorMessage(err)}\n`);
+      logger.debug("doctor", `doctor runtimeHealth: ${errorMessage(err)}`);
       runtime = null;
     }
   }
