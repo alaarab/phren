@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { debugLog } from "../shared.js";
+import { logger } from "../logger.js";
 import { STOP_WORDS, errorMessage } from "../utils.js";
 import { porterStem } from "./shared-stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
@@ -209,7 +210,7 @@ export function cosineFallback(
       totalDocs = Number(statsResult[0].values[0][2] ?? 0);
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback count: ${errorMessage(err)}\n`);
+    logger.debug("cosineFallback count", errorMessage(err));
     return [];
   }
 
@@ -235,7 +236,7 @@ export function cosineFallback(
           const ftsRes = db.exec(`SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT ${COSINE_CANDIDATE_CAP}`, [safeQ]);
           if (ftsRes?.length && ftsRes[0]?.values?.length) ftsRows.push(...ftsRes[0].values);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback FTS pre-filter: ${errorMessage(err)}\n`);
+          logger.debug("cosineFallback FTS pre-filter", errorMessage(err));
         }
       }
       // If FTS gave fewer than cap, supplement with deterministic rowid windows.
@@ -268,7 +269,7 @@ export function cosineFallback(
             pushRows(loadCosineFallbackWindow(db, minRowid, COSINE_CANDIDATE_CAP - ftsRows.length));
           }
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback deterministicSample: ${errorMessage(err)}\n`);
+          logger.debug("cosineFallback deterministicSample", errorMessage(err));
         }
       }
       if (ftsRows.length === 0) return [];
@@ -276,7 +277,7 @@ export function cosineFallback(
       debugLog(`cosineFallback: pre-filtered ${totalDocs} docs to ${allRows.length} candidates`);
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cosineFallback loadDocs: ${errorMessage(err)}\n`);
+    logger.debug("cosineFallback loadDocs", errorMessage(err));
     return [];
   }
 
@@ -328,7 +329,7 @@ export async function vectorFallback(
   // starts empty because load() is only called in the MCP server / CLI entry.
   if (cache.size() === 0) {
     try { await cache.load(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] vectorFallback cacheLoad: ${errorMessage(err)}\n`);
+      logger.debug("vectorFallback cacheLoad", errorMessage(err));
     }
   }
   if (cache.size() === 0) return [];
@@ -378,7 +379,7 @@ export async function vectorFallback(
         content = normalizeIndexedContent(raw, type, phrenPath, 10000);
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] vectorFallback fileRead: ${errorMessage(err)}\n`);
+      logger.debug("vectorFallback fileRead", errorMessage(err));
     }
 
     return { project: entryProject, filename, type, content, path: e.path };

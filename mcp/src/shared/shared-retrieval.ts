@@ -23,6 +23,7 @@ import {
 import { parseCitationComment } from "../content/content-citation.js";
 import { getHighImpactFindings } from "../finding/finding-impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectGlobBoost } from "../cli/cli-hooks-globs.js";
@@ -462,7 +463,7 @@ export async function searchDocumentsAsync(
     return merged.slice(0, 12);
   } catch (err: unknown) {
     // Vector search failure is non-fatal — return sync result
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hybridSearch vectorFallback: ${errorMessage(err)}\n`);
+    logger.debug("hybridSearch vectorFallback", errorMessage(err));
     return syncResult;
   }
 }
@@ -598,9 +599,7 @@ export async function searchKnowledgeRows(
         usedFallback = true;
       }
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) {
-        process.stderr.write(`[phren] vectorFallback: ${errorMessage(err)}\n`);
-      }
+      logger.debug("vectorFallback", errorMessage(err));
     }
   }
 
@@ -650,9 +649,7 @@ export async function searchFederatedStores(
         }
       }
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) {
-        process.stderr.write(`[phren] federatedSearch storePath=${storePath}: ${errorMessage(err)}\n`);
-      }
+      logger.debug(`federatedSearch storePath=${storePath}`, errorMessage(err));
       // Federation errors are non-fatal — continue with other stores
     }
   }
@@ -951,7 +948,7 @@ export function markStaleCitations(snippet: string): string {
                 stale = true;
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] applyCitationAnnotations fileRead: ${errorMessage(err)}\n`);
+              logger.debug("applyCitationAnnotations fileRead", errorMessage(err));
               stale = true;
             }
           }

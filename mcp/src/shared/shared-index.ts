@@ -17,6 +17,7 @@ import { stripTaskDoneSection } from "./shared-content.js";
 import { isInactiveFindingLine } from "../finding/finding-lifecycle.js";
 import { invalidateDfCache } from "./shared-search-fallback.js";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 import {
   beginUserFragmentBuildCache,
   endUserFragmentBuildCache,
@@ -94,7 +95,7 @@ async function _drainEmbQueue(): Promise<void> {
   for (const [phrenPath, docs] of byPhrenPath) {
     const cache = getEmbeddingCache(phrenPath);
     try { await cache.load(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheLoad: ${errorMessage(err)}\n`);
+      logger.debug("embeddingQueue cacheLoad", errorMessage(err));
     }
     const model = getEmbeddingModel();
     for (const { docPath, content } of docs) {
@@ -103,11 +104,11 @@ async function _drainEmbQueue(): Promise<void> {
         const vec = await embedText(content);
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue embedText: ${errorMessage(err)}\n`);
+        logger.debug("embeddingQueue embedText", errorMessage(err));
       }
     }
     try { await cache.flush(); } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embeddingQueue cacheFlush: ${errorMessage(err)}\n`);
+      logger.debug("embeddingQueue cacheFlush", errorMessage(err));
     }
   }
 }
@@ -178,7 +179,7 @@ function _resolveImportsRecursive(
     try {
       normalized = fs.realpathSync.native(resolved);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports realpath: ${errorMessage(err)}\n`);
+      logger.debug("resolveImports realpath", errorMessage(err));
       return `<!-- @import not found: ${trimmed} -->`;
     }
 
@@ -206,7 +207,7 @@ function _resolveImportsRecursive(
       const imported = fs.readFileSync(normalized, "utf-8");
       return _resolveImportsRecursive(imported, phrenPath, childSeen, depth + 1);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] resolveImports fileRead: ${errorMessage(err)}\n`);
+      logger.debug("resolveImports fileRead", errorMessage(err));
       return `<!-- @import error: ${trimmed} -->`;
     }
   });
@@ -231,7 +232,7 @@ function touchSentinel(phrenPath: string): void {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(sentinelPath, Date.now().toString());
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] touchSentinel: ${errorMessage(err)}\n`);
+    logger.debug("touchSentinel", errorMessage(err));
   }
 }
 
@@ -248,7 +249,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
     }
     for (const configPath of topicConfigEntries) {
@@ -256,7 +257,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(configPath);
         hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash topicConfig", errorMessage(err));
       }
     }
   } else {
@@ -283,7 +284,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash globDir: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash globDir", errorMessage(err));
       }
     }
     files.sort();
@@ -292,7 +293,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(f);
         hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
     }
     for (const configPath of topicConfigEntries) {
@@ -300,7 +301,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(configPath);
         hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash topicConfig: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash topicConfig", errorMessage(err));
       }
     }
   }
@@ -310,7 +311,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
   }
   // Include global/ files (pulled via @import) so changes invalidate the cache
@@ -323,7 +324,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
         const stat = fs.statSync(fp);
         hash.update(`global:${f}:${stat.mtimeMs}:${stat.size}`);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
     }
   }
@@ -334,7 +335,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(manualLinksPath);
       hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
   }
   const indexPolicyPath = path.join(phrenPath, ".config", "index-policy.json");
@@ -343,7 +344,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       const stat = fs.statSync(indexPolicyPath);
       hash.update(`index-policy-file:${stat.mtimeMs}:${stat.size}`);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
   }
   if (profile) hash.update(`profile:${profile}`);
@@ -367,7 +368,7 @@ function loadHashMap(phrenPath: string): { version?: number; hashes: Record<stri
       return JSON.parse(fs.readFileSync(hashFile, "utf-8"));
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadHashMap: ${errorMessage(err)}\n`);
+    logger.debug("loadHashMap", errorMessage(err));
   }
   return { hashes: {} };
 }
@@ -386,7 +387,7 @@ function saveHashMap(phrenPath: string, hashes: Record<string, string>): void {
         const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
         if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] saveHashMap readExisting: ${errorMessage(err)}\n`);
+        logger.debug("saveHashMap readExisting", errorMessage(err));
       }
       const merged = { ...existing, ...hashes };
       // Remove entries for paths that no longer exist on disk
@@ -549,7 +550,7 @@ function insertFileIntoIndex(
     }
     return true;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] insertFileIntoIndex: ${errorMessage(err)}\n`);
+    logger.debug("insertFileIntoIndex", errorMessage(err));
     return false;
   }
 }
@@ -627,7 +628,7 @@ function deleteEntityLinksForDocPath(db: SqlJsDatabase, phrenPath: string, docPa
   try {
     db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDoc]);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] deleteEntityLinksForDocPath globalEntities: ${errorMessage(err)}\n`);
+    logger.debug("deleteEntityLinksForDocPath globalEntities", errorMessage(err));
   }
 }
 
@@ -641,10 +642,10 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
 
   // Delete old record
   try { deleteEntityLinksForDocPath(db, phrenPath, resolvedPath); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteEntityLinks: ${errorMessage(err)}\n`);
+    logger.debug("updateFileInIndex deleteEntityLinks", errorMessage(err));
   }
   try { db.run("DELETE FROM docs WHERE path = ?", [resolvedPath]); } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex deleteDocs: ${errorMessage(err)}\n`);
+    logger.debug("updateFileInIndex deleteDocs", errorMessage(err));
   }
 
   // Re-insert if file still exists
@@ -663,7 +664,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
           const content = fs.readFileSync(resolvedPath, "utf-8");
           extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex entityExtraction: ${errorMessage(err)}\n`);
+          logger.debug("updateFileInIndex entityExtraction", errorMessage(err));
         }
       }
     }
@@ -674,7 +675,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
       saveHashMap(phrenPath, hashData.hashes);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex hashMap: ${errorMessage(err)}\n`);
+      logger.debug("updateFileInIndex hashMap", errorMessage(err));
     }
   } else {
     // Remove stale embedding if file was deleted
@@ -685,7 +686,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
         c.delete(resolvedPath);
         await c.flush();
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateFileInIndex embeddingDelete: ${errorMessage(err)}\n`);
+        logger.debug("updateFileInIndex embeddingDelete", errorMessage(err));
       }
     })();
   }
@@ -704,7 +705,7 @@ function readHashSentinel(phrenPath: string): { hash: string; computedAt: number
       return { hash: data.hash, computedAt: data.computedAt };
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readHashSentinel: ${errorMessage(err)}\n`);
+    logger.debug("readHashSentinel", errorMessage(err));
   }
   return null;
 }
@@ -714,7 +715,7 @@ function writeHashSentinel(phrenPath: string, hash: string): void {
     const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
     fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] writeHashSentinel: ${errorMessage(err)}\n`);
+    logger.debug("writeHashSentinel", errorMessage(err));
   }
 }
 
@@ -730,7 +731,7 @@ function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): b
       const stat = fs.statSync(dir);
       if (stat.mtimeMs > sentinel.computedAt) return false;
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isSentinelFresh statDir: ${errorMessage(err)}\n`);
+      logger.debug("isSentinelFresh statDir", errorMessage(err));
     }
   }
   return true;
@@ -748,7 +749,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
     const graphMtime = fs.statSync(graphPath).mtimeMs;
     const anyNewer = allFiles.some(f => {
       try { return fs.statSync(f.fullPath).mtimeMs > graphMtime; } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph statFile: ${errorMessage(err)}\n`);
+        logger.debug("loadCachedEntityGraph statFile", errorMessage(err));
         return true;
       }
     });
@@ -776,7 +777,7 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
               [entity, project, docKey]
             );
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert2: ${errorMessage(err)}\n`);
+            logger.debug("loadCachedEntityGraph globalEntitiesInsert2", errorMessage(err));
           }
         }
       } else {
@@ -797,18 +798,18 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
                   [name as string, proj, sourceDoc as string]
                 );
               } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadCachedEntityGraph globalEntitiesInsert: ${errorMessage(err)}\n`);
+            logger.debug("loadCachedEntityGraph globalEntitiesInsert", errorMessage(err));
           }
             }
           }
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph globalEntitiesRestore: ${errorMessage(err)}\n`);
+          logger.debug("entityGraph globalEntitiesRestore", errorMessage(err));
         }
       }
       return true;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] entityGraph cacheLoad: ${errorMessage(err)}\n`);
+    logger.debug("entityGraph cacheLoad", errorMessage(err));
   }
   return false;
 }
@@ -828,7 +829,7 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
         // Validate: skip manual links whose sourceDoc no longer exists in the index
         const docCheck = queryDocBySourceKey(db, phrenPath, link.sourceDoc);
         if (!docCheck) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks: pruning stale link to "${link.sourceDoc}"\n`);
+          logger.debug("manualLinks", `pruning stale link to "${link.sourceDoc}"`);
           pruned = true;
           continue;
         }
@@ -855,11 +856,11 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
               [link.entity, projectMatch[1], link.sourceDoc]
             );
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks globalEntities: ${errorMessage(err)}\n`);
+            logger.debug("manualLinks globalEntities", errorMessage(err));
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks entry: ${errorMessage(err)}\n`);
+        logger.debug("manualLinks entry", errorMessage(err));
       }
     }
     // Rewrite manual-links.json if stale entries were pruned
@@ -871,11 +872,11 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
           fs.renameSync(tmpPath, manualLinksPath);
         });
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] manualLinks prune write: ${errorMessage(err)}\n`);
+        logger.debug("manualLinks prune write", errorMessage(err));
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] mergeManualLinks: ${errorMessage(err)}\n`);
+    logger.debug("mergeManualLinks", errorMessage(err));
   }
 }
 
@@ -889,7 +890,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndexImpl userInfo: ${errorMessage(err)}\n`);
+    logger.debug("buildIndexImpl userInfo", errorMessage(err));
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -991,7 +992,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               changedFiles.push(entry);
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex hashFile: ${errorMessage(err)}\n`);
+            logger.debug("buildIndex hashFile", errorMessage(err));
           }
         }
 
@@ -1023,17 +1024,17 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           try {
             for (const missingPath of missingFromIndex) {
               try { deleteEntityLinksForDocPath(db, phrenPath, missingPath); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteEntityLinksForMissing: ${errorMessage(err)}\n`);
+                logger.debug("buildIndex deleteEntityLinksForMissing", errorMessage(err));
               }
               try { db.run("DELETE FROM docs WHERE path = ?", [missingPath]); } catch (err: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex deleteDocForMissing: ${errorMessage(err)}\n`);
+                logger.debug("buildIndex deleteDocForMissing", errorMessage(err));
               }
             }
             db.run("COMMIT");
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteCommit: ${errorMessage(err)}\n`);
+            logger.debug("buildIndex incrementalDeleteCommit", errorMessage(err));
             try { db.run("ROLLBACK"); } catch (e2: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalDeleteRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+              logger.debug("buildIndex incrementalDeleteRollback", e2 instanceof Error ? e2.message : String(e2));
             }
           }
 
@@ -1062,7 +1063,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               db.run("COMMIT");
             } catch (err: unknown) {
               try { db.run("ROLLBACK"); } catch (e2: unknown) {
-                if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex perFileRollback: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
+                logger.debug("buildIndex perFileRollback", e2 instanceof Error ? e2.message : String(e2));
               }
               throw err;
             }
@@ -1077,7 +1078,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             fs.mkdirSync(cacheDir, { recursive: true });
             fs.writeFileSync(cacheFile, db.export());
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex incrementalCacheSave: ${errorMessage(err)}\n`);
+            logger.debug("buildIndex incrementalCacheSave", errorMessage(err));
           }
 
           const incMs = Date.now() - t0;
@@ -1137,7 +1138,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     try {
       newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
     } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] computePhrenHash skip: ${errorMessage(err)}\n`);
+        logger.debug("computePhrenHash skip", errorMessage(err));
       }
     if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
       fileCount++;
@@ -1161,7 +1162,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       const globalEntityRows = db.exec("SELECT entity, project, doc_key FROM global_entities")[0]?.values ?? [];
       fs.writeFileSync(graphPath, JSON.stringify({ entities: entityRows, links: linkRows, globalEntities: globalEntityRows, ts: Date.now() }));
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex entityGraphPersist: ${errorMessage(err)}\n`);
+      logger.debug("buildIndex entityGraphPersist", errorMessage(err));
     }
   }
 
@@ -1192,7 +1193,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
     for (const f of fs.readdirSync(cacheDir)) {
       if (!f.endsWith(".db") || f === `${hash}.db`) continue;
       try { fs.unlinkSync(path.join(cacheDir, f)); } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] buildIndex staleCacheCleanup: ${errorMessage(err)}\n`);
+        logger.debug("buildIndex staleCacheCleanup", errorMessage(err));
       }
     }
     debugLog(`Saved FTS index cache (${hash.slice(0, 8)}) — total ${Date.now() - t0}ms`);
@@ -1228,7 +1229,7 @@ function isRebuildLockHeld(phrenPath: string): boolean {
     const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
     return Date.now() - stat.mtimeMs <= staleThreshold;
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] isRebuildLockHeld stat: ${errorMessage(err)}\n`);
+    logger.debug("isRebuildLockHeld stat", errorMessage(err));
     return false;
   }
 }
@@ -1239,7 +1240,7 @@ async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Pr
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadIndexSnapshotOrEmpty userInfo: ${errorMessage(err)}\n`);
+    logger.debug("loadIndexSnapshotOrEmpty userInfo", errorMessage(err));
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -1345,7 +1346,7 @@ export function findFtsCacheForPath(phrenPath: string, profile?: string): { exis
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath userInfo: ${errorMessage(err)}\n`);
+    logger.debug("findFtsCacheForPath userInfo", errorMessage(err));
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
@@ -1358,7 +1359,7 @@ export function findFtsCacheForPath(phrenPath: string, profile?: string): { exis
       return { exists: true, sizeBytes: stat.size };
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findFtsCacheForPath: ${errorMessage(err)}\n`);
+    logger.debug("findFtsCacheForPath", errorMessage(err));
   }
   return { exists: false };
 }
