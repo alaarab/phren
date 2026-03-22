@@ -492,9 +492,7 @@ async function validateAndResolveWebhook(webhook: string): Promise<
     return { resolvedUrl: pinnedUrl.href, host: parsed.host };
   } catch (err: unknown) {
     debugLog(`validateAndResolveWebhook lookup failed for ${parsed.hostname}: ${errorMessage(err)}`);
-    // DNS resolution failed; allow the fetch to proceed with the original URL
-    // (fetch will do its own resolution and may fail with a network error)
-    return { resolvedUrl: webhook, host: parsed.host };
+    return { error: `webhook hostname "${parsed.hostname}" could not be resolved: ${errorMessage(err)}` };
   }
 }
 
@@ -605,12 +603,22 @@ export function runCustomHooks(
       continue;
     }
     const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
+    // On Windows, cmd /c expands %VAR% in the command string.
+    // Sanitize env values to prevent shell metacharacter injection.
+    const mergedEnv = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env };
+    if (isWindows) {
+      for (const [key, val] of Object.entries(mergedEnv)) {
+        if (typeof val === "string") {
+          mergedEnv[key] = val.replace(/[&|<>^%]/g, "");
+        }
+      }
+    }
     try {
       execFileSync(shellCmd, shellArgs, {
         cwd: phrenPath,
         encoding: "utf8",
         timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
-        env: { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env },
+        env: mergedEnv,
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {

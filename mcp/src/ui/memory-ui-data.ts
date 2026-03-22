@@ -163,6 +163,18 @@ export function isAllowedFilePath(filePath: string, phrenPath: string): boolean 
   return allowedRealRoots.some((root) => realResolved === root || realResolved.startsWith(root + path.sep));
 }
 
+/**
+ * Stricter path check for skill endpoints — only allows files under skills/ directories,
+ * not the entire phren store.
+ */
+export function isAllowedSkillPath(filePath: string, phrenPath: string): boolean {
+  if (!isAllowedFilePath(filePath, phrenPath)) return false;
+  const resolved = path.resolve(filePath);
+  // Must be under a "skills" directory segment
+  const segments = resolved.split(path.sep);
+  return segments.some((seg) => seg === "skills");
+}
+
 export function collectSkillsForUI(phrenPath: string, profile = ""): Array<{ name: string; source: string; path: string; enabled: boolean }> {
   return getAllSkills(phrenPath, profile).map((skill) => ({
     name: skill.name,
