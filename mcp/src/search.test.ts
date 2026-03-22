@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
-import { extractSnippet } from "./shared-index.js";
+import { extractSnippet } from "./shared/shared-index.js";
 
 
 describe("buildRobustFtsQuery edge cases", () => {

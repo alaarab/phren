@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { detectConflicts, checkSemanticConflicts, extractDynamicEntities } from "../shared-content.js";
+import { detectConflicts, checkSemanticConflicts, extractDynamicEntities } from "../shared/shared-content.js";
 import { makeTempDir } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";

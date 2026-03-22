@@ -5,10 +5,9 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { withFileLock } from "./shared-governance.js";
+import { withFileLock } from "./shared/shared-governance.js";
 import { errorMessage } from "./utils.js";
-import { logWarn } from "./logger.js";
-import { bootstrapSqlJs } from "./shared-sqljs.js";
+import { bootstrapSqlJs } from "./shared/shared-sqljs.js";
 import type { SqlJsDatabase } from "./index-query.js";
 
 // ---------------------------------------------------------------------------
@@ -45,7 +44,7 @@ function decodeEmbedding(blob: Uint8Array): number[] {
 }
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
-// Q14: see docs/decisions/Q14-sqljs-sync-access-and-persist-lock.md
+// Q14: Synchronously-accessible resolved SQL static, set once sqlPromise settles.
 let sqlResolved: SqlJsStatic | null = null;
 function getSql(): Promise<SqlJsStatic> {
   if (!sqlPromise) {
@@ -98,13 +97,20 @@ async function openCacheDb(phrenPath: string): Promise<SqlJsDatabase> {
     return db;
   } catch (err) {
     try { db?.close(); } catch (e2: unknown) {
-      logWarn("embedding", `openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding openCacheDb dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
     throw err;
   }
 }
 
-// Q14: see docs/decisions/Q14-sqljs-sync-access-and-persist-lock.md
+/**
+ * Q14: Persist the in-memory DB to disk under a file lock.
+ * Reads the current on-disk snapshot inside the lock, merges any entries that
+ * are in `db` but missing from disk, then writes atomically via temp-file rename.
+ * This prevents the "last writer wins" race where two concurrent processes each
+ * open the same on-disk snapshot, insert different entries, and overwrite each
+ * other's work.
+ */
 function persistDb(phrenPath: string, db: SqlJsDatabase): void {
   const dbPath = getCacheDbPath(phrenPath);
   try {
@@ -140,9 +146,9 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
           }
         }
       } catch (err: unknown) {
-        logWarn("embedding", `persistDb onDiskLoad: ${errorMessage(err)}`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskLoad: ${errorMessage(err)}\n`);
         try { onDisk?.close(); } catch (e2: unknown) {
-          logWarn("embedding", `persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
         onDisk = null;
       }
@@ -154,7 +160,7 @@ function persistDb(phrenPath: string, db: SqlJsDatabase): void {
         fs.renameSync(tmp, dbPath);
       } finally {
         if (onDisk) try { onDisk.close(); } catch (e2: unknown) {
-          logWarn("embedding", `persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}`);
+          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding persistDb onDiskCloseFinally: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
         }
       }
     });
@@ -288,7 +294,8 @@ export async function getCachedEmbedding(
 
     const embedding = await embeddingOps.getApiEmbedding(text, apiKey, model);
     embeddingOps.insertCache(db, model, hash, embedding);
-    // Q14: see docs/decisions/Q14-sqljs-sync-access-and-persist-lock.md
+    // Q14: persistDb now holds a file lock and merges with the on-disk snapshot
+    // before writing, so concurrent callers don't overwrite each other's entries.
     embeddingOps.persistDb(phrenPath, db);
     return embedding;
   } catch (err) {
@@ -296,7 +303,7 @@ export async function getCachedEmbedding(
     return [];
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      logWarn("embedding", `getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbedding dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }
@@ -350,7 +357,7 @@ export async function getCachedEmbeddings(
     return texts.map(() => []);
   } finally {
     try { db?.close(); } catch (e2: unknown) {
-      logWarn("embedding", `getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] embedding getCachedEmbeddings dbClose: ${e2 instanceof Error ? e2.message : String(e2)}\n`);
     }
   }
 }

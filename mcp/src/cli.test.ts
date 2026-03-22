@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { grantAdmin, makeTempDir, setupIsolatedCliEnv, runCliSpawn, type IsolatedCliEnv } from "./test-helpers.js";
-import { getMachineName } from "./link.js";
+import { getMachineName } from "./link/link.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -1670,8 +1670,8 @@ describe("CLI integration: detect-skills", () => {
 
 // --- Unit tests for exported cli functions ---
 
-import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli.js";
-import { DocRow } from "./shared-index.js";
+import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli/cli.js";
+import { DocRow } from "./shared/shared-index.js";
 
 describe("scoreFindingCandidate", () => {
   it("returns null for low-signal commits", () => {

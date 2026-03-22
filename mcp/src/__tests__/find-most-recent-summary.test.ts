@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
-import { findMostRecentSummary } from "../mcp-session.js";
+import { findMostRecentSummary } from "../tools/mcp-session.js";
 
 function sessionsDir(phrenPath: string) {
   return path.join(phrenPath, ".runtime", "sessions");

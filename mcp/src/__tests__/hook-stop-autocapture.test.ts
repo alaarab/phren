@@ -7,8 +7,8 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { extractConversationInsights, filterConversationInsightsForProactivity } from "../cli-hooks-session.js";
-import { addFindingToFile } from "../shared-content.js";
+import { extractConversationInsights, filterConversationInsightsForProactivity } from "../cli/cli-hooks-session.js";
+import { addFindingToFile } from "../shared/shared-content.js";
 
 describe("extractConversationInsights: keyword extraction", () => {
   it("extracts lines containing insight keywords", () => {
