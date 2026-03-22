@@ -211,6 +211,10 @@ export class PhrenClient {
     return this.callTool("update_task", { project, item, updates: { pin: true } });
   }
 
+  async promoteTaskToIssue(project: string, item: string): Promise<unknown> {
+    return this.callTool("update_task", { project, item, updates: { create_issue: true } });
+  }
+
   async pinMemory(project: string, memory: string): Promise<unknown> {
     return this.callTool("pin_memory", { project, memory });
   }
