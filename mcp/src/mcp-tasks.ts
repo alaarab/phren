@@ -384,10 +384,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     "update_task",
     {
       title: "◆ phren · update task",
-      description: "Update a task's text, priority, context, section, or GitHub metadata by matching text.",
+      description:
+        "Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. " +
+        "Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). " +
+        "When work_next is true, item is not needed.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text to match against existing tasks."),
+        item: z.string().optional().describe("Partial text to match against existing tasks. Required unless work_next is true."),
         updates: z.object({
           text: z.string().optional().describe("Replacement text for the task line."),
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
@@ -397,6 +400,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
           github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
           unlink_github: z.boolean().optional().describe("If true, remove any linked GitHub issue metadata from the item."),
+          pin: z.boolean().optional().describe("If true, pin the task so it floats to the top of its section."),
+          promote: z.boolean().optional().describe("If true, clear the speculative flag on this task (confirm the user wants it)."),
+          move_to_active: z.boolean().optional().describe("Used with promote: also move the task to the Active section."),
+          work_next: z.boolean().optional().describe("If true, pick the highest-priority Queue item and move it to Active. Ignores item param."),
         }).describe("Fields to update. All are optional."),
       }),
     },
@@ -404,206 +411,85 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       const updateTaskDenied = permissionDeniedError(phrenPath, "update_task", project);
       if (updateTaskDenied) return mcpResponse({ ok: false, error: updateTaskDenied });
-      return withWriteQueue(async () => {
-        const result = updateTaskStore(phrenPath, project, item, updates);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
-      });
-    }
-  );
 
-  server.registerTool(
-    "link_task_issue",
-    {
-      title: "◆ phren · link task issue",
-      description: "Link or unlink a task to an existing GitHub issue.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Task text, ID, or stable bid to link."),
-        issue_number: z.union([z.number().int().positive(), z.string()]).optional().describe("Existing GitHub issue number (for example 14 or '#14')."),
-        issue_url: z.string().optional().describe("Existing GitHub issue URL."),
-        unlink: z.boolean().optional().describe("If true, remove any linked issue from the task item."),
-      }),
-    },
-    async ({ project, item, issue_number, issue_url, unlink }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        if (unlink && (issue_number !== undefined || issue_url)) {
-          return mcpResponse({ ok: false, error: "Use either unlink=true or issue_number/issue_url, not both." });
-        }
-        if (!unlink && issue_number === undefined && !issue_url) {
-          return mcpResponse({ ok: false, error: "Provide issue_number or issue_url to link, or unlink=true to remove the link." });
-        }
-        if (issue_url) {
-          const parsed = parseGithubIssueUrl(issue_url);
-          if (!parsed) return mcpResponse({ ok: false, error: "issue_url must be a valid GitHub issue URL." });
-          if (issue_number !== undefined) {
-            const normalizedIssue = Number.parseInt(String(issue_number).replace(/^#/, ""), 10);
-            if (normalizedIssue !== parsed.issueNumber) {
-              return mcpResponse({ ok: false, error: "issue_number and issue_url refer to different issues." });
-            }
+      // Runtime validation: item is required unless work_next is true
+      if (!updates.work_next && !item) {
+        return mcpResponse({ ok: false, error: "item is required unless updates.work_next is true." });
+      }
+
+      // Cross-validate github_issue and github_url
+      if (updates.github_url) {
+        const parsed = parseGithubIssueUrl(updates.github_url);
+        if (!parsed) return mcpResponse({ ok: false, error: "github_url must be a valid GitHub issue URL." });
+        if (updates.github_issue !== undefined) {
+          const normalizedIssue = Number.parseInt(String(updates.github_issue).replace(/^#/, ""), 10);
+          if (normalizedIssue !== parsed.issueNumber) {
+            return mcpResponse({ ok: false, error: "github_issue and github_url refer to different issues." });
           }
         }
+      }
 
-        const result = linkTaskIssue(phrenPath, project, item, {
-          github_issue: issue_number,
-          github_url: issue_url,
-          unlink: unlink ?? false,
-        });
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({
-          ok: true,
-          message: unlink
-            ? `Removed GitHub link from ${project} task.`
-            : `Linked ${project} task to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
-          data: {
-            project,
-            item,
-            stableId: result.data.stableId || null,
-            githubIssue: result.data.githubIssue ?? null,
-            githubUrl: result.data.githubUrl || null,
-          },
-        });
-      });
-    },
-  );
-
-  server.registerTool(
-    "promote_task_to_issue",
-    {
-      title: "◆ phren · promote task",
-      description: "Create a GitHub issue from a task and link it back into the task list.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Task text, ID, or stable bid to promote."),
-        repo: z.string().optional().describe("Target GitHub repo in owner/name form. If omitted, phren tries to infer it from CLAUDE.md or summary.md."),
-        title: z.string().optional().describe("Optional GitHub issue title. Defaults to the task text."),
-        body: z.string().optional().describe("Optional GitHub issue body. Defaults to a body built from the task plus context."),
-        mark_done: z.boolean().optional().describe("If true, mark the task Done after creating and linking the issue."),
-      }),
-    },
-    async ({ project, item, repo, title, body, mark_done }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const match = resolveTaskItem(phrenPath, project, item);
-        if (!match.ok) return mcpResponse({ ok: false, error: match.error, errorCode: match.code });
-
-        const targetRepo = repo || resolveProjectGithubRepo(phrenPath, project);
-        if (!targetRepo) {
-          return mcpResponse({ ok: false, error: "Could not infer a GitHub repo for this project. Provide repo in owner/name form or add a GitHub URL to CLAUDE.md/summary.md." });
+        // Handle work_next: pick highest-priority Queue item, move to Active
+        if (updates.work_next) {
+          const result = workNextTask(phrenPath, project);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({ ok: true, message: result.data, data: { project } });
         }
 
-        const created = createGithubIssueForTask({
-          repo: targetRepo,
-          title: title?.trim() || match.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
-          body: body?.trim() || buildTaskIssueBody(project, match.data),
-        });
-        if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
+        // Handle pin
+        if (updates.pin) {
+          const result = pinTask(phrenPath, project, item!);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+        }
 
-        const linked = linkTaskIssue(phrenPath, project, match.data.stableId ? `bid:${match.data.stableId}` : match.data.id, {
-          github_issue: created.data.issueNumber,
-          github_url: created.data.url,
-        });
-        if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
-
-        if (mark_done) {
-          const completionMatch = linked.data.stableId ? `bid:${linked.data.stableId}` : linked.data.id;
-          const completed = completeTaskStore(phrenPath, project, completionMatch);
-          if (!completed.ok) return mcpResponse({ ok: false, error: completed.error, errorCode: completed.code });
-          clearTaskCheckpoint(phrenPath, {
-            project,
-            taskId: match.data.stableId ?? match.data.id,
-            stableId: match.data.stableId,
-            positionalId: match.data.id,
-            taskLine: match.data.line,
+        // Handle promote (clear speculative flag)
+        if (updates.promote) {
+          const result = promoteTask(phrenPath, project, item!, updates.move_to_active ?? false);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({
+            ok: true,
+            message: `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
+            data: { project, item: result.data },
           });
         }
 
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({
-          ok: true,
-          message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
-          data: {
-            project,
-            item,
-            repo: targetRepo,
-            githubIssue: created.data.issueNumber ?? null,
-            githubUrl: created.data.url,
-            markDone: mark_done ?? false,
-          },
-        });
-      });
-    },
-  );
+        // Handle github issue linking via update_task when github_issue or github_url is set (and no other field updates)
+        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section) {
+          if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
+            return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
+          }
+          const result = linkTaskIssue(phrenPath, project, item!, {
+            github_issue: updates.github_issue,
+            github_url: updates.github_url,
+            unlink: updates.unlink_github ?? false,
+          });
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({
+            ok: true,
+            message: updates.unlink_github
+              ? `Removed GitHub link from ${project} task.`
+              : `Linked ${project} task to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
+            data: {
+              project,
+              item,
+              stableId: result.data.stableId || null,
+              githubIssue: result.data.githubIssue ?? null,
+              githubUrl: result.data.githubUrl || null,
+            },
+          });
+        }
 
-  server.registerTool(
-    "pin_task",
-    {
-      title: "◆ phren · pin task",
-      description: "Pin a task so it floats to the top of its section.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Partial item text or ID to pin."),
-      }),
-    },
-    async ({ project, item }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        const result = pinTask(phrenPath, project, item);
+        // Standard update path
+        const result = updateTaskStore(phrenPath, project, item!, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
-      });
-    }
-  );
-
-  server.registerTool(
-    "work_next_task",
-    {
-      title: "◆ phren · work next",
-      description: "Move the highest-priority Queue item to Active so it becomes the next task to work on.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-      }),
-    },
-    async ({ project }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        const result = workNextTask(phrenPath, project);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({ ok: true, message: result.data, data: { project } });
-      });
-    }
-  );
-
-  server.registerTool(
-    "promote_task",
-    {
-      title: "◆ phren · promote task",
-      description:
-        "Promote a speculative task to committed by clearing the speculative flag. " +
-        "Use this when the user says 'yes do it', 'let's work on that', or otherwise confirms " +
-        "they want to commit to a suggested task. Optionally moves it to Active.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        item: z.string().describe("Partial text, stable ID (bid:XXXX), or positional ID of the speculative task."),
-        move_to_active: z.boolean().optional().describe("If true, also move the task to the Active section. Default false."),
-      }),
-    },
-    async ({ project, item, move_to_active }) => {
-      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      return withWriteQueue(async () => {
-        const result = promoteTask(phrenPath, project, item, move_to_active ?? false);
-        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
-        return mcpResponse({
-          ok: true,
-          message: `Promoted task "${result.data.line}" in ${project}${move_to_active ? " (moved to Active)" : ""}.`,
-          data: { project, item: result.data },
-        });
+        return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
   );

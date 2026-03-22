@@ -27,15 +27,21 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-// ── get_consolidation_status ─────────────────────────────────────────────────
+// ── health_check consolidation ───────────────────────────────────────────────
 
-describe("mcp-ops: get_consolidation_status", () => {
+describe("mcp-ops: health_check consolidation", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
+  const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
 
   beforeEach(() => {
     tmp = makeTempDir("mcp-ops-consol-");
     grantAdmin(tmp.path);
+    const homeDir = path.join(tmp.path, "home");
+    fs.mkdirSync(homeDir, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
     server = makeMockServer();
 
     const ctx: McpContext = {
@@ -51,10 +57,12 @@ describe("mcp-ops: get_consolidation_status", () => {
 
   afterEach(() => {
     delete process.env.PHREN_ACTOR;
+    process.env.HOME = origHome;
+    process.env.USERPROFILE = origUserProfile;
     tmp.cleanup();
   });
 
-  it("returns recommended:true with 30 entries after consolidated marker", async () => {
+  it("returns consolidation data with recommended:true when entries exceed threshold", async () => {
     const projectDir = path.join(tmp.path, "testapp");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "summary.md"), "# testapp\n");
@@ -72,10 +80,11 @@ describe("mcp-ops: get_consolidation_status", () => {
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const res = parseResult(await server.call("get_consolidation_status", { project: "testapp" }));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    expect(res.data.results).toHaveLength(1);
-    const status = res.data.results[0];
+    expect(res.data.consolidation).toBeDefined();
+    expect(res.data.consolidation).toHaveLength(1);
+    const status = res.data.consolidation[0];
     expect(status.project).toBe("testapp");
     expect(status.entriesSince).toBe(30);
     expect(status.recommended).toBe(true);
@@ -83,16 +92,17 @@ describe("mcp-ops: get_consolidation_status", () => {
     expect(status.threshold).toBe(25);
   });
 
-  it("returns recommended:false for empty FINDINGS.md", async () => {
+  it("returns consolidation data with recommended:false for empty FINDINGS.md", async () => {
     const projectDir = path.join(tmp.path, "emptyapp");
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, "summary.md"), "# emptyapp\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# emptyapp Findings\n");
 
-    const res = parseResult(await server.call("get_consolidation_status", { project: "emptyapp" }));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    expect(res.data.results).toHaveLength(1);
-    const status = res.data.results[0];
+    expect(res.data.consolidation).toBeDefined();
+    expect(res.data.consolidation).toHaveLength(1);
+    const status = res.data.consolidation[0];
     expect(status.entriesSince).toBe(0);
     expect(status.recommended).toBe(false);
   });
@@ -113,19 +123,23 @@ describe("mcp-ops: get_consolidation_status", () => {
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const res = parseResult(await server.call("get_consolidation_status", { project: "nomarker" }));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    const status = res.data.results[0];
+    const status = res.data.consolidation[0];
     expect(status.entriesSince).toBe(10);
     expect(status.lastConsolidated).toBeNull();
-    // 10 < 25 threshold, so not recommended
     expect(status.recommended).toBe(false);
   });
 
-  it("returns error for nonexistent project", async () => {
-    const res = parseResult(await server.call("get_consolidation_status", { project: "nonexistent" }));
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain("not found");
+  it("omits consolidation data when include_consolidation is false", async () => {
+    const projectDir = path.join(tmp.path, "skipapp");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "summary.md"), "# skipapp\n");
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# skipapp Findings\n");
+
+    const res = parseResult(await server.call("health_check", { include_consolidation: false }));
+    expect(res.ok).toBe(true);
+    expect(res.data.consolidation).toBeNull();
   });
 });
 
