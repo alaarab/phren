@@ -14,6 +14,8 @@ import { getMachineName } from "../machine-identity.js";
 
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { logger } from "../logger.js";
+import { getRuntimeHealth } from "../governance/policy.js";
+import { countUnsyncedCommits } from "../cli-hooks-git.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, withWriteQueue } = ctx;
@@ -220,6 +222,83 @@ export function register(server: McpServer, ctx: McpContext): void {
           : `Consolidation: all projects OK`
         : null;
 
+      // ── Surface RuntimeHealth warnings ────────────────────────────────────
+      const warnings: string[] = [];
+      try {
+        const health = getRuntimeHealth(phrenPath);
+
+        // Unsynced commits
+        const unsynced = health.lastSync?.unsyncedCommits;
+        if (typeof unsynced === "number" && unsynced > 0) {
+          warnings.push(`Unsynced commits: ${unsynced} (last push: ${health.lastSync?.lastPushStatus ?? "unknown"})`);
+        }
+
+        // Last auto-save error
+        if (health.lastAutoSave?.status === "error") {
+          warnings.push(`Last auto-save failed: ${health.lastAutoSave.detail ?? "unknown error"}`);
+        }
+
+        // Last push error
+        if (health.lastSync?.lastPushStatus === "error") {
+          warnings.push(`Last push failed: ${health.lastSync.lastPushDetail ?? "unknown error"}`);
+        }
+
+        // Check live unsynced commit count (may differ from cached value)
+        if (syncStatus === "synced" && (!unsynced || unsynced === 0)) {
+          try {
+            const liveUnsynced = await countUnsyncedCommits(phrenPath);
+            if (liveUnsynced > 0) {
+              warnings.push(`Unsynced commits: ${liveUnsynced} (not yet pushed to remote)`);
+            }
+          } catch (err: unknown) {
+            logger.debug("healthCheck liveUnsyncedCount", errorMessage(err));
+          }
+        }
+      } catch (err: unknown) {
+        logger.debug("healthCheck runtimeHealth", errorMessage(err));
+      }
+
+      // Check recent sync warnings from background sync
+      try {
+        const syncWarningsPath = runtimeFile(phrenPath, "sync-warnings.jsonl");
+        if (fs.existsSync(syncWarningsPath)) {
+          const lines = fs.readFileSync(syncWarningsPath, "utf8").trim().split("\n").filter(Boolean);
+          const recent = lines.slice(-3); // last 3 warnings
+          for (const line of recent) {
+            try {
+              const entry = JSON.parse(line) as { at?: string; error?: string; unsyncedCommits?: number };
+              if (entry.error) {
+                warnings.push(`Background sync failed (${entry.at?.slice(0, 16) ?? "unknown"}): ${entry.error}`);
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+      } catch (err: unknown) {
+        logger.debug("healthCheck syncWarnings", errorMessage(err));
+      }
+
+      // Check embedding/LLM availability
+      try {
+        const { getOllamaUrl } = await import("../shared/ollama.js");
+        const ollamaUrl = getOllamaUrl();
+        const hasEmbeddingApi = !!process.env.PHREN_EMBEDDING_API_URL;
+        if (!ollamaUrl && !hasEmbeddingApi) {
+          warnings.push("Embeddings: unavailable (no Ollama or API endpoint configured)");
+        }
+        const hasLlmEndpoint = !!process.env.PHREN_LLM_ENDPOINT;
+        const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+        const hasOpenAiKey = !!process.env.OPENAI_API_KEY;
+        if (!hasLlmEndpoint && !hasAnthropicKey && !hasOpenAiKey) {
+          warnings.push("LLM features: unavailable (no API key configured for semantic dedup/conflict detection)");
+        }
+      } catch (err: unknown) {
+        logger.debug("healthCheck serviceAvailability", errorMessage(err));
+      }
+
+      const warningsSummary = warnings.length > 0
+        ? `Warnings: ${warnings.length}\n  ${warnings.join("\n  ")}`
+        : null;
+
       const lines = [
         `Phren v${version}`,
         `Profile: ${activeProfile || "(default)"}`,
@@ -232,6 +311,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Task mode: ${taskMode}`,
         `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
         consolSummary,
+        warningsSummary,
         `Path: ${phrenPath}`,
       ].filter(Boolean);
 
@@ -251,6 +331,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           syncStatus,
           syncDetail,
           consolidation,
+          warnings,
           phrenPath,
         },
       });
