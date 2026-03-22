@@ -1,7 +1,7 @@
 import { debugLog } from "./shared.js";
-import { decodeStringRow, queryRows, type SqlJsDatabase } from "./shared-index.js";
+import { decodeStringRow, queryRows, type SqlJsDatabase } from "./shared/shared-index.js";
 import { errorMessage } from "./utils.js";
-import type { EmbeddingCache } from "./shared-embedding-cache.js";
+import type { EmbeddingCache } from "./shared/shared-embedding-cache.js";
 
 export interface EmbeddingWarmupDeps {
   checkOllamaAvailable(): Promise<boolean>;
@@ -17,7 +17,7 @@ export type EmbeddingCacheLike = Pick<EmbeddingCache, "load" | "get" | "set" | "
 const BACKGROUND_EMBED_THROTTLE_MS = 50;
 
 async function loadWarmupDeps(): Promise<EmbeddingWarmupDeps> {
-  const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared-ollama.js");
+  const { checkOllamaAvailable, embedText, getEmbeddingModel, getOllamaUrl } = await import("./shared/shared-ollama.js");
   return {
     checkOllamaAvailable,
     embedText,

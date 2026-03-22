@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { buildIndex, queryRows } from "../shared-index.js";
+import { buildIndex, queryRows } from "../shared/shared-index.js";
 
 function runtimeFile(phrenPath: string, name: string) {
   return path.join(phrenPath, ".runtime", name);

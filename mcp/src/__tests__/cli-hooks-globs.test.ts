@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getProjectGlobBoost, clearProjectGlobCache } from "../cli-hooks-globs.js";
+import { getProjectGlobBoost, clearProjectGlobCache } from "../cli/cli-hooks-globs.js";
 import { makeTempDir } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";

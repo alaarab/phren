@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { addFindingToFile, addFindingsToFile } from "../shared-content.js";
+import { addFindingToFile, addFindingsToFile } from "../shared/shared-content.js";
 
 const PROJECT = "testapp";
 

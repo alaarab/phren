@@ -13,22 +13,22 @@ import { log as structuredLog, logWarn } from "./logger.js";
 import {
   buildIndex,
   updateFileInIndex as updateFileInIndexFn,
-} from "./shared-index.js";
+} from "./shared/shared-index.js";
 import { runCustomHooks } from "./hooks.js";
-import { register as registerSearch } from "./mcp-search.js";
-import { register as registerTask } from "./mcp-tasks.js";
-import { register as registerFinding } from "./mcp-finding.js";
-import { register as registerMemory } from "./mcp-memory.js";
-import { register as registerData } from "./mcp-data.js";
-import { register as registerGraph } from "./mcp-graph.js";
-import { register as registerSession } from "./mcp-session.js";
-import { register as registerOps } from "./mcp-ops.js";
-import { register as registerSkills } from "./mcp-skills.js";
-import { register as registerHooks } from "./mcp-hooks.js";
-import { register as registerExtract } from "./mcp-extract.js";
-import { register as registerConfig } from "./mcp-config.js";
-import type { McpContext } from "./mcp-types.js";
-import { mcpResponse } from "./mcp-types.js";
+import { register as registerSearch } from "./tools/mcp-search.js";
+import { register as registerTask } from "./tools/mcp-tasks.js";
+import { register as registerFinding } from "./tools/mcp-finding.js";
+import { register as registerMemory } from "./tools/mcp-memory.js";
+import { register as registerData } from "./tools/mcp-data.js";
+import { register as registerGraph } from "./tools/mcp-graph.js";
+import { register as registerSession } from "./tools/mcp-session.js";
+import { register as registerOps } from "./tools/mcp-ops.js";
+import { register as registerSkills } from "./tools/mcp-skills.js";
+import { register as registerHooks } from "./tools/mcp-hooks.js";
+import { register as registerExtract } from "./tools/mcp-extract.js";
+import { register as registerConfig } from "./tools/mcp-config.js";
+import type { McpContext } from "./tools/mcp-types.js";
+import { mcpResponse } from "./tools/mcp-types.js";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
@@ -76,7 +76,7 @@ async function main() {
     indexReady = true;
 
     // Load embedding cache and kick off background embedding (fire-and-forget)
-    const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+    const { getEmbeddingCache } = await import("./shared/shared-embedding-cache.js");
     const embCache = getEmbeddingCache(phrenPath);
     void startEmbeddingWarmup(db, embCache);
   } catch (error: unknown) {

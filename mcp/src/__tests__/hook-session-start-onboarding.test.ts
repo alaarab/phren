@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
-import { getSessionStartOnboardingNotice, getUntrackedProjectNotice } from "../cli-hooks-session.js";
+import { getSessionStartOnboardingNotice, getUntrackedProjectNotice } from "../cli/cli-hooks-session.js";
 
 describe("hook session start onboarding notice", () => {
   let tmp: { path: string; cleanup: () => void };

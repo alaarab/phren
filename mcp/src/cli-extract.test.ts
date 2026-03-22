@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseGitLogRecords, scoreFindingCandidate, ghCachePath, mineGithubCandidates, runGhJson } from "./cli-extract.js";
+import { parseGitLogRecords, scoreFindingCandidate, ghCachePath, mineGithubCandidates, runGhJson } from "./cli/cli-extract.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";

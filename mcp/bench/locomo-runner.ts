@@ -11,8 +11,8 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { addFindingToFile } from "../src/shared-content.js";
-import { buildIndex, queryDocRows } from "../src/shared-index.js";
+import { addFindingToFile } from "../src/shared/shared-content.js";
+import { buildIndex, queryDocRows } from "../src/shared/shared-index.js";
 import { buildRobustFtsQuery } from "../src/utils.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────

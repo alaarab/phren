@@ -8,7 +8,7 @@ import {
   getIndexPolicy,
   updateIndexPolicy,
   pruneDeadMemories,
-} from "./shared-governance.js";
+} from "./shared/shared-governance.js";
 import {
   validateFindingsFormat,
   validateTaskFormat,
@@ -17,7 +17,7 @@ import {
   filterTrustedFindings,
   addFindingToFile,
   extractConflictVersions,
-} from "./shared-content.js";
+} from "./shared/shared-content.js";
 import { grantAdmin, initTestPhrenRoot, makeTempDir, runCliExec } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";

@@ -6,7 +6,7 @@ import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { configureAllHooks } from "./hooks.js";
-import { configureClaude } from "./init.js";
+import { configureClaude } from "./init/init.js";
 import { getToolCount } from "./tool-registry.js";
 
 function npmExec(): string {

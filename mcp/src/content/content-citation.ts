@@ -1,0 +1,488 @@
+import * as fs from "fs";
+import * as path from "path";
+import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "../shared.js";
+import { errorMessage, runGitOrThrow } from "../utils.js";
+import type { RetentionPolicy } from "../shared/shared-governance.js";
+import { findingIdFromLine } from "../finding/finding-impact.js";
+import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
+import { FINDING_TYPE_DECAY, extractFindingType } from "../finding/finding-lifecycle.js";
+
+export interface FindingCitation {
+  created_at: string;
+  repo?: string;
+  file?: string;
+  line?: number;
+  commit?: string;
+  supersedes?: string;
+  task_item?: string;
+}
+
+export const FINDING_PROVENANCE_SOURCES = [
+  "human",
+  "agent",
+  "hook",
+  "extract",
+  "consolidation",
+  "unknown",
+] as const;
+
+export type FindingProvenanceSource = (typeof FINDING_PROVENANCE_SOURCES)[number];
+export type FindingSource = FindingProvenanceSource;
+
+export function isFindingProvenanceSource(value: string | undefined): value is FindingProvenanceSource {
+  if (!value) return false;
+  return (FINDING_PROVENANCE_SOURCES as readonly string[]).includes(value);
+}
+
+export interface FindingProvenance {
+  source?: FindingProvenanceSource;
+  machine?: string;
+  actor?: string;
+  tool?: string;
+  model?: string;
+  session_id?: string;
+  scope?: string;
+}
+
+export interface FindingTrustIssue {
+  date: string;
+  bullet: string;
+  reason: "stale" | "invalid_citation";
+}
+
+export interface TrustFilterOptions {
+  ttlDays?: number;
+  minConfidence?: number;
+  decay?: Partial<RetentionPolicy["decay"]>;
+  project?: string;
+  highImpactFindingIds?: Set<string>;
+}
+
+export function getHeadCommit(cwd: string): string | undefined {
+  try {
+    const commit = runGitOrThrow(cwd, ["rev-parse", "HEAD"], EXEC_TIMEOUT_QUICK_MS).trim();
+    return commit || undefined;
+  } catch (err: unknown) {
+    debugLog(`getHeadCommit: git rev-parse HEAD failed in ${cwd}: ${errorMessage(err)}`);
+    return undefined;
+  }
+}
+
+export function getRepoRoot(cwd: string): string | undefined {
+  try {
+    const root = runGitOrThrow(cwd, ["rev-parse", "--show-toplevel"], EXEC_TIMEOUT_QUICK_MS).trim();
+    return root || undefined;
+  } catch (err: unknown) {
+    debugLog(`getRepoRoot: not a git repo or git unavailable in ${cwd}: ${errorMessage(err)}`);
+    return undefined;
+  }
+}
+
+export function inferCitationLocation(repoPath: string, commit: string): { file?: string; line?: number } {
+  try {
+    const raw = runGitOrThrow(repoPath, ["show", "--pretty=format:", "--unified=0", "--no-color", commit], EXEC_TIMEOUT_MS);
+    let currentFile = "";
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("+++ b/")) {
+        currentFile = line.slice(6).trim();
+        continue;
+      }
+      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk && currentFile) {
+        return { file: currentFile, line: Number.parseInt(hunk[1], 10) };
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`citationLocationFromCommit: git show failed: ${errorMessage(err)}`);
+  }
+  return {};
+}
+
+export function buildCitationComment(citation: FindingCitation): string {
+  return `<!-- phren:cite ${JSON.stringify(citation)} -->`;
+}
+
+function readSourceToken(match: RegExpMatchArray | null | undefined): string | undefined {
+  if (!match?.[1]) return undefined;
+  const raw = match[1].trim();
+  if (!raw) return undefined;
+  if (raw.startsWith("\"") && raw.endsWith("\"") && raw.length >= 2) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+}
+
+export function buildSourceComment(source: FindingProvenance): string {
+  const parts: string[] = [];
+  if (source.source) parts.push(source.source);
+  if (source.machine) parts.push(`machine:${source.machine}`);
+  if (source.actor) parts.push(`actor:${source.actor}`);
+  if (source.tool) parts.push(`tool:${source.tool}`);
+  if (source.model) parts.push(`model:${source.model}`);
+  if (source.session_id) parts.push(`session:${source.session_id}`);
+  if (source.scope) parts.push(`scope:${source.scope}`);
+  return parts.length > 0 ? `<!-- source:${parts.join(" ")} -->` : "";
+}
+
+export function parseSourceComment(line: string): FindingProvenance | null {
+  const sourceMatch = line.match(METADATA_REGEX.source);
+  if (!sourceMatch) return null;
+
+  const payload = sourceMatch[1];
+  const firstToken = payload.trim().split(/\s+/)[0] || "";
+  const sourceRaw =
+    (firstToken && !firstToken.includes(":") ? firstToken : undefined) ??
+    readSourceToken(payload.match(/(?:^|\s)source:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)kind:(".*?"|\S+)/));
+  const source = isFindingProvenanceSource(sourceRaw) ? sourceRaw : undefined;
+  const machine =
+    readSourceToken(payload.match(/(?:^|\s)machine:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)host:(".*?"|\S+)/));
+  const actor =
+    readSourceToken(payload.match(/(?:^|\s)actor:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)agent:(".*?"|\S+)/));
+  const tool = readSourceToken(payload.match(/(?:^|\s)tool:(".*?"|\S+)/));
+  const model = readSourceToken(payload.match(/(?:^|\s)model:(".*?"|\S+)/));
+  const session_id =
+    readSourceToken(payload.match(/(?:^|\s)session:(".*?"|\S+)/)) ??
+    readSourceToken(payload.match(/(?:^|\s)session_id:(".*?"|\S+)/));
+  const rawScope = readSourceToken(payload.match(/(?:^|\s)scope:(".*?"|\S+)/));
+  const scope = rawScope === undefined
+    ? undefined
+    : (rawScope.trim() ? rawScope.trim() : "shared");
+
+  if (!source && !machine && !actor && !tool && !model && !session_id && !scope) return null;
+  return { source, machine, actor, tool, model, session_id, scope };
+}
+
+export function parseCitationComment(line: string): FindingCitation | null {
+  // Find opening marker and closing --> to handle multiline/escaped JSON.
+  // Uses marker-based extraction instead of regex to support multiline JSON.
+  const markerMatch = line.match(METADATA_REGEX.citationMarker);
+  if (!markerMatch) return null;
+  const jsonStart = markerMatch.index! + markerMatch[0].length;
+  const endMarker = line.indexOf("-->", jsonStart);
+  if (endMarker === -1) return null;
+  const jsonStr = line.slice(jsonStart, endMarker).trim();
+  if (!jsonStr.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    // Default created_at to empty string if missing, but still require it to be string-like
+    const created_at = typeof parsed.created_at === "string" ? parsed.created_at : "";
+    if (!created_at) return null;
+    return {
+      created_at,
+      repo: typeof parsed.repo === "string" ? parsed.repo : undefined,
+      file: typeof parsed.file === "string" ? parsed.file : undefined,
+      line: typeof parsed.line === "number" ? parsed.line : undefined,
+      commit: typeof parsed.commit === "string" ? parsed.commit : undefined,
+      supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
+      task_item: typeof parsed.task_item === "string" ? parsed.task_item : undefined,
+    };
+  } catch (err: unknown) {
+    debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+function resolveCitationFile(citation: FindingCitation): string | null {
+  if (!citation.file) return null;
+  if (citation.repo) {
+    const resolved = path.resolve(citation.repo, citation.file);
+    const repoRoot = path.resolve(citation.repo);
+    // Require resolved path to stay inside the repo to prevent file probing
+    if (resolved !== repoRoot && !resolved.startsWith(repoRoot + path.sep)) return null;
+    return resolved;
+  }
+  if (path.isAbsolute(citation.file)) return citation.file;
+  return path.resolve(citation.file);
+}
+
+// Session-scoped caches for git I/O during citation validation.
+// Keyed by "repo\0commit" and "repo\0file\0line" respectively.
+const MAX_CACHE_ENTRIES = 500;
+const commitExistsCache = new Map<string, boolean>();
+const blameCache = new Map<string, string | false>();
+
+function evictOldest<K, V>(cache: Map<K, V>): void {
+  if (cache.size <= MAX_CACHE_ENTRIES) return;
+  const first = cache.keys().next().value;
+  if (first !== undefined) cache.delete(first);
+}
+
+function commitExists(repoPath: string, commit: string): boolean {
+  const key = `${repoPath}\0${commit}`;
+  const cached = commitExistsCache.get(key);
+  if (cached !== undefined) return cached;
+  try {
+    runGitOrThrow(repoPath, ["cat-file", "-e", `${commit}^{commit}`], EXEC_TIMEOUT_QUICK_MS);
+    commitExistsCache.set(key, true);
+    evictOldest(commitExistsCache);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`commitExists: commit ${commit} not found in ${repoPath}: ${errorMessage(err)}`);
+    commitExistsCache.set(key, false);
+    evictOldest(commitExistsCache);
+    return false;
+  }
+}
+
+function cachedBlame(repoPath: string, relFile: string, line: number): string | false {
+  const key = `${repoPath}\0${relFile}\0${line}`;
+  const cached = blameCache.get(key);
+  if (cached !== undefined) return cached;
+  try {
+    const out = runGitOrThrow(repoPath, ["blame", "-L", `${line},${line}`, "--porcelain", relFile], 10_000).trim();
+    const first = out.split("\n")[0] || "";
+    blameCache.set(key, first);
+    evictOldest(blameCache);
+    return first;
+  } catch (err: unknown) {
+    debugLog(`cachedBlame: git blame failed for ${relFile}:${line}: ${errorMessage(err)}`);
+    blameCache.set(key, false);
+    evictOldest(blameCache);
+    return false;
+  }
+}
+
+export function validateFindingCitation(citation: FindingCitation): boolean {
+  if (citation.repo && !fs.existsSync(citation.repo)) return false;
+  if (citation.commit && citation.repo && !commitExists(citation.repo, citation.commit)) return false;
+
+  const resolvedFile = resolveCitationFile(citation);
+  if (resolvedFile) {
+    if (!fs.existsSync(resolvedFile)) return false;
+    if (citation.line !== undefined) {
+      if (!Number.isInteger(citation.line) || citation.line < 1) return false;
+      const lineCount = fs.readFileSync(resolvedFile, "utf8").split("\n").length;
+      if (citation.line > lineCount) return false;
+      if (citation.commit && citation.repo) {
+        const relFile = path.isAbsolute(resolvedFile)
+          ? path.relative(citation.repo, resolvedFile)
+          : resolvedFile;
+        const first = cachedBlame(citation.repo, relFile, citation.line);
+        if (first === false || !first.startsWith(citation.commit)) return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function parseLearningDateHeading(line: string): string | null {
+  const match = line.match(/^## (\d{4}-\d{2}-\d{2})$/);
+  return match ? match[1] : null;
+}
+
+function isDateStale(headingDate: string, ttlDays: number): boolean {
+  const ts = Date.parse(`${headingDate}T00:00:00Z`);
+  if (Number.isNaN(ts)) return false;
+  const ageDays = Math.floor((Date.now() - ts) / 86400000);
+  return ageDays > ttlDays;
+}
+
+function ageDaysForDate(headingDate: string): number | null {
+  const ts = Date.parse(`${headingDate}T00:00:00Z`);
+  if (Number.isNaN(ts)) return null;
+  return Math.floor((Date.now() - ts) / 86400000);
+}
+
+const DEFAULT_DECAY = {
+  d30: 1.0,
+  d60: 0.85,
+  d90: 0.65,
+  d120: 0.45,
+};
+
+// Treat undated findings as oldest decay tier so they eventually get filtered.
+// Previously 0.7 which meant undated findings never decayed.
+const DEFAULT_UNDATED_CONFIDENCE = DEFAULT_DECAY.d120;
+
+function confidenceForAge(ageDays: number, decay: RetentionPolicy["decay"]): number {
+  const { d30 = 1.0, d60 = 0.85, d90 = 0.65, d120 = 0.45 } = decay;
+  if (ageDays <= 0) return 1.0;
+  if (ageDays <= 30) return 1.0 - ((1.0 - d30) * (ageDays / 30));
+  if (ageDays <= 60) return d30 - ((d30 - d60) * ((ageDays - 30) / 30));
+  if (ageDays <= 90) return d60 - ((d60 - d90) * ((ageDays - 60) / 30));
+  if (ageDays <= 120) return d90 - ((d90 - d120) * ((ageDays - 90) / 30));
+  return d120; // don't decay further past d120; TTL handles final expiry
+}
+
+function wasFileModifiedAfter(filePath: string, findingDate: string): boolean {
+  try {
+    const stat = fs.statSync(filePath);
+    const fileModified = stat.mtime.toISOString().slice(0, 10);
+    return fileModified > findingDate;
+  } catch {
+    return false; // File doesn't exist or can't stat — handled by citation validation
+  }
+}
+
+export function filterTrustedFindings(content: string, ttlDays: number): string {
+  return filterTrustedFindingsDetailed(content, { ttlDays }).content;
+}
+
+export function filterTrustedFindingsDetailed(content: string, opts: number | TrustFilterOptions): {
+  content: string;
+  issues: FindingTrustIssue[];
+} {
+  const options: TrustFilterOptions = typeof opts === "number" ? { ttlDays: opts } : opts;
+  const ttlDays = options.ttlDays ?? 120;
+  const minConfidence = options.minConfidence ?? 0.35;
+  const decay: RetentionPolicy["decay"] = {
+    ...DEFAULT_DECAY,
+    ...(options.decay || {}),
+  };
+  const highImpactFindingIds = options.highImpactFindingIds;
+  const project = options.project;
+
+  const lines = content.split("\n");
+  const out: string[] = [];
+  const issues: FindingTrustIssue[] = [];
+  let currentDate: string | null = null;
+  let headingBuffer: string[] = [];
+  let inDetails = false;
+
+  const flushHeading = (hasEntries: boolean) => {
+    if (headingBuffer.length === 0) return;
+    if (hasEntries) {
+      out.push(...headingBuffer);
+      if (out.length > 0 && out[out.length - 1] !== "") out.push("");
+    }
+    headingBuffer = [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (isArchiveStart(line)) {
+      inDetails = true;
+      continue;
+    }
+    if (isArchiveEnd(line)) {
+      inDetails = false;
+      continue;
+    }
+    if (inDetails) continue;
+
+    const headingDate = parseLearningDateHeading(line);
+    if (headingDate) {
+      flushHeading(false);
+      currentDate = headingDate;
+      headingBuffer = [line];
+      continue;
+    }
+
+    if (line.startsWith("# ")) {
+      if (out.length === 0) out.push(line, "");
+      continue;
+    }
+
+    if (!line.startsWith("- ")) continue;
+
+    // Determine the effective date for this bullet: heading date, inline created tag, or citation
+    const next = lines[i + 1] ?? "";
+    const citation = parseCitationComment(next);
+
+    let effectiveDate = currentDate;
+    if (!effectiveDate) {
+      const inlineCreated = line.match(METADATA_REGEX.createdDate);
+      if (inlineCreated) {
+        effectiveDate = inlineCreated[1];
+      } else if (citation?.created_at) {
+        const citationDate = citation.created_at.slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(citationDate)) {
+          effectiveDate = citationDate;
+        }
+      }
+    }
+
+    const stale = effectiveDate ? isDateStale(effectiveDate, ttlDays) : false;
+    if (stale) {
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+      if (citation) i++;
+      continue;
+    }
+
+    let confidence: number;
+    if (effectiveDate) {
+      const age = ageDaysForDate(effectiveDate);
+      confidence = age !== null ? confidenceForAge(age, decay) : DEFAULT_UNDATED_CONFIDENCE;
+    } else {
+      confidence = DEFAULT_UNDATED_CONFIDENCE;
+    }
+
+    // Type-specific decay adjustment
+    const findingType = extractFindingType(line);
+    if (findingType) {
+      const typeConfig = FINDING_TYPE_DECAY[findingType];
+      if (typeConfig) {
+        // Override max age for this type
+        if (effectiveDate && typeConfig.maxAgeDays !== Infinity) {
+          const age = ageDaysForDate(effectiveDate);
+          if (age !== null && age > typeConfig.maxAgeDays) {
+            issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+            if (citation) i++;
+            continue;
+          }
+        }
+        // Apply type-specific decay multiplier
+        confidence *= typeConfig.decayMultiplier;
+        // Decisions and anti-patterns get a floor boost (never drop below 0.6)
+        if (typeConfig.maxAgeDays === Infinity) {
+          confidence = Math.max(confidence, 0.6);
+        }
+      }
+    }
+
+    if (citation && !validateFindingCitation(citation)) {
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "invalid_citation" });
+      i++;
+      continue;
+    }
+
+    // If cited file was modified after finding was created, lower confidence
+    if (citation && effectiveDate && citation.file) {
+      const fileModifiedAfterFinding = wasFileModifiedAfter(citation.file, effectiveDate);
+      if (fileModifiedAfterFinding) {
+        confidence *= 0.7; // File changed since finding was written — may be stale
+      }
+    }
+
+    if (!citation) confidence *= 0.8;
+    const provenance = parseSourceComment(line)?.source ?? "unknown";
+    if (provenance === "human") confidence *= 1.1;
+    if (provenance === "extract") confidence *= 0.9;
+    if (project && highImpactFindingIds?.size) {
+      const findingId = findingIdFromLine(line);
+      if (highImpactFindingIds.has(findingId)) confidence *= 1.15;
+    }
+    // Confirmed findings decay 3x slower — recompute confidence with reduced age
+    {
+      const findingId = findingIdFromLine(line);
+      if (findingId && highImpactFindingIds?.has(findingId) && effectiveDate) {
+        const realAge = ageDaysForDate(effectiveDate);
+        if (realAge !== null) {
+          const slowedAge = Math.floor(realAge / 3);
+          confidence = Math.max(confidence, confidenceForAge(slowedAge, decay));
+        }
+      }
+    }
+    confidence = Math.max(0, Math.min(1, confidence));
+    if (confidence < minConfidence) {
+      issues.push({ date: effectiveDate || "unknown", bullet: line, reason: "stale" });
+      if (citation) i++;
+      continue;
+    }
+
+    flushHeading(true);
+    out.push(line);
+    if (citation) {
+      out.push(next);
+      i++;
+    }
+  }
+
+  return { content: out.join("\n").trim(), issues };
+}

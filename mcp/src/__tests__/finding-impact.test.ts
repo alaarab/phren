@@ -5,7 +5,7 @@ import {
   getHighImpactFindings,
   logImpact,
   markImpactEntriesCompletedForSession,
-} from "../finding-impact.js";
+} from "../finding/finding-impact.js";
 import { impactLogFile } from "../shared.js";
 
 describe("finding-impact", () => {

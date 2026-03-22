@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeFindings, extractConflictVersions, validateFinding } from "./content-validate.js";
+import { mergeFindings, extractConflictVersions, validateFinding } from "./content/content-validate.js";
 import { isValidProjectName } from "./utils.js";
 
 describe("mergeFindings", () => {
