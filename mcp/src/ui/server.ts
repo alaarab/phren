@@ -21,9 +21,9 @@ import {
   removeTask as removeTaskStore,
   updateTask as updateTaskStore,
   TASKS_FILENAME,
-} from "../data/data-access.js";
+} from "../data/access.js";
 import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "../utils.js";
-import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import {
   buildGraph,
   collectProjectsForUI,
@@ -34,8 +34,8 @@ import {
   readSyncSnapshot,
   recentAccepted,
   recentUsage,
-} from "./memory-ui-data.js";
-import { CONSOLIDATION_ENTRY_THRESHOLD } from "../content/content-validate.js";
+} from "./data.js";
+import { CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import {
   ensureTopicReferenceDoc,
   getProjectTopicsResponse,
@@ -46,11 +46,12 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "../project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, VALID_TASK_MODES } from "../governance/governance-policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, VALID_TASK_MODES } from "../governance/policy.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
-import { findSkill } from "../skill/skill-registry.js";
-import { setSkillEnabledAndSync } from "../skill/skill-files.js";
-import { repairPreexistingInstall } from "../init/init-setup.js";
+import { findSkill } from "../skill/registry.js";
+import { setSkillEnabledAndSync } from "../skill/files.js";
+import { repairPreexistingInstall } from "../init/setup.js";
+import { logger } from "../logger.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -160,7 +161,7 @@ async function bindWebUiPort(
     const candidate = candidates[i];
     try {
       if (candidate !== requestedPort) {
-        process.stderr.write(`[phren] web-ui port ${candidate - 1} is busy, retrying on ${candidate}\n`);
+        logger.info("web-ui", `port ${candidate - 1} is busy, retrying on ${candidate}`);
       }
       return await listenOnLoopback(server, candidate);
     } catch (err: unknown) {
@@ -362,7 +363,7 @@ export function createWebUiHttpServer(
   try {
     repairPreexistingInstall(phrenPath);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] web-ui repair: ${errorMessage(err)}\n`);
+    logger.debug("web-ui", `web-ui repair: ${errorMessage(err)}`);
   }
   const authToken = opts?.authToken;
   const csrfTokens = opts?.csrfTokens;
@@ -866,7 +867,7 @@ export function createWebUiHttpServer(
         return;
       }
       try {
-        const { runSearch } = await import("../cli/cli-search.js");
+        const { runSearch } = await import("../cli/search.js");
         const result = await runSearch(
           { query, limit: Math.min(searchLimit, 50), project: searchProject, type: searchType },
           phrenPath,
@@ -1419,7 +1420,7 @@ export async function startWebUiServer(
   process.stdout.write(`phren web-ui running at ${publicUrl}\n`);
   process.stderr.write(`open: ${reviewUrl}\n`);
   if (!ready) {
-    process.stderr.write("[phren] web-ui health check did not confirm readiness before launch\n");
+    logger.warn("web-ui", "health check did not confirm readiness before launch");
   }
 
   const shouldAutoOpen = opts.autoOpen ?? Boolean(process.stdout.isTTY);
@@ -1428,11 +1429,11 @@ export async function startWebUiServer(
       if (opts.browserLauncher) await opts.browserLauncher(reviewUrl);
       else await launchWebUiBrowser(reviewUrl);
     } catch (err: unknown) {
-      process.stderr.write(`[phren] web-ui browser launch failed: ${errorMessage(err)}\n`);
+      logger.warn("web-ui", `browser launch failed: ${errorMessage(err)}`);
       process.stdout.write(`secure session URL: ${reviewUrl}\n`);
     }
   } else if (shouldAutoOpen && !ready) {
-    process.stderr.write("[phren] skipped auto-open because readiness check failed; use the secure URL below\n");
+    logger.warn("web-ui", "skipped auto-open because readiness check failed; use the secure URL below");
     process.stdout.write(`secure session URL: ${reviewUrl}\n`);
   } else {
     process.stdout.write(`secure session URL: ${reviewUrl}\n`);

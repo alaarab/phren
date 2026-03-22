@@ -2,8 +2,9 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog, debugLog, isRecord, memoryScoresFile, memoryUsageLogFile, runtimeFile } from "../shared.js";
-import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/shared-governance.js";
+import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 export interface EntryScore {
   impressions: number;
@@ -134,7 +135,7 @@ function readScoreJournal(phrenPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readScoreJournal parseLine: ${errorMessage(err)}\n`);
+          logger.debug("scores", `readScoreJournal parseLine: ${errorMessage(err)}`);
           return null;
         }
       })
@@ -165,7 +166,7 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
         try {
           return JSON.parse(line) as ScoreJournalEntry;
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal parseLine: ${errorMessage(err)}\n`);
+          logger.debug("scores", `claimScoreJournal parseLine: ${errorMessage(err)}`);
           return null;
         }
       })
@@ -179,7 +180,7 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
     try {
       fs.unlinkSync(claimedFile);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] claimScoreJournal unlinkClaim: ${errorMessage(err)}\n`);
+      logger.debug("scores", `claimScoreJournal unlinkClaim: ${errorMessage(err)}`);
     }
   }
 }

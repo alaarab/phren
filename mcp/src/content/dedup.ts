@@ -4,7 +4,8 @@ import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "../shared.js";
 import { isFeatureEnabled, safeProjectPath, errorMessage } from "../utils.js";
 import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "../phren-core.js";
-import { isInactiveFindingLine } from "../finding/finding-lifecycle.js";
+import { isInactiveFindingLine } from "../finding/lifecycle.js";
+import { logger } from "../logger.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ async function withCache<T>(
       return cache[key].result;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache load (${path.basename(cachePath)}): ${errorMessage(err)}\n`);
+    logger.debug("dedup", `withCache load (${path.basename(cachePath)}): ${errorMessage(err)}`);
   }
 
   const result = await compute();
@@ -75,7 +76,7 @@ async function withCache<T>(
     cache[key] = { result, ts: Date.now() };
     persistCache(cachePath, cache);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] withCache persist (${path.basename(cachePath)}): ${errorMessage(err)}\n`);
+    logger.debug("dedup", `withCache persist (${path.basename(cachePath)}): ${errorMessage(err)}`);
   }
 
   return result;
@@ -625,7 +626,7 @@ export async function checkSemanticConflicts(
         try {
           return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan stat: ${errorMessage(err)}\n`);
+          logger.debug("dedup", `crossProjectScan stat: ${errorMessage(err)}`);
           return null;
         }
       })
@@ -638,7 +639,7 @@ export async function checkSemanticConflicts(
       if (bullets.length > 0) sources.push({ bullets, sourceProject: proj.name });
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] crossProjectScan: ${errorMessage(err)}\n`);
+    logger.debug("dedup", `crossProjectScan: ${errorMessage(err)}`);
   }
 
   const annotations: string[] = [];

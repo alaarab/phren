@@ -1,12 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import { queryDocBySourceKey, queryRows, queryFragmentLinks, queryCrossProjectFragments, ensureGlobalEntitiesTable, logFragmentMiss } from "../shared/shared-index.js";
+import { queryDocBySourceKey, queryRows, queryFragmentLinks, queryCrossProjectFragments, ensureGlobalEntitiesTable, logFragmentMiss } from "../shared/index.js";
 import { runtimeFile } from "../shared.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
+import { logger } from "../logger.js";
 
 
 
@@ -251,7 +252,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [fragmentName, resolvedFragmentType, new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings fragmentInsert: ${errorMessage(err)}\n`);
+          logger.debug("graph", `link_findings fragmentInsert: ${errorMessage(err)}`);
         }
         const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [fragmentName, resolvedFragmentType]);
         if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) {
@@ -274,7 +275,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings docFragmentInsert: ${errorMessage(err)}\n`);
+          logger.debug("graph", `link_findings docFragmentInsert: ${errorMessage(err)}`);
         }
         const docFragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
         if (!docFragmentResult?.length || !docFragmentResult[0]?.values?.length) {
@@ -289,7 +290,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             [sourceId, targetId, relType, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings linkInsert: ${errorMessage(err)}\n`);
+          logger.debug("graph", `link_findings linkInsert: ${errorMessage(err)}`);
           return mcpResponse({ ok: false, error: "Failed to insert fragment link." });
         }
 
@@ -301,7 +302,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             [fragmentName, project, sourceDoc],
           );
         } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] link_findings globalFragments: ${errorMessage(err)}\n`);
+          logger.debug("graph", `link_findings globalFragments: ${errorMessage(err)}`);
         }
 
         // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
@@ -311,7 +312,7 @@ export function register(server: McpServer, ctx: McpContext): void {
             let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
             if (fs.existsSync(manualLinksPath)) {
               try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err: unknown) {
-                process.stderr.write(`[phren] link_findings manualLinksRead: manual-links.json is malformed — aborting to avoid data loss: ${errorMessage(err)}\n`);
+                logger.error("graph", `link_findings manualLinksRead: manual-links.json is malformed — aborting to avoid data loss: ${errorMessage(err)}`);
                 throw err;
               }
             }

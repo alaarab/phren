@@ -2,8 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { getProjectDirs } from "../shared.js";
-import { TASK_FILE_ALIASES } from "../data/data-tasks.js";
+import { TASK_FILE_ALIASES } from "../data/tasks.js";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 interface ChecksumStore {
   [relativePath: string]: { sha256: string; updatedAt: string };
@@ -24,7 +25,7 @@ function loadChecksums(phrenPath: string): ChecksumStore {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] loadChecksums: ${errorMessage(err)}\n`);
+    logger.debug("checksums", `loadChecksums: ${errorMessage(err)}`);
     return {};
   }
 }
