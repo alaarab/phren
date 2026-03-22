@@ -65,62 +65,6 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
-    "get_consolidation_status",
-    {
-      title: "◆ phren · consolidation status",
-      description:
-        "Check whether a project's FINDINGS.md needs consolidation. " +
-        "Returns entry count since last consolidation, threshold, and recommendation.",
-      inputSchema: z.object({
-        project: z.string().optional().describe("Project name. If omitted, checks all projects."),
-      }),
-    },
-    async ({ project }) => {
-      const projectDirs = project
-        ? (() => {
-            if (!isValidProjectName(project)) return [];
-            const dir = path.join(phrenPath, project);
-            return fs.existsSync(dir) ? [dir] : [];
-          })()
-        : getProjectDirs(phrenPath, profile);
-
-      if (project && projectDirs.length === 0) {
-        return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
-      }
-
-      const results: Array<{
-        project: string;
-        entriesSince: number;
-        threshold: number;
-        daysSince: number | null;
-        lastConsolidated: string | null;
-        recommended: boolean;
-      }> = [];
-
-      for (const dir of projectDirs) {
-        const status = getProjectConsolidationStatus(dir);
-        if (!status) continue;
-        results.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
-      }
-
-      if (results.length === 0) {
-        return mcpResponse({ ok: true, message: "No FINDINGS.md files found.", data: { results: [] } });
-      }
-
-      const lines = results.map(r =>
-        `${r.project}: ${r.entriesSince} entries since${r.lastConsolidated ? ` ${r.lastConsolidated}` : " (never consolidated)"}` +
-        `${r.recommended ? " — consolidation recommended" : ""}`
-      );
-
-      return mcpResponse({
-        ok: true,
-        message: lines.join("\n"),
-        data: { results },
-      });
-    }
-  );
-
   // ── health_check ───────────────────────────────────────────────────────────
 
   server.registerTool(
@@ -128,10 +72,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · health",
       description:
-        "Return phren health status: version, FTS index status, hook registration, and profile/machine info.",
-      inputSchema: z.object({}),
+        "Return phren health status: version, FTS index status, hook registration, profile/machine info, and consolidation status for all projects.",
+      inputSchema: z.object({
+        include_consolidation: z.boolean().optional()
+          .describe("Include consolidation status for all projects (default true)."),
+      }),
     },
-    async () => {
+    async ({ include_consolidation }) => {
       const activeProfile = (() => {
         try {
           return resolveRuntimeProfile(phrenPath);
@@ -240,6 +187,38 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
       }
 
+      // Consolidation status (opt-out via include_consolidation: false)
+      let consolidation: Array<{
+        project: string;
+        entriesSince: number;
+        threshold: number;
+        daysSince: number | null;
+        lastConsolidated: string | null;
+        recommended: boolean;
+      }> | null = null;
+
+      if (include_consolidation !== false) {
+        try {
+          const projectDirsForConsol = getProjectDirs(phrenPath, activeProfile);
+          const consolResults: typeof consolidation = [];
+          for (const dir of projectDirsForConsol) {
+            const status = getProjectConsolidationStatus(dir);
+            if (!status) continue;
+            consolResults.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
+          }
+          consolidation = consolResults;
+        } catch (err: unknown) {
+          logDebug("healthCheck consolidation", errorMessage(err));
+          consolidation = null;
+        }
+      }
+
+      const consolSummary = consolidation && consolidation.length > 0
+        ? consolidation.filter(r => r.recommended).length > 0
+          ? `Consolidation: ${consolidation.filter(r => r.recommended).length} project(s) need consolidation`
+          : `Consolidation: all projects OK`
+        : null;
+
       const lines = [
         `Phren v${version}`,
         `Profile: ${activeProfile || "(default)"}`,
@@ -251,6 +230,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Proactivity: ${proactivity}`,
         `Task mode: ${taskMode}`,
         `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
+        consolSummary,
         `Path: ${phrenPath}`,
       ].filter(Boolean);
 
@@ -269,6 +249,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           taskMode,
           syncStatus,
           syncDetail,
+          consolidation,
           phrenPath,
         },
       });

@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 67 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 66 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |
@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.29
 
-## MCP Tools (67)
+## MCP Tools (66)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -52,8 +52,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `get_project_summary(name)` : project summary + file list
 - `list_projects()` : all projects in active profile
 - `get_findings(project, limit?)` : read recent findings without a search query
-- `get_consolidation_status(project?)` : check if findings need consolidation
-- `health_check()` : run doctor checks and return results
+- `health_check(include_consolidation?)` : run doctor checks and return health status including consolidation status for all projects
 - `list_hook_errors()` : show recent hook errors and failures
 - `get_review_queue(project?)` : read items waiting for review
 - `manage_review_item(project, line, action, new_text?)` : manage a review queue item — approve (remove from queue), reject (remove from queue and FINDINGS.md), or edit (update text in both; requires new_text)
