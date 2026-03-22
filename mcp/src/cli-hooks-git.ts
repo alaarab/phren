@@ -276,10 +276,11 @@ export async function recoverPushConflict(cwd: string): Promise<{ ok: boolean; d
 }
 
 export function resolveSubprocessArgs(command: string): string[] | null {
+  // Prefer the entry script from process.argv[1] (the index.js that started this process)
+  const entry = process.argv[1];
+  if (entry && fs.existsSync(entry) && /index\.(ts|js)$/.test(entry)) return [entry, command];
+  // Fallback: look for index.js next to this file
   const distEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
   if (fs.existsSync(distEntry)) return [distEntry, command];
-  const sourceEntry = process.argv.find((a) => /[\\/]index\.(ts|js)$/.test(a) && fs.existsSync(a));
-  const runner = process.argv[1];
-  if (sourceEntry && runner) return [runner, sourceEntry, command];
   return null;
 }
