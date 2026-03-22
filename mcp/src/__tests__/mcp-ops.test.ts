@@ -80,11 +80,11 @@ describe("mcp-ops: health_check consolidation", () => {
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const res = parseResult(await server.call("get_consolidation_status", {}));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    expect(res.data.results).toBeDefined();
-    expect(res.data.results).toHaveLength(1);
-    const status = res.data.results[0];
+    expect(res.data.consolidation).toBeDefined();
+    expect(res.data.consolidation).toHaveLength(1);
+    const status = res.data.consolidation[0];
     expect(status.project).toBe("testapp");
     expect(status.entriesSince).toBe(30);
     expect(status.recommended).toBe(true);
@@ -98,11 +98,11 @@ describe("mcp-ops: health_check consolidation", () => {
     fs.writeFileSync(path.join(projectDir, "summary.md"), "# emptyapp\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# emptyapp Findings\n");
 
-    const res = parseResult(await server.call("get_consolidation_status", {}));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    expect(res.data.results).toBeDefined();
-    expect(res.data.results).toHaveLength(1);
-    const status = res.data.results[0];
+    expect(res.data.consolidation).toBeDefined();
+    expect(res.data.consolidation).toHaveLength(1);
+    const status = res.data.consolidation[0];
     expect(status.entriesSince).toBe(0);
     expect(status.recommended).toBe(false);
   });
@@ -123,17 +123,23 @@ describe("mcp-ops: health_check consolidation", () => {
     ].join("\n");
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), content);
 
-    const res = parseResult(await server.call("get_consolidation_status", {}));
+    const res = parseResult(await server.call("health_check", {}));
     expect(res.ok).toBe(true);
-    const status = res.data.results[0];
+    const status = res.data.consolidation[0];
     expect(status.entriesSince).toBe(10);
     expect(status.lastConsolidated).toBeNull();
     expect(status.recommended).toBe(false);
   });
 
-  it("returns empty results when no projects have findings", async () => {
-    const res = parseResult(await server.call("get_consolidation_status", { project: "nonexistent" }));
-    expect(res.ok).toBe(false);
+  it("omits consolidation data when include_consolidation is false", async () => {
+    const projectDir = path.join(tmp.path, "skipapp");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "summary.md"), "# skipapp\n");
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# skipapp Findings\n");
+
+    const res = parseResult(await server.call("health_check", { include_consolidation: false }));
+    expect(res.ok).toBe(true);
+    expect(res.data.consolidation).toBeNull();
   });
 });
 
