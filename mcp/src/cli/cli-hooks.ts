@@ -33,6 +33,7 @@ import {
   STOP_WORDS,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
+import { logger } from "../logger.js";
 import { isToolHookEnabled } from "../hooks.js";
 import { handleExtractMemories } from "./cli-extract.js";
 import { appendAuditLog } from "../shared.js";
@@ -213,7 +214,7 @@ export async function handleHookPrompt() {
 
   let raw = "";
   try { raw = await readStdin(); } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt stdinRead: ${errorMessage(err)}\n`);
+    if (process.env.PHREN_DEBUG) logger.debug("cli-hooks", `hookPrompt stdinRead: ${errorMessage(err)}`);
     process.exit(0);
   }
 
@@ -463,7 +464,7 @@ export async function handleHookPrompt() {
 
       if (noticeFile) {
         try { fs.writeFileSync(noticeFile, ""); } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookPrompt noticeFileWrite: ${errorMessage(err)}\n`);
+          if (process.env.PHREN_DEBUG) logger.debug("cli-hooks", `hookPrompt noticeFileWrite: ${errorMessage(err)}`);
         }
       }
     }

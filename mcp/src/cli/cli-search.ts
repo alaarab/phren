@@ -3,6 +3,7 @@ import * as path from "path";
 import { runtimeFile } from "../shared.js";
 import { buildIndex, extractSnippet, queryDocRows, queryRows, queryEntityLinks, queryDocBySourceKey, logEntityMiss } from "../shared/shared-index.js";
 import { buildFtsQueryVariants, errorMessage, isValidProjectName } from "../utils.js";
+import { logger } from "../logger.js";
 import { keywordFallbackSearch } from "../core/core-search.js";
 
 export interface SearchOptions {
@@ -52,7 +53,7 @@ export function readSearchHistory(phrenPath: string): SearchHistoryEntry[] {
       .filter(Boolean)
       .map((line) => JSON.parse(line) as SearchHistoryEntry);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readSearchHistory: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) logger.debug("cli-search", `readSearchHistory: ${errorMessage(err)}`);
     return [];
   }
 }
@@ -305,7 +306,7 @@ export async function runSearch(
           const { logSearchMiss } = await import("../tools/mcp-search.js");
           logSearchMiss(phrenPath, opts.query, opts.project);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] search logSearchMiss: ${errorMessage(err)}\n`);
+          if ((process.env.PHREN_DEBUG)) logger.debug("cli-search", `search logSearchMiss: ${errorMessage(err)}`);
         }
       }
       const scope = [
