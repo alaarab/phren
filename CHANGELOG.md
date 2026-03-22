@@ -3,7 +3,7 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.0.33] - 2026-03-22
 
 ### Security
 - Replace `execSync` with `execFileSync` in govern.ts
