@@ -105,8 +105,8 @@ import {
 } from "./cli-hooks-session.js";
 import { approximateTokens } from "./shared-retrieval.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { logger } from "./logger.js";
 import { handleTaskPromptLifecycle } from "./task-lifecycle.js";
-import { logDebug } from "./logger.js";
 
 function synonymTermKnown(term: string, map: Record<string, string[]>): boolean {
   if (Object.prototype.hasOwnProperty.call(map, term)) return true;
@@ -214,7 +214,7 @@ export async function handleHookPrompt() {
 
   let raw = "";
   try { raw = await readStdin(); } catch (err: unknown) {
-    logDebug("hookPrompt stdinRead", errorMessage(err));
+    logger.debug("hook-prompt", `stdinRead: ${errorMessage(err)}`);
     process.exit(0);
   }
 
@@ -464,7 +464,7 @@ export async function handleHookPrompt() {
 
       if (noticeFile) {
         try { fs.writeFileSync(noticeFile, ""); } catch (err: unknown) {
-          logDebug("hookPrompt noticeFileWrite", errorMessage(err));
+          logger.debug("hook-prompt", `noticeFileWrite: ${errorMessage(err)}`);
         }
       }
     }

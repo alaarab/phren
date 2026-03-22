@@ -33,7 +33,7 @@ import { addFinding, removeFinding } from "./core-finding.js";
 import { supersedeFinding, retractFinding, resolveFindingContradiction } from "./finding-lifecycle.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, type CustomHookEntry } from "./hooks.js";
 import { runtimeFile } from "./shared.js";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
@@ -98,7 +98,7 @@ function openInEditor(filePath: string): void {
   try {
     execFileSync(editor, [filePath], { stdio: "inherit" });
   } catch (err: unknown) {
-    logDebug("openInEditor", errorMessage(err));
+    logger.debug("cli-namespaces", `openInEditor: ${errorMessage(err)}`);
     console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
     process.exit(1);
   }
@@ -172,7 +172,7 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       fs.symlinkSync(source, dest);
       console.log(`Linked skill ${fileName} into ${project}.`);
     } catch (err: unknown) {
-      logDebug("skill add symlinkFailed", errorMessage(err));
+      logger.debug("cli-namespaces", `skill add symlinkFailed: ${errorMessage(err)}`);
       fs.copyFileSync(source, dest);
       console.log(`Copied skill ${fileName} into ${project}.`);
     }
@@ -508,7 +508,7 @@ export function handleDetectSkills(args: string[], profile: string) {
     try {
       if (fs.lstatSync(entryPath).isSymbolicLink()) continue;
     } catch (err: unknown) {
-      logDebug("skillList lstat", errorMessage(err));
+      logger.debug("cli-namespaces", `skillList lstat: ${errorMessage(err)}`);
     }
     const name = entry.replace(/\.md$/, "");
     if (trackedSkills.has(name)) continue;
@@ -729,7 +729,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
     }
-    const { readFindings, readTasks, resolveTaskFilePath } = await import("./data-access.js");
+    const { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } = await import("./data-access.js");
     const exported: Record<string, unknown> = { project: name, exportedAt: new Date().toISOString(), version: 1 };
     const summaryPath = path.join(projectDir, "summary.md");
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
@@ -924,7 +924,7 @@ function handleProjectsList(profile: string) {
     try {
       dirFiles = new Set(fs.readdirSync(projectDir));
     } catch (err: unknown) {
-      logDebug("projects list readdir", errorMessage(err));
+      logger.debug("cli-namespaces", `projects list readdir: ${errorMessage(err)}`);
       dirFiles = new Set();
     }
     const tags: string[] = [];
@@ -965,7 +965,7 @@ async function handleProjectsRemove(name: string, profile: string) {
   try {
     countFiles(projectDir);
   } catch (err: unknown) {
-    logDebug("projects remove countFiles", errorMessage(err));
+    logger.debug("cli-namespaces", `projects remove countFiles: ${errorMessage(err)}`);
   }
 
   const readline = await import("readline");
