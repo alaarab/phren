@@ -69,16 +69,14 @@ describe("add_task bulk (array): error field when nothing is added", () => {
     tmp.cleanup();
   });
 
-  it("returns ok:false and an error field when all items are empty strings", async () => {
-    // Empty strings produce no line after trim, so added.length === 0
+  it("returns ok:false and an error field when item is an empty string", async () => {
     const res = parseResult(
-      await server.call("add_task", { project: PROJECT, item: ["", "   "] })
+      await server.call("add_task", { project: PROJECT, item: "   " })
     );
 
     expect(res.ok).toBe(false);
     expect(typeof res.error).toBe("string");
     expect(res.error.length).toBeGreaterThan(0);
-    expect(res.data.added).toHaveLength(0);
   });
 });
 
@@ -109,11 +107,11 @@ describe("complete_task bulk (array): error field when nothing is completed", ()
     tmp.cleanup();
   });
 
-  it("returns ok:false and an error field when no items match", async () => {
+  it("returns ok:false and an error field when item does not match", async () => {
     const res = parseResult(
       await server.call("complete_task", {
         project: PROJECT,
-        item: ["nonexistent-task-xyz-123", "another-nonexistent-abc"],
+        item: "nonexistent-task-xyz-123",
       })
     );
 

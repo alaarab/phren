@@ -3,13 +3,14 @@
 
 /* Override landing page hero-specific stuff */
 body.docs-page {
-  padding-top: 60px;
+  padding-top: 0;
 }
 
 /* --- Docs layout: sidebar + content + optional TOC --- */
 .docs-layout {
   display: grid;
   grid-template-columns: 260px 1fr;
+  margin-top: 60px;
   min-height: calc(100vh - 60px);
 }
 
@@ -77,7 +78,7 @@ body.docs-page {
 /* --- Docs content --- */
 .docs-content {
   max-width: 860px;
-  padding: 48px 56px 100px;
+  padding: 28px 56px 100px;
 }
 
 .docs-content h1 {
@@ -418,7 +419,7 @@ h3:hover .anchor-link {
   }
 
   .docs-content {
-    padding: 32px 24px 80px;
+    padding: 24px 24px 80px;
   }
 
   .sidebar-toggle {

@@ -6,7 +6,7 @@ import { register } from "../tools/tasks.js";
 import { readTasks } from "../data/access.js";
 import type { McpContext } from "../tools/types.js";
 
-vi.mock("../github.js", () => ({
+vi.mock("../task/github.js", () => ({
   buildTaskIssueBody: vi.fn(() => "generated body"),
   createGithubIssueForTask: vi.fn(() => ({
     ok: true,
