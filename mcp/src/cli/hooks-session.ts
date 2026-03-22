@@ -38,7 +38,7 @@ import {
   appendFindingJournal,
   runDoctor,
   resolveRuntimeProfile,
-} from "./cli-hooks-context.js";
+} from "./hooks-context.js";
 import {
   sessionMetricsFile,
   qualityMarkers,
@@ -47,29 +47,30 @@ import {
   autoMergeConflicts,
   mergeTask,
   mergeFindings,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import { runGit } from "../utils.js";
-import { readInstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences } from "../init/preferences.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
-import { isTaskFileName, TASKS_FILENAME } from "../data/data-tasks.js";
+import { isTaskFileName, TASKS_FILENAME } from "../data/tasks.js";
 import {
   buildIndex,
   queryRows,
-} from "../shared/shared-index.js";
-import type { SelectedSnippet } from "../shared/shared-retrieval.js";
-import { filterTaskByPriority } from "../shared/shared-retrieval.js";
+} from "../shared/index.js";
+import type { SelectedSnippet } from "../shared/retrieval.js";
+import { filterTaskByPriority } from "../shared/retrieval.js";
+import { logger } from "../logger.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getPhrenPath());
 }
 
 // Re-export HookContext types for consumers
-export type { HookContext } from "./cli-hooks-context.js";
-export { buildHookContext, checkHookGuard, handleGuardSkip } from "./cli-hooks-context.js";
+export type { HookContext } from "./hooks-context.js";
+export { buildHookContext, checkHookGuard, handleGuardSkip } from "./hooks-context.js";
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 function readStdinJson<T>(): T | null {
@@ -77,7 +78,7 @@ function readStdinJson<T>(): T | null {
   try {
     return JSON.parse(fs.readFileSync(0, "utf-8")) as T;
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] readStdinJson: ${errorMessage(err)}\n`);
+    logger.debug("hooks-session", `readStdinJson: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -392,7 +393,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
       fd = fs.openSync(markers.lock, "wx");
     } catch (err: unknown) {
       // Another process already claimed the lock
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance lockClaim: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `backgroundMaintenance lockClaim: ${errorMessage(err)}`);
       return false;
     }
     try {
@@ -422,24 +423,24 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
     child.on("exit", (code, signal) => {
       const msg = `[${new Date().toISOString()}] exit code=${code ?? "null"} signal=${signal ?? "none"}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance exitLog: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `backgroundMaintenance exitLog: ${errorMessage(err)}`);
       }
       if (code === 0) {
         try { fs.writeFileSync(markers.done, new Date().toISOString() + "\n"); } catch (err: unknown) {
-          if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance doneMarker: ${errorMessage(err)}\n`);
+          logger.debug("hooks-session", `backgroundMaintenance doneMarker: ${errorMessage(err)}`);
         }
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnExit: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `backgroundMaintenance unlockOnExit: ${errorMessage(err)}`);
       }
     });
     child.on("error", (spawnErr) => {
       const msg = `[${new Date().toISOString()}] spawn error: ${spawnErr.message}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance errorLog: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `backgroundMaintenance errorLog: ${errorMessage(err)}`);
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnError: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `backgroundMaintenance unlockOnError: ${errorMessage(err)}`);
       }
     });
     fs.closeSync(logFd);
@@ -455,10 +456,10 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
         `[${new Date().toISOString()}] spawn failed: ${errMsg}\n`
       );
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance logSpawnFailure: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `backgroundMaintenance logSpawnFailure: ${errorMessage(err)}`);
     }
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] backgroundMaintenance unlockOnFailure: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `backgroundMaintenance unlockOnFailure: ${errorMessage(err)}`);
     }
     return false;
   }
@@ -670,7 +671,7 @@ export async function handleHookSessionStart() {
   const unsyncedCommits = hasRemote ? await countUnsyncedCommits(phrenPath) : 0;
 
   try { const { trackSession } = await import("../telemetry.js"); trackSession(phrenPath); } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookSessionStart trackSession: ${errorMessage(err)}\n`);
+    logger.debug("hooks-session", `hookSessionStart trackSession: ${errorMessage(err)}`);
   }
 
   updateRuntimeHealth(phrenPath, {
@@ -849,7 +850,7 @@ export async function handleHookStop() {
                 }
               }
             } catch (err: unknown) {
-              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookStop transcriptParse: ${errorMessage(err)}\n`);
+              logger.debug("hooks-session", `hookStop transcriptParse: ${errorMessage(err)}`);
             }
           }
           captureInput = assistantTexts.join("\n");
@@ -872,7 +873,7 @@ export async function handleHookStop() {
                 capReached = true;
               }
             } catch (err: unknown) {
-              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookStop sessionCapCheck: ${errorMessage(err)}\n`);
+              logger.debug("hooks-session", `hookStop sessionCapCheck: ${errorMessage(err)}`);
             }
           }
           if (!capReached) {
@@ -1318,7 +1319,7 @@ export async function handleHookTool() {
       try {
         raw = fs.readFileSync(0, "utf-8");
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool stdinRead: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `hookTool stdinRead: ${errorMessage(err)}`);
         process.exit(0);
       }
     }
@@ -1327,7 +1328,7 @@ export async function handleHookTool() {
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool stdinParse: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `hookTool stdinParse: ${errorMessage(err)}`);
       process.exit(0);
     }
 
@@ -1377,7 +1378,7 @@ export async function handleHookTool() {
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool toolLog: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `hookTool toolLog: ${errorMessage(err)}`);
     }
 
     const cooldownFile = runtimeFile(ctx.phrenPath, "hook-tool-cooldown");
@@ -1390,7 +1391,7 @@ export async function handleHookTool() {
         }
       }
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool cooldownStat: ${errorMessage(err)}\n`);
+      logger.debug("hooks-session", `hookTool cooldownStat: ${errorMessage(err)}`);
     }
 
     if (activeProject && sessionId) {
@@ -1406,7 +1407,7 @@ export async function handleHookTool() {
           activeProject = null;
         }
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool sessionCapCheck: ${errorMessage(err)}\n`);
+        logger.debug("hooks-session", `hookTool sessionCapCheck: ${errorMessage(err)}`);
       }
     }
 
@@ -1424,19 +1425,19 @@ export async function handleHookTool() {
 
         if (candidates.length > 0) {
           try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch (err: unknown) {
-            if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool cooldownWrite: ${errorMessage(err)}\n`);
+            logger.debug("hooks-session", `hookTool cooldownWrite: ${errorMessage(err)}`);
           }
           if (sessionId) {
             try {
               const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
               let count = 0;
               try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch (err: unknown) {
-                if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool capFileRead: ${errorMessage(err)}\n`);
+                logger.debug("hooks-session", `hookTool capFileRead: ${errorMessage(err)}`);
               }
               count += candidates.length;
               fs.writeFileSync(capFile, count.toString());
             } catch (err: unknown) {
-              if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] hookTool capFileWrite: ${errorMessage(err)}\n`);
+              logger.debug("hooks-session", `hookTool capFileWrite: ${errorMessage(err)}`);
             }
           }
         }

@@ -21,11 +21,11 @@ import { getMachineName } from "../machine-identity.js";
 import { execFileSync } from "child_process";
 import {
   GOVERNANCE_SCHEMA_VERSION,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import { STOP_WORDS, errorMessage } from "../utils.js";
-import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./init-shared.js";
-import { readInstallPreferences } from "./init-preferences.js";
-import { TASKS_FILENAME } from "../data/data-tasks.js";
+import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./shared.js";
+import { readInstallPreferences } from "./preferences.js";
+import { TASKS_FILENAME } from "../data/tasks.js";
 import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
@@ -34,8 +34,9 @@ import {
   type ProjectOwnershipMode,
 } from "../project-config.js";
 import { getBuiltinTopicConfig, normalizeBuiltinTopicDomain, type BuiltinTopic } from "../project-topics.js";
-import { writeSkillMd } from "../link/link-skills.js";
-import { syncScopeSkillsToDir } from "../skill/skill-files.js";
+import { writeSkillMd } from "../link/skills.js";
+import { syncScopeSkillsToDir } from "../skill/files.js";
+import { logger } from "../logger.js";
 
 export interface PostInitCheck {
   name: string;
@@ -1238,15 +1239,13 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] updateMachinesYaml parse: ${errorMessage(err)}\n`);
+    logger.debug("setup", `updateMachinesYaml parse: ${errorMessage(err)}`);
   }
 
   // Passive init/link refreshes should keep an existing mapping; explicit overrides can remap.
   if (hasExistingMapping && !machine && !profile) return;
   const mapping = setMachineProfile(phrenPath, machineName, profileName);
-  if (!mapping.ok && (process.env.PHREN_DEBUG)) {
-    process.stderr.write(`[phren] updateMachinesYaml setMachineProfile: ${mapping.error}\n`);
-  }
+  if (!mapping.ok) logger.debug("setup", `updateMachinesYaml setMachineProfile: ${mapping.error}`);
 }
 
 /**
@@ -1449,7 +1448,7 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     const entries = fs.readdirSync(phrenPath, { withFileTypes: true });
     ftsOk = entries.some(d => d.isDirectory() && !d.name.startsWith("."));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] runPostInitVerify projectScan: ${errorMessage(err)}\n`);
+    logger.debug("setup", `runPostInitVerify projectScan: ${errorMessage(err)}`);
     ftsOk = false;
   }
   checks.push({

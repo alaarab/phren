@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
-import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "../data/data-access.js";
+import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "../data/access.js";
 import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "../shared.js";
+import { logger } from "../logger.js";
 
 
 
@@ -92,7 +93,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           decoded = JSON.parse(rawData);
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project jsonParse: ${errorMessage(err)}\n`);
+          logger.debug("data", `import_project jsonParse: ${errorMessage(err)}`);
           return mcpResponse({ ok: false, error: "Invalid JSON input." });
         }
 
@@ -254,7 +255,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 fs.renameSync(backupDir, projectDir);
               }
             } catch (err: unknown) {
-              if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupRestore: ${errorMessage(err)}\n`);
+              logger.debug("data", `import_project backupRestore: ${errorMessage(err)}`);
             }
           }
           return mcpResponse({
@@ -269,7 +270,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           try {
             fs.rmSync(backupDir, { recursive: true, force: true });
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] import_project backupCleanup: ${errorMessage(err)}\n`);
+            logger.debug("data", `import_project backupCleanup: ${errorMessage(err)}`);
           }
         }
         return mcpResponse({

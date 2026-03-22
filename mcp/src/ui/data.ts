@@ -9,16 +9,17 @@ import {
   homePath,
 } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { readInstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences } from "../init/preferences.js";
 import { readCustomHooks } from "../hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "../provider-adapters.js";
 import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "../project-config.js";
-import { getAllSkills } from "../skill/skill-registry.js";
-import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "../data/data-tasks.js";
-import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/shared-index.js";
-import type { SqlJsDatabase } from "../shared/shared-index.js";
+import { getAllSkills } from "../skill/registry.js";
+import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "../data/tasks.js";
+import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
+import type { SqlJsDatabase } from "../shared/index.js";
 import { readProjectTopics, classifyTopicForText } from "../project-topics.js";
-import { entryScoreKey } from "../governance/governance-scores.js";
+import { entryScoreKey } from "../governance/scores.js";
+import { logger } from "../logger.js";
 
 interface EntryScore {
   impressions: number;
@@ -558,7 +559,7 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
       }
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] memory-ui filterByProfile: ${errorMessage(err)}\n`);
+    logger.debug("memory-ui", `memory-ui filterByProfile: ${errorMessage(err)}`);
   }
 
   const results: ProjectInfo[] = [];

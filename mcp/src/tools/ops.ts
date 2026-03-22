@@ -1,18 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { runtimeFile, getProjectDirs } from "../shared.js";
-import { findFtsCacheForPath } from "../shared/shared-index.js";
+import { findFtsCacheForPath } from "../shared/index.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import { readReviewQueue, readReviewQueueAcrossProjects, approveQueueItem, rejectQueueItem, editQueueItem } from "../data/data-access.js";
-import { addProjectFromPath } from "../core/core-project.js";
+import { readReviewQueue, readReviewQueueAcrossProjects, approveQueueItem, rejectQueueItem, editQueueItem } from "../data/access.js";
+import { addProjectFromPath } from "../core/project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "../project-config.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getMachineName } from "../machine-identity.js";
 
-import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/content-validate.js";
+import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
+import { logger } from "../logger.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, withWriteQueue } = ctx;
@@ -146,7 +147,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck version: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck version: ${errorMessage(err)}`);
       }
 
       // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
@@ -154,24 +155,24 @@ export function register(server: McpServer, ctx: McpContext): void {
       try {
         indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck ftsCacheCheck: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck ftsCacheCheck: ${errorMessage(err)}`);
       }
 
       // Hook registration
       let hooksEnabled = false;
       try {
-        const { getHooksEnabledPreference } = await import("../init/init-preferences.js");
+        const { getHooksEnabledPreference } = await import("../init/preferences.js");
         hooksEnabled = getHooksEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck hooksEnabled: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck hooksEnabled: ${errorMessage(err)}`);
       }
 
       let mcpEnabled = false;
       try {
-        const { getMcpEnabledPreference } = await import("../init/init-preferences.js");
+        const { getMcpEnabledPreference } = await import("../init/preferences.js");
         mcpEnabled = getMcpEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck mcpEnabled: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck mcpEnabled: ${errorMessage(err)}`);
       }
 
       // Profile/machine info
@@ -179,7 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           return getMachineName();
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck machineName: ${errorMessage(err)}\n`);
+          logger.debug("ops", `healthCheck machineName: ${errorMessage(err)}`);
         }
         return undefined;
       })();
@@ -190,20 +191,20 @@ export function register(server: McpServer, ctx: McpContext): void {
       let proactivity: string = "high";
       let taskMode: string = "auto";
       try {
-        const { getWorkflowPolicy } = await import("../governance/governance-policy.js");
+        const { getWorkflowPolicy } = await import("../governance/policy.js");
         const workflowPolicy = getWorkflowPolicy(phrenPath);
         taskMode = workflowPolicy.taskMode;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck taskMode: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck taskMode: ${errorMessage(err)}`);
       }
       let syncIntent: string | undefined;
       try {
-        const { readInstallPreferences } = await import("../init/init-preferences.js");
+        const { readInstallPreferences } = await import("../init/preferences.js");
         const prefs = readInstallPreferences(phrenPath);
         proactivity = prefs.proactivity || "high";
         syncIntent = prefs.syncIntent;
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] healthCheck proactivity: ${errorMessage(err)}\n`);
+        logger.debug("ops", `healthCheck proactivity: ${errorMessage(err)}`);
       }
 
       // Determine sync status from intent + git remote state
@@ -289,7 +290,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ check_data }) => {
-      const { runDoctor } = await import("../link/link-doctor.js");
+      const { runDoctor } = await import("../link/doctor.js");
       const result = await runDoctor(phrenPath, true, check_data ?? false);
       const lines = result.checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.name}: ${c.detail}`);
       const failCount = result.checks.filter((c) => !c.ok).length;
@@ -346,7 +347,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
         } catch (err: unknown) {
-          if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readErrorLines: ${errorMessage(err)}\n`);
+          logger.debug("ops", `readErrorLines: ${errorMessage(err)}`);
           return [];
         }
       }

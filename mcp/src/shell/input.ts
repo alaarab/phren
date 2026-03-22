@@ -30,15 +30,15 @@ import {
   workNextTask,
   loadShellState,
   resolveTaskFilePath,
-} from "../data/data-access.js";
+} from "../data/access.js";
 import { runtimeFile } from "../shared.js";
-import { handleGovernMemories } from "../cli/cli-govern.js";
-import { runSearch } from "../cli/cli-search.js";
-import { consolidateProjectFindings } from "../governance/governance-policy.js";
-import { style } from "./shell-render.js";
-import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./shell-types.js";
-import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./shell-view.js";
-import { removeSkillPath, setSkillEnabledAndSync } from "../skill/skill-files.js";
+import { handleGovernMemories } from "../cli/govern.js";
+import { runSearch } from "../cli/search.js";
+import { consolidateProjectFindings } from "../governance/policy.js";
+import { style } from "./render.js";
+import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
+import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./view.js";
+import { removeSkillPath, setSkillEnabledAndSync } from "../skill/files.js";
 import {
   resultMsg,
   editDistance,
@@ -47,8 +47,9 @@ import {
   normalizeSection,
   tasksByFilter,
   queueByFilter,
-} from "./shell-palette.js";
+} from "./palette.js";
 import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
 
 /** Interface for the shell methods that executePalette needs */
 export interface PaletteHost {
@@ -383,7 +384,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
           }
         }
       } catch (err: unknown) {
-        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] shell status gitStatus: ${errorMessage(err)}\n`);
+        logger.debug("shell-input", `shell status gitStatus: ${errorMessage(err)}`);
       }
 
       const auditPathNew = runtimeFile(host.phrenPath, "audit.log");
