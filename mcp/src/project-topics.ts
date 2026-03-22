@@ -4,6 +4,7 @@ import * as path from "path";
 import { debugLog } from "./shared.js";
 import { withFileLock } from "./shared/governance.js";
 import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName, safeProjectPath } from "./utils.js";
+import { walkDirectory } from "./shared/data-utils.js";
 
 export interface ProjectTopic {
   slug: string;
@@ -398,7 +399,7 @@ function normalizeKeyword(raw: string): string {
     .trim();
 }
 
-export function normalizeTopicSlug(raw: string): string {
+function normalizeTopicSlug(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
@@ -483,11 +484,11 @@ function projectDirPath(phrenPath: string, project: string): string | null {
   return safeProjectPath(phrenPath, project);
 }
 
-export function topicReferenceDir(phrenPath: string, project: string): string | null {
+function topicReferenceDir(phrenPath: string, project: string): string | null {
   return safeProjectPath(phrenPath, project, "reference", "topics");
 }
 
-export function topicReferenceRelativePath(slug: string): string {
+function topicReferenceRelativePath(slug: string): string {
   return path.posix.join("reference", "topics", `${slug}.md`);
 }
 
@@ -635,7 +636,7 @@ function readProjectDomain(phrenPath: string, project: string): string | undefin
   return typeof parsed?.domain === "string" ? parsed.domain : undefined;
 }
 
-export function getBuiltinTopics(phrenPath?: string, project?: string): ProjectTopic[] {
+function getBuiltinTopics(phrenPath?: string, project?: string): ProjectTopic[] {
   const domain = (phrenPath && project) ? readProjectDomain(phrenPath, project) : undefined;
   const fallback = ensureGeneralTopic(resolveDomainTopics(domain)).map((topic) => ({ ...topic, keywords: [...topic.keywords] }));
   if (!phrenPath || !project || !isValidProjectName(project)) return fallback;
@@ -681,7 +682,7 @@ export function readProjectTopics(phrenPath: string, project: string): { source:
   return { source: "custom", topics: normalized, domain: typeof parsed.domain === "string" ? parsed.domain : undefined };
 }
 
-export function readPinnedTopics(phrenPath: string, project: string): ProjectTopic[] {
+function readPinnedTopics(phrenPath: string, project: string): ProjectTopic[] {
   const configPath = topicConfigPath(phrenPath, project);
   if (!configPath || !fs.existsSync(configPath)) return [];
   const parsed = readJsonFile<ProjectTopicConfigFile>(configPath);
@@ -787,23 +788,12 @@ function normalizeBullet(line: string): string {
 
 function collectArchivedBulletsRecursively(dirPath: string): Set<string> {
   const bullets = new Set<string>();
-  if (!fs.existsSync(dirPath)) return bullets;
-  const stack = [dirPath];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-      const content = fs.readFileSync(fullPath, "utf8");
-      for (const line of content.split("\n")) {
-        if (!line.startsWith("- ")) continue;
-        const normalized = normalizeBullet(line);
-        if (normalized) bullets.add(normalized);
-      }
+  for (const filePath of walkDirectory(dirPath)) {
+    const content = fs.readFileSync(filePath, "utf8");
+    for (const line of content.split("\n")) {
+      if (!line.startsWith("- ")) continue;
+      const normalized = normalizeBullet(line);
+      if (normalized) bullets.add(normalized);
     }
   }
   return bullets;
@@ -896,21 +886,7 @@ function parseLegacyTopicEntries(content: string, project: string): { slug: stri
 }
 
 function readReferenceMarkdownFiles(referenceDir: string): string[] {
-  if (!fs.existsSync(referenceDir)) return [];
-  const files: string[] = [];
-  const stack = [referenceDir];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (entry.isFile() && entry.name.endsWith(".md")) files.push(fullPath);
-    }
-  }
-  return files.sort();
+  return walkDirectory(referenceDir).sort();
 }
 
 function relativeToProject(projectDir: string, filePath: string): string {
@@ -931,7 +907,7 @@ function safeStatIso(filePath: string): string {
   try { return new Date(fs.statSync(filePath).mtimeMs).toISOString(); } catch { return ""; }
 }
 
-export function listProjectTopicDocs(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicDocInfo[] {
+function listProjectTopicDocs(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicDocInfo[] {
   const projectDir = projectDirPath(phrenPath, project);
   if (!projectDir) return [];
   const topicList = topics ?? readProjectTopics(phrenPath, project).topics;
@@ -979,7 +955,7 @@ export function listProjectReferenceDocs(phrenPath: string, project: string, top
   return { topicDocs, otherDocs };
 }
 
-export function listLegacyTopicDocs(phrenPath: string, project: string): LegacyTopicDocInfo[] {
+function listLegacyTopicDocs(phrenPath: string, project: string): LegacyTopicDocInfo[] {
   const projectDir = projectDirPath(phrenPath, project);
   const referenceDir = safeProjectPath(phrenPath, project, "reference");
   if (!projectDir || !referenceDir || !fs.existsSync(referenceDir)) return [];
@@ -1041,7 +1017,7 @@ function collectSuggestionCorpus(phrenPath: string, project: string): string {
   return parts.join("\n");
 }
 
-export function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
+function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
   const currentTopics = topics ?? readProjectTopics(phrenPath, project).topics;
   const pinnedTopics = readPinnedTopics(phrenPath, project);
   if (pinnedTopics.length > 0) {

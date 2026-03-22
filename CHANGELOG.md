@@ -3,6 +3,48 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Security
+- Replace `execSync` with `execFileSync` in govern.ts
+- Fix searchFragments VS Code param mismatch (`query` → `name`)
+- Add symlink check to `read_skill`
+- Validate workflow domain `taskMode`/`findingSensitivity` enums
+
+### Fixed
+- Atomic writes for all FINDINGS.md mutation paths (removeFinding, editFinding, removeFindings, writeQueueLines, lifecycle ops)
+- Unicode support in FTS5 sanitizer and keyword extraction
+- Finding insertion skips archived `<details>` blocks
+- Filter retracted/superseded findings from hook-context
+- Unbalanced quote handling in FTS5 sanitizer
+- Space normalization order in FTS5 asterisk stripping
+- addProject cancel when ownership picker dismissed
+- MCP startup error no longer leaks stack traces
+- Output channel leak in VS Code hooksStatus
+- healthTimer stacking in VS Code statusBar
+- Unguarded audit log append in governance
+- JSON.parse crash in install preferences reader
+- Hook config failures now show visible warnings
+
+### Changed
+- Extract detached child spawn into `shared/process.ts` helper
+- Extract Ollama availability check into `shared/ollama.ts` helper
+- Refactor `prepareFinding` from 10 positional params to options object
+- Extract magic numbers into named constants
+- Remove 8 dead exports from `project-topics.ts`
+- Break up `createWebUiHttpServer` into per-route handlers
+- Break up tools `register()` functions into per-tool handlers
+- Extract sync status, directory walker, RetentionPolicy duplications
+- Fix unsafe null type casts in `shared/index.ts`
+- Fix as-any casts in `init-update.ts` and `init-fresh.ts`
+
+### Removed
+- Delete dead files: `init-migrate.ts`, `init-dryrun.ts`
+
+### Docs
+- Fix 4 stale file paths in CLAUDE.md
+- Add re-init reminder to `phren update` command
+
 ## [0.0.32] - 2026-03-22
 
 ### Changed

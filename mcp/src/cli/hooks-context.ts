@@ -81,6 +81,7 @@ export {
 } from "../shared.js";
 export {
   updateRuntimeHealth,
+  buildSyncStatus,
   getWorkflowPolicy,
   withFileLock,
   appendReviewQueue,

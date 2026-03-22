@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "../shared.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import { withFileLock } from "../shared/governance.js";
+import { walkDirectory } from "../shared/data-utils.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./metadata.js";
 import { logger } from "../logger.js";
@@ -77,24 +78,13 @@ function parseActiveEntries(content: string): ParsedEntry[] {
 /** Build a Set of normalized bullet strings from all .md files in referenceDir. */
 function buildArchivedBulletSet(referenceDir: string): Set<string> {
   const bulletSet = new Set<string>();
-  if (!fs.existsSync(referenceDir)) return bulletSet;
   try {
-    const stack = [referenceDir];
-    while (stack.length > 0) {
-      const current = stack.pop()!;
-      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-        const fullPath = path.join(current, entry.name);
-        if (entry.isDirectory()) {
-          stack.push(fullPath);
-          continue;
-        }
-        if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-        const content = fs.readFileSync(fullPath, "utf8");
-        for (const line of content.split("\n")) {
-          if (!line.startsWith("- ")) continue;
-          const normalizedLine = stripComments(line).replace(/^-\s+/, "").trim().toLowerCase();
-          if (normalizedLine) bulletSet.add(normalizedLine);
-        }
+    for (const filePath of walkDirectory(referenceDir)) {
+      const content = fs.readFileSync(filePath, "utf8");
+      for (const line of content.split("\n")) {
+        if (!line.startsWith("- ")) continue;
+        const normalizedLine = stripComments(line).replace(/^-\s+/, "").trim().toLowerCase();
+        if (normalizedLine) bulletSet.add(normalizedLine);
       }
     }
   } catch (err: unknown) {

@@ -17,11 +17,457 @@ import { logger } from "../logger.js";
 import { getRuntimeHealth } from "../governance/policy.js";
 import { countUnsyncedCommits } from "../cli-hooks-git.js";
 
-export function register(server: McpServer, ctx: McpContext): void {
+// ── Handlers ─────────────────────────────────────────────────────────────────
+
+async function handleAddProject(
+  ctx: McpContext,
+  { path: targetPath, profile: requestedProfile, ownership }: {
+    path: string;
+    profile?: string;
+    ownership?: (typeof PROJECT_OWNERSHIP_MODES)[number];
+  },
+) {
   const { phrenPath, profile, withWriteQueue } = ctx;
+  return withWriteQueue(async () => {
+    try {
+      const added = addProjectFromPath(
+        phrenPath,
+        targetPath,
+        requestedProfile || profile || undefined,
+        parseProjectOwnershipMode(ownership) ?? undefined
+      );
+      if (!added.ok) {
+        return mcpResponse({
+          ok: false,
+          error: added.error,
+        });
+      }
+      await ctx.rebuildIndex();
+      return mcpResponse({
+        ok: true,
+        message: `Added project "${added.data.project}" (${added.data.ownership}) from ${added.data.path}.`,
+        data: added.data,
+      });
+    } catch (err: unknown) {
+      return mcpResponse({
+        ok: false,
+        error: errorMessage(err),
+      });
+    }
+  });
+}
 
-  // ── add_project ────────────────────────────────────────────────────────────
+async function handleHealthCheck(
+  ctx: McpContext,
+  { include_consolidation }: { include_consolidation?: boolean },
+) {
+  const { phrenPath, profile } = ctx;
+  const activeProfile = (() => {
+    try {
+      return resolveRuntimeProfile(phrenPath);
+    } catch {
+      return profile || "";
+    }
+  })();
 
+  // Version
+  let version = "unknown";
+  try {
+    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    version = pkg.version || "unknown";
+  } catch (err: unknown) {
+    logger.debug("healthCheck version", errorMessage(err));
+  }
+
+  // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
+  let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
+  try {
+    indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
+  } catch (err: unknown) {
+    logger.debug("healthCheck ftsCacheCheck", errorMessage(err));
+  }
+
+  // Hook registration
+  let hooksEnabled = false;
+  try {
+    const { getHooksEnabledPreference } = await import("../init/preferences.js");
+    hooksEnabled = getHooksEnabledPreference(phrenPath);
+  } catch (err: unknown) {
+    logger.debug("healthCheck hooksEnabled", errorMessage(err));
+  }
+
+  let mcpEnabled = false;
+  try {
+    const { getMcpEnabledPreference } = await import("../init/preferences.js");
+    mcpEnabled = getMcpEnabledPreference(phrenPath);
+  } catch (err: unknown) {
+    logger.debug("healthCheck mcpEnabled", errorMessage(err));
+  }
+
+  // Profile/machine info
+  const machineName = (() => {
+    try {
+      return getMachineName();
+    } catch (err: unknown) {
+      logger.debug("healthCheck machineName", errorMessage(err));
+    }
+    return undefined;
+  })();
+
+  const projectCount = getProjectDirs(phrenPath, activeProfile).length;
+
+  // Proactivity and taskMode
+  let proactivity: string = "high";
+  let taskMode: string = "auto";
+  try {
+    const { getWorkflowPolicy } = await import("../governance/policy.js");
+    const workflowPolicy = getWorkflowPolicy(phrenPath);
+    taskMode = workflowPolicy.taskMode;
+  } catch (err: unknown) {
+    logger.debug("healthCheck taskMode", errorMessage(err));
+  }
+  let syncIntent: string | undefined;
+  try {
+    const { readInstallPreferences } = await import("../init/preferences.js");
+    const prefs = readInstallPreferences(phrenPath);
+    proactivity = prefs.proactivity || "high";
+    syncIntent = prefs.syncIntent;
+  } catch (err: unknown) {
+    logger.debug("healthCheck proactivity", errorMessage(err));
+  }
+
+  // Determine sync status from intent + git remote state
+  let syncStatus: "synced" | "local-only" | "broken" = "local-only";
+  let syncDetail = "no git remote configured";
+  try {
+    const { execFileSync } = await import("child_process");
+    const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    }).trim();
+    if (remote) {
+      try {
+        execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
+          stdio: ["ignore", "ignore", "ignore"],
+          timeout: 10_000,
+        });
+        syncStatus = "synced";
+        syncDetail = `origin=${remote}`;
+      } catch {
+        syncStatus = syncIntent === "sync" ? "broken" : "local-only";
+        syncDetail = `origin=${remote} (unreachable)`;
+      }
+    } else if (syncIntent === "sync") {
+      syncStatus = "broken";
+      syncDetail = "sync was configured but no remote found";
+    }
+  } catch {
+    if (syncIntent === "sync") {
+      syncStatus = "broken";
+      syncDetail = "sync was configured but no remote found";
+    }
+  }
+
+  // Consolidation status (opt-out via include_consolidation: false)
+  type ConsolidationEntry = {
+    project: string;
+    entriesSince: number;
+    threshold: number;
+    daysSince: number | null;
+    lastConsolidated: string | null;
+    recommended: boolean;
+  };
+  let consolidation: ConsolidationEntry[] | null = null;
+
+  if (include_consolidation !== false) {
+    try {
+      const projectDirsForConsol = getProjectDirs(phrenPath, activeProfile);
+      const consolResults: ConsolidationEntry[] = [];
+      for (const dir of projectDirsForConsol) {
+        const status = getProjectConsolidationStatus(dir);
+        if (!status) continue;
+        consolResults.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
+      }
+      consolidation = consolResults;
+    } catch (err: unknown) {
+      logger.debug("healthCheck consolidation", errorMessage(err));
+      consolidation = null;
+    }
+  }
+
+  const consolSummary = consolidation && consolidation.length > 0
+    ? consolidation.filter(r => r.recommended).length > 0
+      ? `Consolidation: ${consolidation.filter(r => r.recommended).length} project(s) need consolidation`
+      : `Consolidation: all projects OK`
+    : null;
+
+  // ── Surface RuntimeHealth warnings ────────────────────────────────────
+  const warnings: string[] = [];
+  try {
+    const health = getRuntimeHealth(phrenPath);
+
+    // Unsynced commits
+    const unsynced = health.lastSync?.unsyncedCommits;
+    if (typeof unsynced === "number" && unsynced > 0) {
+      warnings.push(`Unsynced commits: ${unsynced} (last push: ${health.lastSync?.lastPushStatus ?? "unknown"})`);
+    }
+
+    // Last auto-save error
+    if (health.lastAutoSave?.status === "error") {
+      warnings.push(`Last auto-save failed: ${health.lastAutoSave.detail ?? "unknown error"}`);
+    }
+
+    // Last push error
+    if (health.lastSync?.lastPushStatus === "error") {
+      warnings.push(`Last push failed: ${health.lastSync.lastPushDetail ?? "unknown error"}`);
+    }
+
+    // Check live unsynced commit count (may differ from cached value)
+    if (syncStatus === "synced" && (!unsynced || unsynced === 0)) {
+      try {
+        const liveUnsynced = await countUnsyncedCommits(phrenPath);
+        if (liveUnsynced > 0) {
+          warnings.push(`Unsynced commits: ${liveUnsynced} (not yet pushed to remote)`);
+        }
+      } catch (err: unknown) {
+        logger.debug("healthCheck liveUnsyncedCount", errorMessage(err));
+      }
+    }
+  } catch (err: unknown) {
+    logger.debug("healthCheck runtimeHealth", errorMessage(err));
+  }
+
+  // Check recent sync warnings from background sync
+  try {
+    const syncWarningsPath = runtimeFile(phrenPath, "sync-warnings.jsonl");
+    if (fs.existsSync(syncWarningsPath)) {
+      const lines = fs.readFileSync(syncWarningsPath, "utf8").trim().split("\n").filter(Boolean);
+      const recent = lines.slice(-3); // last 3 warnings
+      for (const line of recent) {
+        try {
+          const entry = JSON.parse(line) as { at?: string; error?: string; unsyncedCommits?: number };
+          if (entry.error) {
+            warnings.push(`Background sync failed (${entry.at?.slice(0, 16) ?? "unknown"}): ${entry.error}`);
+          }
+        } catch { /* skip malformed lines */ }
+      }
+    }
+  } catch (err: unknown) {
+    logger.debug("healthCheck syncWarnings", errorMessage(err));
+  }
+
+  // Check embedding/LLM availability
+  try {
+    const { getOllamaUrl } = await import("../shared/ollama.js");
+    const ollamaUrl = getOllamaUrl();
+    const hasEmbeddingApi = !!process.env.PHREN_EMBEDDING_API_URL;
+    if (!ollamaUrl && !hasEmbeddingApi) {
+      warnings.push("Embeddings: unavailable (no Ollama or API endpoint configured)");
+    }
+    const hasLlmEndpoint = !!process.env.PHREN_LLM_ENDPOINT;
+    const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+    const hasOpenAiKey = !!process.env.OPENAI_API_KEY;
+    if (!hasLlmEndpoint && !hasAnthropicKey && !hasOpenAiKey) {
+      warnings.push("LLM features: unavailable (no API key configured for semantic dedup/conflict detection)");
+    }
+  } catch (err: unknown) {
+    logger.debug("healthCheck serviceAvailability", errorMessage(err));
+  }
+
+  const warningsSummary = warnings.length > 0
+    ? `Warnings: ${warnings.length}\n  ${warnings.join("\n  ")}`
+    : null;
+
+  const lines = [
+    `Phren v${version}`,
+    `Profile: ${activeProfile || "(default)"}`,
+    machineName ? `Machine: ${machineName}` : null,
+    `Projects: ${projectCount}`,
+    `FTS index: ${indexStatus.exists ? `ok (${Math.round((indexStatus.sizeBytes ?? 0) / 1024)} KB)` : "missing"}`,
+    `MCP: ${mcpEnabled ? "enabled" : "disabled"}`,
+    `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
+    `Proactivity: ${proactivity}`,
+    `Task mode: ${taskMode}`,
+    `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
+    consolSummary,
+    warningsSummary,
+    `Path: ${phrenPath}`,
+  ].filter(Boolean);
+
+  return mcpResponse({
+    ok: true,
+    message: lines.join("\n"),
+    data: {
+      version,
+      profile: activeProfile || "(default)",
+      machine: machineName ?? null,
+      projectCount,
+      index: indexStatus,
+      mcpEnabled,
+      hooksEnabled,
+      proactivity,
+      taskMode,
+      syncStatus,
+      syncDetail,
+      consolidation,
+      warnings,
+      phrenPath,
+    },
+  });
+}
+
+async function handleDoctorFix(
+  _ctx: McpContext,
+  { check_data }: { check_data?: boolean },
+) {
+  const { phrenPath } = _ctx;
+  const { runDoctor } = await import("../link/doctor.js");
+  const result = await runDoctor(phrenPath, true, check_data ?? false);
+  const lines = result.checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.name}: ${c.detail}`);
+  const failCount = result.checks.filter((c) => !c.ok).length;
+  return mcpResponse({
+    ok: result.ok,
+    ...(result.ok ? {} : { error: `${failCount} check(s) could not be auto-fixed: ${lines.filter((l) => l.startsWith("FAIL")).join("; ")}` }),
+    message: result.ok
+      ? `Doctor fix complete: all ${result.checks.length} checks passed`
+      : `Doctor fix complete: ${failCount} issue(s) remain`,
+    data: {
+      machine: result.machine,
+      profile: result.profile,
+      checks: result.checks,
+      summary: lines.join("\n"),
+    },
+  });
+}
+
+async function handleListHookErrors(
+  ctx: McpContext,
+  { limit }: { limit?: number },
+) {
+  const { phrenPath } = ctx;
+  const maxEntries = limit ?? 20;
+
+  const ERROR_PATTERNS = [
+    /\berror\b/i,
+    /\bfail(ed|ure|s)?\b/i,
+    /\bcrash(ed)?\b/i,
+    /\btimeout\b/i,
+    /\bEXCEPTION\b/i,
+    /\bEACCES\b/,
+    /\bENOENT\b/,
+    /\bEPERM\b/,
+    /\bENOSPC\b/,
+  ];
+
+  function readErrorLines(filePath: string, filterPatterns: boolean): string[] {
+    try {
+      if (!fs.existsSync(filePath)) return [];
+      const content = fs.readFileSync(filePath, "utf8");
+      const lines = content.split("\n").filter(l => l.trim());
+      if (!filterPatterns) return lines; // hook-errors.log: every line is an error
+      return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
+    } catch (err: unknown) {
+      logger.debug("readErrorLines", errorMessage(err));
+      return [];
+    }
+  }
+
+  // hook-errors.log contains only hook failure lines (no filtering needed)
+  const hookErrors = readErrorLines(runtimeFile(phrenPath, "hook-errors.log"), false);
+  // debug.log may contain non-error lines, so filter
+  const debugErrors = readErrorLines(runtimeFile(phrenPath, "debug.log"), true);
+
+  const allErrors = [...hookErrors, ...debugErrors];
+
+  if (allErrors.length === 0) {
+    return mcpResponse({
+      ok: true,
+      message: "No error entries found. Hook errors go to hook-errors.log; general errors require PHREN_DEBUG=1.",
+      data: { errors: [], total: 0 },
+    });
+  }
+
+  const recent = allErrors.slice(-maxEntries);
+  return mcpResponse({
+    ok: true,
+    message: `Found ${allErrors.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
+    data: { errors: recent, total: allErrors.length, sources: { hookErrors: hookErrors.length, debugErrors: debugErrors.length } },
+  });
+}
+
+async function handleGetReviewQueue(
+  ctx: McpContext,
+  { project }: { project?: string },
+) {
+  const { phrenPath, profile } = ctx;
+  if (project && !isValidProjectName(project)) {
+    return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+  }
+  if (project) {
+    const result = readReviewQueue(phrenPath, project);
+    if (!result.ok) {
+      return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+    }
+    const items = result.data.map((item) => ({ ...item, project }));
+    return mcpResponse({
+      ok: true,
+      message: `${items.length} queue item(s) for "${project}".`,
+      data: { items },
+    });
+  }
+
+  const result = readReviewQueueAcrossProjects(phrenPath, profile);
+  if (!result.ok) {
+    return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+  }
+  return mcpResponse({
+    ok: true,
+    message: `${result.data.length} queue item(s) across all projects.`,
+    data: { items: result.data },
+  });
+}
+
+async function handleManageReviewItem(
+  ctx: McpContext,
+  { project, line, action, new_text }: {
+    project: string;
+    line: string;
+    action: "approve" | "reject" | "edit";
+    new_text?: string;
+  },
+) {
+  const { phrenPath, withWriteQueue } = ctx;
+  if (!isValidProjectName(project)) {
+    return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
+  }
+  if (action === "edit" && !new_text) {
+    return mcpResponse({ ok: false, error: "new_text is required when action is 'edit'." });
+  }
+  return withWriteQueue(async () => {
+    let result;
+    switch (action) {
+      case "approve":
+        result = approveQueueItem(phrenPath, project, line);
+        break;
+      case "reject":
+        result = rejectQueueItem(phrenPath, project, line);
+        break;
+      case "edit":
+        result = editQueueItem(phrenPath, project, line, new_text!);
+        break;
+    }
+    if (!result.ok) {
+      return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+    }
+    return mcpResponse({ ok: true, message: result.data });
+  });
+}
+
+// ── Registration ─────────────────────────────────────────────────────────────
+
+export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "add_project",
     {
@@ -36,38 +482,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("How Phren should treat repo-facing instruction files: phren-managed, detached, or repo-managed."),
       }),
     },
-    async ({ path: targetPath, profile: requestedProfile, ownership }) => {
-      return withWriteQueue(async () => {
-        try {
-          const added = addProjectFromPath(
-            phrenPath,
-            targetPath,
-            requestedProfile || profile || undefined,
-            parseProjectOwnershipMode(ownership) ?? undefined
-          );
-          if (!added.ok) {
-            return mcpResponse({
-              ok: false,
-              error: added.error,
-            });
-          }
-          await ctx.rebuildIndex();
-          return mcpResponse({
-            ok: true,
-            message: `Added project "${added.data.project}" (${added.data.ownership}) from ${added.data.path}.`,
-            data: added.data,
-          });
-        } catch (err: unknown) {
-          return mcpResponse({
-            ok: false,
-            error: errorMessage(err),
-          });
-        }
-      });
-    }
+    (params) => handleAddProject(ctx, params),
   );
-
-  // ── health_check ───────────────────────────────────────────────────────────
 
   server.registerTool(
     "health_check",
@@ -80,265 +496,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Include consolidation status for all projects (default true)."),
       }),
     },
-    async ({ include_consolidation }) => {
-      const activeProfile = (() => {
-        try {
-          return resolveRuntimeProfile(phrenPath);
-        } catch {
-          return profile || "";
-        }
-      })();
-
-      // Version
-      let version = "unknown";
-      try {
-        const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..", "package.json");
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-        version = pkg.version || "unknown";
-      } catch (err: unknown) {
-        logger.debug("healthCheck version", errorMessage(err));
-      }
-
-      // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
-      let indexStatus: { exists: boolean; sizeBytes?: number } = { exists: false };
-      try {
-        indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
-      } catch (err: unknown) {
-        logger.debug("healthCheck ftsCacheCheck", errorMessage(err));
-      }
-
-      // Hook registration
-      let hooksEnabled = false;
-      try {
-        const { getHooksEnabledPreference } = await import("../init/preferences.js");
-        hooksEnabled = getHooksEnabledPreference(phrenPath);
-      } catch (err: unknown) {
-        logger.debug("healthCheck hooksEnabled", errorMessage(err));
-      }
-
-      let mcpEnabled = false;
-      try {
-        const { getMcpEnabledPreference } = await import("../init/preferences.js");
-        mcpEnabled = getMcpEnabledPreference(phrenPath);
-      } catch (err: unknown) {
-        logger.debug("healthCheck mcpEnabled", errorMessage(err));
-      }
-
-      // Profile/machine info
-      const machineName = (() => {
-        try {
-          return getMachineName();
-        } catch (err: unknown) {
-          logger.debug("healthCheck machineName", errorMessage(err));
-        }
-        return undefined;
-      })();
-
-      const projectCount = getProjectDirs(phrenPath, activeProfile).length;
-
-      // Proactivity and taskMode
-      let proactivity: string = "high";
-      let taskMode: string = "auto";
-      try {
-        const { getWorkflowPolicy } = await import("../governance/policy.js");
-        const workflowPolicy = getWorkflowPolicy(phrenPath);
-        taskMode = workflowPolicy.taskMode;
-      } catch (err: unknown) {
-        logger.debug("healthCheck taskMode", errorMessage(err));
-      }
-      let syncIntent: string | undefined;
-      try {
-        const { readInstallPreferences } = await import("../init/preferences.js");
-        const prefs = readInstallPreferences(phrenPath);
-        proactivity = prefs.proactivity || "high";
-        syncIntent = prefs.syncIntent;
-      } catch (err: unknown) {
-        logger.debug("healthCheck proactivity", errorMessage(err));
-      }
-
-      // Determine sync status from intent + git remote state
-      let syncStatus: "synced" | "local-only" | "broken" = "local-only";
-      let syncDetail = "no git remote configured";
-      try {
-        const { execFileSync } = await import("child_process");
-        const remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "origin"], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-          timeout: 5_000,
-        }).trim();
-        if (remote) {
-          try {
-            execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "origin"], {
-              stdio: ["ignore", "ignore", "ignore"],
-              timeout: 10_000,
-            });
-            syncStatus = "synced";
-            syncDetail = `origin=${remote}`;
-          } catch {
-            syncStatus = syncIntent === "sync" ? "broken" : "local-only";
-            syncDetail = `origin=${remote} (unreachable)`;
-          }
-        } else if (syncIntent === "sync") {
-          syncStatus = "broken";
-          syncDetail = "sync was configured but no remote found";
-        }
-      } catch {
-        if (syncIntent === "sync") {
-          syncStatus = "broken";
-          syncDetail = "sync was configured but no remote found";
-        }
-      }
-
-      // Consolidation status (opt-out via include_consolidation: false)
-      type ConsolidationEntry = {
-        project: string;
-        entriesSince: number;
-        threshold: number;
-        daysSince: number | null;
-        lastConsolidated: string | null;
-        recommended: boolean;
-      };
-      let consolidation: ConsolidationEntry[] | null = null;
-
-      if (include_consolidation !== false) {
-        try {
-          const projectDirsForConsol = getProjectDirs(phrenPath, activeProfile);
-          const consolResults: ConsolidationEntry[] = [];
-          for (const dir of projectDirsForConsol) {
-            const status = getProjectConsolidationStatus(dir);
-            if (!status) continue;
-            consolResults.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
-          }
-          consolidation = consolResults;
-        } catch (err: unknown) {
-          logger.debug("healthCheck consolidation", errorMessage(err));
-          consolidation = null;
-        }
-      }
-
-      const consolSummary = consolidation && consolidation.length > 0
-        ? consolidation.filter(r => r.recommended).length > 0
-          ? `Consolidation: ${consolidation.filter(r => r.recommended).length} project(s) need consolidation`
-          : `Consolidation: all projects OK`
-        : null;
-
-      // ── Surface RuntimeHealth warnings ────────────────────────────────────
-      const warnings: string[] = [];
-      try {
-        const health = getRuntimeHealth(phrenPath);
-
-        // Unsynced commits
-        const unsynced = health.lastSync?.unsyncedCommits;
-        if (typeof unsynced === "number" && unsynced > 0) {
-          warnings.push(`Unsynced commits: ${unsynced} (last push: ${health.lastSync?.lastPushStatus ?? "unknown"})`);
-        }
-
-        // Last auto-save error
-        if (health.lastAutoSave?.status === "error") {
-          warnings.push(`Last auto-save failed: ${health.lastAutoSave.detail ?? "unknown error"}`);
-        }
-
-        // Last push error
-        if (health.lastSync?.lastPushStatus === "error") {
-          warnings.push(`Last push failed: ${health.lastSync.lastPushDetail ?? "unknown error"}`);
-        }
-
-        // Check live unsynced commit count (may differ from cached value)
-        if (syncStatus === "synced" && (!unsynced || unsynced === 0)) {
-          try {
-            const liveUnsynced = await countUnsyncedCommits(phrenPath);
-            if (liveUnsynced > 0) {
-              warnings.push(`Unsynced commits: ${liveUnsynced} (not yet pushed to remote)`);
-            }
-          } catch (err: unknown) {
-            logger.debug("healthCheck liveUnsyncedCount", errorMessage(err));
-          }
-        }
-      } catch (err: unknown) {
-        logger.debug("healthCheck runtimeHealth", errorMessage(err));
-      }
-
-      // Check recent sync warnings from background sync
-      try {
-        const syncWarningsPath = runtimeFile(phrenPath, "sync-warnings.jsonl");
-        if (fs.existsSync(syncWarningsPath)) {
-          const lines = fs.readFileSync(syncWarningsPath, "utf8").trim().split("\n").filter(Boolean);
-          const recent = lines.slice(-3); // last 3 warnings
-          for (const line of recent) {
-            try {
-              const entry = JSON.parse(line) as { at?: string; error?: string; unsyncedCommits?: number };
-              if (entry.error) {
-                warnings.push(`Background sync failed (${entry.at?.slice(0, 16) ?? "unknown"}): ${entry.error}`);
-              }
-            } catch { /* skip malformed lines */ }
-          }
-        }
-      } catch (err: unknown) {
-        logger.debug("healthCheck syncWarnings", errorMessage(err));
-      }
-
-      // Check embedding/LLM availability
-      try {
-        const { getOllamaUrl } = await import("../shared/ollama.js");
-        const ollamaUrl = getOllamaUrl();
-        const hasEmbeddingApi = !!process.env.PHREN_EMBEDDING_API_URL;
-        if (!ollamaUrl && !hasEmbeddingApi) {
-          warnings.push("Embeddings: unavailable (no Ollama or API endpoint configured)");
-        }
-        const hasLlmEndpoint = !!process.env.PHREN_LLM_ENDPOINT;
-        const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
-        const hasOpenAiKey = !!process.env.OPENAI_API_KEY;
-        if (!hasLlmEndpoint && !hasAnthropicKey && !hasOpenAiKey) {
-          warnings.push("LLM features: unavailable (no API key configured for semantic dedup/conflict detection)");
-        }
-      } catch (err: unknown) {
-        logger.debug("healthCheck serviceAvailability", errorMessage(err));
-      }
-
-      const warningsSummary = warnings.length > 0
-        ? `Warnings: ${warnings.length}\n  ${warnings.join("\n  ")}`
-        : null;
-
-      const lines = [
-        `Phren v${version}`,
-        `Profile: ${activeProfile || "(default)"}`,
-        machineName ? `Machine: ${machineName}` : null,
-        `Projects: ${projectCount}`,
-        `FTS index: ${indexStatus.exists ? `ok (${Math.round((indexStatus.sizeBytes ?? 0) / 1024)} KB)` : "missing"}`,
-        `MCP: ${mcpEnabled ? "enabled" : "disabled"}`,
-        `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
-        `Proactivity: ${proactivity}`,
-        `Task mode: ${taskMode}`,
-        `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
-        consolSummary,
-        warningsSummary,
-        `Path: ${phrenPath}`,
-      ].filter(Boolean);
-
-      return mcpResponse({
-        ok: true,
-        message: lines.join("\n"),
-        data: {
-          version,
-          profile: activeProfile || "(default)",
-          machine: machineName ?? null,
-          projectCount,
-          index: indexStatus,
-          mcpEnabled,
-          hooksEnabled,
-          proactivity,
-          taskMode,
-          syncStatus,
-          syncDetail,
-          consolidation,
-          warnings,
-          phrenPath,
-        },
-      });
-    }
+    (params) => handleHealthCheck(ctx, params),
   );
-
-  // ── doctor_fix ─────────────────────────────────────────────────────────────
 
   server.registerTool(
     "doctor_fix",
@@ -352,28 +511,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Also validate data files (tasks, findings, governance). Default false."),
       }),
     },
-    async ({ check_data }) => {
-      const { runDoctor } = await import("../link/doctor.js");
-      const result = await runDoctor(phrenPath, true, check_data ?? false);
-      const lines = result.checks.map((c) => `${c.ok ? "ok" : "FAIL"} ${c.name}: ${c.detail}`);
-      const failCount = result.checks.filter((c) => !c.ok).length;
-      return mcpResponse({
-        ok: result.ok,
-        ...(result.ok ? {} : { error: `${failCount} check(s) could not be auto-fixed: ${lines.filter((l) => l.startsWith("FAIL")).join("; ")}` }),
-        message: result.ok
-          ? `Doctor fix complete: all ${result.checks.length} checks passed`
-          : `Doctor fix complete: ${failCount} issue(s) remain`,
-        data: {
-          machine: result.machine,
-          profile: result.profile,
-          checks: result.checks,
-          summary: lines.join("\n"),
-        },
-      });
-    }
+    (params) => handleDoctorFix(ctx, params),
   );
-
-  // ── list_hook_errors ───────────────────────────────────────────────────────
 
   server.registerTool(
     "list_hook_errors",
@@ -387,59 +526,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           .describe("Max error entries to return (default 20)."),
       }),
     },
-    async ({ limit }) => {
-      const maxEntries = limit ?? 20;
-
-      const ERROR_PATTERNS = [
-        /\berror\b/i,
-        /\bfail(ed|ure|s)?\b/i,
-        /\bcrash(ed)?\b/i,
-        /\btimeout\b/i,
-        /\bEXCEPTION\b/i,
-        /\bEACCES\b/,
-        /\bENOENT\b/,
-        /\bEPERM\b/,
-        /\bENOSPC\b/,
-      ];
-
-      function readErrorLines(filePath: string, filterPatterns: boolean): string[] {
-        try {
-          if (!fs.existsSync(filePath)) return [];
-          const content = fs.readFileSync(filePath, "utf8");
-          const lines = content.split("\n").filter(l => l.trim());
-          if (!filterPatterns) return lines; // hook-errors.log: every line is an error
-          return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
-        } catch (err: unknown) {
-          logger.debug("readErrorLines", errorMessage(err));
-          return [];
-        }
-      }
-
-      // hook-errors.log contains only hook failure lines (no filtering needed)
-      const hookErrors = readErrorLines(runtimeFile(phrenPath, "hook-errors.log"), false);
-      // debug.log may contain non-error lines, so filter
-      const debugErrors = readErrorLines(runtimeFile(phrenPath, "debug.log"), true);
-
-      const allErrors = [...hookErrors, ...debugErrors];
-
-      if (allErrors.length === 0) {
-        return mcpResponse({
-          ok: true,
-          message: "No error entries found. Hook errors go to hook-errors.log; general errors require PHREN_DEBUG=1.",
-          data: { errors: [], total: 0 },
-        });
-      }
-
-      const recent = allErrors.slice(-maxEntries);
-      return mcpResponse({
-        ok: true,
-        message: `Found ${allErrors.length} error(s), showing last ${recent.length}:\n\n${recent.join("\n")}`,
-        data: { errors: recent, total: allErrors.length, sources: { hookErrors: hookErrors.length, debugErrors: debugErrors.length } },
-      });
-    }
+    (params) => handleListHookErrors(ctx, params),
   );
-
-  // ── get_review_queue ─────────────────────────────────────────────────────
 
   server.registerTool(
     "get_review_queue",
@@ -452,36 +540,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().optional().describe("Project name. Omit to read the review queue across all projects in the active profile."),
       }),
     },
-    async ({ project }) => {
-      if (project && !isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      if (project) {
-        const result = readReviewQueue(phrenPath, project);
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        }
-        const items = result.data.map((item) => ({ ...item, project }));
-        return mcpResponse({
-          ok: true,
-          message: `${items.length} queue item(s) for "${project}".`,
-          data: { items },
-        });
-      }
-
-      const result = readReviewQueueAcrossProjects(phrenPath, profile);
-      if (!result.ok) {
-        return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-      }
-      return mcpResponse({
-        ok: true,
-        message: `${result.data.length} queue item(s) across all projects.`,
-        data: { items: result.data },
-      });
-    }
+    (params) => handleGetReviewQueue(ctx, params),
   );
-
-  // ── manage_review_item ──────────────────────────────────────────────────
 
   server.registerTool(
     "manage_review_item",
@@ -496,32 +556,6 @@ export function register(server: McpServer, ctx: McpContext): void {
         new_text: z.string().max(10000).optional().describe("Required when action is 'edit'."),
       }),
     },
-    async ({ project, line, action, new_text }) => {
-      if (!isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      if (action === "edit" && !new_text) {
-        return mcpResponse({ ok: false, error: "new_text is required when action is 'edit'." });
-      }
-      return withWriteQueue(async () => {
-        let result;
-        switch (action) {
-          case "approve":
-            result = approveQueueItem(phrenPath, project, line);
-            break;
-          case "reject":
-            result = rejectQueueItem(phrenPath, project, line);
-            break;
-          case "edit":
-            result = editQueueItem(phrenPath, project, line, new_text!);
-            break;
-        }
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        }
-        return mcpResponse({ ok: true, message: result.data });
-      });
-    }
+    (params) => handleManageReviewItem(ctx, params),
   );
-
 }

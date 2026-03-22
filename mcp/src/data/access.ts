@@ -438,7 +438,9 @@ export function removeFinding(phrenPath: string, project: string, match: string)
     const matched = lines[idx];
     lines.splice(idx, removeCount);
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(filePath, normalized);
+    const tmp = filePath + ".tmp." + process.pid;
+    fs.writeFileSync(tmp, normalized);
+    fs.renameSync(tmp, filePath);
     return phrenOk(`Removed from ${project}: ${matched}`);
   });
 }
@@ -491,7 +493,9 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
     if (removed.length > 0) {
       const filtered = lines.filter((_, i) => !indicesToRemove.has(i));
       const normalized = filtered.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-      fs.writeFileSync(findingsPath, normalized);
+      const tmp = findingsPath + ".tmp." + process.pid;
+      fs.writeFileSync(tmp, normalized);
+      fs.renameSync(tmp, findingsPath);
     }
 
     return phrenOk({ removed, errors });
@@ -534,7 +538,9 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
     const metaSuffix = metaMatch ? " " + metaMatch.join(" ") : "";
     lines[idx] = `- ${newTextTrimmed}${metaSuffix}`;
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(findingsPath, normalized);
+    const tmp = findingsPath + ".tmp." + process.pid;
+    fs.writeFileSync(tmp, normalized);
+    fs.renameSync(tmp, findingsPath);
     return phrenOk(`Updated finding in ${project}`);
   });
 }
@@ -626,7 +632,10 @@ function withQueueLineOp<T>(
 }
 
 function writeQueueLines(file: string, lines: string[]): void {
-  fs.writeFileSync(file, lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
+  const content = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  const tmp = file + ".tmp." + process.pid;
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, file);
 }
 
 /** Remove a queue item's line from review.md (finding stays in FINDINGS.md). */
