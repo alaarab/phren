@@ -4,7 +4,7 @@ import {
   resolveCoref,
   addFindingsToFile,
   checkSemanticDedup,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";

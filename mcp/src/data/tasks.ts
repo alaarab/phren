@@ -10,9 +10,9 @@ import {
   forwardErr,
   getProjectDirs,
 } from "../shared.js";
-import { validateTaskFormat } from "../shared/shared-content.js";
+import { validateTaskFormat } from "../shared/content.js";
 import { safeProjectPath } from "../utils.js";
-import { withSafeLock, ensureProject } from "../shared/shared-data-utils.js";
+import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);

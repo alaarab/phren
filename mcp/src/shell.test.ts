@@ -3,9 +3,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { PhrenShell } from "./shell/shell.js";
-import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data/data-access.js";
+import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data/access.js";
 import { writeFile as write, makeTempDir } from "./test-helpers.js";
-import { shellStartupFrames, stripAnsi } from "./shell/shell-render.js";
+import { shellStartupFrames, stripAnsi } from "./shell/render.js";
 
 interface TempContext {
   root: string;

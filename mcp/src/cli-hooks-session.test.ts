@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
-import { getUntrackedProjectNotice } from "./cli/cli-hooks-session.js";
+import { getUntrackedProjectNotice } from "./cli/hooks-session.js";
 import { writeProjectConfig } from "./project-config.js";
 
 describe("getUntrackedProjectNotice", () => {

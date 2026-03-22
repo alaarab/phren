@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { readInstallPreferences, writeInstallPreferences, updateInstallPreferences, type InstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences, writeInstallPreferences, updateInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, validateCustomWebhookUrl, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "../hooks.js";
 import { hookConfigPath } from "../shared.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig } from "../project-config.js";

@@ -71,7 +71,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
 
     process.env.PHREN_PATH = repoB;
-    const { handleBackgroundSync } = await import("../cli/cli-hooks-session.js");
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
     await handleBackgroundSync();
 
     execFileSync("git", ["pull", "--quiet"], { cwd: repoA, stdio: "ignore" });
@@ -106,7 +106,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["commit", "-m", "local"], { cwd: repo, stdio: "ignore" });
 
     process.env.PHREN_PATH = repo;
-    const { handleBackgroundSync } = await import("../cli/cli-hooks-session.js");
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
     await handleBackgroundSync();
 
     expect(git(repo, ["log", "--oneline", "-1"], "utf8")).toContain("local");
@@ -145,7 +145,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
 
     process.env.PHREN_PATH = repoB;
-    const { handleBackgroundSync } = await import("../cli/cli-hooks-session.js");
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
     await handleBackgroundSync();
 
     expect(git(repoB, ["log", "--oneline", "-1"], "utf8")).toContain("local");
@@ -187,7 +187,7 @@ describe("handleBackgroundSync recovery", () => {
     execFileSync("git", ["commit", "-m", "local task"], { cwd: repoB, stdio: "ignore" });
 
     process.env.PHREN_PATH = repoB;
-    const { handleBackgroundSync } = await import("../cli/cli-hooks-session.js");
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
     await handleBackgroundSync();
 
     execFileSync("git", ["pull", "--quiet"], { cwd: repoA, stdio: "ignore" });

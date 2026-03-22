@@ -8,8 +8,8 @@
 import * as fs from "fs";
 import { runtimeFile, debugLog } from "./shared.js";
 import { isFeatureEnabled, errorMessage } from "./utils.js";
-import { withFileLock } from "./shared/shared-governance.js";
-import type { SelectedSnippet } from "./shared/shared-retrieval.js";
+import { withFileLock } from "./shared/governance.js";
+import type { SelectedSnippet } from "./shared/retrieval.js";
 
 export interface CorrelationEntry {
   timestamp: string;

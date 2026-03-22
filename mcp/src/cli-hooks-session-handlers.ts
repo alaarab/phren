@@ -24,17 +24,17 @@ import {
   errorMessage,
   runDoctor,
   resolveRuntimeProfile,
-} from "./cli-hooks-context.js";
+} from "./hooks-context.js";
 import {
   qualityMarkers,
   runtimeFile,
 } from "./shared.js";
-import { readInstallPreferences } from "./init-preferences.js";
+import { readInstallPreferences } from "./preferences.js";
 import { logDebug } from "./logger.js";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
-import { TASKS_FILENAME } from "./data-tasks.js";
+import { TASKS_FILENAME } from "./tasks.js";
 import {
   resolveSubprocessArgs as _resolveSubprocessArgs,
   runBestEffortGit,

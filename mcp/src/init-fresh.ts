@@ -14,7 +14,7 @@ import { getMachineName, persistMachineName } from "./machine-identity.js";
 import {
   readInstallPreferences,
   writeInstallPreferences,
-} from "./init-preferences.js";
+} from "./preferences.js";
 import {
   ensureGovernanceFiles,
   repairPreexistingInstall,
@@ -26,10 +26,10 @@ import {
   ensureLocalGitRepo,
   updateMachinesYaml,
   detectProjectDir,
-} from "./init-setup.js";
-import { getWorkflowPolicy } from "./shared-governance.js";
+} from "./setup.js";
+import { getWorkflowPolicy } from "./governance.js";
 import { addProjectToProfile } from "./profile-store.js";
-import { STARTER_DIR, VERSION, log, confirmPrompt } from "./init-shared.js";
+import { STARTER_DIR, VERSION, log, confirmPrompt } from "./shared.js";
 import { configureMcpTargets } from "./init-mcp.js";
 import { configureHooksIfEnabled } from "./init-hooks.js";
 import {
@@ -41,7 +41,7 @@ import { warmSemanticSearch } from "./init-semantic.js";
 import { bootstrapProject } from "./init-bootstrap.js";
 import { logDebug } from "./logger.js";
 import type { InitOptions, SkillsScope } from "./init-types.js";
-import type { InitProjectDomain } from "./init-setup.js";
+import type { InitProjectDomain } from "./setup.js";
 
 function copyDir(src: string, dest: string) {
   fs.mkdirSync(dest, { recursive: true });
@@ -228,7 +228,7 @@ export async function runFreshInstall(
   const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || !opts.yes;
   if (!walkthroughCoveredOllama) {
     try {
-      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
+      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./ollama.js");
       if (getOllamaUrl()) {
         const ollamaUp = await checkOllamaAvailable();
         if (ollamaUp) {

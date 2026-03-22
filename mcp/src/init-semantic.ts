@@ -3,7 +3,7 @@
  */
 
 export async function warmSemanticSearch(phrenPath: string, profile?: string): Promise<string> {
-  const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./shared-ollama.js");
+  const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("./ollama.js");
   const ollamaUrl = getOllamaUrl();
   if (!ollamaUrl) return "Semantic search: disabled.";
 
@@ -15,10 +15,10 @@ export async function warmSemanticSearch(phrenPath: string, profile?: string): P
     return `Semantic search not warmed: model ${model} is not pulled yet.`;
   }
 
-  const { buildIndex, listIndexedDocumentPaths } = await import("./shared-index.js");
-  const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+  const { buildIndex, listIndexedDocumentPaths } = await import("./index.js");
+  const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./embedding-cache.js");
   const { backgroundEmbedMissingDocs } = await import("./startup-embedding.js");
-  const { getPersistentVectorIndex } = await import("./shared-vector-index.js");
+  const { getPersistentVectorIndex } = await import("./vector-index.js");
 
   const db = await buildIndex(phrenPath, profile);
   try {

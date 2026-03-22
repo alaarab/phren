@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import type { InitOptions } from "./init-types.js";
 import { runWalkthrough } from "./init-walkthrough.js";
 import { resolveInitPhrenPath, hasInstallMarkers } from "./init-detect.js";
-import { log } from "./init-shared.js";
+import { log } from "./shared.js";
 
 /**
  * Run the interactive walkthrough for first-time installs, merging answers into opts.

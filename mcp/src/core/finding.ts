@@ -1,11 +1,11 @@
 import { isValidProjectName } from "../utils.js";
 import {
   addFindingToFile,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import {
   removeFinding as removeFindingStore,
-} from "../data/data-access.js";
-import { MAX_FINDING_LENGTH } from "../content/content-validate.js";
+} from "../data/access.js";
+import { MAX_FINDING_LENGTH } from "../content/validate.js";
 
 export interface FindingResult {
   ok: boolean;

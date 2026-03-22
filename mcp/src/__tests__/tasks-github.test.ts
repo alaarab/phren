@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTaskIssueBody, extractGithubRepoFromText, parseGithubIssueUrl } from "../task/tasks-github.js";
+import { buildTaskIssueBody, extractGithubRepoFromText, parseGithubIssueUrl } from "../task/github.js";
 
 describe("tasks-github helpers", () => {
   it("parses GitHub issue URLs into repo and issue number", () => {

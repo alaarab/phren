@@ -4,9 +4,9 @@ import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { countActiveFindings } from "./content-archive.js";
-import { isTaskFileName } from "../data/data-tasks.js";
-import { METADATA_REGEX } from "./content-metadata.js";
+import { countActiveFindings } from "./archive.js";
+import { isTaskFileName } from "../data/tasks.js";
+import { METADATA_REGEX } from "./metadata.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;

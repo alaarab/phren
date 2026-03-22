@@ -83,7 +83,7 @@ describe.sequential("1.10.x release hardening gates", () => {
 
   it("keeps generated skill metadata aligned with the live tool registry", async () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-    const linkSkillsTs = fs.readFileSync(path.join(root, "mcp", "src", "link-skills.ts"), "utf8");
+    const linkSkillsTs = fs.readFileSync(path.join(root, "mcp", "src", "link", "skills.ts"), "utf8");
     expect(linkSkillsTs).toContain("getToolCount()");
     expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
     expect(getToolCount()).toBe(51);

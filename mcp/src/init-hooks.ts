@@ -4,7 +4,7 @@
 import { configureAllHooks } from "./hooks.js";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
-import { log } from "./init-shared.js";
+import { log } from "./shared.js";
 
 /**
  * Configure hooks if enabled, or log a disabled message.

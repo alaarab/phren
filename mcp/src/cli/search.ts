@@ -1,10 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { runtimeFile } from "../shared.js";
-import { buildIndex, extractSnippet, queryDocRows, queryRows, queryEntityLinks, queryDocBySourceKey, logEntityMiss } from "../shared/shared-index.js";
+import { buildIndex, extractSnippet, queryDocRows, queryRows, queryEntityLinks, queryDocBySourceKey, logEntityMiss } from "../shared/index.js";
 import { buildFtsQueryVariants, errorMessage, isValidProjectName } from "../utils.js";
 import { logger } from "../logger.js";
-import { keywordFallbackSearch } from "../core/core-search.js";
+import { keywordFallbackSearch } from "../core/search.js";
 
 export interface SearchOptions {
   query: string;
@@ -303,7 +303,7 @@ export async function runSearch(
     if (!rows) {
       if (opts.query) {
         try {
-          const { logSearchMiss } = await import("../tools/mcp-search.js");
+          const { logSearchMiss } = await import("../tools/search.js");
           logSearchMiss(phrenPath, opts.query, opts.project);
         } catch (err: unknown) {
           if ((process.env.PHREN_DEBUG)) logger.debug("cli-search", `search logSearchMiss: ${errorMessage(err)}`);

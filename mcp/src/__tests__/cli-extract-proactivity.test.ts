@@ -19,7 +19,7 @@ vi.mock("../shared.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../shared-governance.js", () => ({
+vi.mock("../governance.js", () => ({
   appendReviewQueue: vi.fn(() => ({ ok: true, data: 1 })),
   getRetentionPolicy: vi.fn(() => ({ autoAcceptThreshold: 0.5 })),
   recordFeedback: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("../shared-governance.js", () => ({
   entryScoreKey: vi.fn(() => "score-key"),
 }));
 
-vi.mock("../finding-journal.js", () => ({
+vi.mock("../journal.js", () => ({
   appendFindingJournal: vi.fn(() => ({ ok: true, data: "journal" })),
   compactFindingJournals: vi.fn(() => ({ added: 0, skipped: 0, failed: 0 })),
 }));
@@ -36,10 +36,10 @@ vi.mock("../hooks.js", () => ({
   commandExists: vi.fn(() => false),
 }));
 
-import { handleExtractMemories } from "../cli/cli-extract.js";
+import { handleExtractMemories } from "../cli/extract.js";
 import { runGit } from "../utils.js";
-import { appendFindingJournal } from "../finding/finding-journal.js";
-import { appendReviewQueue } from "../shared/shared-governance.js";
+import { appendFindingJournal } from "../finding/journal.js";
+import { appendReviewQueue } from "../shared/governance.js";
 import { appendAuditLog } from "../shared.js";
 
 function gitLog(subject: string, body = "", hash = "abc12345"): string {

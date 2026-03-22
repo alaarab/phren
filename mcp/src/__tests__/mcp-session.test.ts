@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { incrementSessionFindings, incrementSessionTasksCompleted } from "../tools/mcp-session.js";
+import { incrementSessionFindings, incrementSessionTasksCompleted } from "../tools/session.js";
 
 function sessionFile(phrenPath: string, sessionId: string) {
   return path.join(phrenPath, ".runtime", "sessions", `session-${sessionId}.json`);

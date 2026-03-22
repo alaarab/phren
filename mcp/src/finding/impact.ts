@@ -1,8 +1,8 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import { impactLogFile } from "../shared.js";
-import { withFileLock } from "../shared/shared-governance.js";
-import { normalizeFindingText } from "../content/content-metadata.js";
+import { withFileLock } from "../shared/governance.js";
+import { normalizeFindingText } from "../content/metadata.js";
 
 export interface FindingImpactEntry {
   findingId: string;

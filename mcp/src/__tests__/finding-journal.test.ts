@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { appendFindingJournal, compactFindingJournals } from "../finding/finding-journal.js";
+import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 
 describe("finding journal", () => {
   let tmp: { path: string; cleanup: () => void };

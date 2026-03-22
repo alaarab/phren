@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "../utils.js";
 import { debugLog, sessionMarker } from "../shared.js";
-import { atomicWriteJson } from "./session-utils.js";
+import { atomicWriteJson } from "./utils.js";
 
 export interface TaskCheckpoint {
   project: string;

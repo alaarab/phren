@@ -1,6 +1,6 @@
-import { WEB_UI_STYLES, renderWebUiScript } from "./memory-ui-assets.js";
-import { renderGraphScript } from "./memory-ui-graph.js";
-import { PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./memory-ui-styles.js";
+import { WEB_UI_STYLES, renderWebUiScript } from "./assets.js";
+import { renderGraphScript } from "./graph.js";
+import { PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
 import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
@@ -9,7 +9,7 @@ import {
   renderSearchScript,
   renderEventWiringScript,
   renderGraphHostScript,
-} from "./memory-ui-scripts.js";
+} from "./scripts.js";
 
 function h(s: string): string {
   return s

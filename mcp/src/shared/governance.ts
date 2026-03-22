@@ -1,4 +1,4 @@
-export * from '../governance/governance-policy.js';
-export * from '../governance/governance-scores.js';
-export * from '../governance/governance-audit.js';
-export { withFileLock, isFiniteNumber, hasValidSchemaVersion } from '../governance/governance-locks.js';
+export * from '../governance/policy.js';
+export * from '../governance/scores.js';
+export * from '../governance/audit.js';
+export { withFileLock, isFiniteNumber, hasValidSchemaVersion } from '../governance/locks.js';

@@ -3,8 +3,8 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { isValidProjectName } from "../utils.js";
 import { homeDir, homePath } from "../shared.js";
-import { resolveTaskFilePath } from "../data/data-tasks.js";
-import { log } from "../init/init-shared.js";
+import { resolveTaskFilePath } from "../data/tasks.js";
+import { log } from "../init/shared.js";
 
 function contextFilePath(): string {
   return homePath(".phren-context.md");

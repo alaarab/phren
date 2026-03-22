@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import type { TaskItem, QueueItem } from "../data/data-access.js";
+import type { TaskItem, QueueItem } from "../data/access.js";
 import { runLink } from "../link/link.js";
 import { runPhrenUpdate } from "../update.js";
 import {

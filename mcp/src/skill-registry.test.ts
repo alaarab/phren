@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as path from "path";
 import { makeTempDir, writeFile } from "./test-helpers.js";
-import { buildSkillManifest } from "./skill/skill-registry.js";
+import { buildSkillManifest } from "./skill/registry.js";
 
 describe("skill-registry", () => {
   it("resolves project-local skills over inherited global skills", () => {

@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { rankResults, selectSnippets } from "./shared/shared-retrieval.js";
-import { queryRows, type DbRow, type SqlJsDatabase } from "./shared/shared-index.js";
-import type { DocRow } from "./shared/shared-index.js";
+import { rankResults, selectSnippets } from "./shared/retrieval.js";
+import { queryRows, type DbRow, type SqlJsDatabase } from "./shared/index.js";
+import type { DocRow } from "./shared/index.js";
 import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
-import { keywordFallbackSearch } from "./core/core-search.js";
+import { keywordFallbackSearch } from "./core/search.js";
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 
 // Minimal mock DB that returns empty results for all queries.

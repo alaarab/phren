@@ -3,7 +3,7 @@ import {
   buildSourceComment,
   filterTrustedFindingsDetailed,
   parseSourceComment,
-} from "../content/content-citation.js";
+} from "../content/citation.js";
 
 describe("content-citation source provenance", () => {
   it("round-trips source annotation with structured fields", () => {

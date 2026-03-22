@@ -6,13 +6,13 @@ import {
   resolveTaskItem,
   updateTask,
   type TaskItem,
-} from "../data/data-access.js";
-import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./tasks-github.js";
+} from "../data/access.js";
+import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
 import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
-import { getWorkflowPolicy } from "../shared/shared-governance.js";
+import { getWorkflowPolicy } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { incrementSessionTasksCompleted } from "../tools/mcp-session.js";
+import { incrementSessionTasksCompleted } from "../tools/session.js";
 
 export type TaskMode = "off" | "manual" | "suggest" | "auto";
 
@@ -387,7 +387,7 @@ export function clearTaskSession(phrenPath: string, sessionId?: string): void {
  * Return the active TaskItem tracked for a session+project, if any.
  * Used by mcp-finding.ts to link findings to active tasks.
  */
-export function getActiveTaskForSession(phrenPath: string, sessionId: string, project: string): import("../data/data-tasks.js").TaskItem | null {
+export function getActiveTaskForSession(phrenPath: string, sessionId: string, project: string): import("../data/tasks.js").TaskItem | null {
   const state = readTaskSessionState(phrenPath, sessionId);
   if (!state || state.project !== project) return null;
   return resolveTrackedSessionTask(phrenPath, state);

@@ -3,7 +3,7 @@ import {
   type RetentionPolicy,
   getQualityMultiplier,
   entryScoreKey,
-} from "./shared-governance.js";
+} from "./governance.js";
 import {
   queryDocRows,
   queryRows,
@@ -16,22 +16,22 @@ import {
   decodeFiniteNumber,
   rowToDocWithRowid,
   buildIndex,
-} from "./shared-index.js";
+} from "./index.js";
 import {
   filterTrustedFindingsDetailed,
-} from "./shared-content.js";
-import { parseCitationComment } from "../content/content-citation.js";
-import { getHighImpactFindings } from "../finding/finding-impact.js";
+} from "./content.js";
+import { parseCitationComment } from "../content/citation.js";
+import { getHighImpactFindings } from "../finding/impact.js";
 import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import * as fs from "fs";
 import * as path from "path";
-import { getProjectGlobBoost } from "../cli/cli-hooks-globs.js";
-import type { GitContext } from "../cli/cli-hooks-session.js";
-export type { GitContext } from "../cli/cli-hooks-session.js";
-import { vectorFallback, deterministicSeed } from "./shared-search-fallback.js";
-import { getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
-import { keywordFallbackSearch } from "../core/core-search.js";
+import { getProjectGlobBoost } from "../cli/hooks-globs.js";
+import type { GitContext } from "../cli/hooks-session.js";
+export type { GitContext } from "../cli/hooks-session.js";
+import { vectorFallback, deterministicSeed } from "./search-fallback.js";
+import { getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
+import { keywordFallbackSearch } from "../core/search.js";
 import { debugLog } from "../shared.js";
 
 // ── Scoring constants ─────────────────────────────────────────────────────────

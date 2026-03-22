@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
-import { addFindingsToFile } from "../shared/shared-content.js";
-import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "../shared/shared-ollama.js";
+import { addFindingsToFile } from "../shared/content.js";
+import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "../shared/ollama.js";
 import { debugLog } from "../shared.js";
 import { getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as path from "path";

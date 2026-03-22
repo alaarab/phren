@@ -12,10 +12,10 @@ import {
   homeDir,
   readRootManifest,
 } from "../shared.js";
-import { getIndexPolicy, withFileLock } from "./shared-governance.js";
-import { stripTaskDoneSection } from "./shared-content.js";
-import { isInactiveFindingLine } from "../finding/finding-lifecycle.js";
-import { invalidateDfCache } from "./shared-search-fallback.js";
+import { getIndexPolicy, withFileLock } from "./governance.js";
+import { stripTaskDoneSection } from "./content.js";
+import { isInactiveFindingLine } from "../finding/lifecycle.js";
+import { invalidateDfCache } from "./search-fallback.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import {
@@ -23,8 +23,8 @@ import {
   endUserFragmentBuildCache,
   extractAndLinkFragments,
   ensureGlobalEntitiesTable,
-} from "./shared-fragment-graph.js";
-import { bootstrapSqlJs } from "./shared-sqljs.js";
+} from "./fragment-graph.js";
+import { bootstrapSqlJs } from "./sqljs.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "../project-config.js";
 import {
   buildSourceDocKey,
@@ -38,8 +38,8 @@ import {
   type ProjectTopic,
 } from "../project-topics.js";
 
-export { porterStem } from "./shared-stemmer.js";
-export { cosineFallback } from "./shared-search-fallback.js";
+export { porterStem } from "./stemmer.js";
+export { cosineFallback } from "./search-fallback.js";
 export {
   queryFragmentLinks, queryFragmentLinks as queryEntityLinks,
   getFragmentBoostDocs, getFragmentBoostDocs as getEntityBoostDocs,
@@ -47,7 +47,7 @@ export {
   queryCrossProjectFragments,
   logFragmentMiss, logFragmentMiss as logEntityMiss,
   extractFragmentNames, extractFragmentNames as extractEntityNames,
-} from "./shared-fragment-graph.js";
+} from "./fragment-graph.js";
 export {
   buildSourceDocKey,
   decodeFiniteNumber,
@@ -81,8 +81,8 @@ function scheduleEmbedding(phrenPath: string, docPath: string, content: string):
 
 async function _drainEmbQueue(): Promise<void> {
   if (_embQueue.size === 0) return;
-  const { embedText, getEmbeddingModel } = await import("./shared-ollama.js");
-  const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+  const { embedText, getEmbeddingModel } = await import("./ollama.js");
+  const { getEmbeddingCache } = await import("./embedding-cache.js");
   const entries = [..._embQueue.entries()];
   _embQueue.clear();
   // Group by phrenPath so we flush each cache once after all its entries are set.
@@ -681,7 +681,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     // Remove stale embedding if file was deleted
     void (async () => {
       try {
-        const { getEmbeddingCache } = await import("./shared-embedding-cache.js");
+        const { getEmbeddingCache } = await import("./embedding-cache.js");
         const c = getEmbeddingCache(phrenPath);
         c.delete(resolvedPath);
         await c.flush();

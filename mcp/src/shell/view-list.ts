@@ -1,4 +1,4 @@
-import { RESET, padToWidth, truncateLine, lineViewport, style } from "./shell-render.js";
+import { RESET, padToWidth, truncateLine, lineViewport, style } from "./render.js";
 
 export function formatSelectableLine(line: string, cols: number, selected: boolean): string {
   return selected

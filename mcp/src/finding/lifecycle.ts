@@ -4,7 +4,7 @@ import { PhrenError, phrenErr, phrenOk, type PhrenResult } from "../phren-core.j
 
 // Phren lifecycle comment prefix. No backward compat.
 const LIFECYCLE_PREFIX = "phren";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
 import {
   isArchiveEnd,
@@ -18,7 +18,7 @@ import {
   stripLifecycleMetadata,
   stripRelationMetadata,
   normalizeFindingText,
-} from "../content/content-metadata.js";
+} from "../content/metadata.js";
 
 export const FINDING_TYPE_DECAY: Record<string, { maxAgeDays: number; decayMultiplier: number }> = {
   'pattern':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay, long-lived

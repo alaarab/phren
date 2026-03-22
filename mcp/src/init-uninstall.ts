@@ -10,8 +10,8 @@ import {
   removeMcpServerAtPath,
   removeTomlMcpServer,
   patchJsonFile,
-} from "./init-config.js";
-import type { HookEntry, HookMap } from "./init-config.js";
+} from "./config.js";
+import type { HookEntry, HookMap } from "./config.js";
 import {
   atomicWriteText,
   debugLog,
@@ -31,7 +31,7 @@ import {
   cursorMcpCandidates,
   vscodeMcpCandidates,
 } from "./provider-adapters.js";
-import { DEFAULT_PHREN_PATH, log } from "./init-shared.js";
+import { DEFAULT_PHREN_PATH, log } from "./shared.js";
 
 const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
 

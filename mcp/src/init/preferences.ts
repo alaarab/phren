@@ -6,7 +6,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, installPreferencesFile } from "../phren-paths.js";
 import { errorMessage } from "../utils.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
 import type { CustomHookEntry } from "../hooks.js";
 
 export interface InstallPreferences {

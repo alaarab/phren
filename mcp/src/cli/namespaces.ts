@@ -14,13 +14,13 @@ import {
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
-import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/init-preferences.js";
-import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/skill-registry.js";
-import { detectSkillCollisions } from "../link/link-skills.js";
-import { setSkillEnabledAndSync, syncSkillLinksForScope } from "../skill/skill-files.js";
+import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/preferences.js";
+import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/registry.js";
+import { detectSkillCollisions } from "../link/skills.js";
+import { setSkillEnabledAndSync, syncSkillLinksForScope } from "../skill/files.js";
 import { findProjectDir } from "../project-locator.js";
-import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/data-tasks.js";
-import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "../task/tasks-github.js";
+import { TASK_FILE_ALIASES, addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/tasks.js";
+import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "../task/github.js";
 import {
   PROJECT_HOOK_EVENTS,
   PROJECT_OWNERSHIP_MODES,
@@ -30,8 +30,8 @@ import {
   writeProjectConfig,
   writeProjectHookConfig,
 } from "../project-config.js";
-import { addFinding, removeFinding } from "../core/core-finding.js";
-import { supersedeFinding, retractFinding, resolveFindingContradiction } from "../finding/finding-lifecycle.js";
+import { addFinding, removeFinding } from "../core/finding.js";
+import { supersedeFinding, retractFinding, resolveFindingContradiction } from "../finding/lifecycle.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, type CustomHookEntry } from "../hooks.js";
 import { runtimeFile } from "../shared.js";
 
@@ -729,7 +729,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
     }
-    const { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } = await import("../data/data-access.js");
+    const { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } = await import("../data/access.js");
     const exported: Record<string, unknown> = { project: name, exportedAt: new Date().toISOString(), version: 1 };
     const summaryPath = path.join(projectDir, "summary.md");
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
@@ -778,7 +778,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error("Invalid import payload: missing project field.");
       process.exit(1);
     }
-    const { TASKS_FILENAME } = await import("../data/data-access.js");
+    const { TASKS_FILENAME } = await import("../data/access.js");
     const phrenPath = getPhrenPath();
     const projectName = normalizeProjectNameForCreate(String(decoded.project));
     if (!isValidProjectName(projectName)) {
@@ -1014,7 +1014,7 @@ export async function handleTaskNamespace(args: string[]) {
 
   if (subcommand === "list") {
     // Delegate to the cross-project task view (same as `phren tasks`)
-    const { handleTaskView } = await import("./cli-ops.js");
+    const { handleTaskView } = await import("./ops.js");
     return handleTaskView(args[1] || "default");
   }
 
@@ -1377,7 +1377,7 @@ export async function handleFindingNamespace(args: string[]) {
       console.error("Usage: phren finding list <project>");
       process.exit(1);
     }
-    const { readFindings } = await import("../data/data-access.js");
+    const { readFindings } = await import("../data/access.js");
     const result = readFindings(getPhrenPath(), project);
     if (!result.ok) {
       console.error(result.error);
@@ -1498,7 +1498,7 @@ export async function handleFindingNamespace(args: string[]) {
     const project = args[1];
     const phrenPath = getPhrenPath();
     const RESERVED_DIRS = new Set(["global", ".runtime", ".sessions", ".config"]);
-    const { readFindings } = await import("../data/data-access.js");
+    const { readFindings } = await import("../data/access.js");
     const projects = project
       ? [project]
       : fs.readdirSync(phrenPath, { withFileTypes: true })

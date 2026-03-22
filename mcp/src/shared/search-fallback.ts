@@ -2,12 +2,12 @@ import { createHash } from "crypto";
 import { debugLog } from "../shared.js";
 import { logger } from "../logger.js";
 import { STOP_WORDS, errorMessage } from "../utils.js";
-import { porterStem } from "./shared-stemmer.js";
-import type { SqlJsDatabase, DbRow, DocRow } from "./shared-index.js";
-import { classifyFile, normalizeIndexedContent, rowToDocWithRowid } from "./shared-index.js";
-import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./shared-ollama.js";
-import { getEmbeddingCache } from "./shared-embedding-cache.js";
-import { getPersistentVectorIndex } from "./shared-vector-index.js";
+import { porterStem } from "./stemmer.js";
+import type { SqlJsDatabase, DbRow, DocRow } from "./index.js";
+import { classifyFile, normalizeIndexedContent, rowToDocWithRowid } from "./index.js";
+import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
+import { getEmbeddingCache } from "./embedding-cache.js";
+import { getPersistentVectorIndex } from "./vector-index.js";
 import * as fs from "fs";
 import * as path from "path";
 

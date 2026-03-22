@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -25,18 +25,18 @@ import {
   TASKS_FILENAME,
   updateTask as updateTaskStore,
   promoteTask,
-} from "../data/data-access.js";
-import { applyGravity } from "../data/data-tasks.js";
+} from "../data/access.js";
+import { applyGravity } from "../data/tasks.js";
 import {
   buildTaskIssueBody,
   createGithubIssueForTask,
   parseGithubIssueUrl,
   resolveProjectGithubRepo,
-} from "../task/tasks-github.js";
-import { clearTaskCheckpoint } from "../session/session-checkpoints.js";
-import { incrementSessionTasksCompleted } from "./mcp-session.js";
+} from "../task/github.js";
+import { clearTaskCheckpoint } from "../session/checkpoints.js";
+import { incrementSessionTasksCompleted } from "./session.js";
 import { normalizeMemoryScope } from "../shared.js";
-import { permissionDeniedError } from "../governance/governance-rbac.js";
+import { permissionDeniedError } from "../governance/rbac.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 

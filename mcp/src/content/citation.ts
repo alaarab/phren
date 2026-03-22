@@ -2,10 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog, EXEC_TIMEOUT_MS, EXEC_TIMEOUT_QUICK_MS } from "../shared.js";
 import { errorMessage, runGitOrThrow } from "../utils.js";
-import type { RetentionPolicy } from "../shared/shared-governance.js";
-import { findingIdFromLine } from "../finding/finding-impact.js";
-import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./content-metadata.js";
-import { FINDING_TYPE_DECAY, extractFindingType } from "../finding/finding-lifecycle.js";
+import type { RetentionPolicy } from "../shared/governance.js";
+import { findingIdFromLine } from "../finding/impact.js";
+import { METADATA_REGEX, isArchiveStart, isArchiveEnd } from "./metadata.js";
+import { FINDING_TYPE_DECAY, extractFindingType } from "../finding/lifecycle.js";
 
 export interface FindingCitation {
   created_at: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
-import { getPersistentVectorIndex } from "../shared/shared-vector-index.js";
+import { getPersistentVectorIndex } from "../shared/vector-index.js";
 
 function makeVec(seed: number, dims = 16): number[] {
   const vec: number[] = [];

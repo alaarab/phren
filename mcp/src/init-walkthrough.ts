@@ -10,13 +10,13 @@ import {
   inferInitScaffoldFromRepo,
   type InitProjectDomain,
   type InferredInitScaffold,
-} from "./init-setup.js";
+} from "./setup.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
 } from "./project-config.js";
 import { type ProactivityLevel } from "./proactivity.js";
-import { log } from "./init-shared.js";
+import { log } from "./shared.js";
 import * as path from "path";
 import { logDebug } from "./logger.js";
 
@@ -414,7 +414,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  Change later: set PHREN_OLLAMA_URL=off to disable");
   let ollamaEnabled = false;
   try {
-    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared-ollama.js");
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./ollama.js");
     if (getOllamaUrl()) {
       const ollamaUp = await checkOllamaAvailable();
       if (ollamaUp) {

@@ -8,10 +8,10 @@ import {
   configureCopilotMcp,
   configureCodexMcp,
   logMcpTargetStatus,
-} from "./init-config.js";
+} from "./config.js";
 import { debugLog } from "./shared.js";
 import { errorMessage } from "./utils.js";
-import { log } from "./init-shared.js";
+import { log } from "./shared.js";
 
 /**
  * Configure MCP for all detected AI coding tools (Claude, VS Code, Cursor, Copilot, Codex).

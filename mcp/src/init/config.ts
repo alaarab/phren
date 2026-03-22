@@ -20,8 +20,8 @@ import {
   resolveCursorMcpConfig,
 } from "../provider-adapters.js";
 
-import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init-preferences.js";
-import { resolveEntryScript, log, VERSION } from "./init-shared.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference } from "./preferences.js";
+import { resolveEntryScript, log, VERSION } from "./shared.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
 export type McpRootKey = "mcpServers" | "servers";

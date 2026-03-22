@@ -1,23 +1,23 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { debugLog, isMemoryScopeVisible, normalizeMemoryScope } from "../shared.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { runCustomHooks } from "../hooks.js";
-import { readExtractedFacts } from "./mcp-extract-facts.js";
-import { resolveFindingSessionId } from "../finding/finding-context.js";
-import { readTasks } from "../data/data-tasks.js";
-import { readFindings } from "../data/data-access.js";
+import { readExtractedFacts } from "./extract-facts.js";
+import { resolveFindingSessionId } from "../finding/context.js";
+import { readTasks } from "../data/tasks.js";
+import { readFindings } from "../data/access.js";
 import { getProjectDirs } from "../shared.js";
-import { getActiveTaskForSession } from "../task/task-lifecycle.js";
-import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/session-checkpoints.js";
-import { markImpactEntriesCompletedForSession } from "../finding/finding-impact.js";
-import { atomicWriteJson, debugError, scanSessionFiles } from "../session/session-utils.js";
+import { getActiveTaskForSession } from "../task/lifecycle.js";
+import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
+import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
+import { atomicWriteJson, debugError, scanSessionFiles } from "../session/utils.js";
 
 interface SessionState {
   sessionId: string;

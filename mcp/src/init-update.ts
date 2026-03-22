@@ -10,16 +10,16 @@ import { isVersionNewer } from "./init-npm.js";
 import {
   readInstallPreferences,
   writeInstallPreferences,
-} from "./init-preferences.js";
+} from "./preferences.js";
 import {
   ensureGovernanceFiles,
   repairPreexistingInstall,
   runPostInitVerify,
   applyStarterTemplateUpdates,
   ensureLocalGitRepo,
-} from "./init-setup.js";
-import { getWorkflowPolicy } from "./shared-governance.js";
-import { VERSION, log, confirmPrompt } from "./init-shared.js";
+} from "./setup.js";
+import { getWorkflowPolicy } from "./governance.js";
+import { VERSION, log, confirmPrompt } from "./shared.js";
 import { configureMcpTargets } from "./init-mcp.js";
 import { configureHooksIfEnabled } from "./init-hooks.js";
 import {

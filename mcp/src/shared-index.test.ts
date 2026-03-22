@@ -18,7 +18,7 @@ import {
   queryDocBySourceKey,
   queryDocRows,
   porterStem,
-} from "./shared/shared-index.js";
+} from "./shared/index.js";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;

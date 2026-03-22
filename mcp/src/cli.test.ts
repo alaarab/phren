@@ -1671,7 +1671,7 @@ describe("CLI integration: detect-skills", () => {
 // --- Unit tests for exported cli functions ---
 
 import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli/cli.js";
-import { DocRow } from "./shared/shared-index.js";
+import { DocRow } from "./shared/index.js";
 
 describe("scoreFindingCandidate", () => {
   it("returns null for low-signal commits", () => {

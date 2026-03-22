@@ -1,4 +1,4 @@
-import type { ShellState } from "../data/data-access.js";
+import type { ShellState } from "../data/access.js";
 import type { runDoctor } from "../link/link.js";
 
 // Projects is level 0 (the home screen); these sub-views are level 1 (drill-down into a project)

@@ -5,20 +5,20 @@ import {
   recordFeedback,
   flushEntryScores,
   getWorkflowPolicy,
-} from "../shared/shared-governance.js";
-import { upsertCanonical } from "../shared/shared-content.js";
+} from "../shared/governance.js";
+import { upsertCanonical } from "../shared/content.js";
 import { errorMessage, isValidProjectName } from "../utils.js";
 import { logger } from "../logger.js";
-import { addFinding as addFindingCore } from "../core/core-finding.js";
+import { addFinding as addFindingCore } from "../core/finding.js";
 import { runDoctor } from "../link/link.js";
 import { startWebUi } from "../ui/memory-ui.js";
 import { startShell } from "../shell/shell.js";
 import { runPhrenUpdate } from "../update.js";
-import { readRuntimeHealth, readReviewQueue, readReviewQueueAcrossProjects } from "../data/data-access.js";
-import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, parseRelatedDocsArgs, type SearchOptions } from "./cli-search.js";
+import { readRuntimeHealth, readReviewQueue, readReviewQueueAcrossProjects } from "../data/access.js";
+import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, parseRelatedDocsArgs, type SearchOptions } from "./search.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/content-validate.js";
-import { listAllSessions } from "../tools/mcp-session.js";
+import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
+import { listAllSessions } from "../tools/session.js";
 
 async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
   const result = await fn();
@@ -207,9 +207,9 @@ type SemanticSearchStatus =
 
 async function getSemanticSearchStatus(phrenPath: string, profile: string | undefined): Promise<SemanticSearchStatus> {
   try {
-    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("../shared/shared-ollama.js");
-    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("../shared/shared-embedding-cache.js");
-    const { listIndexedDocumentPaths } = await import("../shared/shared-index.js");
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl, getEmbeddingModel } = await import("../shared/ollama.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("../shared/embedding-cache.js");
+    const { listIndexedDocumentPaths } = await import("../shared/index.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) return { ollamaUrl: null };
     const available = await checkOllamaAvailable();

@@ -15,14 +15,14 @@ import {
   isProjectHookEnabled,
   getProactivityLevelForFindings,
   errorMessage,
-} from "./cli-hooks-context.js";
+} from "./hooks-context.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
   buildIndex,
   queryRows,
-} from "./shared-index.js";
-import { filterTaskByPriority } from "./shared-retrieval.js";
+} from "./index.js";
+import { filterTaskByPriority } from "./retrieval.js";
 import { readStdinJson, getSessionCap } from "./cli-hooks-stop.js";
 import { logDebug } from "./logger.js";
 

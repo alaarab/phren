@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { upsertCanonical } from "../content/content-learning.js";
-import { recordFeedback, flushEntryScores } from "../shared/shared-governance.js";
+import { upsertCanonical } from "../content/learning.js";
+import { recordFeedback, flushEntryScores } from "../shared/governance.js";
 import { runtimeDir } from "../shared.js";
 
 const PROJECT = "myapp";
