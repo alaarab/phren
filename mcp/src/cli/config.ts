@@ -43,7 +43,7 @@ import {
 } from "../utils.js";
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-export function parseProjectArg(args: string[]): { project?: string; rest: string[] } {
+function parseProjectArg(args: string[]): { project?: string; rest: string[] } {
   const project = args.find((a) => a.startsWith("--project="))?.slice("--project=".length)
     ?? (args.indexOf("--project") !== -1 ? args[args.indexOf("--project") + 1] : undefined);
   const rest = args.filter((a, i) =>
@@ -95,7 +95,7 @@ function formatConfigAsTable(label: string, rows: [string, string][]): void {
   }
 }
 
-export function handleConfigShow(args: string[]): void {
+function handleConfigShow(args: string[]): void {
   const phrenPath = getPhrenPath();
   const { project: projectArg } = parseProjectArg(args);
 
@@ -568,7 +568,7 @@ function handleConfigFindingSensitivity(args: string[]) {
 const EXPENSIVE_MODEL_RE = /opus|sonnet|gpt-4(?!o-mini)/i;
 const DEFAULT_LLM_MODEL = "gpt-4o-mini / claude-haiku-4-5-20251001";
 
-export function printSemanticCostNotice(model?: string): void {
+function printSemanticCostNotice(model?: string): void {
   const effectiveModel = model || process.env.PHREN_LLM_MODEL || DEFAULT_LLM_MODEL;
   console.log(`  Note: Each semantic check is ~80 input + ~5 output tokens (one call per 'maybe' pair, cached 24h).`);
   console.log(`  Current model: ${effectiveModel}`);

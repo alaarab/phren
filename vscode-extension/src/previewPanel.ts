@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 
 let panel: vscode.WebviewPanel | undefined;
-let currentKey: string | undefined;
 let messageDisposable: vscode.Disposable | undefined;
 
 export interface PreviewOptions {
@@ -19,7 +18,6 @@ export function showPreview(opts: PreviewOptions): void {
   }
 
   if (panel) {
-    currentKey = opts.key;
     panel.title = opts.title;
     panel.webview.html = opts.html;
     if (opts.onMessage) {
@@ -29,7 +27,6 @@ export function showPreview(opts: PreviewOptions): void {
     return;
   }
 
-  currentKey = opts.key;
   panel = vscode.window.createWebviewPanel(
     "phren.preview",
     opts.title,
@@ -39,7 +36,6 @@ export function showPreview(opts: PreviewOptions): void {
 
   panel.onDidDispose(() => {
     panel = undefined;
-    currentKey = undefined;
     if (messageDisposable) {
       messageDisposable.dispose();
       messageDisposable = undefined;

@@ -19,7 +19,7 @@ export interface SkillEntry {
   aliases: string[];
 }
 
-export interface ResolvedSkill extends Pick<SkillEntry, "path" | "format" | "root" | "name" | "source" | "enabled" | "description" | "command" | "aliases" | "scopeType" | "sourceKind"> {
+interface ResolvedSkill extends Pick<SkillEntry, "path" | "format" | "root" | "name" | "source" | "enabled" | "description" | "command" | "aliases" | "scopeType" | "sourceKind"> {
   visibleToAgents: boolean;
   commandRegistered: boolean;
   overrides: Array<{
@@ -30,7 +30,7 @@ export interface ResolvedSkill extends Pick<SkillEntry, "path" | "format" | "roo
   mirrorTargets: string[];
 }
 
-export interface SkillCommandRegistration {
+interface SkillCommandRegistration {
   command: string;
   type: "skill";
   skillId: string;
@@ -40,7 +40,7 @@ export interface SkillCommandRegistration {
   registered: boolean;
 }
 
-export interface SkillManifestProblem {
+interface SkillManifestProblem {
   code: string;
   message: string;
   command?: string;
@@ -285,7 +285,7 @@ export function getAllSkills(phrenPath: string, profile: string): SkillEntry[] {
   return all;
 }
 
-export function getLocalSkills(phrenPath: string, scope: string): SkillEntry[] {
+function getLocalSkills(phrenPath: string, scope: string): SkillEntry[] {
   if (scope.toLowerCase() === "global") return getGlobalSkills(phrenPath);
   return getProjectLocalSkills(phrenPath, scope);
 }

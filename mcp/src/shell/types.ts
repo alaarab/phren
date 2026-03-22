@@ -31,7 +31,7 @@ export interface ShellDeps {
   runUpdate: () => Promise<string>;
 }
 
-export interface DoctorCheck {
+interface DoctorCheck {
   name: string;
   ok: boolean;
   detail: string;

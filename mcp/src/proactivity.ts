@@ -31,7 +31,7 @@ function resolveProactivityPhrenPath(explicitPhrenPath?: string): string | null 
   return explicitPhrenPath ?? findPhrenPath();
 }
 
-export interface UserPreferences {
+interface UserPreferences {
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
   proactivityTask?: "high" | "medium" | "low";
@@ -39,7 +39,7 @@ export interface UserPreferences {
 }
 
 /** Read per-user preferences from ~/.phren/.users/<actor>/preferences.json. Actor from PHREN_ACTOR env var. */
-export function readUserPreferences(explicitPhrenPath?: string): UserPreferences {
+function readUserPreferences(explicitPhrenPath?: string): UserPreferences {
   const phrenPath = resolveProactivityPhrenPath(explicitPhrenPath);
   if (!phrenPath) return {};
 

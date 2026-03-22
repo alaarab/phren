@@ -85,14 +85,14 @@ const GENERIC_TASK_TERMS = new Set([
 const MAX_TEXT_BYTES = 16 * 1024;
 const MAX_FILES_PER_ROOT = 400;
 
-export interface TaskHygieneIssue {
+interface TaskHygieneIssue {
   id: string;
   line: string;
   reason: "anchors-missing" | "keywords-missing";
   evidence: string[];
 }
 
-export interface TaskHygieneResult {
+interface TaskHygieneResult {
   ok: boolean;
   detail: string;
   issues: TaskHygieneIssue[];

@@ -40,10 +40,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Removed
 - Delete dead files: `init-migrate.ts`, `init-dryrun.ts`
+- Dead code sweep: removed ~100 dead exports, 3 dead files, 3 trivial wrappers, 6 dead PhrenClient methods across 40+ files
+- Migrated all Entity→Fragment naming aliases
+- Removed unwired RBAC checkPermission scaffolding
 
 ### Docs
 - Fix 4 stale file paths in CLAUDE.md
 - Add re-init reminder to `phren update` command
+
+### TODO (review before release)
+- Wire up searchFragments and getRelatedDocs in VS Code graph webview, or remove if not shipping graph search from extension
 
 ## [0.0.32] - 2026-03-22
 

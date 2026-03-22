@@ -22,7 +22,7 @@ interface SessionStateSnapshot {
   endedAt?: string;
 }
 
-export interface TaskReferenceResolution {
+interface TaskReferenceResolution {
   stableId?: string;
   error?: string;
 }

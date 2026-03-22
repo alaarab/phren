@@ -29,7 +29,6 @@ import {
   collectProjectsForUI,
   collectSkillsForUI,
   getHooksData,
-  isAllowedFilePath,
   isAllowedSkillPath,
   readSyncSnapshot,
   recentAccepted,
@@ -70,13 +69,13 @@ const WEB_UI_READY_ATTEMPTS = 12;
 const WEB_UI_READY_DELAY_MS = 75;
 const WEB_UI_PORT_RETRY_ATTEMPTS = 3;
 
-export function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
   if (platform === "darwin") return { command: "open", args: [url] };
   if (platform === "win32") return { command: process.env.ComSpec || "cmd.exe", args: ["/c", "start", "", url] };
   return { command: "xdg-open", args: [url] };
 }
 
-export async function launchWebUiBrowser(url: string): Promise<void> {
+async function launchWebUiBrowser(url: string): Promise<void> {
   const { command, args } = getWebUiBrowserCommand(url);
   await new Promise<void>((resolve, reject) => {
     try {
@@ -93,7 +92,7 @@ export async function launchWebUiBrowser(url: string): Promise<void> {
   });
 }
 
-export async function waitForWebUiReady(
+async function waitForWebUiReady(
   url: string,
   attempts: number = WEB_UI_READY_ATTEMPTS,
   delayMs: number = WEB_UI_READY_DELAY_MS,

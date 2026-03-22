@@ -4,7 +4,7 @@ import { impactLogFile } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { normalizeFindingText } from "../content/metadata.js";
 
-export interface FindingImpactEntry {
+interface FindingImpactEntry {
   findingId: string;
   project: string;
   timestamp: string;

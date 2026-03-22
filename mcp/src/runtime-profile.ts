@@ -1,6 +1,6 @@
 import { resolveActiveProfile } from "./profile-store.js";
 
-export function requestedProfileFromEnv(): string | undefined {
+function requestedProfileFromEnv(): string | undefined {
   const profile = (process.env.PHREN_PROFILE)?.trim();
   return profile ? profile : undefined;
 }

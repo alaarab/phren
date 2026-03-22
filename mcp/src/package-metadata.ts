@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const ROOT = path.join(__dirname, "..", "..");
-export const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
+const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
 
 interface PackageJsonShape {
   name?: string;

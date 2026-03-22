@@ -6,10 +6,10 @@ import { logger } from "../logger.js";
 import { UNIVERSAL_TECH_TERMS_RE } from "../phren-core.js";
 import { errorMessage } from "../utils.js";
 
-export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /** Escape SQL LIKE wildcard characters so user input is treated literally. */
-export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
+function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
 
 /**
  * Log fragment resolution misses to .runtime/fragment-misses.jsonl.
@@ -43,8 +43,6 @@ export function logFragmentMiss(phrenPath: string, name: string, context: string
   }
 }
 
-/** @deprecated Use logFragmentMiss instead */
-export const logEntityMiss = logFragmentMiss;
 
 // Use the shared universal starter set. Framework/tool specifics are learned
 // dynamically per project via extractDynamicFragments() in content-dedup.ts.
@@ -118,9 +116,6 @@ export function extractFragmentNames(content: string): string[] {
 
   return [...found];
 }
-
-/** @deprecated Use extractFragmentNames instead */
-export const extractEntityNames = extractFragmentNames;
 
 function getOrCreateFragment(db: SqlJsDatabase, name: string, type: string): number {
   try {
@@ -203,9 +198,6 @@ export function beginUserFragmentBuildCache(phrenPath: string, projects: Iterabl
   }
 }
 
-/** @deprecated Use beginUserFragmentBuildCache instead */
-export const beginUserEntityBuildCache = beginUserFragmentBuildCache;
-
 /** End a build-scoped cache created by beginUserFragmentBuildCache(). */
 export function endUserFragmentBuildCache(phrenPath: string): void {
   const prefix = `${phrenPath}/`;
@@ -214,9 +206,6 @@ export function endUserFragmentBuildCache(phrenPath: string): void {
   }
   if (_activeBuildCacheKeyPrefix === prefix) _activeBuildCacheKeyPrefix = null;
 }
-
-/** @deprecated Use endUserFragmentBuildCache instead */
-export const endUserEntityBuildCache = endUserFragmentBuildCache;
 
 function parseUserDefinedFragments(phrenPath: string, project: string): string[] {
   const claudeMdPath = `${phrenPath}/${project}/CLAUDE.md`;
@@ -251,14 +240,11 @@ function parseUserDefinedFragments(phrenPath: string, project: string): string[]
 }
 
 /** Clear the user fragment cache (call between index builds). */
-export function clearUserFragmentCache(): void {
+function clearUserFragmentCache(): void {
   _userFragmentCache.clear();
   _buildUserFragmentCache.clear();
   _activeBuildCacheKeyPrefix = null;
 }
-
-/** @deprecated Use clearUserFragmentCache instead */
-export const clearUserEntityCache = clearUserFragmentCache;
 
 // Words that commonly start sentences or appear in titles — not fragment names
 const SENTENCE_START_WORDS = new Set([
@@ -391,9 +377,6 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
   }
 }
 
-/** @deprecated Use extractAndLinkFragments instead */
-export const extractAndLinkEntities = extractAndLinkFragments;
-
 /**
  * Query related fragments for a given name.
  */
@@ -421,9 +404,6 @@ export function queryFragmentLinks(db: SqlJsDatabase, name: string): { related: 
   }
   return { related };
 }
-
-/** @deprecated Use queryFragmentLinks instead */
-export const queryEntityLinks = queryFragmentLinks;
 
 /**
  * Query cross-project fragment relationships.
@@ -485,5 +465,3 @@ export function getFragmentBoostDocs(db: SqlJsDatabase, query: string): Set<stri
   }
 }
 
-/** @deprecated Use getFragmentBoostDocs instead */
-export const getEntityBoostDocs = getFragmentBoostDocs;

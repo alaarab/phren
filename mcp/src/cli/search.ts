@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { runtimeFile } from "../shared.js";
-import { buildIndex, extractSnippet, queryDocRows, queryRows, queryEntityLinks, queryDocBySourceKey, logEntityMiss } from "../shared/index.js";
+import { buildIndex, extractSnippet, queryDocRows, queryRows, queryFragmentLinks, queryDocBySourceKey, logFragmentMiss } from "../shared/index.js";
 import { buildFtsQueryVariants, errorMessage, isValidProjectName } from "../utils.js";
 import { logger } from "../logger.js";
 import { keywordFallbackSearch } from "../core/search.js";
@@ -44,7 +44,7 @@ function historyFile(phrenPath: string): string {
   return runtimeFile(phrenPath, "search-history.jsonl");
 }
 
-export function readSearchHistory(phrenPath: string): SearchHistoryEntry[] {
+function readSearchHistory(phrenPath: string): SearchHistoryEntry[] {
   const file = historyFile(phrenPath);
   if (!fs.existsSync(file)) return [];
   try {
@@ -381,7 +381,7 @@ export async function runFragmentSearch(
 
   const rows = queryRows(db, sql, params);
   if (!rows || rows.length === 0) {
-    logEntityMiss(phrenPath, query, "cli_search_fragments", opts.project);
+    logFragmentMiss(phrenPath, query, "cli_search_fragments", opts.project);
     return { lines: [`No fragments matching "${query}".`], exitCode: 0 };
   }
 
@@ -438,7 +438,7 @@ export async function runRelatedDocs(
   const db = await buildIndex(phrenPath, profile);
   const max = opts.limit ?? 10;
 
-  const links = queryEntityLinks(db, entity.toLowerCase());
+  const links = queryFragmentLinks(db, entity.toLowerCase());
   let relatedDocs = links.related.filter(r => r.includes("/"));
 
   if (opts.project) {
@@ -448,7 +448,7 @@ export async function runRelatedDocs(
   relatedDocs = relatedDocs.slice(0, max);
 
   if (relatedDocs.length === 0) {
-    logEntityMiss(phrenPath, entity, "cli_related_docs", opts.project);
+    logFragmentMiss(phrenPath, entity, "cli_related_docs", opts.project);
     return { lines: [`No docs found referencing fragment "${entity}".`], exitCode: 0 };
   }
 

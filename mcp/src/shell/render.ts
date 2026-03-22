@@ -43,7 +43,7 @@ export function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
-export function visibleWidth(s: string): number {
+function visibleWidth(s: string): number {
   return stripAnsi(s).length;
 }
 
