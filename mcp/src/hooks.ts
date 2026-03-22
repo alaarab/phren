@@ -77,10 +77,6 @@ export function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-/** @deprecated Use shellEscape instead */
-function shellSingleQuote(value: string): string {
-  return shellEscape(value);
-}
 
 export interface LifecycleCommands {
   sessionStart: string;
@@ -103,11 +99,11 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
   const entry = resolveCliEntryScript();
   const isWindows = process.platform === "win32";
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const quotedPhren = shellSingleQuote(phrenPath);
+  const quotedPhren = shellEscape(phrenPath);
 
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const quotedEntry = shellSingleQuote(entry);
+    const quotedEntry = shellEscape(entry);
     if (isWindows) {
       return {
         sessionStart: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-session-start`,
@@ -149,7 +145,7 @@ function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" 
   if (process.platform === "win32") {
     return `set "PHREN_HOOK_TOOL=${tool}" && ${command}`;
   }
-  return `PHREN_HOOK_TOOL=${shellSingleQuote(tool)} ${command}`;
+  return `PHREN_HOOK_TOOL=${shellEscape(tool)} ${command}`;
 }
 
 function withHookToolLifecycleCommands(
@@ -183,10 +179,10 @@ function installSessionWrapper(tool: string, phrenPath: string): boolean {
   const content = `#!/bin/sh
 set -u
 
-REAL_BIN=${shellSingleQuote(realBinary)}
-DEFAULT_PHREN_PATH=${shellSingleQuote(phrenPath)}
+REAL_BIN=${shellEscape(realBinary)}
+DEFAULT_PHREN_PATH=${shellEscape(phrenPath)}
 PHREN_PATH="\${PHREN_PATH:-$DEFAULT_PHREN_PATH}"
-ENTRY_SCRIPT=${shellSingleQuote(entry || "")}
+ENTRY_SCRIPT=${shellEscape(entry || "")}
 export PHREN_HOOK_TOOL="${tool}"
 
 if [ ! -x "$REAL_BIN" ]; then
