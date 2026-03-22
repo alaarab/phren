@@ -484,10 +484,6 @@ function projectDirPath(phrenPath: string, project: string): string | null {
   return safeProjectPath(phrenPath, project);
 }
 
-function topicReferenceDir(phrenPath: string, project: string): string | null {
-  return safeProjectPath(phrenPath, project, "reference", "topics");
-}
-
 function topicReferenceRelativePath(slug: string): string {
   return path.posix.join("reference", "topics", `${slug}.md`);
 }
@@ -1102,8 +1098,6 @@ function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic
   return deduped;
 }
 
-export const suggestProjectTopics = suggestTopics;
-
 export function getProjectTopicsResponse(phrenPath: string, project: string): ProjectTopicsResponse {
   const { source, topics } = readProjectTopics(phrenPath, project);
   return {
@@ -1116,7 +1110,7 @@ export function getProjectTopicsResponse(phrenPath: string, project: string): Pr
   };
 }
 
-export function resolveReferenceContentPath(phrenPath: string, project: string, file: string): string | null {
+function resolveReferenceContentPath(phrenPath: string, project: string, file: string): string | null {
   if (!isValidProjectName(project) || !file || file.includes("\0")) return null;
   if (!file.endsWith(".md")) return null;
   const filePath = safeProjectPath(phrenPath, project, file);

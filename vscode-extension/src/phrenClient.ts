@@ -171,24 +171,8 @@ export class PhrenClient {
     return this.callTool("toggle_hooks", args);
   }
 
-  async addCustomHook(event: string, command: string, timeout?: number): Promise<unknown> {
-    const args: Record<string, unknown> = { event, command };
-    if (timeout !== undefined) args.timeout = timeout;
-    return this.callTool("add_custom_hook", args);
-  }
-
-  async removeCustomHook(event: string, command?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { event };
-    if (command) args.command = command;
-    return this.callTool("remove_custom_hook", args);
-  }
-
   async listHookErrors(): Promise<unknown> {
     return this.callTool("list_hook_errors", {});
-  }
-
-  async memoryFeedback(key: string, feedback: string): Promise<unknown> {
-    return this.callTool("memory_feedback", { key, feedback });
   }
 
   async updateTask(project: string, item: string, updates: Record<string, unknown>): Promise<unknown> {
@@ -231,26 +215,10 @@ export class PhrenClient {
     return this.callTool("get_review_queue", project ? { project } : {});
   }
 
-  async searchFragments(query: string, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { name: query };
-    if (project) args.project = project;
-    return this.callTool("search_fragments", args);
-  }
-
-  async getRelatedDocs(entity: string, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { entity };
-    if (project) args.project = project;
-    return this.callTool("get_related_docs", args);
-  }
-
   async readGraph(project?: string): Promise<unknown> {
     const args: Record<string, unknown> = {};
     if (project) args.project = project;
     return this.callTool("read_graph", args);
-  }
-
-  async crossProjectFragments(): Promise<unknown> {
-    return this.callTool("cross_project_fragments", {});
   }
 
   async pushChanges(message?: string): Promise<unknown> {

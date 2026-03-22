@@ -40,32 +40,6 @@ async function httpGet(port: number, reqPath: string): Promise<{ status: number;
   });
 }
 
-async function postForm(port: number, reqPath: string, body: Record<string, string>): Promise<{ status: number; body: string }> {
-  const payload = new URLSearchParams(body).toString();
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        method: "POST",
-        host: "127.0.0.1",
-        port,
-        path: reqPath,
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "content-length": Buffer.byteLength(payload),
-        },
-      },
-      (res) => {
-        let out = "";
-        res.on("data", (chunk) => { out += String(chunk); });
-        res.on("end", () => resolve({ status: res.statusCode || 0, body: out }));
-      },
-    );
-    req.on("error", reject);
-    req.write(payload);
-    req.end();
-  });
-}
-
 function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }

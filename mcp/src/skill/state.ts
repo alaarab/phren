@@ -28,6 +28,3 @@ export function setSkillEnabled(phrenPath: string, scope: SkillScope, name: stri
   });
 }
 
-export function getSkillStateKey(scope: SkillScope, name: string): string {
-  return skillStateKey(scope, name);
-}

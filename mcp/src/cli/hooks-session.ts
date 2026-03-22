@@ -1,7 +1,5 @@
 import {
-  type HookContext,
   buildHookContext,
-  checkHookGuard,
   handleGuardSkip,
   debugLog,
   appendAuditLog,
@@ -71,7 +69,7 @@ const MAINTENANCE_LOCK_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // Re-export HookContext types for consumers
 export type { HookContext } from "./hooks-context.js";
-export { buildHookContext, checkHookGuard, handleGuardSkip } from "./hooks-context.js";
+export { buildHookContext, handleGuardSkip } from "./hooks-context.js";
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 function readStdinJson<T>(): T | null {

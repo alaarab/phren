@@ -23,7 +23,7 @@ import { debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { readProjectConfig, type ProjectAccessControl } from "../project-config.js";
 
-export type RbacAction =
+type RbacAction =
   | "add_finding"
   | "remove_finding"
   | "edit_finding"
@@ -114,7 +114,7 @@ function rolePermits(role: "admin" | "contributor" | "reader" | "denied", action
   return false;
 }
 
-export interface PermissionResult {
+interface PermissionResult {
   allowed: boolean;
   actor: string | null;
   role: "admin" | "contributor" | "reader" | "denied" | "open";
@@ -127,7 +127,7 @@ export interface PermissionResult {
  *
  * Returns `{ allowed: true }` when permitted, `{ allowed: false, reason }` when denied.
  */
-export function checkPermission(
+function checkPermission(
   phrenPath: string,
   action: RbacAction,
   project?: string | null,

@@ -36,7 +36,7 @@ export function commandVersion(cmd: string, args: string[] = ["--version"]): str
   }
 }
 
-export function parseSemverTriple(raw: string): [number, number, number] | null {
+function parseSemverTriple(raw: string): [number, number, number] | null {
   const match = raw.match(/(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
   return [Number.parseInt(match[1], 10), Number.parseInt(match[2], 10), Number.parseInt(match[3], 10)];

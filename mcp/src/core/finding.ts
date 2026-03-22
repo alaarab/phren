@@ -7,7 +7,7 @@ import {
 } from "../data/access.js";
 import { MAX_FINDING_LENGTH } from "../content/validate.js";
 
-export interface FindingResult {
+interface FindingResult {
   ok: boolean;
   message: string;
   data?: unknown;

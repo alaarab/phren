@@ -48,10 +48,6 @@ function writeTaskFile(content: string): void {
   fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), content);
 }
 
-function readTaskFile(): string {
-  return fs.readFileSync(path.join(projectDir, TASKS_FILENAME), "utf8");
-}
-
 beforeEach(() => {
   ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("data-tasks-test-"));
   projectDir = path.join(tmpDir, PROJECT);

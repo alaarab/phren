@@ -12,7 +12,7 @@ import {
   cosineFallback,
   extractSnippet,
   getDocSourceKey,
-  getEntityBoostDocs,
+  getFragmentBoostDocs,
   decodeFiniteNumber,
   rowToDocWithRowid,
   buildIndex,
@@ -211,7 +211,7 @@ const RRF_K = 60;
  * Documents appearing in multiple tiers get a higher combined score.
  * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
  */
-export function rrfMerge(tiers: DocRow[][], k = RRF_K): DocRow[] {
+function rrfMerge(tiers: DocRow[][], k = RRF_K): DocRow[] {
   const scores = new Map<string, number>();
   const docs = new Map<string, DocRow>();
   for (const tier of tiers) {
@@ -298,7 +298,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   return scored;
 }
 
-export function shouldRunVectorExpansion(
+function shouldRunVectorExpansion(
   rows: DocRow[] | null,
   prompt: string,
   desiredResults = VECTOR_FALLBACK_SKIP_COUNT
@@ -617,7 +617,7 @@ export interface FederatedDocRow extends DocRow {
  * Parse PHREN_FEDERATION_PATHS env var and return valid, distinct paths.
  * Paths are colon-separated. The local phrenPath is excluded to avoid duplicate results.
  */
-export function parseFederationPaths(localPhrenPath: string): string[] {
+function parseFederationPaths(localPhrenPath: string): string[] {
   const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
   if (!raw.trim()) return [];
   return raw
@@ -780,7 +780,7 @@ export function rankResults(
     if (canonicalRows) ranked = [...canonicalRows, ...ranked];
   }
 
-  const entityBoost = query ? getEntityBoostDocs(db, query) : new Set<string>();
+  const entityBoost = query ? getFragmentBoostDocs(db, query) : new Set<string>();
   const entityBoostPaths = new Set<string>();
   for (const doc of ranked) {
     // Use getDocSourceKey to build the full project/relFile key, matching what
@@ -920,7 +920,7 @@ export interface SelectedSnippet {
 }
 
 /** Mark snippet lines with stale citations (cited file missing or line content changed). */
-export function markStaleCitations(snippet: string): string {
+function markStaleCitations(snippet: string): string {
   const lines = snippet.split("\n");
   const result: string[] = [];
   for (let i = 0; i < lines.length; i++) {

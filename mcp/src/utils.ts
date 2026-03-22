@@ -70,7 +70,7 @@ export function runGit(cwd: string, args: string[], timeoutMs: number, debugLogF
   }
 }
 
-export interface ResolvedExecCommand {
+interface ResolvedExecCommand {
   command: string;
   shell: boolean;
 }
@@ -79,7 +79,7 @@ function needsCommandShell(cmd: string): boolean {
   return /\.(cmd|bat)$/i.test(path.basename(cmd));
 }
 
-export function normalizeExecCommand(
+function normalizeExecCommand(
   cmd: string,
   platform: NodeJS.Platform = process.platform,
   whereOutput?: string | null,
@@ -263,8 +263,6 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
   return resolved;
 }
 
-// Review queue section types and file path helper, shared by data-access.ts and shared.ts.
-export type QueueSection = "Review" | "Stale" | "Conflicts";
 const QUEUE_FILENAME = "review.md";
 
 export function queueFilePath(phrenPath: string, project: string): string {

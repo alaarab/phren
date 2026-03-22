@@ -5,7 +5,7 @@
 
 import { PhrenShell } from "./shell.js";
 import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./render.js";
-import { createPhrenAnimator, PHREN_ART_RIGHT } from "../phren-art.js";
+import { createPhrenAnimator } from "../phren-art.js";
 import { errorMessage } from "../utils.js";
 import { computePhrenLiveStateToken } from "../shared.js";
 import { VERSION } from "../init/shared.js";
@@ -18,7 +18,7 @@ interface LiveStateHost {
   setMessage(message: string): void;
 }
 
-export interface StartupIntroPlan {
+interface StartupIntroPlan {
   mode: "always" | "once-per-version" | "off";
   variant: "full" | "final-frame" | "skip";
   holdForKeypress: boolean;
@@ -46,7 +46,7 @@ async function waitForAnyKeypress(): Promise<void> {
   });
 }
 
-export function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
+function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
   const state = loadShellState(phrenPath);
   const mode = state.introMode === "always" || state.introMode === "off" ? state.introMode : "once-per-version";
 
@@ -139,7 +139,7 @@ async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPla
   }
 }
 
-export function startLiveStatePoller({
+function startLiveStatePoller({
   phrenPath,
   shell,
   repaint,

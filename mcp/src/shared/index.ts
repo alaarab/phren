@@ -41,15 +41,14 @@ import {
 export { porterStem } from "./stemmer.js";
 export { cosineFallback } from "./search-fallback.js";
 export {
-  queryFragmentLinks, queryFragmentLinks as queryEntityLinks,
-  getFragmentBoostDocs, getFragmentBoostDocs as getEntityBoostDocs,
+  queryFragmentLinks,
+  getFragmentBoostDocs,
   ensureGlobalEntitiesTable,
   queryCrossProjectFragments,
-  logFragmentMiss, logFragmentMiss as logEntityMiss,
-  extractFragmentNames, extractFragmentNames as extractEntityNames,
+  logFragmentMiss,
+  extractFragmentNames,
 } from "./fragment-graph.js";
 export {
-  buildSourceDocKey,
   decodeFiniteNumber,
   decodeStringRow,
   extractSnippet,
@@ -218,7 +217,7 @@ function _resolveImportsRecursive(
  * The import path is resolved relative to the phren root (e.g. `shared/foo.md` -> `~/.phren/global/shared/foo.md`).
  * Circular imports are detected and skipped. Depth is capped to prevent runaway recursion.
  */
-export function resolveImports(
+function resolveImports(
   content: string,
   phrenPath: string,
 ): string {

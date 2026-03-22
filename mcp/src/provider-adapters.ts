@@ -45,7 +45,7 @@ function uniqStrings(values: Array<string | undefined>): string[] {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value && value.trim()))));
 }
 
-export function pickExistingFile(candidates: string[]): string | null {
+function pickExistingFile(candidates: string[]): string | null {
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate;
   }

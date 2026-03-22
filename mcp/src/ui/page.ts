@@ -19,7 +19,7 @@ function h(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-export function renderWebUiPage(phrenPath: string, authToken?: string, nonce?: string): string {
+export function renderWebUiPage(_phrenPath: string, authToken?: string, nonce?: string): string {
   const nonceAttr = nonce ? ` nonce="${h(nonce)}"` : "";
 
   return `<!doctype html>

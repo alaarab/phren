@@ -6,7 +6,7 @@ import { PhrenClient } from "./phrenClient";
 
 export function showSetupWizard(
   client: PhrenClient,
-  context: vscode.ExtensionContext,
+  _context: vscode.ExtensionContext,
   initialData: { hostname: string },
 ): void {
   const panel = vscode.window.createWebviewPanel(

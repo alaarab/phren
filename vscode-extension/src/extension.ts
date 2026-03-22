@@ -1908,97 +1908,11 @@ function summarizeCommandError(result: CommandResult): string {
   return result.status === null ? "failed to start command" : `exit code ${result.status}`;
 }
 
-interface McpCleanupResult {
-  cleanedFiles: string[];
-  warnings: string[];
-}
-
 interface NpmUninstallResult {
   ok: boolean;
   status: number | null;
   stdout: string;
   stderr: string;
-}
-
-interface SettingsResetResult {
-  resetKeys: string[];
-  warnings: string[];
-}
-
-function clearPhrenMcpEntries(): McpCleanupResult {
-  const cleanedFiles: string[] = [];
-  const warnings: string[] = [];
-  const candidateFiles = getMcpConfigCandidateFiles();
-
-  for (const filePath of candidateFiles) {
-    try {
-      if (removeMcpServerAtPath(filePath)) {
-        cleanedFiles.push(filePath);
-      }
-    } catch (error) {
-      warnings.push(`${filePath}: ${toErrorMessage(error)}`);
-    }
-  }
-
-  const codexTomlPath = path.join(os.homedir(), ".codex", "config.toml");
-  try {
-    if (removeTomlMcpServer(codexTomlPath)) {
-      cleanedFiles.push(codexTomlPath);
-    }
-  } catch (error) {
-    warnings.push(`${codexTomlPath}: ${toErrorMessage(error)}`);
-  }
-
-  return { cleanedFiles, warnings };
-}
-
-function getMcpConfigCandidateFiles(): string[] {
-  const home = os.homedir();
-  const files = [
-    path.join(home, ".claude", "settings.json"),
-    path.join(home, ".cursor", "mcp.json"),
-  ];
-
-  return Array.from(new Set(files.filter((value): value is string => Boolean(value))));
-}
-
-function removeMcpServerAtPath(filePath: string): boolean {
-  if (!fs.existsSync(filePath)) return false;
-  let data: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-    data = parsed as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(`malformed JSON: ${toErrorMessage(error)}`);
-  }
-
-  let removed = false;
-  for (const key of ["mcpServers", "servers"] as const) {
-    const root = data[key];
-    if (!root || typeof root !== "object" || Array.isArray(root)) continue;
-    const objectRoot = root as Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(objectRoot, "phren")) {
-      delete objectRoot.phren;
-      removed = true;
-    }
-  }
-
-  if (removed) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
-  }
-  return removed;
-}
-
-function removeTomlMcpServer(filePath: string): boolean {
-  if (!fs.existsSync(filePath)) return false;
-  const content = fs.readFileSync(filePath, "utf8");
-  const sectionRe = /^\[mcp_servers\.phren\]\s*\n(?:(?!\[)[^\n]*\n?)*/m;
-  if (!sectionRe.test(content)) return false;
-  const next = content.replace(sectionRe, "").replace(/\n{3,}/g, "\n\n");
-  fs.writeFileSync(filePath, next, "utf8");
-  return true;
 }
 
 function uninstallGlobalPhrenPackage(): NpmUninstallResult {
@@ -2041,29 +1955,6 @@ function removePhrenStore(storePath: string): { removed: boolean; skipped: boole
   } catch (error) {
     return { removed: false, skipped: false, error: toErrorMessage(error) };
   }
-}
-
-async function resetPhrenExtensionSettings(context: vscode.ExtensionContext): Promise<SettingsResetResult> {
-  const warnings: string[] = [];
-  const resetKeys: string[] = [];
-  const config = vscode.workspace.getConfiguration("phren");
-  const packageJson = context.extension.packageJSON as Record<string, unknown>;
-  const contributes = asRecord(packageJson.contributes);
-  const configuration = asRecord(contributes?.configuration);
-  const properties = asRecord(configuration?.properties) ?? {};
-  const keys = Object.keys(properties).filter((key) => key.startsWith("phren."));
-
-  for (const key of keys) {
-    const section = key.slice("phren.".length);
-    try {
-      await config.update(section, undefined, vscode.ConfigurationTarget.Global);
-      resetKeys.push(key);
-    } catch (error) {
-      warnings.push(`${key}: ${toErrorMessage(error)}`);
-    }
-  }
-
-  return { resetKeys, warnings };
 }
 
 // ── Settings → phren preference file sync ──────────────────────────────────

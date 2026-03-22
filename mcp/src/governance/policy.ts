@@ -15,7 +15,7 @@ import {
   stripLifecycleMetadata as stripLifecycleMetadataMeta,
 } from "../content/metadata.js";
 
-export const MAX_QUEUE_ENTRY_LENGTH = 500;
+const MAX_QUEUE_ENTRY_LENGTH = 500;
 
 export interface RetentionPolicy {
   schemaVersion?: number;

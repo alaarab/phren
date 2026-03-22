@@ -251,7 +251,7 @@ async function handleAddFinding(
 
       // Extract fragment hints synchronously from the finding text (regex only, no DB).
       // Full DB fragment linking happens on the next index rebuild via updateFileInIndex →
-      // extractAndLinkEntities. We surface hints here so callers can see what was detected.
+      // extractAndLinkFragments. We surface hints here so callers can see what was detected.
       const detectedFragments = extractFragmentNames(taggedFinding);
 
       return mcpResponse({
