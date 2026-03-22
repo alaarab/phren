@@ -3,7 +3,7 @@ import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { logDebug } from "./logger.js";
+import { logDebug, logWarn } from "./logger.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import {
   removeFinding as removeFindingCore,
@@ -22,7 +22,6 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "./shared-content.js";
-import { logWarn } from "./logger.js";
 import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "./content-dedup.js";
 import type { PhrenResult } from "./phren-core.js";
 import { runCustomHooks } from "./hooks.js";
