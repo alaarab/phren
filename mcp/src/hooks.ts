@@ -10,6 +10,7 @@ import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 import { logDebug } from "./logger.js";
+import { withFileLock } from "./shared/shared-governance.js";
 
 export interface HookError {
   code: PhrenErrorCode;
@@ -527,16 +528,22 @@ export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
 function appendHookErrorLog(phrenPath: string, event: string, message: string): void {
   const logPath = runtimeFile(phrenPath, "hook-errors.log");
   const line = `[${new Date().toISOString()}] [${event}] ${message}\n`;
-  fs.appendFileSync(logPath, line);
   try {
-    const stat = fs.statSync(logPath);
-    if (stat.size > 200_000) {
-      const content = fs.readFileSync(logPath, "utf-8");
-      const lines = content.split("\n").filter(Boolean);
-      atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
-    }
+    withFileLock(logPath, () => {
+      fs.appendFileSync(logPath, line);
+      try {
+        const stat = fs.statSync(logPath);
+        if (stat.size > 200_000) {
+          const content = fs.readFileSync(logPath, "utf-8");
+          const lines = content.split("\n").filter(Boolean);
+          atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
+        }
+      } catch (err: unknown) {
+        logDebug("appendHookErrorLog rotate", errorMessage(err));
+      }
+    });
   } catch (err: unknown) {
-    logDebug("appendHookErrorLog rotate", errorMessage(err));
+    logDebug("appendHookErrorLog lock", errorMessage(err));
   }
 }
 
