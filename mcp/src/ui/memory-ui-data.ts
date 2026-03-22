@@ -226,7 +226,7 @@ export function getHooksData(phrenPath: string, profile?: string) {
   return { globalEnabled, tools, customHooks: readCustomHooks(phrenPath), projectOverrides };
 }
 
-export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
+export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string, existingDb?: SqlJsDatabase | null): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
   const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
@@ -379,9 +379,10 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   }
 
   // ── Fragments (fragment graph) ──────────────────────────────────────
-  let db: SqlJsDatabase | null = null;
+  const ownDb = !existingDb;
+  let db: SqlJsDatabase | null = existingDb ?? null;
   try {
-    db = await buildIndex(phrenPath, profile);
+    if (!db) db = await buildIndex(phrenPath, profile);
     const rows = queryRows(
       db,
       `SELECT e.id, e.name, e.type, COUNT(DISTINCT el.source_doc) as ref_count
@@ -457,7 +458,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   } catch {
     // fragment loading failed — continue with other data sources
   } finally {
-    if (db) {
+    if (ownDb && db) {
       try { db.close(); } catch { /* already closed or failed — ignore */ }
     }
   }

@@ -91,17 +91,25 @@ async function main() {
   const WRITE_TIMEOUT_MS = 30_000;
   async function rebuildIndex() {
     runCustomHooks(phrenPath, "pre-index");
-    indexReady = false;
-    try { db?.close(); } catch (err: unknown) {
-      logWarn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
+    const oldDb = db;
+    try {
+      indexReady = false;
+      db = await buildIndex(phrenPath, profile);
+      indexReady = true;
+      try { oldDb?.close(); } catch (err: unknown) {
+        logWarn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
+      }
+    } catch (err) {
+      // Restore old state on failure
+      db = oldDb;
+      indexReady = !!oldDb;
+      throw err;
     }
-    db = await buildIndex(phrenPath, profile);
-    indexReady = true;
     runCustomHooks(phrenPath, "post-index");
   }
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T | { content: { type: "text"; text: string }[] }> {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
-      throw new Error(`Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`);
+      return mcpResponse({ ok: false, error: `Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`, errorCode: "TIMEOUT" });
     }
     writeQueueDepth++;
     const run = writeQueue.then(async () => {

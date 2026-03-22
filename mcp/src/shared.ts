@@ -3,6 +3,7 @@ import * as path from "path";
 import { debugLog, runtimeFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
 import { logWarn } from "./logger.js";
+import { withFileLock } from "./governance/governance-locks.js";
 
 export type { HookToolName } from "./provider-adapters.js";
 export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";
@@ -111,44 +112,9 @@ export function impactLogFile(phrenPath: string): string {
 export function appendAuditLog(phrenPath: string, event: string, details: string): void {
   const logPath = runtimeFile(phrenPath, "audit.log");
   const line = `[${new Date().toISOString()}] ${event} ${details}\n`;
-  const lockPath = logPath + ".lock";
-  const maxWait = 5000;
-  const pollMs = 50;
-  const staleMs = 30_000;
-  const waiter = new Int32Array(new SharedArrayBuffer(4));
-  // Q82: see docs/decisions/Q82-audit-log-inline-lock.md
-  let waited = 0;
-  let hasLock = false;
   try {
-    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
-    while (waited < maxWait) {
-      try {
-        fs.writeFileSync(lockPath, `${process.pid}\n${Date.now()}`, { flag: "wx" });
-        hasLock = true;
-        break;
-      } catch (err: unknown) {
-        logWarn("appendAuditLog", `lockWrite: ${errorMessage(err)}`);
-        try {
-          const stat = fs.statSync(lockPath);
-          if (Date.now() - stat.mtimeMs > staleMs) {
-            try {
-              fs.unlinkSync(lockPath);
-            } catch {
-              // Another process may have claimed or removed the stale lock between
-              // statSync and unlinkSync. Sleep before retrying to avoid a spin loop.
-              Atomics.wait(waiter, 0, 0, pollMs);
-              waited += pollMs;
-            }
-            continue;
-          }
-        } catch (statErr: unknown) {
-          logWarn("appendAuditLog", `staleStat: ${errorMessage(statErr)}`);
-        }
-        Atomics.wait(waiter, 0, 0, pollMs);
-        waited += pollMs;
-      }
-    }
-    if (hasLock) {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    withFileLock(logPath, () => {
       fs.appendFileSync(logPath, line);
       const stat = fs.statSync(logPath);
       if (stat.size > 1_000_000) {
@@ -156,18 +122,8 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
         const lines = content.split("\n");
         fs.writeFileSync(logPath, lines.slice(-500).join("\n") + "\n");
       }
-    } else {
-      debugLog(`Audit log skipped (lock timeout): ${event} ${details}`);
-    }
+    });
   } catch (err: unknown) {
     debugLog(`Audit log write failed: ${errorMessage(err)}`);
-  } finally {
-    if (hasLock) {
-      try {
-        fs.unlinkSync(lockPath);
-      } catch (err: unknown) {
-        logWarn("appendAuditLog", `unlock: ${errorMessage(err)}`);
-      }
-    }
   }
 }
