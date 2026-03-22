@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isValidProjectName, safeProjectPath, errorMessage } from "./utils.js";
 import { addFindingsToFile } from "./shared-content.js";
 import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "./shared-ollama.js";
+import { callLlm } from "./content-dedup.js";
 import { debugLog } from "./shared.js";
 import { getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "./proactivity.js";
 import * as path from "path";
@@ -49,11 +50,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · auto-extract findings",
       description:
-        "Use a local Ollama LLM to automatically extract non-obvious findings from text. " +
+        "Use an LLM to automatically extract non-obvious findings from text. " +
         "Pass conversation snippets, code review notes, error logs, or any engineering text. " +
         "The model identifies patterns, pitfalls, decisions, and bugs worth remembering. " +
-        "Requires Ollama running locally. Set PHREN_EXTRACT_MODEL env var to choose model (default: llama3.2). " +
-        "Set PHREN_OLLAMA_URL=off to disable.",
+        "Prefers local Ollama (set PHREN_EXTRACT_MODEL, default: llama3.2). " +
+        "Falls back to remote LLMs when Ollama is unavailable: PHREN_LLM_ENDPOINT → Anthropic API → OpenAI API. " +
+        "Set PHREN_OLLAMA_URL=off to skip Ollama entirely.",
       inputSchema: z.object({
         project: z.string().describe("Project name to save extracted findings to."),
         text: z.string().describe("Text to extract findings from (conversation, code review, error log, etc.). Max 10000 chars."),
@@ -77,35 +79,53 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error });
       }
 
-      const ollamaUrl = getOllamaUrl();
-      if (!ollamaUrl) {
-        return mcpResponse({
-          ok: false,
-          error: "Ollama is disabled (PHREN_OLLAMA_URL=off). Set PHREN_OLLAMA_URL=http://localhost:11434 to enable auto-extraction.",
-        });
-      }
-
-      const available = await checkOllamaAvailable(ollamaUrl);
-      if (!available) {
-        return mcpResponse({
-          ok: false,
-          error: `Ollama not running at ${ollamaUrl}. Start Ollama first: https://ollama.com`,
-        });
-      }
-
-      const extractModel = model ?? getExtractModel();
-      const modelAvailable = await checkModelAvailable(extractModel, ollamaUrl);
-      if (!modelAvailable) {
-        return mcpResponse({
-          ok: false,
-          error: `Model "${extractModel}" not found. Pull it with: ollama pull ${extractModel}`,
-        });
-      }
-
       const prompt = EXTRACT_PROMPT + text;
-      const raw = await generateText(prompt, extractModel, ollamaUrl);
+      let raw: string | null = null;
+      let usedBackend = "unknown";
+
+      // Try Ollama first (local, fast, free)
+      const ollamaUrl = getOllamaUrl();
+      if (ollamaUrl) {
+        const available = await checkOllamaAvailable(ollamaUrl);
+        if (available) {
+          const extractModel = model ?? getExtractModel();
+          const modelAvailable = await checkModelAvailable(extractModel, ollamaUrl);
+          if (modelAvailable) {
+            raw = await generateText(prompt, extractModel, ollamaUrl);
+            if (raw) usedBackend = `ollama (${extractModel})`;
+          } else {
+            debugLog(`auto_extract: Ollama model "${extractModel}" not available, trying remote LLM fallback`);
+          }
+        } else {
+          debugLog(`auto_extract: Ollama not reachable at ${ollamaUrl}, trying remote LLM fallback`);
+        }
+      }
+
+      // Fall back to remote LLM (PHREN_LLM_ENDPOINT → Anthropic → OpenAI)
       if (!raw) {
-        return mcpResponse({ ok: false, error: "Ollama returned no response. Try again or check model availability." });
+        try {
+          // callLlm uses the same provider chain as semantic dedup/conflict detection.
+          // We need a higher maxTokens since extraction returns a JSON array, not just YES/NO.
+          const result = await callLlm(prompt, undefined, 1024);
+          if (result) {
+            raw = result;
+            usedBackend = "remote LLM";
+          }
+        } catch (err: unknown) {
+          debugLog(`auto_extract: remote LLM call failed: ${errorMessage(err)}`);
+        }
+      }
+
+      if (!raw) {
+        return mcpResponse({
+          ok: false,
+          error:
+            "No LLM available for extraction. Configure one of: " +
+            "(1) Ollama locally (https://ollama.com), " +
+            "(2) PHREN_LLM_ENDPOINT + PHREN_LLM_KEY, " +
+            "(3) ANTHROPIC_API_KEY, or " +
+            "(4) OPENAI_API_KEY.",
+        });
       }
 
       const findings = parseFindings(raw);
