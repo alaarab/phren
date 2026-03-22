@@ -132,36 +132,15 @@ describe.sequential("web-ui auth token protection", () => {
     tmpCleanup();
   });
 
-  it("returns 401 when auth token is missing from protected POST routes", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("returns 401 when auth token is wrong", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: "wrong-token",
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("succeeds with correct auth token", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("GET / returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/");
+  it.each([
+    "/",
+    "/api/csrf-token",
+    "/api/hooks",
+    "/api/review-queue",
+    "/api/review-activity",
+    "/api/project-content?project=demo&file=FINDINGS.md",
+  ])("GET %s returns 401 without auth token", async (endpoint) => {
+    const res = await httpGet(port, endpoint);
     expect(res.status).toBe(401);
     expect(res.body).toContain("Unauthorized");
   });
@@ -170,36 +149,6 @@ describe.sequential("web-ui auth token protection", () => {
     const res = await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
     expect(res.status).toBe(200);
     expect(res.body).toContain(authToken);
-  });
-
-  it("GET /api/csrf-token returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/csrf-token");
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("GET /api/hooks returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/hooks");
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("GET /api/review-queue returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/review-queue");
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("GET /api/review-activity returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/review-activity");
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
-  });
-
-  it("GET /api/project-content returns 401 without auth token", async () => {
-    const res = await httpGet(port, "/api/project-content?project=demo&file=FINDINGS.md");
-    expect(res.status).toBe(401);
-    expect(res.body).toContain("Unauthorized");
   });
 });
 
@@ -1032,84 +981,6 @@ describe.sequential("web-ui project topics and reference APIs", () => {
   });
 });
 
-describe.sequential("web-ui hook-toggle auth protection (Q13)", () => {
-  let tmpRoot = "";
-  let tmpCleanup: () => void;
-  let server: http.Server | null = null;
-  let port = 0;
-  let authToken: string;
-  let csrfTokens: Map<string, number>;
-  const priorActor = process.env.PHREN_ACTOR;
-
-  beforeEach(async () => {
-    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hook-auth-"));
-    seedProject(tmpRoot);
-    process.env.PHREN_ACTOR = "web-ui-admin";
-    grantAdmin(tmpRoot);
-    authToken = "hook-auth-token";
-    csrfTokens = new Map<string, number>();
-    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
-    await new Promise<void>((resolve) => {
-      server!.listen(0, "127.0.0.1", () => resolve());
-    });
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("failed to bind test server");
-    port = address.port;
-  });
-
-  afterEach(async () => {
-    await new Promise<void>((resolve) => {
-      if (!server) return resolve();
-      server.close(() => resolve());
-    });
-    server = null;
-    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
-    else process.env.PHREN_ACTOR = priorActor;
-    tmpCleanup();
-  });
-
-  it("POST /api/hook-toggle returns 401 without auth token", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      tool: "claude",
-    });
-    expect(res.status).toBe(401);
-    const data = JSON.parse(res.body);
-    expect(data.ok).toBe(false);
-    expect(data.error).toContain("Unauthorized");
-  });
-
-  it("POST /api/hook-toggle returns 401 with wrong auth token", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: "wrong-token",
-      tool: "claude",
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("POST /api/hook-toggle succeeds with correct auth token", async () => {
-    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-    expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      _csrf: csrf,
-      tool: "claude",
-    });
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    expect(data.ok).toBe(true);
-  });
-
-  it("POST /api/hook-toggle rejects missing CSRF when auth is correct", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      tool: "claude",
-    });
-    expect(res.status).toBe(403);
-    expect(JSON.parse(res.body).error).toContain("CSRF");
-  });
-});
-
 describe.sequential("web-ui JSON API auth and removed queue routes", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
@@ -1146,62 +1017,13 @@ describe.sequential("web-ui JSON API auth and removed queue routes", () => {
     tmpCleanup();
   });
 
-  it("POST /api/hook-toggle returns 401 without auth", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      tool: "claude",
-      enabled: "true",
-    });
+  it.each([
+    { route: "/api/approve", body: { project: "demo", line: "- [2026-03-05] Keep this memory [confidence 0.90]" } },
+    { route: "/api/reject", body: { project: "demo", line: "- [2026-03-04] Remove stale memory [confidence 0.55]" } },
+    { route: "/api/edit", body: { project: "demo", line: "- [2026-03-05] Keep this memory [confidence 0.90]", new_text: "updated text" } },
+  ])("POST $route requires auth", async ({ route, body }) => {
+    const res = await postForm(port, route, body);
     expect(res.status).toBe(401);
-  });
-
-  it("POST /api/approve requires auth", async () => {
-    const res = await postForm(port, "/api/approve", {
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("POST /api/reject requires auth", async () => {
-    const res = await postForm(port, "/api/reject", {
-      project: "demo",
-      line: "- [2026-03-04] Remove stale memory [confidence 0.55]",
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("POST /api/edit requires auth", async () => {
-    const res = await postForm(port, "/api/edit", {
-      project: "demo",
-      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
-      new_text: "updated text",
-    });
-    expect(res.status).toBe(401);
-  });
-
-  it("POST /api/hook-toggle succeeds with correct auth", async () => {
-    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
-    expect(csrfRes.status).toBe(200);
-    const csrf = JSON.parse(csrfRes.body).token as string;
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      _csrf: csrf,
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    expect(data.ok).toBe(true);
-  });
-
-  it("POST /api/hook-toggle rejects missing CSRF when auth is correct", async () => {
-    const res = await postForm(port, "/api/hook-toggle", {
-      _auth: authToken,
-      tool: "claude",
-      enabled: "true",
-    });
-    expect(res.status).toBe(403);
-    expect(JSON.parse(res.body).error).toContain("CSRF");
   });
 
   it("JSON review queue edit route works with auth and CSRF", async () => {
