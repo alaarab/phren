@@ -10,7 +10,7 @@ export interface McpContext {
   withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T | { content: { type: "text"; text: string }[] }>;
 }
 
-export type RegisterFn = (server: McpServer, ctx: McpContext) => void;
+type RegisterFn = (server: McpServer, ctx: McpContext) => void;
 
 /**
  * Standardized MCP tool response payload, based on PhrenResult conventions.
@@ -20,7 +20,7 @@ export type RegisterFn = (server: McpServer, ctx: McpContext) => void;
  * Accepts `boolean` for ok (not just literals) to support computed expressions
  * like `ok: added.length > 0`. All MCP tool handlers use this type.
  */
-export interface McpToolResult {
+interface McpToolResult {
   ok: boolean;
   data?: unknown;
   error?: string;

@@ -52,7 +52,7 @@ import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 
 /** Interface for the shell methods that executePalette needs */
-export interface PaletteHost {
+interface PaletteHost {
   phrenPath: string;
   profile: string;
   state: ShellState;

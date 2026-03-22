@@ -27,7 +27,6 @@ export const FINDING_PROVENANCE_SOURCES = [
 ] as const;
 
 export type FindingProvenanceSource = (typeof FINDING_PROVENANCE_SOURCES)[number];
-export type FindingSource = FindingProvenanceSource;
 
 export function isFindingProvenanceSource(value: string | undefined): value is FindingProvenanceSource {
   if (!value) return false;

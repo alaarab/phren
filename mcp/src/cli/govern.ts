@@ -274,7 +274,7 @@ interface GcReport {
   runtimeLogsRemoved: number;
 }
 
-export async function handleGcMaintain(args: string[] = []): Promise<void> {
+async function handleGcMaintain(args: string[] = []): Promise<void> {
   const dryRun = args.includes("--dry-run");
   const phrenPath = getPhrenPath();
   const { execFileSync } = await import("child_process");

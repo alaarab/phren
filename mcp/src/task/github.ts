@@ -8,7 +8,7 @@ import type { TaskItem } from "../data/tasks.js";
 const GITHUB_REPO_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:\/|\b|$)/;
 const GITHUB_ISSUE_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)(?:[?#][^\s]*)?$/;
 
-export interface GithubIssueRef {
+interface GithubIssueRef {
   repo?: string;
   issueNumber?: number;
   url?: string;
@@ -25,7 +25,7 @@ export function parseGithubIssueUrl(url: string): GithubIssueRef | null {
   };
 }
 
-export function extractGithubRepoFromText(content: string): string | undefined {
+function extractGithubRepoFromText(content: string): string | undefined {
   const match = content.match(GITHUB_REPO_URL);
   return match?.[1];
 }

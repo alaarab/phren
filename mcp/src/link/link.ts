@@ -65,7 +65,6 @@ export {
 export type {
   ManifestHooks,
   SkillFrontmatter,
-  SkillValidationResult,
 } from "./skills.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -76,7 +75,7 @@ interface ProfileData {
   projects?: string[];
 }
 
-export interface LinkOptions {
+interface LinkOptions {
   machine?: string;
   profile?: string;
   register?: boolean;

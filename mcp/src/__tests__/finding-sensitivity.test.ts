@@ -30,12 +30,6 @@ function makePhren() {
   return tmp;
 }
 
-function makeProject(phrenPath: string, project: string) {
-  const dir = path.join(phrenPath, project);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n`);
-}
-
 function writeWorkflowPolicy(
   phrenPath: string,
   overrides: Record<string, unknown> = {},

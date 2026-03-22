@@ -27,7 +27,7 @@ interface TaskSessionState {
   updatedAt: string;
 }
 
-export interface TaskPromptLifecycleResult {
+interface TaskPromptLifecycleResult {
   mode: TaskMode;
   noticeLines: string[];
 }
@@ -107,7 +107,7 @@ function clearTaskSessionState(phrenPath: string, sessionId: string): void {
   }
 }
 
-export function getTaskMode(phrenPath: string): TaskMode {
+function getTaskMode(phrenPath: string): TaskMode {
   return getWorkflowPolicy(phrenPath).taskMode;
 }
 
@@ -376,11 +376,6 @@ export function finalizeTaskSession(args: {
     });
     return;
   }
-}
-
-export function clearTaskSession(phrenPath: string, sessionId?: string): void {
-  if (!sessionId) return;
-  clearTaskSessionState(phrenPath, sessionId);
 }
 
 /**

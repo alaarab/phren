@@ -5,7 +5,7 @@ import { resolveActiveProfile } from "../profile-store.js";
 import type { ProjectOwnershipMode } from "../project-config.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
 
-export interface AddedProjectData {
+interface AddedProjectData {
   project: string;
   path: string;
   profile: string | null;

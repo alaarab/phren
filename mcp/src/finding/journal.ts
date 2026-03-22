@@ -7,7 +7,7 @@ import { addFindingToFile } from "../shared/content.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import type { FindingProvenanceSource } from "../content/citation.js";
 
-export interface FindingJournalEntry {
+interface FindingJournalEntry {
   at: string;
   project: string;
   text: string;
@@ -18,7 +18,7 @@ export interface FindingJournalEntry {
   file?: string;
 }
 
-export interface FindingJournalCompactResult {
+interface FindingJournalCompactResult {
   filesProcessed: number;
   entriesProcessed: number;
   added: number;

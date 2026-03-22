@@ -25,7 +25,7 @@ function run(cmd: string, args: string[], cwd?: string): string {
   }).trim();
 }
 
-export interface UpdateResult {
+interface UpdateResult {
   ok: boolean;
   message: string;
 }

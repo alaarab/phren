@@ -45,18 +45,18 @@ export interface PostInitCheck {
   fix?: string;
 }
 
-export interface BootstrapProjectOptions {
+interface BootstrapProjectOptions {
   profile?: string;
   ownership?: ProjectOwnershipMode;
 }
 
-export interface BootstrapProjectResult {
+interface BootstrapProjectResult {
   project: string;
   ownership: ProjectOwnershipMode;
   claudePath: string | null;
 }
 
-export interface LocalGitRepoStatus {
+interface LocalGitRepoStatus {
   ok: boolean;
   initialized: boolean;
   detail: string;
@@ -203,7 +203,7 @@ function ensureGeneratedRootMemory(home: string): boolean {
   return true;
 }
 
-export interface RepairInstallResult {
+interface RepairInstallResult {
   profileFilesUpdated: number;
   removedLegacyProjects: number;
   createdContextFile: boolean;
@@ -397,7 +397,7 @@ interface HookEntrypointCheckDeps {
   versionReader?: typeof commandVersion;
 }
 
-export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
+function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
   const pathExists = deps.pathExists ?? fs.existsSync;
   const versionReader = deps.versionReader ?? commandVersion;
   const distIndex = resolveEntryScript();

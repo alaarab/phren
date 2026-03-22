@@ -202,7 +202,7 @@ function writeLastSummary(phrenPath: string, summary: string, sessionId: string,
 }
 
 /** Find the most recent session with a summary (including ended sessions). */
-export function findMostRecentSummary(phrenPath: string): string | null {
+function findMostRecentSummary(phrenPath: string): string | null {
   return findMostRecentSummaryWithProject(phrenPath).summary;
 }
 
@@ -324,7 +324,7 @@ function incrementSessionCounter(
 }
 
 /** Summary of a session for history listing. */
-export interface SessionHistoryEntry {
+interface SessionHistoryEntry {
   sessionId: string;
   project?: string;
   agentScope?: string;
@@ -374,14 +374,14 @@ export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEn
 }
 
 /** Get findings and tasks that belong to a specific session. */
-export interface SessionArtifactFinding {
+interface SessionArtifactFinding {
   project: string;
   id: string;
   date: string;
   text: string;
 }
 
-export interface SessionArtifactTask {
+interface SessionArtifactTask {
   project: string;
   id: string;
   text: string;
@@ -447,7 +447,7 @@ function hasCompletedTasksInSession(phrenPath: string, sessionId: string, projec
 }
 
 /** Compute what changed since the last session ended. */
-export function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: string): {
+function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: string): {
   newFindings: number;
   superseded: number;
   tasksCompleted: number;

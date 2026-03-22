@@ -22,8 +22,8 @@ import {
   decodeStringRow,
   queryRows,
   queryDocRows,
-  queryEntityLinks,
-  logEntityMiss,
+  queryFragmentLinks,
+  logFragmentMiss,
   extractSnippet,
   queryDocBySourceKey,
   normalizeMemoryId,
@@ -436,11 +436,11 @@ async function handleSearchKnowledge(
     try {
       const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
       for (const term of terms) {
-        const links = queryEntityLinks(db, term);
+        const links = queryFragmentLinks(db, term);
         if (links.related.length > 0) {
           relatedFragments.push(...links.related);
         } else {
-          logEntityMiss(phrenPath, term, "search_knowledge", filterProject);
+          logFragmentMiss(phrenPath, term, "search_knowledge", filterProject);
         }
       }
       relatedFragments = [...new Set(relatedFragments)].slice(0, 10);
