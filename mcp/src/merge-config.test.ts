@@ -343,8 +343,8 @@ describe("getRetentionPolicy with project", () => {
   });
 });
 
-// Tests for set_* tools writing to the correct location
-describe("set_* tools write to phren.project.yaml when project given", () => {
+// Tests for set_config tool writing to the correct location
+describe("set_config writes to phren.project.yaml when project given", () => {
   let tmp: { path: string; cleanup: () => void };
   let phrenPath: string;
 
@@ -358,9 +358,9 @@ describe("set_* tools write to phren.project.yaml when project given", () => {
     tmp.cleanup();
   });
 
-  // Test 4: set_proactivity with project writes to phren.project.yaml
-  it("set_proactivity with project writes to phren.project.yaml, not .config/", () => {
-    // Simulate what set_proactivity does when project is given
+  // Test 4: set_config proactivity with project writes to phren.project.yaml
+  it("set_config proactivity with project writes to phren.project.yaml, not .config/", () => {
+    // Simulate what set_config proactivity does when project is given
     const project = "alpha";
     const level = "low" as const;
     const scope = "base";
@@ -382,12 +382,12 @@ describe("set_* tools write to phren.project.yaml when project given", () => {
     // Check .config/ was NOT written
     const govDir = path.join(phrenPath, ".config");
     const govFiles = fs.existsSync(govDir) ? fs.readdirSync(govDir) : [];
-    // install-preferences.json should not be written by project-scoped set_proactivity
+    // install-preferences.json should not be written by project-scoped set_config proactivity
     expect(govFiles).not.toContain("install-preferences.json");
   });
 
-  // Test 5: set_proactivity without project writes to .config/
-  it("set_proactivity without project writes to .config/ install-preferences.json", () => {
+  // Test 5: set_config proactivity without project writes to .config/
+  it("set_config proactivity without project writes to .config/ install-preferences.json", () => {
     writeGovernanceInstallPreferences(phrenPath, { proactivity: "medium" });
 
     const govPrefsPath = path.join(phrenPath, ".config", "install-preferences.json");

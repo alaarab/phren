@@ -39,11 +39,8 @@ export const vscodeManifest: CapabilityManifest = {
     "graph.link_findings": { implemented: false, reason: "Link findings is MCP-only" },
 
     // Config
-    "config.proactivity": { implemented: false, reason: "Config tools are CLI-only" },
-    "config.task_mode": { implemented: false, reason: "Config tools are CLI-only" },
-    "config.retention": { implemented: false, reason: "Config tools are CLI-only" },
-    "config.workflow": { implemented: false, reason: "Config tools are CLI-only" },
-    "config.index": { implemented: false, reason: "Config tools are CLI-only" },
+    "config.get": { implemented: false, reason: "Config tools are CLI-only" },
+    "config.set": { implemented: false, reason: "Config tools are CLI-only" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "extension.ts:phren.doctor" },

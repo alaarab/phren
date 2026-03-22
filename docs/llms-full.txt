@@ -91,13 +91,8 @@ MCP Tools (66 across 12 modules):
     auto_extract_findings(project, text, model?, dryRun?) - extract findings from text (max 10000 chars)
 
   Configuration:
-    get_config(domain?) - read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, or all)
-    set_proactivity(level, scope?) - set agent proactivity level (high/medium/low) with optional scope (base/findings/tasks)
-    set_task_mode(mode) - set task management mode (off, manual, suggest, auto)
-    set_finding_sensitivity(level) - set finding capture sensitivity (minimal, conservative, balanced, aggressive)
-    set_retention_policy(settings) - configure retention and decay policy
-    set_workflow_policy(settings) - configure workflow approval gates
-    set_index_policy(settings) - configure indexer include/exclude globs
+    get_config(domain?, project?) - read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, or all)
+    set_config(domain, settings, project?) - update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)
 
 CLI Commands:
 
