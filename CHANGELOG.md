@@ -3,6 +3,32 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.30] - 2026-03-21
+
+### Changed
+- **Tool consolidation (72 → 51 tools)**: merged singular/plural tools, combined health_check + task tools, consolidated config tools, merged toggle_skill + manage_review_item
+- **Progressive tool registration**: tools register progressively instead of all-at-once at startup
+- **Removed tier/unlock_tools system**: all tools registered at startup, no gating
+- **Fragment graph boost**: wired fragment graph into search ranking for better results
+- **Remote LLM fallback**: `auto_extract_findings` now falls back to remote LLM when Ollama is unavailable
+- **Structured logging**: migrated PHREN_DEBUG stderr patterns to structured logger across 37 files
+
+### Fixed
+- **addTasks scope forwarding** and **removeFindings O(N²) performance**
+- **Duplicate logger import** and mismatched closing tag
+- **Deduplicated git functions** in tool registry
+- **validate-docs**: added 6 missing MCP tools to llms-install.md
+- **Code review issues**: tool registry cleanup, doc fixes
+
+### Refactored
+- **Split init.ts** into focused modules (1,231 → 183 lines): extracted init-walkthrough.ts, init-npm.ts, init-uninstall.ts
+- **Split cli-hooks-session.ts** into focused modules + fixed merge-agent contamination
+- **Extracted cli-hooks-git** module
+- **ADRs and performance docs** added
+
+### Removed
+- **Improvement plan file** (`.plan/improvements.md`) — improvements implemented directly
+
 ## [0.0.29] - 2026-03-21
 
 ### Added
