@@ -14,11 +14,7 @@ const RESET = `${ESC}0m`;
 const PURPLE = `${ESC}35m`;       // magenta — body
 const BRIGHT_PURPLE = `${ESC}95m`; // bright magenta — highlights
 const CYAN = `${ESC}96m`;          // bright cyan — sparkle
-const DIM = `${ESC}2m`;
 const DARK_PURPLE = `${ESC}38;5;57m`;  // deep purple — shadow/outline
-const LIGHT_PURPLE = `${ESC}38;5;141m`; // lavender — brain highlights
-const MID_PURPLE = `${ESC}38;5;98m`;    // mid tone
-const NAVY = `${ESC}38;5;18m`;          // darkest outline
 
 // ── Art constants (24px wide, truecolor half-blocks) ─────────────────────────
 
@@ -41,9 +37,6 @@ export const PHREN_ART: string[] = [
   "                        ",
   "                        ",
 ];
-
-/** The art width in visible columns */
-const ART_WIDTH = 24;
 
 // ── Sparkle row: the cyan pixels at row 2 ────────────────────────────────────
 // Sparkle uses ▄ half-blocks with cyan truecolor. For animation we cycle through
