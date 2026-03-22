@@ -259,7 +259,7 @@ New: "What lives in your phren" (or whatever copy says, keep the question format
 Current: "Memory across your machines"
 New: "Phren across machines"
 
-Current: "The MCP server (67 tools)"
+Current: "The MCP server (51 tools)"
 New: "The MCP server" (drop the number, it changes and sounds like bragging)
 
 ---
