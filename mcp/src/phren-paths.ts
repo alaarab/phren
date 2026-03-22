@@ -9,6 +9,8 @@ import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 
 bootstrapPhrenDotEnv();
 
+function stderrLog(msg: string) { try { process.stderr.write("[phren] " + msg + "\n"); } catch {} }
+
 export type InstallMode = "shared" | "project-local";
 export type SyncMode = "managed-git" | "workspace-git";
 
@@ -97,7 +99,7 @@ export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
     const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
     return normalizeManifest(parsed);
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readRootManifest: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`readRootManifest: ${errorMessage(err)}`);
     return null;
   }
 }
@@ -321,7 +323,7 @@ export function appendIndexEvent(phrenPath: string, event: Record<string, unknow
     const file = runtimeFile(phrenPath, "index-events.jsonl");
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] appendIndexEvent: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`appendIndexEvent: ${errorMessage(err)}`);
   }
 }
 
@@ -351,7 +353,7 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
       if (entry.name.toLowerCase() === needle) return entry.name;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`findProjectNameCaseInsensitive: ${errorMessage(err)}`);
   }
   return null;
 }
@@ -365,7 +367,7 @@ export function findArchivedProjectNameCaseInsensitive(phrenPath: string, name: 
       if (archivedName.toLowerCase() === needle) return archivedName;
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] findArchivedProjectNameCaseInsensitive: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`findArchivedProjectNameCaseInsensitive: ${errorMessage(err)}`);
   }
   return null;
 }
@@ -421,7 +423,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
 
       return [...new Set([...listed, ...sharedDirs])];
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
+      if ((process.env.PHREN_DEBUG)) stderrLog(`getProjectDirs yamlParse: ${errorMessage(err)}`);
       errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
       return [];
     }
@@ -432,7 +434,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       .filter(isProjectDirEntry)
       .map((entry) => path.join(phrenPath, entry.name));
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`getProjectDirs: ${errorMessage(err)}`);
     return [];
   }
 }
@@ -456,7 +458,7 @@ export function collectNativeMemoryFiles(): Array<{ project: string; file: strin
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] collectNativeMemoryFiles: ${errorMessage(err)}\n`);
+    if ((process.env.PHREN_DEBUG)) stderrLog(`collectNativeMemoryFiles: ${errorMessage(err)}`);
   }
   return results;
 }
