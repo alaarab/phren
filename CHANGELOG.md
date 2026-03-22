@@ -35,6 +35,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Complete structured logging migration**: all `process.stderr.write("[phren]...")` diagnostic calls replaced with `logger.debug()` across ~130 files
 - **Logger performance**: `findPhrenPath()` result cached after first resolution instead of re-resolving on every log call
 - **ESLint cleanup**: removed 44 unused variable/import warnings; added underscore-prefix ignore pattern
+- **validate-docs.sh**: removed references to deleted docs files so CI passes
+- **Starter template**: added `/phren-profiles` skill, fixed "task" → "tasks" typo
+- **Tool registry**: updated module names to match renamed files
+- **Test suite**: updated mock paths, API calls, and assertions for tool consolidation and file renames
 
 ### Removed
 - **Internal decision records** (`docs/decisions/`): 14 ADR files — phren's own knowledge layer handles this
