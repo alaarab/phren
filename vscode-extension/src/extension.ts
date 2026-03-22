@@ -293,11 +293,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     async (skillName: string, skillSource: string, currentlyEnabled: boolean) => {
       try {
         const project = skillSource === "global" ? undefined : skillSource;
-        if (currentlyEnabled) {
-          await phrenClient.disableSkill(skillName, project);
-        } else {
-          await phrenClient.enableSkill(skillName, project);
-        }
+        await phrenClient.toggleSkill(skillName, !currentlyEnabled, project);
         treeDataProvider.refresh();
         await vscode.window.showInformationMessage(
           `Skill "${skillName}" ${currentlyEnabled ? "disabled" : "enabled"}.`,

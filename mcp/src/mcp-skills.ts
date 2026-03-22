@@ -206,42 +206,41 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  for (const action of [
-    { tool: "enable_skill", enabled: true, verb: "Enable" },
-    { tool: "disable_skill", enabled: false, verb: "Disable" },
-  ] as const) {
-    server.registerTool(
-      action.tool,
-      {
-        title: `◆ phren · ${action.enabled ? "enable" : "disable"} skill`,
-        description: `${action.verb} a skill without deleting its file.`,
-        inputSchema: z.object({
-          name: z.string().describe("Skill name (without .md)."),
-          project: z.string().describe("Project scope or 'global'."),
-        }),
-      },
-      async ({ name, project }) => {
-        if (project.toLowerCase() !== "global" && !isValidProjectName(project)) {
-          return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        }
+  // ── toggle_skill ─────────────────────────────────────────────────────
 
-        const result = findSkill(phrenPath, profile, project, name);
-        if (!result) {
-          return mcpResponse({ ok: false, error: `Skill "${name}" not found in "${project}".` });
-        }
-        if ("error" in result) {
-          return mcpResponse({ ok: false, error: result.error });
-        }
-
-        return withWriteQueue(async () => {
-          setSkillEnabledAndSync(phrenPath, project, result.name, action.enabled);
-          return mcpResponse({
-            ok: true,
-            message: `${action.verb}d skill "${result.name}" in ${project}.`,
-            data: { name: result.name, project, enabled: action.enabled },
-          });
-        });
+  server.registerTool(
+    "toggle_skill",
+    {
+      title: "◆ phren · toggle skill",
+      description: "Enable or disable a skill without deleting its file.",
+      inputSchema: z.object({
+        name: z.string().describe("Skill name (without .md)."),
+        enabled: z.boolean().describe("true to enable, false to disable."),
+        project: z.string().describe("Project scope or 'global'."),
+      }),
+    },
+    async ({ name, enabled, project }) => {
+      if (project.toLowerCase() !== "global" && !isValidProjectName(project)) {
+        return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
-    );
-  }
+
+      const result = findSkill(phrenPath, profile, project, name);
+      if (!result) {
+        return mcpResponse({ ok: false, error: `Skill "${name}" not found in "${project}".` });
+      }
+      if ("error" in result) {
+        return mcpResponse({ ok: false, error: result.error });
+      }
+
+      const verb = enabled ? "Enable" : "Disable";
+      return withWriteQueue(async () => {
+        setSkillEnabledAndSync(phrenPath, project, result.name, enabled);
+        return mcpResponse({
+          ok: true,
+          message: `${verb}d skill "${result.name}" in ${project}.`,
+          data: { name: result.name, project, enabled },
+        });
+      });
+    }
+  );
 }

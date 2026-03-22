@@ -155,12 +155,8 @@ export class PhrenClient {
     return this.callTool("write_skill", { name, content, scope });
   }
 
-  async enableSkill(name: string, project?: string): Promise<unknown> {
-    return this.callTool("enable_skill", project ? { name, project } : { name });
-  }
-
-  async disableSkill(name: string, project?: string): Promise<unknown> {
-    return this.callTool("disable_skill", project ? { name, project } : { name });
+  async toggleSkill(name: string, enabled: boolean, project?: string): Promise<unknown> {
+    return this.callTool("toggle_skill", project ? { name, enabled, project } : { name, enabled });
   }
 
   async listHooks(project?: string): Promise<unknown> {
@@ -298,16 +294,8 @@ export class PhrenClient {
     return this.callTool("retract_finding", { project, finding_text, reason });
   }
 
-  async approveQueueItem(project: string, line: string): Promise<unknown> {
-    return this.callTool("approve_queue_item", { project, line });
-  }
-
-  async rejectQueueItem(project: string, line: string): Promise<unknown> {
-    return this.callTool("reject_queue_item", { project, line });
-  }
-
-  async editQueueItem(project: string, line: string, newText: string): Promise<unknown> {
-    return this.callTool("edit_queue_item", { project, line, new_text: newText });
+  async manageReviewItem(project: string, line: string, action: "approve" | "reject" | "edit", newText?: string): Promise<unknown> {
+    return this.callTool("manage_review_item", { project, line, action, ...(newText !== undefined && { new_text: newText }) });
   }
 
   async resolveContradiction(
