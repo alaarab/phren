@@ -1256,7 +1256,26 @@ async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Pr
     }
   }
 
-  debugLog("FTS rebuild already in progress; returning empty snapshot");
+  // Before returning empty, try to load any stale-but-usable cache file
+  try {
+    if (fs.existsSync(cacheDir)) {
+      const cacheFiles = fs.readdirSync(cacheDir)
+        .filter(f => f.endsWith(".db"))
+        .map(f => ({ name: f, mtime: fs.statSync(path.join(cacheDir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      for (const cf of cacheFiles) {
+        try {
+          const staleDb = new SQL.Database(fs.readFileSync(path.join(cacheDir, cf.name)));
+          debugLog(`FTS rebuild in progress; falling back to stale cache: ${cf.name}`);
+          return staleDb;
+        } catch { /* try next */ }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`Failed to scan stale FTS caches: ${errorMessage(err)}`);
+  }
+
+  debugLog("FTS rebuild already in progress; no usable cache found, returning empty snapshot");
   return createEmptyIndexDb(SQL);
 }
 

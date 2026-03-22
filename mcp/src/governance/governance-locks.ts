@@ -35,7 +35,10 @@ function acquireFileLock(lockPath: string): void {
                 try { process.kill(lockPid, 0); ownerDead = false; }
                 catch { ownerDead = true; }
               } else {
-                ownerDead = true;
+                try {
+                  const result = require('child_process').spawnSync('tasklist', ['/FI', `PID eq ${lockPid}`, '/NH'], { encoding: 'utf8', timeout: 2000 });
+                  if (result.stdout && result.stdout.includes(String(lockPid))) ownerDead = false;
+                } catch { ownerDead = true; }
               }
             }
           } catch {
