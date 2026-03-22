@@ -27,9 +27,8 @@ import { register as registerSkills } from "./mcp-skills.js";
 import { register as registerHooks } from "./mcp-hooks.js";
 import { register as registerExtract } from "./mcp-extract.js";
 import { register as registerConfig } from "./mcp-config.js";
-import type { McpContext, RegisterOptions } from "./mcp-types.js";
+import type { McpContext } from "./mcp-types.js";
 import { mcpResponse } from "./mcp-types.js";
-import { z } from "zod";
 import { errorMessage } from "./utils.js";
 import { runTopLevelCommand } from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
@@ -187,128 +186,18 @@ async function main() {
     },
   };
 
-  // Register only core tools at startup (~20 tools) for a lighter initial footprint.
-  // Agents can unlock additional tool domains on demand via the unlock_tools meta-tool.
-  const coreOnly: RegisterOptions = { tier: new Set(["core"]) };
-
-  registerSearch(server, ctx, coreOnly);
-  registerTask(server, ctx, coreOnly);
-  registerFinding(server, ctx, coreOnly);
-  registerMemory(server, ctx, coreOnly);
-  registerData(server, ctx, coreOnly);
-  registerGraph(server, ctx, coreOnly);
-  registerSession(server, ctx, coreOnly);
-  registerOps(server, ctx, coreOnly);
-  registerSkills(server, ctx, coreOnly);
-  registerHooks(server, ctx, coreOnly);
-  registerExtract(server, ctx, coreOnly);
-  registerConfig(server, ctx, coreOnly);
-
-  // ── unlock_tools meta-tool ──────────────────────────────────────────────
-  // Maps domain names to the register functions that provide those tools.
-  const DOMAIN_REGISTER_MAP: Record<string, Array<(server: McpServer, ctx: McpContext, options?: RegisterOptions) => void>> = {
-    bulk: [registerTask, registerFinding],
-    lifecycle: [registerFinding, registerSearch],
-    graph: [registerGraph],
-    skills: [registerSkills],
-    hooks: [registerHooks],
-    config: [registerConfig],
-    data: [registerData],
-    review: [registerOps],
-    extract: [registerExtract],
-    search: [registerSearch],
-    tasks: [registerTask],
-    findings: [registerFinding],
-    session: [registerSession],
-    memory: [registerMemory],
-    ops: [registerOps],
-  };
-
-  const unlockedDomains = new Set<string>();
-  const calledRegisterFns = new Set<Function>();
-
-  // Use origRegisterTool to bypass the indexReady guard — unlock_tools
-  // only registers tool domains and never touches the search index.
-  origRegisterTool(
-    "unlock_tools",
-    {
-      title: "◆ phren · unlock tools",
-      description:
-        "Unlock additional tool domains beyond the ~20 core tools registered at startup. " +
-        "Available domains: " +
-        "\"all\" (unlock everything), " +
-        "\"bulk\" (add_tasks, complete_tasks, remove_tasks, add_findings, remove_findings), " +
-        "\"lifecycle\" (supersede_finding, retract_finding, resolve_contradiction, get_contradictions, get_memory_detail, get_project_summary, list_projects), " +
-        "\"graph\" (search_fragments, get_related_docs, read_graph, link_findings, cross_project_fragments), " +
-        "\"skills\" (list_skills, read_skill, write_skill, remove_skill, enable_skill, disable_skill), " +
-        "\"hooks\" (list_hooks, toggle_hooks, add_custom_hook, remove_custom_hook), " +
-        "\"config\" (set_proactivity, set_task_mode, set_finding_sensitivity, set_retention_policy, set_workflow_policy, set_index_policy, get_topic_config, set_topic_config), " +
-        "\"data\" (export_project, import_project, manage_project), " +
-        "\"review\" (approve_queue_item, reject_queue_item, edit_queue_item, get_consolidation_status, doctor_fix, list_hook_errors), " +
-        "\"extract\" (auto_extract_findings), " +
-        "\"session\" (session_history), " +
-        "\"tasks\" (update_task, link_task_issue, promote_task_to_issue, pin_task, promote_task, tidy_done_tasks), " +
-        "\"findings\" (add_findings, remove_findings, supersede_finding, retract_finding, resolve_contradiction, get_contradictions), " +
-        "\"memory\" (memory_feedback), " +
-        "\"ops\" (get_consolidation_status, doctor_fix, list_hook_errors, approve_queue_item, reject_queue_item, edit_queue_item).",
-      inputSchema: z.object({
-        domain: z.string().describe(
-          "Domain to unlock. One of: all, bulk, lifecycle, graph, skills, hooks, config, data, review, extract, search, tasks, findings, session, memory, ops."
-        ),
-      }),
-    },
-    async ({ domain }) => {
-      const d = domain.toLowerCase().trim();
-
-      if (d === "all") {
-        if (unlockedDomains.has("all")) {
-          return mcpResponse({ ok: true, message: "All tool domains already unlocked." });
-        }
-        // Register all advanced tools from every module (skip already-called fns)
-        const advancedOnly: RegisterOptions = { tier: new Set(["advanced"]) };
-        for (const fn of [registerSearch, registerTask, registerFinding, registerMemory,
-          registerData, registerGraph, registerSession, registerOps, registerSkills,
-          registerHooks, registerExtract, registerConfig]) {
-          if (!calledRegisterFns.has(fn)) {
-            fn(server, ctx, advancedOnly);
-            calledRegisterFns.add(fn);
-          }
-        }
-        unlockedDomains.add("all");
-        return mcpResponse({
-          ok: true,
-          message: "All advanced tool domains unlocked.",
-          data: { domain: "all" },
-        });
-      }
-
-      if (!DOMAIN_REGISTER_MAP[d]) {
-        return mcpResponse({
-          ok: false,
-          error: `Unknown domain "${domain}". Available: all, ${Object.keys(DOMAIN_REGISTER_MAP).join(", ")}`,
-        });
-      }
-
-      if (unlockedDomains.has("all") || unlockedDomains.has(d)) {
-        return mcpResponse({ ok: true, message: `Domain "${d}" already unlocked.` });
-      }
-
-      const advancedOnly: RegisterOptions = { tier: new Set(["advanced"]) };
-      for (const registerFn of DOMAIN_REGISTER_MAP[d]) {
-        if (!calledRegisterFns.has(registerFn)) {
-          registerFn(server, ctx, advancedOnly);
-          calledRegisterFns.add(registerFn);
-        }
-      }
-      unlockedDomains.add(d);
-
-      return mcpResponse({
-        ok: true,
-        message: `Unlocked "${d}" tool domain.`,
-        data: { domain: d },
-      });
-    }
-  );
+  registerSearch(server, ctx);
+  registerTask(server, ctx);
+  registerFinding(server, ctx);
+  registerMemory(server, ctx);
+  registerData(server, ctx);
+  registerGraph(server, ctx);
+  registerSession(server, ctx);
+  registerOps(server, ctx);
+  registerSkills(server, ctx);
+  registerHooks(server, ctx);
+  registerExtract(server, ctx);
+  registerConfig(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

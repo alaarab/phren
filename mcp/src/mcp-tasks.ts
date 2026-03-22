@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -122,29 +122,10 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string
   return lines.join("\n");
 }
 
-const TOOL_TIER: Record<string, ToolTier> = {
-  get_tasks: "core",
-  add_task: "core",
-  complete_task: "core",
-  remove_task: "core",
-  work_next_task: "core",
-  update_task: "advanced",
-  link_task_issue: "advanced",
-  promote_task_to_issue: "advanced",
-  pin_task: "advanced",
-  promote_task: "advanced",
-  tidy_done_tasks: "advanced",
-};
-
-function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
-  if (!options?.tier) return true;
-  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
-}
-
-export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
+export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
 
-  if (shouldRegister("get_tasks", options)) server.registerTool(
+  server.registerTool(
     "get_tasks",
     {
       title: "◆ phren · tasks",
@@ -252,7 +233,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("add_task", options)) server.registerTool(
+  server.registerTool(
     "add_task",
     {
       title: "◆ phren · add task",
@@ -293,7 +274,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("complete_task", options)) server.registerTool(
+  server.registerTool(
     "complete_task",
     {
       title: "◆ phren · done",
@@ -362,7 +343,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("remove_task", options)) server.registerTool(
+  server.registerTool(
     "remove_task",
     {
       title: "◆ phren · remove task",
@@ -399,7 +380,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("update_task", options)) server.registerTool(
+  server.registerTool(
     "update_task",
     {
       title: "◆ phren · update task",
@@ -432,7 +413,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("link_task_issue", options)) server.registerTool(
+  server.registerTool(
     "link_task_issue",
     {
       title: "◆ phren · link task issue",
@@ -489,7 +470,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     },
   );
 
-  if (shouldRegister("promote_task_to_issue", options)) server.registerTool(
+  server.registerTool(
     "promote_task_to_issue",
     {
       title: "◆ phren · promote task",
@@ -557,7 +538,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     },
   );
 
-  if (shouldRegister("pin_task", options)) server.registerTool(
+  server.registerTool(
     "pin_task",
     {
       title: "◆ phren · pin task",
@@ -578,7 +559,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("work_next_task", options)) server.registerTool(
+  server.registerTool(
     "work_next_task",
     {
       title: "◆ phren · work next",
@@ -598,7 +579,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("promote_task", options)) server.registerTool(
+  server.registerTool(
     "promote_task",
     {
       title: "◆ phren · promote task",
@@ -627,7 +608,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("tidy_done_tasks", options)) server.registerTool(
+  server.registerTool(
     "tidy_done_tasks",
     {
       title: "◆ phren · tidy done",

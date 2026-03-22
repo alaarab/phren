@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, type RegisterOptions, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -35,17 +35,12 @@ function normalizeProjectHookEvent(input: string | undefined): typeof PROJECT_HO
   return aliasMap[normalized] ?? null;
 }
 
-function shouldRegister(_toolName: string, options?: RegisterOptions): boolean {
-  if (!options?.tier) return true;
-  return options.tier.has("advanced");
-}
-
-export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
+export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath } = ctx;
 
   // ── list_hooks ───────────────────────────────────────────────────────────
 
-  if (shouldRegister("list_hooks", options)) server.registerTool(
+  server.registerTool(
     "list_hooks",
     {
       title: "◆ phren · hooks",
@@ -128,7 +123,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
 
   // ── toggle_hooks ─────────────────────────────────────────────────────────
 
-  if (shouldRegister("toggle_hooks", options)) server.registerTool(
+  server.registerTool(
     "toggle_hooks",
     {
       title: "◆ phren · toggle hooks",
@@ -195,7 +190,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
 
   // ── add_custom_hook ──────────────────────────────────────────────────────
 
-  if (shouldRegister("add_custom_hook", options)) server.registerTool(
+  server.registerTool(
     "add_custom_hook",
     {
       title: "◆ phren · add custom hook",
@@ -241,7 +236,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
 
   // ── remove_custom_hook ───────────────────────────────────────────────────
 
-  if (shouldRegister("remove_custom_hook", options)) server.registerTool(
+  server.registerTool(
     "remove_custom_hook",
     {
       title: "◆ phren · remove custom hook",

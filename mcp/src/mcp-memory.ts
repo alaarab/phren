@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, type RegisterOptions, type ToolTier, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./mcp-types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -13,20 +13,10 @@ import { isValidProjectName } from "./utils.js";
 
 
 
-const TOOL_TIER: Record<string, ToolTier> = {
-  pin_memory: "core",
-  memory_feedback: "advanced",
-};
-
-function shouldRegister(toolName: string, options?: RegisterOptions): boolean {
-  if (!options?.tier) return true;
-  return options.tier.has(TOOL_TIER[toolName] ?? "advanced");
-}
-
-export function register(server: McpServer, ctx: McpContext, options?: RegisterOptions): void {
+export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
 
-  if (shouldRegister("pin_memory", options)) server.registerTool(
+  server.registerTool(
     "pin_memory",
     {
       title: "◆ phren · pin memory",
@@ -50,7 +40,7 @@ export function register(server: McpServer, ctx: McpContext, options?: RegisterO
     }
   );
 
-  if (shouldRegister("memory_feedback", options)) server.registerTool(
+  server.registerTool(
     "memory_feedback",
     {
       title: "◆ phren · feedback",
