@@ -392,7 +392,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (!trimmedTaskText) return;
 
     try {
-      await phrenClient.addTask(project, trimmedTaskText);
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: "Adding task to Phren...", cancellable: false },
+        async () => {
+          await phrenClient.addTask(project, trimmedTaskText);
+        },
+      );
       treeDataProvider.refresh();
       await vscode.window.showInformationMessage(`Task added to ${project}`);
     } catch (error) {

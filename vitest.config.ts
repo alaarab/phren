@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globalSetup: ["./mcp/src/test-global-setup.ts"],
     pool: "forks",
-    fileParallelism: false,
+    fileParallelism: true,
     testTimeout: 15000,
     include: ["mcp/src/**/*.test.ts"],
   },

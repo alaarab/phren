@@ -12,6 +12,8 @@ import {
   isProjectTracked,
   upsertProjectEnvVar,
 } from "../init/setup.js";
+import { createWebUiServer } from "../ui/memory-ui.js";
+import type { Server } from "http";
 
 describe("init setup onboarding helpers", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -190,5 +192,54 @@ describe("init setup onboarding helpers", () => {
     const envFile = fs.readFileSync(path.join(projectRoot, ".env"), "utf8");
     expect(envFile).toContain(`PHREN_PATH=${next}`);
     expect(envFile).not.toMatch(new RegExp(`^PHREN_PATH=${target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+  });
+});
+
+describe.sequential("web-ui onboarding repair", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let phrenPath: string;
+  let homeDir: string;
+  let priorHome: string | undefined;
+  let priorUserProfile: string | undefined;
+  let server: Server | null = null;
+
+  beforeEach(() => {
+    tmp = makeTempDir("phren-web-ui-onboarding-");
+    phrenPath = path.join(tmp.path, ".phren");
+    homeDir = path.join(tmp.path, "home");
+    priorHome = process.env.HOME;
+    priorUserProfile = process.env.USERPROFILE;
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${os.hostname()}: default\n`);
+    fs.writeFileSync(path.join(phrenPath, "profiles", "default.yaml"), "name: default\nprojects:\n  - global\n");
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      if (!server.listening) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
+    if (priorUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = priorUserProfile;
+    tmp.cleanup();
+  });
+
+  it("self-repairs baseline assets before serving requests", async () => {
+    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(false);
+    expect(fs.existsSync(path.join(phrenPath, ".env"))).toBe(false);
+
+    server = createWebUiServer(phrenPath, undefined, "default");
+
+    expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
+    expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
   });
 });
