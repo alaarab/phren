@@ -10,6 +10,7 @@ import {
   sessionMarker,
   getPhrenPath,
   updateRuntimeHealth,
+  buildSyncStatus,
   appendAuditLog,
   withFileLock,
   getWorkflowPolicy,
@@ -26,12 +27,11 @@ import {
   finalizeTaskSession,
   appendFindingJournal,
   homePath,
-  resolveRuntimeProfile,
 } from "./cli/hooks-context.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { spawn } from "child_process";
+import { spawnDetachedChild } from "./shared/process.js";
 import {
   resolveSubprocessArgs as _resolveSubprocessArgs,
   runBestEffortGit,
@@ -40,9 +40,7 @@ import {
 } from "./cli-hooks-git.js";
 import { logger } from "./logger.js";
 
-function getRuntimeProfile(): string {
-  return resolveRuntimeProfile(getPhrenPath());
-}
+const SYNC_LOCK_STALE_MS = 10 * 60 * 1000; // 10 minutes
 
 /** Read JSON from stdin if it's not a TTY. Returns null if stdin is a TTY or parsing fails. */
 export function readStdinJson<T>(): T | null {
@@ -153,7 +151,7 @@ function scheduleBackgroundSync(phrenPathLocal: string): boolean {
   try {
     if (fs.existsSync(lockPath)) {
       const ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
-      if (ageMs <= 10 * 60 * 1000) return false;
+      if (ageMs <= SYNC_LOCK_STALE_MS) return false;
       fs.unlinkSync(lockPath);
     }
   } catch (err: unknown) {
@@ -165,16 +163,7 @@ function scheduleBackgroundSync(phrenPathLocal: string): boolean {
     fs.writeFileSync(lockPath, JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid }) + "\n", { flag: "wx" });
     const logFd = fs.openSync(logPath, "a");
     fs.writeSync(logFd, `[${new Date().toISOString()}] spawn ${process.execPath} ${spawnArgs.join(" ")}\n`);
-    const child = spawn(process.execPath, spawnArgs, {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: {
-        ...process.env,
-        PHREN_PATH: phrenPathLocal,
-        PHREN_PROFILE: getRuntimeProfile(),
-      },
-    });
+    const child = spawnDetachedChild(spawnArgs, { phrenPath: phrenPathLocal, logFd });
     child.unref();
     fs.closeSync(logFd);
     return true;
@@ -193,7 +182,7 @@ function scheduleWeeklyGovernance(): void {
     if (daysSince >= 7) {
       const spawnArgs = _resolveSubprocessArgs("background-maintenance");
       if (spawnArgs) {
-        const child = spawn(process.execPath, spawnArgs, { detached: true, stdio: "ignore" });
+        const child = spawnDetachedChild(spawnArgs, { phrenPath: getPhrenPath() });
         child.unref();
         fs.writeFileSync(lastGovPath, Date.now().toString());
         debugLog("hook_stop: scheduled weekly governance run");
@@ -514,12 +503,7 @@ export async function handleBackgroundSync() {
       const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
       updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-local", detail: "background sync skipped; no remote configured" },
-        lastSync: {
-          lastPushAt: now,
-          lastPushStatus: "saved-local",
-          lastPushDetail: "background sync skipped; no remote configured",
-          unsyncedCommits,
-        },
+        lastSync: buildSyncStatus({ now, pushStatus: "saved-local", pushDetail: "background sync skipped; no remote configured", unsyncedCommits }),
       });
       appendAuditLog(phrenPathLocal, "background_sync", "status=saved-local detail=no_remote");
       return;
@@ -529,12 +513,7 @@ export async function handleBackgroundSync() {
     if (push.ok) {
       updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed by background sync" },
-        lastSync: {
-          lastPushAt: now,
-          lastPushStatus: "saved-pushed",
-          lastPushDetail: "commit pushed by background sync",
-          unsyncedCommits: 0,
-        },
+        lastSync: buildSyncStatus({ now, pushStatus: "saved-pushed", pushDetail: "commit pushed by background sync", unsyncedCommits: 0 }),
       });
       appendAuditLog(phrenPathLocal, "background_sync", "status=saved-pushed");
       return;
@@ -544,16 +523,7 @@ export async function handleBackgroundSync() {
     if (recovered.ok) {
       updateRuntimeHealth(phrenPathLocal, {
         lastAutoSave: { at: now, status: "saved-pushed", detail: recovered.detail },
-        lastSync: {
-          lastPullAt: now,
-          lastPullStatus: recovered.pullStatus,
-          lastPullDetail: recovered.pullDetail,
-          lastSuccessfulPullAt: now,
-          lastPushAt: now,
-          lastPushStatus: "saved-pushed",
-          lastPushDetail: recovered.detail,
-          unsyncedCommits: 0,
-        },
+        lastSync: buildSyncStatus({ now, pushStatus: "saved-pushed", pushDetail: recovered.detail, pullAt: now, pullStatus: recovered.pullStatus, pullDetail: recovered.pullDetail, successfulPullAt: now, unsyncedCommits: 0 }),
       });
       appendAuditLog(phrenPathLocal, "background_sync", `status=saved-pushed detail=${JSON.stringify(recovered.detail)}`);
       return;
@@ -563,15 +533,7 @@ export async function handleBackgroundSync() {
     const failDetail = recovered.detail || push.error || "background sync push failed";
     updateRuntimeHealth(phrenPathLocal, {
       lastAutoSave: { at: now, status: "saved-local", detail: failDetail },
-      lastSync: {
-        lastPullAt: now,
-        lastPullStatus: recovered.pullStatus,
-        lastPullDetail: recovered.pullDetail,
-        lastPushAt: now,
-        lastPushStatus: "saved-local",
-        lastPushDetail: failDetail,
-        unsyncedCommits,
-      },
+      lastSync: buildSyncStatus({ now, pushStatus: "saved-local", pushDetail: failDetail, pullAt: now, pullStatus: recovered.pullStatus, pullDetail: recovered.pullDetail, unsyncedCommits }),
     });
     appendAuditLog(phrenPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(failDetail)}`);
 

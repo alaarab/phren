@@ -42,6 +42,7 @@ import { bootstrapProject } from "./init-bootstrap.js";
 import { logger } from "./logger.js";
 import type { InitOptions, SkillsScope } from "./init-types.js";
 import type { InitProjectDomain } from "./init/setup.js";
+import type { ProjectOwnershipMode } from "./project-config.js";
 
 function copyDir(src: string, dest: string) {
   fs.mkdirSync(dest, { recursive: true });
@@ -165,7 +166,7 @@ export async function runFreshInstall(
 
   // Bootstrap CWD project if opted in
   if (cwdProjectPath && shouldBootstrapCurrentProject) {
-    bootstrapProject(phrenPath, cwdProjectPath, opts.profile, bootstrapOwnership as any, "Added current project");
+    bootstrapProject(phrenPath, cwdProjectPath, opts.profile, bootstrapOwnership as ProjectOwnershipMode, "Added current project");
   }
 
   // Persist machine and config
@@ -228,22 +229,17 @@ export async function runFreshInstall(
   const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || !opts.yes;
   if (!walkthroughCoveredOllama) {
     try {
-      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared/ollama.js");
-      if (getOllamaUrl()) {
-        const ollamaUp = await checkOllamaAvailable();
-        if (ollamaUp) {
-          const modelReady = await checkModelAvailable();
-          if (modelReady) {
-            log("\n  Semantic search: Ollama + nomic-embed-text ready.");
-          } else {
-            log("\n  Semantic search: Ollama running, but nomic-embed-text not pulled.");
-            log("  Run: ollama pull nomic-embed-text");
-          }
-        } else {
-          log("\n  Tip: Install Ollama for semantic search (optional).");
-          log("  https://ollama.com → then: ollama pull nomic-embed-text");
-          log("  (Set PHREN_OLLAMA_URL=off to hide this message)");
-        }
+      const { checkOllamaStatus } = await import("./shared/ollama.js");
+      const status = await checkOllamaStatus();
+      if (status === "ready") {
+        log("\n  Semantic search: Ollama + nomic-embed-text ready.");
+      } else if (status === "no_model") {
+        log("\n  Semantic search: Ollama running, but nomic-embed-text not pulled.");
+        log("  Run: ollama pull nomic-embed-text");
+      } else if (status === "not_running") {
+        log("\n  Tip: Install Ollama for semantic search (optional).");
+        log("  https://ollama.com → then: ollama pull nomic-embed-text");
+        log("  (Set PHREN_OLLAMA_URL=off to hide this message)");
       }
     } catch (err: unknown) {
       logger.debug("init ollamaInstallHint", errorMessage(err));

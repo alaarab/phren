@@ -6,6 +6,7 @@ import { readInstallPreferences } from "./init/preferences.js";
 import { debugLog } from "./shared.js";
 import { errorMessage, safeProjectPath } from "./utils.js";
 import { withFileLock } from "./shared/governance.js";
+import type { RetentionPolicyPatch } from "./governance/policy.js";
 
 export const PROJECT_OWNERSHIP_MODES = ["phren-managed", "detached", "repo-managed"] as const;
 export type ProjectOwnershipMode = typeof PROJECT_OWNERSHIP_MODES[number];
@@ -22,18 +23,7 @@ export interface ProjectConfigOverrides {
   proactivityFindings?: "high" | "medium" | "low";
   proactivityTask?: "high" | "medium" | "low";
   taskMode?: "off" | "manual" | "suggest" | "auto";
-  retentionPolicy?: {
-    ttlDays?: number;
-    retentionDays?: number;
-    autoAcceptThreshold?: number;
-    minInjectConfidence?: number;
-    decay?: {
-      d30?: number;
-      d60?: number;
-      d90?: number;
-      d120?: number;
-    };
-  };
+  retentionPolicy?: RetentionPolicyPatch;
   workflowPolicy?: {
     lowConfidenceThreshold?: number;
     riskySections?: Array<"Review" | "Stale" | "Conflicts">;

@@ -5,6 +5,8 @@ import { errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { withFileLock } from "./governance/locks.js";
 
+const MAX_LOG_LINES = 1000;
+
 export type { HookToolName } from "./provider-adapters.js";
 export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";
 
@@ -120,7 +122,7 @@ export function appendAuditLog(phrenPath: string, event: string, details: string
       if (stat.size > 1_000_000) {
         const content = fs.readFileSync(logPath, "utf8");
         const lines = content.split("\n");
-        fs.writeFileSync(logPath, lines.slice(-500).join("\n") + "\n");
+        fs.writeFileSync(logPath, lines.slice(-MAX_LOG_LINES).join("\n") + "\n");
       }
     });
   } catch (err: unknown) {

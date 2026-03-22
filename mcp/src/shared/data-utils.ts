@@ -21,6 +21,31 @@ export function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): Phr
   }
 }
 
+/**
+ * Recursively walk a directory and return paths of files matching an optional filter.
+ * Defaults to `.md` files only. Uses an iterative stack to avoid recursion limits.
+ */
+export function walkDirectory(root: string, filter?: (name: string) => boolean): string[] {
+  const accept = filter ?? ((name: string) => name.endsWith(".md"));
+  const results: string[] = [];
+  if (!fs.existsSync(root)) return results;
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && accept(entry.name)) {
+        results.push(fullPath);
+      }
+    }
+  }
+  return results;
+}
+
 export function ensureProject(phrenPath: string, project: string): PhrenResult<string> {
   if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   const dir = safeProjectPath(phrenPath, project);

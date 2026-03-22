@@ -82,7 +82,7 @@ async function main() {
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     structuredLog("error", "startup", `Failed to build phren index: ${msg}`);
-    console.error("Failed to build phren index at startup:", error);
+    console.error("Failed to build phren index at startup:", msg);
     process.exit(1);
   }
   let writeQueue: Promise<void> = Promise.resolve();

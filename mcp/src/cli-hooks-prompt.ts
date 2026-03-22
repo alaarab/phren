@@ -107,6 +107,7 @@ export async function handleHookContext() {
 
 const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
 const COOLDOWN_MS = parseInt(process.env.PHREN_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
+const MAX_TOOL_COMMAND_LENGTH = 200;
 
 interface ToolLogEntry {
   at: string;
@@ -191,14 +192,14 @@ export async function handleHookTool() {
       if (filePath) entry.file = String(filePath);
     } else if (toolName === "Bash") {
       const cmd = input.command ?? undefined;
-      if (cmd) entry.command = String(cmd).slice(0, 200);
+      if (cmd) entry.command = String(cmd).slice(0, MAX_TOOL_COMMAND_LENGTH);
     } else if (toolName === "Glob") {
       const pattern = input.pattern ?? undefined;
       if (pattern) entry.file = String(pattern);
     } else if (toolName === "Grep") {
       const pattern = input.pattern ?? undefined;
       const searchPath = input.path ?? undefined;
-      if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
+      if (pattern) entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, MAX_TOOL_COMMAND_LENGTH);
     }
 
     const responseStr = flattenToolResponseText(data.tool_response ?? "");

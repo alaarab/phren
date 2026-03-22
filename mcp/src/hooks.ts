@@ -308,7 +308,13 @@ function cachedReadInstallPrefsJson(phrenPath: string): Record<string, unknown> 
   if (cached && cached.mtimeMs === mtimeMs) {
     return cached.parsed;
   }
-  const parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    _installPrefsJsonCache.delete(prefsPath);
+    return null;
+  }
   _installPrefsJsonCache.set(prefsPath, { mtimeMs, parsed });
   return parsed;
 }
@@ -372,6 +378,7 @@ export const HOOK_EVENT_VALUES = [
 ] as const;
 
 const VALID_HOOK_EVENTS = new Set<string>(HOOK_EVENT_VALUES);
+const MAX_HOOK_COMMAND_LENGTH = 1000;
 
 /** Return the target (URL or shell command) for display or matching. */
 export function getHookTarget(h: CustomHookEntry): string {
@@ -381,7 +388,7 @@ export function getHookTarget(h: CustomHookEntry): string {
 export function validateCustomHookCommand(command: string): string | null {
   const trimmed = command.trim();
   if (!trimmed) return "Command cannot be empty.";
-  if (trimmed.length > 1000) return "Command too long (max 1000 characters).";
+  if (trimmed.length > MAX_HOOK_COMMAND_LENGTH) return `Command too long (max ${MAX_HOOK_COMMAND_LENGTH} characters).`;
   if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
     return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < > # \\n \\r";
   }
@@ -677,7 +684,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       atomicWriteText(copilotFile, JSON.stringify(config, null, 2));
       configured.push("Copilot CLI");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: copilot failed: ${errorMessage(err)}`);
+      console.warn(`configureAllHooks: copilot hook config failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
   }
@@ -704,7 +711,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       atomicWriteText(cursorFile, JSON.stringify(config, null, 2));
       configured.push("Cursor");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: cursor failed: ${errorMessage(err)}`);
+      console.warn(`configureAllHooks: cursor hook config failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
   }
@@ -730,7 +737,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       atomicWriteText(codexFile, JSON.stringify(config, null, 2));
       configured.push("Codex");
     } catch (err: unknown) {
-      debugLog(`configureAllHooks: codex failed: ${errorMessage(err)}`);
+      console.warn(`configureAllHooks: codex hook config failed: ${errorMessage(err)}`);
     }
     if (isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
   }

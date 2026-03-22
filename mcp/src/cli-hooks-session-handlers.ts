@@ -33,17 +33,13 @@ import { readInstallPreferences } from "./init/preferences.js";
 import { logger } from "./logger.js";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn } from "child_process";
+import { spawnDetachedChild } from "./shared/process.js";
 import { TASKS_FILENAME } from "./data/tasks.js";
 import {
   resolveSubprocessArgs as _resolveSubprocessArgs,
   runBestEffortGit,
   countUnsyncedCommits,
 } from "./cli-hooks-git.js";
-
-function getRuntimeProfile(): string {
-  return resolveRuntimeProfile(getPhrenPath());
-}
 
 const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
@@ -188,16 +184,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
       logFd,
       `[${new Date().toISOString()}] spawn ${process.execPath} ${spawnArgs.join(" ")}\n`
     );
-    const child = spawn(process.execPath, spawnArgs, {
-      cwd: process.cwd(),
-      detached: true,
-      stdio: ["ignore", logFd, logFd],
-      env: {
-        ...process.env,
-        PHREN_PATH: phrenPathLocal,
-        PHREN_PROFILE: getRuntimeProfile(),
-      },
-    });
+    const child = spawnDetachedChild(spawnArgs, { phrenPath: phrenPathLocal, logFd });
     child.on("exit", (code, signal) => {
       const msg = `[${new Date().toISOString()}] exit code=${code ?? "null"} signal=${signal ?? "none"}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {

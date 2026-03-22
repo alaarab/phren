@@ -354,6 +354,591 @@ function parseTopicPayload(raw: string): { slug: string; label: string; descript
   }
 }
 
+// ── Route context shared by all handlers ──────────────────────────────────────
+
+interface RouteCtx {
+  phrenPath: string;
+  profile?: string;
+  authToken?: string;
+  csrfTokens?: Map<string, number>;
+  renderPage: (phrenPath: string, authToken?: string, nonce?: string) => string;
+}
+
+type Req = http.IncomingMessage;
+type Res = http.ServerResponse;
+
+function parseQs(url: string): querystring.ParsedUrlQuery {
+  return url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
+}
+
+function jsonOk(res: Res, data: unknown, status = 200): void {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(data));
+}
+
+function jsonErr(res: Res, error: string, status = 200): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify({ ok: false, error }));
+}
+
+function withPostBody(
+  req: Req, res: Res, url: string, ctx: RouteCtx,
+  handler: (parsed: querystring.ParsedUrlQuery) => void,
+): void {
+  void readFormBody(req, res).then((parsed) => {
+    if (!parsed) return;
+    if (!requirePostAuth(req, res, url, parsed, ctx.authToken, true)) return;
+    if (!requireCsrf(res, parsed, ctx.csrfTokens, true)) return;
+    handler(parsed);
+  });
+}
+
+// ── GET handlers ──────────────────────────────────────────────────────────────
+
+function handleGetHome(res: Res, ctx: RouteCtx): void {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  setCommonHeaders(res, nonce);
+  const html = ctx.renderPage(ctx.phrenPath, ctx.authToken, nonce);
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(html);
+}
+
+function handleGetProjects(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, collectProjectsForUI(ctx.phrenPath, ctx.profile));
+}
+
+function handleGetChangeToken(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, { token: computePhrenLiveStateToken(ctx.phrenPath) });
+}
+
+function handleGetRuntimeHealth(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, readSyncSnapshot(ctx.phrenPath));
+}
+
+function handleGetReviewQueue(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, readProjectQueue(ctx.phrenPath, ctx.profile));
+}
+
+function handleGetReviewActivity(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, { accepted: recentAccepted(ctx.phrenPath), usage: recentUsage(ctx.phrenPath) });
+}
+
+function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
+  const qs = parseQs(url);
+  const project = String(qs.project || "");
+  const file = String(qs.file || "");
+  if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
+  const allowedFiles = ["FINDINGS.md", TASKS_FILENAME, "CLAUDE.md", "summary.md"];
+  if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
+  const filePath = safeProjectPath(ctx.phrenPath, project, file);
+  if (!filePath) return jsonErr(res, "Invalid project or file path", 400);
+  if (!fs.existsSync(filePath)) return jsonErr(res, `File not found: ${file}`);
+  jsonOk(res, { ok: true, content: fs.readFileSync(filePath, "utf8") });
+}
+
+function handleGetProjectTopics(res: Res, url: string, ctx: RouteCtx): void {
+  const project = String(parseQs(url).project || "");
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+  jsonOk(res, { ok: true, ...getProjectTopicsResponse(ctx.phrenPath, project) });
+}
+
+function handleGetProjectReferenceList(res: Res, url: string, ctx: RouteCtx): void {
+  const project = String(parseQs(url).project || "");
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+  jsonOk(res, { ok: true, ...listProjectReferenceDocs(ctx.phrenPath, project) });
+}
+
+function handleGetProjectReferenceContent(res: Res, url: string, ctx: RouteCtx): void {
+  const qs = parseQs(url);
+  const contentResult = readReferenceContent(ctx.phrenPath, String(qs.project || ""), String(qs.file || ""));
+  res.writeHead(contentResult.ok ? 200 : 400, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(contentResult.ok ? { ok: true, content: contentResult.content } : { ok: false, error: contentResult.error }));
+}
+
+function handleGetSkills(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, collectSkillsForUI(ctx.phrenPath, ctx.profile));
+}
+
+function handleGetSkillContent(res: Res, url: string, ctx: RouteCtx): void {
+  const filePath = String(parseQs(url).path || "");
+  if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path", 400);
+  if (!fs.existsSync(filePath)) return jsonErr(res, "File not found");
+  jsonOk(res, { ok: true, content: fs.readFileSync(filePath, "utf8") });
+}
+
+function handleGetHooks(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, getHooksData(ctx.phrenPath));
+}
+
+async function handleGetSearch(res: Res, url: string, ctx: RouteCtx): Promise<void> {
+  const searchParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
+  const query = searchParams.get("q") || searchParams.get("query") || "";
+  const searchProject = searchParams.get("project") || undefined;
+  const searchType = searchParams.get("type") || undefined;
+  const searchLimit = parseInt(searchParams.get("limit") || "10", 10) || 10;
+  if (!query.trim()) return jsonErr(res, "Missing query parameter (q or query).");
+  try {
+    const { runSearch } = await import("../cli/search.js");
+    const result = await runSearch(
+      { query, limit: Math.min(searchLimit, 50), project: searchProject, type: searchType },
+      ctx.phrenPath, ctx.profile || "",
+    );
+    const fileDates: Record<string, string> = {};
+    for (const line of result.lines) {
+      const srcMatch = line.match(/^\[([^\]]+)\]\s/);
+      if (srcMatch) {
+        const sourceKey = srcMatch[1];
+        if (fileDates[sourceKey]) continue;
+        const slashIdx = sourceKey.indexOf("/");
+        if (slashIdx > 0) {
+          try {
+            const filePath = path.join(ctx.phrenPath, sourceKey.slice(0, slashIdx), sourceKey.slice(slashIdx + 1));
+            if (fs.existsSync(filePath)) fileDates[sourceKey] = fs.statSync(filePath).mtime.toISOString();
+          } catch { /* skip */ }
+        }
+      }
+    }
+    jsonOk(res, { ok: true, query, results: result.lines, fileDates });
+  } catch (err: unknown) {
+    jsonErr(res, errorMessage(err));
+  }
+}
+
+async function handleGetGraph(res: Res, url: string, ctx: RouteCtx): Promise<void> {
+  const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
+  jsonOk(res, await buildGraph(ctx.phrenPath, ctx.profile, graphParams.get("project") || undefined));
+}
+
+function handleGetScores(res: Res, ctx: RouteCtx): void {
+  let scores: Record<string, unknown> = {};
+  try {
+    const raw = fs.readFileSync(path.join(ctx.phrenPath, ".runtime", "memory-scores.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") scores = parsed as Record<string, unknown>;
+  } catch { /* file missing or unparseable */ }
+  jsonOk(res, scores);
+}
+
+function handleGetTasks(res: Res, ctx: RouteCtx): void {
+  try {
+    const docs = readTasksAcrossProjects(ctx.phrenPath, ctx.profile);
+    const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean; sessionId?: string }> = [];
+    for (const doc of docs) {
+      for (const section of ["Active", "Queue", "Done"] as const) {
+        for (const item of doc.items[section]) {
+          tasks.push({
+            project: doc.project, section: item.section, line: item.line, priority: item.priority,
+            pinned: item.pinned, githubIssue: item.githubIssue, githubUrl: item.githubUrl,
+            context: item.context, checked: item.checked, sessionId: item.sessionId,
+          });
+        }
+      }
+    }
+    jsonOk(res, { ok: true, tasks });
+  } catch (err: unknown) {
+    jsonOk(res, { ok: false, error: errorMessage(err), tasks: [] });
+  }
+}
+
+function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
+  try {
+    const prefs = readInstallPreferences(ctx.phrenPath);
+    const workflowPolicy = getWorkflowPolicy(ctx.phrenPath);
+    const retentionPolicy = getRetentionPolicy(ctx.phrenPath);
+    const hooksData = getHooksData(ctx.phrenPath);
+    const proactivityFindings = prefs.proactivityFindings || prefs.proactivity || "high";
+    const settingsProject = String(parseQs(url).project || "");
+    const merged = settingsProject && isValidProjectName(settingsProject) ? mergeConfig(ctx.phrenPath, settingsProject) : null;
+    const overrides = settingsProject && isValidProjectName(settingsProject) ? getProjectConfigOverrides(ctx.phrenPath, settingsProject) : null;
+    let projectInfo: { diskPath: string; ownership: string; configFile: string; configExists: boolean; hasFindings: boolean; hasTasks: boolean; hasSummary: boolean; hasClaudeMd: boolean; findingCount: number; taskCount: number } | null = null;
+    if (settingsProject && isValidProjectName(settingsProject)) {
+      const projectDir = path.join(ctx.phrenPath, settingsProject);
+      const configFile = path.join(projectDir, "phren.project.yaml");
+      const projConfig = readProjectConfig(ctx.phrenPath, settingsProject);
+      const findingsPath = path.join(projectDir, "FINDINGS.md");
+      const taskPath = path.join(projectDir, "tasks.md");
+      let findingCount = 0;
+      if (fs.existsSync(findingsPath)) findingCount = (fs.readFileSync(findingsPath, "utf8").match(/^- /gm) || []).length;
+      let taskCount = 0;
+      if (fs.existsSync(taskPath)) {
+        const queueMatch = fs.readFileSync(taskPath, "utf8").match(/## Queue[\s\S]*?(?=## |$)/);
+        if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
+      }
+      projectInfo = {
+        diskPath: projConfig.sourcePath || projectDir, ownership: projConfig.ownership || "default",
+        configFile, configExists: fs.existsSync(configFile), hasFindings: fs.existsSync(findingsPath),
+        hasTasks: fs.existsSync(taskPath), hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
+        hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")), findingCount, taskCount,
+      };
+    }
+    jsonOk(res, {
+      ok: true, proactivity: prefs.proactivity || "high", proactivityFindings,
+      proactivityTask: prefs.proactivityTask || prefs.proactivity || "high", taskMode: workflowPolicy.taskMode,
+      findingSensitivity: workflowPolicy.findingSensitivity || "balanced", autoCaptureEnabled: proactivityFindings !== "low",
+      consolidationEntryThreshold: CONSOLIDATION_ENTRY_THRESHOLD, hooksEnabled: hooksData.globalEnabled,
+      mcpEnabled: prefs.mcpEnabled !== false, hookTools: hooksData.tools,
+      retentionPolicy, workflowPolicy, merged, overrides, projectInfo,
+    });
+  } catch (err: unknown) {
+    jsonErr(res, errorMessage(err));
+  }
+}
+
+function handleGetConfig(res: Res, url: string, ctx: RouteCtx): void {
+  const project = String(parseQs(url).project || "");
+  if (project && !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  try {
+    const config = mergeConfig(ctx.phrenPath, project || undefined);
+    const projects = getProjectDirs(ctx.phrenPath, ctx.profile).map((d) => path.basename(d)).filter((p) => p !== "global");
+    jsonOk(res, { ok: true, config, projects });
+  } catch (err: unknown) {
+    jsonErr(res, errorMessage(err));
+  }
+}
+
+function handleGetCsrfToken(res: Res, ctx: RouteCtx): void {
+  if (!ctx.csrfTokens) return jsonOk(res, { ok: true, token: null });
+  pruneExpiredCsrfTokens(ctx.csrfTokens);
+  const token = crypto.randomUUID();
+  ctx.csrfTokens.set(token, Date.now());
+  jsonOk(res, { ok: true, token });
+}
+
+function handleGetFindings(res: Res, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  const result = readFindings(ctx.phrenPath, project);
+  jsonOk(res, result.ok ? { ok: true, data: { project, findings: result.data } } : { ok: false, error: result.error });
+}
+
+// ── POST handlers ─────────────────────────────────────────────────────────────
+
+function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const message = String(parsed.message || "update phren");
+    try {
+      const EXEC_TIMEOUT = 15_000;
+      const runGit = (args: string[]) =>
+        execFileSync("git", args, { cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
+      const status = runGit(["status", "--porcelain"]);
+      if (!status) return jsonOk(res, { ok: true, message: "Nothing to sync — working tree clean." });
+      runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
+      const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
+      if (!stagedFiles) return jsonOk(res, { ok: true, message: "Nothing to sync — no matching files to commit." });
+      runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
+      let pushed = false;
+      try { if (runGit(["remote"])) { runGit(["push"]); pushed = true; } } catch { /* no remote or push failed */ }
+      const changedFiles = status.split("\n").filter(Boolean).length;
+      jsonOk(res, { ok: true, message: `Synced ${changedFiles} file(s).${pushed ? " Pushed to remote." : " No remote, saved locally."}` });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handlePostApprove(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const line = String(parsed.line || "");
+    if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
+    try {
+      const qPath = queueFilePath(ctx.phrenPath, project);
+      if (fs.existsSync(qPath)) {
+        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
+        fs.writeFileSync(qPath, lines.join("\n"));
+      }
+      jsonOk(res, { ok: true });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handlePostReject(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const line = String(parsed.line || "");
+    if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
+    try {
+      const qPath = queueFilePath(ctx.phrenPath, project);
+      if (fs.existsSync(qPath)) {
+        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
+        fs.writeFileSync(qPath, lines.join("\n"));
+      }
+      const findingText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
+      if (findingText) removeFinding(ctx.phrenPath, project, findingText);
+      jsonOk(res, { ok: true });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handlePostEdit(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const line = String(parsed.line || "");
+    const newText = String(parsed.new_text || "");
+    if (!project || !isValidProjectName(project) || !line || !newText) return jsonErr(res, "Missing project, line, or new_text");
+    try {
+      const oldText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
+      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handlePostSkillSave(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const filePath = String(parsed.path || "");
+    const content = String(parsed.content || "");
+    if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path");
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+      fs.writeFileSync(tmpPath, content);
+      fs.renameSync(tmpPath, filePath);
+      jsonOk(res, { ok: true });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handlePostSkillToggle(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const name = String(parsed.name || "");
+    const enabled = String(parsed.enabled || "") === "true";
+    if (!project || !name || (project.toLowerCase() !== "global" && !isValidProjectName(project))) return jsonErr(res, "Invalid skill toggle request");
+    const skill = findSkill(ctx.phrenPath, ctx.profile || "", project, name);
+    if (!skill || "error" in skill) return jsonErr(res, skill && "error" in skill ? skill.error : "Skill not found");
+    setSkillEnabledAndSync(ctx.phrenPath, project, skill.name, enabled);
+    jsonOk(res, { ok: true, enabled });
+  });
+}
+
+function handlePostHookToggle(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const tool = String(parsed.tool || "").toLowerCase();
+    if (!["claude", "copilot", "cursor", "codex"].includes(tool)) return jsonErr(res, "Invalid tool");
+    const prefs = readInstallPreferences(ctx.phrenPath);
+    const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
+    const current = toolPrefs[tool] !== false && prefs.hooksEnabled !== false;
+    writeInstallPreferences(ctx.phrenPath, { hookTools: { ...toolPrefs, [tool]: !current } } satisfies Partial<InstallPreferences>);
+    jsonOk(res, { ok: true, enabled: !current });
+  });
+}
+
+function handlePostTopicsSave(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+    const topics = parseTopicsPayload(String(parsed.topics || ""));
+    if (!topics) return jsonErr(res, "Invalid topics payload", 400);
+    const saved = writeProjectTopics(ctx.phrenPath, project, topics);
+    if (!saved.ok) return jsonOk(res, saved);
+    for (const topic of saved.topics) {
+      const ensured = ensureTopicReferenceDoc(ctx.phrenPath, project, topic);
+      if (!ensured.ok) return jsonErr(res, ensured.error);
+    }
+    jsonOk(res, { ok: true, ...getProjectTopicsResponse(ctx.phrenPath, project) });
+  });
+}
+
+function handlePostTopicsReclassify(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+    jsonOk(res, { ok: true, ...reclassifyLegacyTopicDocs(ctx.phrenPath, project) });
+  });
+}
+
+function handlePostTopicsPin(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+    const topic = parseTopicPayload(String(parsed.topic || ""));
+    if (!topic) return jsonErr(res, "Invalid topic payload", 400);
+    const pinned = pinProjectTopicSuggestion(ctx.phrenPath, project, topic);
+    if (!pinned.ok) return jsonOk(res, pinned);
+    jsonOk(res, { ok: true, ...getProjectTopicsResponse(ctx.phrenPath, project) });
+  });
+}
+
+function handlePostTopicsUnpin(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
+    const unpinned = unpinProjectTopicSuggestion(ctx.phrenPath, project, String(parsed.slug || ""));
+    if (!unpinned.ok) return jsonOk(res, unpinned);
+    jsonOk(res, { ok: true, ...getProjectTopicsResponse(ctx.phrenPath, project) });
+  });
+}
+
+function handlePostTaskAction(req: Req, res: Res, url: string, ctx: RouteCtx, action: "complete" | "add" | "remove"): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const item = String(parsed.item || "");
+    if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
+    if (action === "complete") {
+      const result = completeTaskStore(ctx.phrenPath, project, item);
+      jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
+    } else if (action === "add") {
+      const result = addTaskStore(ctx.phrenPath, project, item);
+      jsonOk(res, { ok: result.ok, message: result.ok ? `Task added: ${result.data.line}` : undefined, error: result.ok ? undefined : result.error });
+    } else {
+      const result = removeTaskStore(ctx.phrenPath, project, item);
+      jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
+    }
+  });
+}
+
+function handlePostTaskUpdate(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const item = String(parsed.item || "");
+    if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
+    const updates: { text?: string; priority?: string; section?: string } = {};
+    if (Object.prototype.hasOwnProperty.call(parsed, "text")) updates.text = String(parsed.text || "");
+    if (Object.prototype.hasOwnProperty.call(parsed, "priority")) updates.priority = String(parsed.priority || "");
+    if (Object.prototype.hasOwnProperty.call(parsed, "section")) updates.section = String(parsed.section || "");
+    const result = updateTaskStore(ctx.phrenPath, project, item, updates);
+    jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
+  });
+}
+
+function handlePostSettingsFindingSensitivity(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const value = String(parsed.value || "");
+    const valid = ["minimal", "conservative", "balanced", "aggressive"];
+    if (!valid.includes(value)) return jsonErr(res, `Invalid finding sensitivity: "${value}". Must be one of: ${valid.join(", ")}`);
+    const result = updateWorkflowPolicy(ctx.phrenPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
+    jsonOk(res, result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error });
+  });
+}
+
+function handlePostSettingsTaskMode(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const value = String(parsed.value || "").trim().toLowerCase();
+    const valid: readonly string[] = VALID_TASK_MODES;
+    if (!valid.includes(value)) return jsonErr(res, `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}`);
+    const result = updateWorkflowPolicy(ctx.phrenPath, { taskMode: value as typeof VALID_TASK_MODES[number] });
+    jsonOk(res, result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error });
+  });
+}
+
+function handlePostSettingsProactivity(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const value = String(parsed.value || "").trim().toLowerCase();
+    const valid = ["high", "medium", "low"];
+    if (!valid.includes(value)) return jsonErr(res, `Invalid proactivity: "${value}". Must be one of: ${valid.join(", ")}`);
+    writeInstallPreferences(ctx.phrenPath, { proactivity: value as "high" | "medium" | "low" });
+    writeGovernanceInstallPreferences(ctx.phrenPath, { proactivity: value as "high" | "medium" | "low" });
+    jsonOk(res, { ok: true, proactivity: value });
+  });
+}
+
+function handlePostSettingsAutoCapture(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const enabled = String(parsed.enabled || "").toLowerCase() === "true";
+    const next = enabled ? "high" : "low";
+    writeInstallPreferences(ctx.phrenPath, { proactivityFindings: next });
+    writeGovernanceInstallPreferences(ctx.phrenPath, { proactivityFindings: next });
+    jsonOk(res, { ok: true, autoCaptureEnabled: enabled, proactivityFindings: next });
+  });
+}
+
+function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const enabled = String(parsed.enabled || "").toLowerCase() === "true";
+    writeInstallPreferences(ctx.phrenPath, { mcpEnabled: enabled });
+    jsonOk(res, { ok: true, mcpEnabled: enabled });
+  });
+}
+
+function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "");
+    const field = String(parsed.field || "");
+    const value = String(parsed.value || "");
+    const clearField = String(parsed.clear || "") === "true";
+    if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+    const registeredProjects = getProjectDirs(ctx.phrenPath, ctx.profile).map((d) => path.basename(d)).filter((p) => p !== "global");
+    const registrationWarning = registeredProjects.includes(project) ? undefined : `Project '${project}' is not registered in the active profile. Config was saved but it will have no effect until the project is added with 'phren add'.`;
+    const VALID_FIELDS: Record<string, string[]> = {
+      findingSensitivity: ["minimal", "conservative", "balanced", "aggressive"],
+      proactivity: ["high", "medium", "low"], proactivityFindings: ["high", "medium", "low"],
+      proactivityTask: ["high", "medium", "low"], taskMode: ["off", "manual", "suggest", "auto"],
+    };
+    const NUMERIC_RETENTION_FIELDS = ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"];
+    const NUMERIC_WORKFLOW_FIELDS = ["lowConfidenceThreshold"];
+    try {
+      updateProjectConfigOverrides(ctx.phrenPath, project, (current) => {
+        const next = { ...current };
+        if (clearField) {
+          if (field in VALID_FIELDS) delete (next as Record<string, unknown>)[field];
+          else if (NUMERIC_RETENTION_FIELDS.includes(field)) { if (next.retentionPolicy) delete (next.retentionPolicy as Record<string, unknown>)[field]; }
+          else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) { if (next.workflowPolicy) delete (next.workflowPolicy as Record<string, unknown>)[field]; }
+          return next;
+        }
+        if (field in VALID_FIELDS) {
+          if (!VALID_FIELDS[field].includes(value)) throw new Error(`Invalid value "${value}" for ${field}`);
+          (next as Record<string, unknown>)[field] = value;
+        } else if (NUMERIC_RETENTION_FIELDS.includes(field)) {
+          const num = parseFloat(value);
+          if (!Number.isFinite(num) || num < 0) throw new Error(`Invalid numeric value for ${field}`);
+          next.retentionPolicy = { ...next.retentionPolicy, [field]: num };
+        } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
+          const num = parseFloat(value);
+          if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error(`Invalid value for ${field} (must be 0-1)`);
+          next.workflowPolicy = { ...next.workflowPolicy, [field]: num };
+        } else {
+          throw new Error(`Unknown config field: ${field}`);
+        }
+        return next;
+      });
+      jsonOk(res, { ok: true, config: mergeConfig(ctx.phrenPath, project), ...(registrationWarning ? { warning: registrationWarning } : {}) });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
+function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/findings/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+
+  if (req.method === "POST") {
+    withPostBody(req, res, url, ctx, (parsed) => {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required");
+      const result = addFindingStore(ctx.phrenPath, project, text);
+      jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
+    });
+  } else if (req.method === "PUT") {
+    withPostBody(req, res, url, ctx, (parsed) => {
+      const oldText = String(parsed.old_text || "");
+      const newText = String(parsed.new_text || "");
+      if (!oldText || !newText) return jsonErr(res, "old_text and new_text are required");
+      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
+    });
+  } else {
+    // DELETE
+    withPostBody(req, res, url, ctx, (parsed) => {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required");
+      const result = removeFinding(ctx.phrenPath, project, text);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
+    });
+  }
+}
+
+// ── Main router ───────────────────────────────────────────────────────────────
+
 export function createWebUiHttpServer(
   phrenPath: string,
   renderPage: (phrenPath: string, authToken?: string, nonce?: string) => string,
@@ -365,1035 +950,82 @@ export function createWebUiHttpServer(
   } catch (err: unknown) {
     logger.debug("web-ui", `web-ui repair: ${errorMessage(err)}`);
   }
-  const authToken = opts?.authToken;
-  const csrfTokens = opts?.csrfTokens;
+
+  const ctx: RouteCtx = {
+    phrenPath, profile, authToken: opts?.authToken, csrfTokens: opts?.csrfTokens, renderPage,
+  };
 
   return http.createServer(async (req, res) => {
     const url = req.url || "/";
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
+    // Home page
     if (req.method === "GET" && pathname === "/") {
-      if (!requireGetAuth(req, res, url, authToken)) return;
-      pruneExpiredCsrfTokens(csrfTokens);
-      if (csrfTokens) csrfTokens.set(crypto.randomUUID(), Date.now());
-      const nonce = crypto.randomBytes(16).toString("base64");
-      setCommonHeaders(res, nonce);
-      const html = renderPage(phrenPath, authToken, nonce);
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(html);
-      return;
+      if (!requireGetAuth(req, res, url, ctx.authToken)) return;
+      pruneExpiredCsrfTokens(ctx.csrfTokens);
+      if (ctx.csrfTokens) ctx.csrfTokens.set(crypto.randomUUID(), Date.now());
+      return handleGetHome(res, ctx);
     }
 
     setCommonHeaders(res);
 
-    if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, authToken)) {
-      return;
-    }
+    // Auth gate for all GET /api/* routes
+    if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, ctx.authToken)) return;
 
-    if (req.method === "GET" && pathname === "/api/projects") {
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(collectProjectsForUI(phrenPath, profile)));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/change-token") {
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ token: computePhrenLiveStateToken(phrenPath) }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/runtime-health") {
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(readSyncSnapshot(phrenPath)));
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/sync") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const message = String(parsed.message || "update phren");
-        try {
-          const EXEC_TIMEOUT = 15_000;
-          const runGit = (args: string[]) =>
-            execFileSync("git", args, { cwd: phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
-
-          const status = runGit(["status", "--porcelain"]);
-          if (!status) {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: true, message: "Nothing to sync — working tree clean." }));
-            return;
-          }
-
-          runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
-          // Use --only to commit exactly the files we just staged,
-          // avoiding committing unrelated previously-staged changes.
-          const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
-          if (!stagedFiles) {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: true, message: "Nothing to sync — no matching files to commit." }));
-            return;
-          }
-          runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
-
-          let pushed = false;
-          try {
-            const remotes = runGit(["remote"]);
-            if (remotes) {
-              runGit(["push"]);
-              pushed = true;
-            }
-          } catch { /* no remote or push failed */ }
-
-          const changedFiles = status.split("\n").filter(Boolean).length;
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true, message: `Synced ${changedFiles} file(s).${pushed ? " Pushed to remote." : " No remote, saved locally."}` }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/review-queue") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(readProjectQueue(phrenPath, profile)));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/review-activity") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({
-        accepted: recentAccepted(phrenPath),
-        usage: recentUsage(phrenPath),
-      }));
-      return;
-    }
-
-    // POST /api/approve — remove item from review queue (keep finding)
-    if (req.method === "POST" && pathname === "/api/approve") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const line = String(parsed.line || "");
-        if (!project || !isValidProjectName(project) || !line) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing project or line" }));
-          return;
-        }
-        try {
-          const qPath = queueFilePath(phrenPath, project);
-          if (fs.existsSync(qPath)) {
-            const content = fs.readFileSync(qPath, "utf8");
-            const lines = content.split("\n");
-            const filtered = lines.filter((l) => l.trim() !== line.trim());
-            fs.writeFileSync(qPath, filtered.join("\n"));
-          }
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    // POST /api/reject — remove item from review queue AND remove finding
-    if (req.method === "POST" && pathname === "/api/reject") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const line = String(parsed.line || "");
-        if (!project || !isValidProjectName(project) || !line) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing project or line" }));
-          return;
-        }
-        try {
-          // Remove from review queue
-          const qPath = queueFilePath(phrenPath, project);
-          if (fs.existsSync(qPath)) {
-            const content = fs.readFileSync(qPath, "utf8");
-            const lines = content.split("\n");
-            const filtered = lines.filter((l) => l.trim() !== line.trim());
-            fs.writeFileSync(qPath, filtered.join("\n"));
-          }
-          // Also remove the finding from FINDINGS.md
-          // Extract text from the line (strip "- " prefix and inline metadata)
-          const findingText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-          if (findingText) {
-            removeFinding(phrenPath, project, findingText);
-          }
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    // POST /api/edit — edit a finding's text
-    if (req.method === "POST" && pathname === "/api/edit") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const line = String(parsed.line || "");
-        const newText = String(parsed.new_text || "");
-        if (!project || !isValidProjectName(project) || !line || !newText) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing project, line, or new_text" }));
-          return;
-        }
-        try {
-          const oldText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-          const result = editFinding(phrenPath, project, oldText, newText);
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    if (req.method === "GET" && pathname.startsWith("/api/project-content")) {
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const project = String(qs.project || "");
-      const file = String(qs.file || "");
-      if (!project || !isValidProjectName(project) || !file) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project or file" }));
-        return;
+    // ── GET routes ──
+    if (req.method === "GET") {
+      switch (pathname) {
+        case "/api/projects": return handleGetProjects(res, ctx);
+        case "/api/change-token": return handleGetChangeToken(res, ctx);
+        case "/api/runtime-health": return handleGetRuntimeHealth(res, ctx);
+        case "/api/review-queue": return handleGetReviewQueue(res, ctx);
+        case "/api/review-activity": return handleGetReviewActivity(res, ctx);
+        case "/api/project-topics": return handleGetProjectTopics(res, url, ctx);
+        case "/api/project-reference-list": return handleGetProjectReferenceList(res, url, ctx);
+        case "/api/project-reference-content": return handleGetProjectReferenceContent(res, url, ctx);
+        case "/api/skills": return handleGetSkills(res, ctx);
+        case "/api/hooks": return handleGetHooks(res, ctx);
+        case "/api/scores": return handleGetScores(res, ctx);
+        case "/api/tasks": return handleGetTasks(res, ctx);
+        case "/api/settings": return handleGetSettings(res, url, ctx);
+        case "/api/config": return handleGetConfig(res, url, ctx);
+        case "/api/csrf-token": return handleGetCsrfToken(res, ctx);
+        case "/api/search": return await handleGetSearch(res, url, ctx);
       }
-      const allowedFiles = ["FINDINGS.md", TASKS_FILENAME, "CLAUDE.md", "summary.md"];
-      if (!allowedFiles.includes(file)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: `File not allowed: ${file}` }));
-        return;
+      // Prefix-matched GET routes
+      if (pathname.startsWith("/api/project-content")) return handleGetProjectContent(res, url, ctx);
+      if (pathname.startsWith("/api/skill-content")) return handleGetSkillContent(res, url, ctx);
+      if (pathname.startsWith("/api/graph")) return await handleGetGraph(res, url, ctx);
+      if (pathname.startsWith("/api/findings/")) return handleGetFindings(res, pathname, ctx);
+    }
+
+    // ── POST/PUT/DELETE routes ──
+    if (req.method === "POST" || req.method === "PUT" || req.method === "DELETE") {
+      switch (pathname) {
+        case "/api/sync": return handlePostSync(req, res, url, ctx);
+        case "/api/approve": return handlePostApprove(req, res, url, ctx);
+        case "/api/reject": return handlePostReject(req, res, url, ctx);
+        case "/api/edit": return handlePostEdit(req, res, url, ctx);
+        case "/api/skill-save": return handlePostSkillSave(req, res, url, ctx);
+        case "/api/skill-toggle": return handlePostSkillToggle(req, res, url, ctx);
+        case "/api/hook-toggle": return handlePostHookToggle(req, res, url, ctx);
+        case "/api/project-topics/save": return handlePostTopicsSave(req, res, url, ctx);
+        case "/api/project-topics/reclassify": return handlePostTopicsReclassify(req, res, url, ctx);
+        case "/api/project-topics/pin": return handlePostTopicsPin(req, res, url, ctx);
+        case "/api/project-topics/unpin": return handlePostTopicsUnpin(req, res, url, ctx);
+        case "/api/tasks/complete": return handlePostTaskAction(req, res, url, ctx, "complete");
+        case "/api/tasks/add": return handlePostTaskAction(req, res, url, ctx, "add");
+        case "/api/tasks/remove": return handlePostTaskAction(req, res, url, ctx, "remove");
+        case "/api/tasks/update": return handlePostTaskUpdate(req, res, url, ctx);
+        case "/api/settings/finding-sensitivity": return handlePostSettingsFindingSensitivity(req, res, url, ctx);
+        case "/api/settings/task-mode": return handlePostSettingsTaskMode(req, res, url, ctx);
+        case "/api/settings/proactivity": return handlePostSettingsProactivity(req, res, url, ctx);
+        case "/api/settings/auto-capture": return handlePostSettingsAutoCapture(req, res, url, ctx);
+        case "/api/settings/mcp-enabled": return handlePostSettingsMcpEnabled(req, res, url, ctx);
+        case "/api/settings/project-overrides": return handlePostSettingsProjectOverrides(req, res, url, ctx);
       }
-      const filePath = safeProjectPath(phrenPath, project, file);
-      if (!filePath) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project or file path" }));
-        return;
-      }
-      if (!fs.existsSync(filePath)) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: `File not found: ${file}` }));
-        return;
-      }
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, content: fs.readFileSync(filePath, "utf8") }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/project-topics") {
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const project = String(qs.project || "");
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-        return;
-      }
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/project-reference-list") {
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const project = String(qs.project || "");
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-        return;
-      }
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, ...listProjectReferenceDocs(phrenPath, project) }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/project-reference-content") {
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const project = String(qs.project || "");
-      const file = String(qs.file || "");
-      const contentResult = readReferenceContent(phrenPath, project, file);
-      res.writeHead(contentResult.ok ? 200 : 400, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(contentResult.ok ? { ok: true, content: contentResult.content } : { ok: false, error: contentResult.error }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/skills") {
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(collectSkillsForUI(phrenPath, profile)));
-      return;
-    }
-
-    if (req.method === "GET" && pathname.startsWith("/api/skill-content")) {
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const filePath = String(qs.path || "");
-      if (!filePath || !isAllowedSkillPath(filePath, phrenPath)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
-        return;
-      }
-      if (!fs.existsSync(filePath)) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: "File not found" }));
-        return;
-      }
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, content: fs.readFileSync(filePath, "utf8") }));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/hooks") {
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(getHooksData(phrenPath)));
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/skill-save") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const filePath = String(parsed.path || "");
-        const content = String(parsed.content || "");
-        if (!filePath || !isAllowedSkillPath(filePath, phrenPath)) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
-          return;
-        }
-        try {
-          fs.mkdirSync(path.dirname(filePath), { recursive: true });
-          const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-          fs.writeFileSync(tmpPath, content);
-          fs.renameSync(tmpPath, filePath);
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/skill-toggle") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const name = String(parsed.name || "");
-        const enabled = String(parsed.enabled || "") === "true";
-        if (!project || !name || (project.toLowerCase() !== "global" && !isValidProjectName(project))) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid skill toggle request" }));
-          return;
-        }
-        const skill = findSkill(phrenPath, profile || "", project, name);
-        if (!skill || "error" in skill) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: skill && "error" in skill ? skill.error : "Skill not found" }));
-          return;
-        }
-        setSkillEnabledAndSync(phrenPath, project, skill.name, enabled);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, enabled }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/hook-toggle") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const tool = String(parsed.tool || "").toLowerCase();
-        const validTools = ["claude", "copilot", "cursor", "codex"];
-        if (!validTools.includes(tool)) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid tool" }));
-          return;
-        }
-        const prefs = readInstallPreferences(phrenPath);
-        const toolPrefs = (prefs.hookTools && typeof prefs.hookTools === "object") ? prefs.hookTools : {};
-        const current = toolPrefs[tool] !== false && prefs.hooksEnabled !== false;
-        writeInstallPreferences(phrenPath, {
-          hookTools: { ...toolPrefs, [tool]: !current },
-        } satisfies Partial<InstallPreferences>);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, enabled: !current }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/project-topics/save") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const rawTopics = String(parsed.topics || "");
-        if (!project || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-          return;
-        }
-        const topics = parseTopicsPayload(rawTopics);
-        if (!topics) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid topics payload" }));
-          return;
-        }
-        const saved = writeProjectTopics(phrenPath, project, topics);
-        if (!saved.ok) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify(saved));
-          return;
-        }
-        for (const topic of saved.topics) {
-          const ensured = ensureTopicReferenceDoc(phrenPath, project, topic);
-          if (!ensured.ok) {
-            res.writeHead(200, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: false, error: ensured.error }));
-            return;
-          }
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/project-topics/reclassify") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        if (!project || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-          return;
-        }
-        const result = reclassifyLegacyTopicDocs(phrenPath, project);
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...result }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/project-topics/pin") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const rawTopic = String(parsed.topic || "");
-        if (!project || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-          return;
-        }
-        const topic = parseTopicPayload(rawTopic);
-        if (!topic) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid topic payload" }));
-          return;
-        }
-        const pinned = pinProjectTopicSuggestion(phrenPath, project, topic);
-        if (!pinned.ok) {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify(pinned));
-          return;
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/project-topics/unpin") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const slug = String(parsed.slug || "");
-        if (!project || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid project" }));
-          return;
-        }
-        const unpinned = unpinProjectTopicSuggestion(phrenPath, project, slug);
-        if (!unpinned.ok) {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify(unpinned));
-          return;
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, ...getProjectTopicsResponse(phrenPath, project) }));
-      });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/search") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      const searchParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
-      const query = searchParams.get("q") || searchParams.get("query") || "";
-      const searchProject = searchParams.get("project") || undefined;
-      const searchType = searchParams.get("type") || undefined;
-      const searchLimit = parseInt(searchParams.get("limit") || "10", 10) || 10;
-      if (!query.trim()) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: "Missing query parameter (q or query)." }));
-        return;
-      }
-      try {
-        const { runSearch } = await import("../cli/search.js");
-        const result = await runSearch(
-          { query, limit: Math.min(searchLimit, 50), project: searchProject, type: searchType },
-          phrenPath,
-          profile || "",
-        );
-        // Build file date map from source headers like [project/filename]
-        const fileDates: Record<string, string> = {};
-        for (const line of result.lines) {
-          const srcMatch = line.match(/^\[([^\]]+)\]\s/);
-          if (srcMatch) {
-            const sourceKey = srcMatch[1];
-            if (fileDates[sourceKey]) continue;
-            const slashIdx = sourceKey.indexOf("/");
-            if (slashIdx > 0) {
-              const proj = sourceKey.slice(0, slashIdx);
-              const file = sourceKey.slice(slashIdx + 1);
-              try {
-                const filePath = path.join(phrenPath, proj, file);
-                if (fs.existsSync(filePath)) {
-                  const stat = fs.statSync(filePath);
-                  fileDates[sourceKey] = stat.mtime.toISOString();
-                }
-              } catch { /* skip */ }
-            }
-          }
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, query, results: result.lines, fileDates }));
-      } catch (err: unknown) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-      }
-      return;
-    }
-
-    if (req.method === "GET" && pathname.startsWith("/api/graph")) {
-      const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
-      const focusProject = graphParams.get("project") || undefined;
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(await buildGraph(phrenPath, profile, focusProject)));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/scores") {
-      let scores: Record<string, unknown> = {};
-      try {
-        const raw = fs.readFileSync(path.join(phrenPath, ".runtime", "memory-scores.json"), "utf-8");
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === "object") {
-          scores = parsed as Record<string, unknown>;
-        }
-      } catch {
-        // file missing or unparseable – return empty
-      }
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(scores));
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/tasks") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      try {
-        const docs = readTasksAcrossProjects(phrenPath, profile);
-        const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean; sessionId?: string }> = [];
-        for (const doc of docs) {
-          for (const section of ["Active", "Queue", "Done"] as const) {
-            for (const item of doc.items[section]) {
-              tasks.push({
-                project: doc.project,
-                section: item.section,
-                line: item.line,
-                priority: item.priority,
-                pinned: item.pinned,
-                githubIssue: item.githubIssue,
-                githubUrl: item.githubUrl,
-                context: item.context,
-                checked: item.checked,
-                sessionId: item.sessionId,
-              });
-            }
-          }
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, tasks }));
-      } catch (err: unknown) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: errorMessage(err), tasks: [] }));
-      }
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/tasks/complete") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const item = String(parsed.item || "");
-        if (!project || !item || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
-          return;
-        }
-        const result = completeTaskStore(phrenPath, project, item);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/tasks/add") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const item = String(parsed.item || "");
-        if (!project || !item || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
-          return;
-        }
-        const result = addTaskStore(phrenPath, project, item);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? `Task added: ${result.data.line}` : undefined, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/tasks/remove") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const item = String(parsed.item || "");
-        if (!project || !item || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
-          return;
-        }
-        const result = removeTaskStore(phrenPath, project, item);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/tasks/update") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const item = String(parsed.item || "");
-        if (!project || !item || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Missing or invalid project/item" }));
-          return;
-        }
-
-        const updates: {
-          text?: string;
-          priority?: string;
-          section?: string;
-        } = {};
-        if (Object.prototype.hasOwnProperty.call(parsed, "text")) updates.text = String(parsed.text || "");
-        if (Object.prototype.hasOwnProperty.call(parsed, "priority")) updates.priority = String(parsed.priority || "");
-        if (Object.prototype.hasOwnProperty.call(parsed, "section")) updates.section = String(parsed.section || "");
-
-        const result = updateTaskStore(phrenPath, project, item, updates);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/settings") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      try {
-        const prefs = readInstallPreferences(phrenPath);
-        const workflowPolicy = getWorkflowPolicy(phrenPath);
-        const retentionPolicy = getRetentionPolicy(phrenPath);
-        const hooksData = getHooksData(phrenPath);
-        const proactivityFindings = prefs.proactivityFindings || prefs.proactivity || "high";
-        const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-        const settingsProject = String(qs.project || "");
-        const merged = settingsProject && isValidProjectName(settingsProject) ? mergeConfig(phrenPath, settingsProject) : null;
-        const overrides = settingsProject && isValidProjectName(settingsProject) ? getProjectConfigOverrides(phrenPath, settingsProject) : null;
-        // Build project info when a specific project is selected
-        let projectInfo: { diskPath: string; ownership: string; configFile: string; configExists: boolean; hasFindings: boolean; hasTasks: boolean; hasSummary: boolean; hasClaudeMd: boolean; findingCount: number; taskCount: number } | null = null;
-        if (settingsProject && isValidProjectName(settingsProject)) {
-          const projectDir = path.join(phrenPath, settingsProject);
-          const configFile = path.join(projectDir, "phren.project.yaml");
-          const projConfig = readProjectConfig(phrenPath, settingsProject);
-          const findingsPath = path.join(projectDir, "FINDINGS.md");
-          const taskPath = path.join(projectDir, "tasks.md");
-          let findingCount = 0;
-          if (fs.existsSync(findingsPath)) {
-            findingCount = (fs.readFileSync(findingsPath, "utf8").match(/^- /gm) || []).length;
-          }
-          let taskCount = 0;
-          if (fs.existsSync(taskPath)) {
-            const queueMatch = fs.readFileSync(taskPath, "utf8").match(/## Queue[\s\S]*?(?=## |$)/);
-            if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
-          }
-          projectInfo = {
-            diskPath: projConfig.sourcePath || projectDir,
-            ownership: projConfig.ownership || "default",
-            configFile,
-            configExists: fs.existsSync(configFile),
-            hasFindings: fs.existsSync(findingsPath),
-            hasTasks: fs.existsSync(taskPath),
-            hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
-            hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")),
-            findingCount,
-            taskCount,
-          };
-        }
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({
-          ok: true,
-          proactivity: prefs.proactivity || "high",
-          proactivityFindings,
-          proactivityTask: prefs.proactivityTask || prefs.proactivity || "high",
-          taskMode: workflowPolicy.taskMode,
-          findingSensitivity: workflowPolicy.findingSensitivity || "balanced",
-          autoCaptureEnabled: proactivityFindings !== "low",
-          consolidationEntryThreshold: CONSOLIDATION_ENTRY_THRESHOLD,
-          hooksEnabled: hooksData.globalEnabled,
-          mcpEnabled: prefs.mcpEnabled !== false,
-          hookTools: hooksData.tools,
-          retentionPolicy,
-          workflowPolicy,
-          merged,
-          overrides,
-          projectInfo,
-        }));
-      } catch (err: unknown) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-      }
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/settings/finding-sensitivity") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const value = String(parsed.value || "");
-        const valid = ["minimal", "conservative", "balanced", "aggressive"];
-        if (!valid.includes(value)) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: `Invalid finding sensitivity: "${value}". Must be one of: ${valid.join(", ")}` }));
-          return;
-        }
-        const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify(result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/settings/task-mode") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const value = String(parsed.value || "").trim().toLowerCase();
-        const valid: readonly string[] = VALID_TASK_MODES;
-        if (!valid.includes(value)) {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}` }));
-          return;
-        }
-        const result = updateWorkflowPolicy(phrenPath, { taskMode: value as typeof VALID_TASK_MODES[number] });
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify(result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/settings/proactivity") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const value = String(parsed.value || "").trim().toLowerCase();
-        const valid = ["high", "medium", "low"];
-        if (!valid.includes(value)) {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: `Invalid proactivity: "${value}". Must be one of: ${valid.join(", ")}` }));
-          return;
-        }
-        writeInstallPreferences(phrenPath, { proactivity: value as "high" | "medium" | "low" });
-        writeGovernanceInstallPreferences(phrenPath, { proactivity: value as "high" | "medium" | "low" });
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, proactivity: value }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/settings/auto-capture") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const enabled = String(parsed.enabled || "").toLowerCase() === "true";
-        const next = enabled ? "high" : "low";
-        writeInstallPreferences(phrenPath, { proactivityFindings: next });
-        writeGovernanceInstallPreferences(phrenPath, { proactivityFindings: next });
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, autoCaptureEnabled: enabled, proactivityFindings: next }));
-      });
-      return;
-    }
-
-    if (req.method === "POST" && pathname === "/api/settings/mcp-enabled") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const enabled = String(parsed.enabled || "").toLowerCase() === "true";
-        writeInstallPreferences(phrenPath, { mcpEnabled: enabled });
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, mcpEnabled: enabled }));
-      });
-      return;
-    }
-
-    // POST /api/settings/project-overrides — write per-project config overrides
-    if (req.method === "POST" && pathname === "/api/settings/project-overrides") {
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const project = String(parsed.project || "");
-        const field = String(parsed.field || "");
-        const value = String(parsed.value || "");
-        const clearField = String(parsed.clear || "") === "true";
-        if (!project || !isValidProjectName(project)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-          return;
-        }
-        const registeredProjects = getProjectDirs(phrenPath, profile).map((d) => path.basename(d)).filter((p) => p !== "global");
-        const isRegistered = registeredProjects.includes(project);
-        const registrationWarning = isRegistered ? undefined : `Project '${project}' is not registered in the active profile. Config was saved but it will have no effect until the project is added with 'phren add'.`;
-        const VALID_FIELDS: Record<string, string[]> = {
-          findingSensitivity: ["minimal", "conservative", "balanced", "aggressive"],
-          proactivity: ["high", "medium", "low"],
-          proactivityFindings: ["high", "medium", "low"],
-          proactivityTask: ["high", "medium", "low"],
-          taskMode: ["off", "manual", "suggest", "auto"],
-        };
-        const NUMERIC_RETENTION_FIELDS = ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"];
-        const NUMERIC_WORKFLOW_FIELDS = ["lowConfidenceThreshold"];
-        try {
-          updateProjectConfigOverrides(phrenPath, project, (current) => {
-            const next = { ...current };
-            if (clearField) {
-              if (field in VALID_FIELDS) delete (next as Record<string, unknown>)[field];
-              else if (NUMERIC_RETENTION_FIELDS.includes(field)) {
-                if (next.retentionPolicy) delete (next.retentionPolicy as Record<string, unknown>)[field];
-              } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
-                if (next.workflowPolicy) delete (next.workflowPolicy as Record<string, unknown>)[field];
-              }
-              return next;
-            }
-            if (field in VALID_FIELDS) {
-              const allowed = VALID_FIELDS[field];
-              if (!allowed.includes(value)) throw new Error(`Invalid value "${value}" for ${field}`);
-              (next as Record<string, unknown>)[field] = value;
-            } else if (NUMERIC_RETENTION_FIELDS.includes(field)) {
-              const num = parseFloat(value);
-              if (!Number.isFinite(num) || num < 0) throw new Error(`Invalid numeric value for ${field}`);
-              next.retentionPolicy = { ...next.retentionPolicy, [field]: num };
-            } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
-              const num = parseFloat(value);
-              if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error(`Invalid value for ${field} (must be 0–1)`);
-              next.workflowPolicy = { ...next.workflowPolicy, [field]: num };
-            } else {
-              throw new Error(`Unknown config field: ${field}`);
-            }
-            return next;
-          });
-          const merged = mergeConfig(phrenPath, project);
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: true, config: merged, ...(registrationWarning ? { warning: registrationWarning } : {}) }));
-        } catch (err: unknown) {
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-          res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-        }
-      });
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/config") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
-      const project = String(qs.project || "");
-      if (project && !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-        return;
-      }
-      try {
-        const config = mergeConfig(phrenPath, project || undefined);
-        const projects = getProjectDirs(phrenPath, profile).map((d) => path.basename(d)).filter((p) => p !== "global");
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, config, projects }));
-      } catch (err: unknown) {
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: errorMessage(err) }));
-      }
-      return;
-    }
-
-    if (req.method === "GET" && pathname === "/api/csrf-token") {
-      if (!requireGetAuth(req, res, url, authToken, true)) return;
-      if (!csrfTokens) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, token: null }));
-        return;
-      }
-      pruneExpiredCsrfTokens(csrfTokens);
-      const token = crypto.randomUUID();
-      csrfTokens.set(token, Date.now());
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: true, token }));
-      return;
-    }
-
-    // GET /api/findings/:project — list findings for a project
-    if (req.method === "GET" && pathname.startsWith("/api/findings/")) {
-      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-        return;
-      }
-      const result = readFindings(phrenPath, project);
-      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      if (!result.ok) {
-        res.end(JSON.stringify({ ok: false, error: result.error }));
-      } else {
-        res.end(JSON.stringify({ ok: true, data: { project, findings: result.data } }));
-      }
-      return;
-    }
-
-    // POST /api/findings/:project — add a finding
-    if (req.method === "POST" && pathname.startsWith("/api/findings/")) {
-      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-        return;
-      }
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const text = String(parsed.text || "");
-        if (!text) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "text is required" }));
-          return;
-        }
-        const result = addFindingStore(phrenPath, project, text);
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    // PUT /api/findings/:project — edit a finding (old_text → new_text)
-    if (req.method === "PUT" && pathname.startsWith("/api/findings/")) {
-      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-        return;
-      }
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const oldText = String(parsed.old_text || "");
-        const newText = String(parsed.new_text || "");
-        if (!oldText || !newText) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "old_text and new_text are required" }));
-          return;
-        }
-        const result = editFinding(phrenPath, project, oldText, newText);
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
-      });
-      return;
-    }
-
-    // DELETE /api/findings/:project — remove a finding by text match
-    if (req.method === "DELETE" && pathname.startsWith("/api/findings/")) {
-      const project = decodeURIComponent(pathname.slice("/api/findings/".length));
-      if (!project || !isValidProjectName(project)) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Invalid project name" }));
-        return;
-      }
-      void readFormBody(req, res).then((parsed) => {
-        if (!parsed) return;
-        if (!requirePostAuth(req, res, url, parsed, authToken, true)) return;
-        if (!requireCsrf(res, parsed, csrfTokens, true)) return;
-        const text = String(parsed.text || "");
-        if (!text) {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "text is required" }));
-          return;
-        }
-        const result = removeFinding(phrenPath, project, text);
-        res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: result.ok, error: result.ok ? undefined : result.error }));
-      });
-      return;
+      // Prefix-matched write routes
+      if (pathname.startsWith("/api/findings/")) return handleFindingsWrite(req, res, url, pathname, ctx);
     }
 
     res.writeHead(404, { "content-type": "text/plain" });

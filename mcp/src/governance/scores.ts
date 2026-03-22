@@ -6,6 +6,8 @@ import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/g
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 
+const MAX_LOG_LINES = 1000;
+
 export interface EntryScore {
   impressions: number;
   helpful: number;
@@ -276,7 +278,7 @@ export function recordInjection(phrenPath: string, key: string, sessionId?: stri
     if (stat.size > 1_000_000) {
       const content = fs.readFileSync(logFile, "utf8");
       const lines = content.split("\n");
-      fs.writeFileSync(logFile, lines.slice(-500).join("\n"));
+      fs.writeFileSync(logFile, lines.slice(-MAX_LOG_LINES).join("\n"));
     }
   } catch (err: unknown) {
     debugLog(`Usage log rotation failed: ${errorMessage(err)}`);

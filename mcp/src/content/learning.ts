@@ -185,18 +185,23 @@ export function autoDetectFindingType(text: string): string | null {
   return null;
 }
 
+interface PrepareFindingOpts {
+  finding: string;
+  project: string;
+  fullHistory: string;
+  extraAnnotations?: string[];
+  citationInput?: Partial<FindingCitation>;
+  source?: FindingProvenance;
+  nowIso?: string;
+  inferredRepo?: string;
+  headCommit?: string;
+  phrenPath?: string;
+}
+
 function prepareFinding(
-  learning: string,
-  project: string,
-  fullHistory: string,
-  extraAnnotations?: string[],
-  citationInput?: Partial<FindingCitation>,
-  source?: FindingProvenance,
-  nowIso?: string,
-  inferredRepo?: string,
-  headCommit?: string,
-  phrenPath?: string,
+  opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, source, nowIso, inferredRepo, headCommit, phrenPath } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -376,7 +381,10 @@ export function addFindingToFile(
   if (!fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" does not exist.`, PhrenError.INVALID_PROJECT_NAME);
 
   const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
-    const preparedForNewFile = prepareFinding(learning, project, "", opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
+    const preparedForNewFile = prepareFinding({
+      finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
+      citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+    });
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
         return phrenErr(`Rejected: finding appears to contain a secret (${preparedForNewFile.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
@@ -407,7 +415,10 @@ export function addFindingToFile(
           .filter(line => !line.startsWith("- ") || !line.toLowerCase().includes(supersedesText.slice(0, 40).toLowerCase()))
           .join("\n")
       : content;
-    const prepared = prepareFinding(learning, project, historyForDedup, opts?.extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
+    const prepared = prepareFinding({
+      finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
+      citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+    });
     if (prepared.status === "rejected") {
       return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
     }
@@ -535,7 +546,10 @@ export function addFindingsToFile(
           rejected.push({ text: learning, reason: lengthError });
           continue;
         }
-        const prepared = prepareFinding(learning, project, content, extraAnnotations, resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath);
+        const prepared = prepareFinding({
+          finding: learning, project, fullHistory: content, extraAnnotations,
+          citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+        });
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
           continue;
@@ -567,18 +581,10 @@ export function addFindingsToFile(
         rejected.push({ text: learning, reason: lengthError });
         continue;
       }
-      const prepared = prepareFinding(
-        learning,
-        project,
-        content,
-        extraAnnotations,
-        resolvedCitationInput,
-        source,
-        nowIso,
-        inferredRepo,
-        headCommit,
-        phrenPath,
-      );
+      const prepared = prepareFinding({
+        finding: learning, project, fullHistory: content, extraAnnotations,
+        citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+      });
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });
         continue;
