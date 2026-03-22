@@ -68,8 +68,7 @@ MCP Tools (67 across 12 modules):
     read_skill(name, project?) - read full skill file content and parsed frontmatter
     write_skill(name, content, scope) - create or update a skill (scope: 'global' or project name)
     remove_skill(name, project?) - delete a skill file
-    enable_skill(name, project) - enable a skill without deleting its file
-    disable_skill(name, project) - disable a skill without deleting its file
+    toggle_skill(name, enabled, project) - enable or disable a skill without deleting its file
     resolution model:
       precedence: project scope overrides global scope
       alias collisions: conflicting commands/aliases are marked unregistered

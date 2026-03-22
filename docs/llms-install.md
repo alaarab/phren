@@ -124,8 +124,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `read_skill` | `name`, `project?` | Read full skill file content and parsed frontmatter. |
 | `write_skill` | `name`, `content`, `scope` | Create or update a skill (`scope`: `'global'` or project name). |
 | `remove_skill` | `name`, `project?` | Delete a skill file. |
-| `enable_skill` | `name`, `project` | Enable a disabled skill without rewriting it. |
-| `disable_skill` | `name`, `project` | Disable a skill without deleting it. |
+| `toggle_skill` | `name`, `enabled`, `project` | Enable or disable a skill without deleting its file. |
 
 Skill system behavior:
 - precedence: project-local skills override global skills with the same name
@@ -150,9 +149,7 @@ Skill system behavior:
 | `health_check` | (none) | Run doctor checks and return results. |
 | `list_hook_errors` | `limit?` | Show recent hook errors and failures. |
 | `get_review_queue` | `project?` | Read items waiting for review. The review queue is read-only. |
-| `approve_queue_item` | `project`, `line` | Approve a review queue item (removes from queue, finding stays in FINDINGS.md). |
-| `reject_queue_item` | `project`, `line` | Reject a review queue item (removes from queue AND from FINDINGS.md). |
-| `edit_queue_item` | `project`, `line`, `new_text` | Edit a review queue item's text in both queue and FINDINGS.md. |
+| `manage_review_item` | `project`, `line`, `action`, `new_text?` | Manage a review queue item: approve (removes from queue), reject (removes from queue and FINDINGS.md), or edit (updates text in both; `new_text` required for edit). |
 | `doctor_fix` | `check_data?` | Run doctor self-heal checks and apply fixes automatically. |
 
 ### Configuration

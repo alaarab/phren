@@ -23,7 +23,7 @@ export function showQueueItemDetail(client: PhrenClient, item: QueueItemData, on
     onMessage: async (msg: Record<string, unknown>) => {
       if (msg.type === "approve") {
         try {
-          await client.approveQueueItem(item.projectName, item.line);
+          await client.manageReviewItem(item.projectName, item.line, "approve");
           vscode.window.showInformationMessage(`Queue item "${item.id}" approved.`);
           closePreview();
           onRefresh();
@@ -33,7 +33,7 @@ export function showQueueItemDetail(client: PhrenClient, item: QueueItemData, on
       }
       if (msg.type === "reject") {
         try {
-          await client.rejectQueueItem(item.projectName, item.line);
+          await client.manageReviewItem(item.projectName, item.line, "reject");
           vscode.window.showInformationMessage(`Queue item "${item.id}" rejected.`);
           closePreview();
           onRefresh();
@@ -45,7 +45,7 @@ export function showQueueItemDetail(client: PhrenClient, item: QueueItemData, on
         try {
           const nextText = msg.newText.trim();
           if (!nextText || nextText === item.text.trim()) return;
-          await client.editQueueItem(item.projectName, item.line, nextText);
+          await client.manageReviewItem(item.projectName, item.line, "edit", nextText);
           item.text = nextText;
           vscode.window.showInformationMessage(`Queue item "${item.id}" updated.`);
           onRefresh();

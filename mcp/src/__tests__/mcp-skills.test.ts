@@ -65,14 +65,14 @@ describe("mcp-skills", () => {
   });
 
   it("disables and re-enables a skill without deleting it", async () => {
-    let res = parseResult(await server.call("disable_skill", { project: "demo", name: "helper" }));
+    let res = parseResult(await server.call("toggle_skill", { project: "demo", name: "helper", enabled: false }));
     expect(res.ok).toBe(true);
     expect(fs.existsSync(path.join(tmp.path, "demo", "skills", "helper.md"))).toBe(true);
 
     res = parseResult(await server.call("list_skills", { project: "demo" }));
     expect(res.data.skills[0].enabled).toBe(false);
 
-    res = parseResult(await server.call("enable_skill", { project: "demo", name: "helper" }));
+    res = parseResult(await server.call("toggle_skill", { project: "demo", name: "helper", enabled: true }));
     expect(res.ok).toBe(true);
 
     res = parseResult(await server.call("list_skills", { project: "demo" }));

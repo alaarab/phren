@@ -418,80 +418,41 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  // ── approve_queue_item ──────────────────────────────────────────────────
+  // ── manage_review_item ──────────────────────────────────────────────────
 
   server.registerTool(
-    "approve_queue_item",
+    "manage_review_item",
     {
-      title: "◆ phren · approve queue item",
+      title: "◆ phren · manage review item",
       description:
-        "Approve a review queue item — removes it from the review queue (the finding stays in FINDINGS.md).",
+        "Manage a review queue item: approve (removes from queue, finding stays), reject (removes from queue AND FINDINGS.md), or edit (updates text in both).",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
+        action: z.enum(["approve", "reject", "edit"]).describe("Action to perform on the queue item."),
+        new_text: z.string().max(10000).optional().describe("Required when action is 'edit'."),
       }),
     },
-    async ({ project, line }) => {
+    async ({ project, line, action, new_text }) => {
       if (!isValidProjectName(project)) {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       }
+      if (action === "edit" && !new_text) {
+        return mcpResponse({ ok: false, error: "new_text is required when action is 'edit'." });
+      }
       return withWriteQueue(async () => {
-        const result = approveQueueItem(phrenPath, project, line);
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        let result;
+        switch (action) {
+          case "approve":
+            result = approveQueueItem(phrenPath, project, line);
+            break;
+          case "reject":
+            result = rejectQueueItem(phrenPath, project, line);
+            break;
+          case "edit":
+            result = editQueueItem(phrenPath, project, line, new_text!);
+            break;
         }
-        return mcpResponse({ ok: true, message: result.data });
-      });
-    }
-  );
-
-  // ── reject_queue_item ───────────────────────────────────────────────────
-
-  server.registerTool(
-    "reject_queue_item",
-    {
-      title: "◆ phren · reject queue item",
-      description:
-        "Reject a review queue item — removes it from the review queue AND removes the corresponding finding from FINDINGS.md.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
-      }),
-    },
-    async ({ project, line }) => {
-      if (!isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      return withWriteQueue(async () => {
-        const result = rejectQueueItem(phrenPath, project, line);
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        }
-        return mcpResponse({ ok: true, message: result.data });
-      });
-    }
-  );
-
-  // ── edit_queue_item ─────────────────────────────────────────────────────
-
-  server.registerTool(
-    "edit_queue_item",
-    {
-      title: "◆ phren · edit queue item",
-      description:
-        "Edit a review queue item's text in both the review queue and FINDINGS.md.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
-        new_text: z.string().max(10000).describe("The new finding text."),
-      }),
-    },
-    async ({ project, line, new_text }) => {
-      if (!isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      return withWriteQueue(async () => {
-        const result = editQueueItem(phrenPath, project, line, new_text);
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
         }

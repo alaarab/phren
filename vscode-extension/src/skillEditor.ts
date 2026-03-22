@@ -32,13 +32,8 @@ export async function showSkillEditor(client: PhrenClient, skillName: string, sk
       if (msg.type === "toggle") {
         try {
           const project = skillSource === "global" ? undefined : skillSource;
-          if (skillEnabled) {
-            await client.disableSkill(skillName, project);
-            skillEnabled = false;
-          } else {
-            await client.enableSkill(skillName, project);
-            skillEnabled = true;
-          }
+          await client.toggleSkill(skillName, !skillEnabled, project);
+          skillEnabled = !skillEnabled;
           vscode.window.showInformationMessage(`Skill "${skillName}" ${skillEnabled ? "enabled" : "disabled"}.`);
         } catch (error) {
           vscode.window.showErrorMessage(`Failed to toggle skill: ${error instanceof Error ? error.message : String(error)}`);

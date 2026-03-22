@@ -56,9 +56,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `health_check()` : run doctor checks and return results
 - `list_hook_errors()` : show recent hook errors and failures
 - `get_review_queue(project?)` : read items waiting for review
-- `approve_queue_item(project, line)` : approve a review queue item (removes from queue, finding stays in FINDINGS.md)
-- `reject_queue_item(project, line)` : reject a review queue item (removes from queue AND from FINDINGS.md)
-- `edit_queue_item(project, line, new_text)` : edit a review queue item's text in both queue and FINDINGS.md
+- `manage_review_item(project, line, action, new_text?)` : manage a review queue item — approve (remove from queue), reject (remove from queue and FINDINGS.md), or edit (update text in both; requires new_text)
 - `doctor_fix()` : run doctor self-heal checks and apply fixes
 
 **Task management:**
@@ -113,8 +111,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `read_skill(name, project?)` : read full skill file content and parsed frontmatter
 - `write_skill(name, content, scope)` : create or update a skill (scope: 'global' or project name)
 - `remove_skill(name, project?)` : delete a skill file
-- `enable_skill(name, project?)` : enable a disabled skill without rewriting it
-- `disable_skill(name, project?)` : disable a skill without deleting it
+- `toggle_skill(name, enabled, project)` : enable or disable a skill without deleting its file
 
 **Hooks management:**
 - `list_hooks(project?)` : show hook status for all tools (claude/copilot/cursor/codex) + custom hooks + config paths, optionally including per-project overrides
