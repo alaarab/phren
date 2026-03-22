@@ -18,7 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./cli-extract.js";
 import { errorMessage } from "./utils.js";
-import { logWarn, logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 import { compactFindingJournals } from "./finding-journal.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 
@@ -182,7 +182,7 @@ export async function handlePruneMemories(args: string[] = []) {
         .map(line => { try { return JSON.parse(line); } catch { return null; } }) // null filtered below
         .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
     } catch (err: unknown) {
-      logDebug("cli-govern retrievalLog readParse", errorMessage(err));
+      logger.debug("cli-govern", `retrievalLog readParse: ${errorMessage(err)}`);
     }
   }
 
@@ -578,7 +578,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     appendAuditLog(getPhrenPath(), "background_maintenance_failed", `error=${errMsg}`);
   } finally {
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      logWarn("backgroundMaintenance", `unlockFinal: ${errorMessage(err)}`);
+      logger.debug("cli-govern", `backgroundMaintenance unlockFinal: ${errorMessage(err)}`);
     }
   }
 }
