@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { parseMcpMode, runInit } from "./init.js";
 import { errorMessage } from "./utils.js";
+import { logger } from "./logger.js";
 import { defaultPhrenPath, findPhrenPath } from "./shared.js";
 import { addProjectFromPath } from "./core-project.js";
 import {
@@ -435,7 +436,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       const { trackCliCommand } = await import("./telemetry.js");
       trackCliCommand(defaultPhrenPath(), argvCommand);
     } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] cli trackCliCommand: ${errorMessage(err)}\n`);
+      logger.debug("cli", `trackCliCommand: ${errorMessage(err)}`);
     }
     await runCliCommand(argvCommand, argv.slice(1));
     return finish();

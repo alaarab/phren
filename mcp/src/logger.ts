@@ -14,3 +14,10 @@ export function log(level: LogLevel, tool: string, message: string, extra?: obje
     // Logging must never throw
   }
 }
+
+export const logger = {
+  debug: (tool: string, message: string, extra?: object) => log("debug", tool, message, extra),
+  info: (tool: string, message: string, extra?: object) => log("info", tool, message, extra),
+  warn: (tool: string, message: string, extra?: object) => log("warn", tool, message, extra),
+  error: (tool: string, message: string, extra?: object) => log("error", tool, message, extra),
+};
