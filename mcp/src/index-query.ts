@@ -1,5 +1,6 @@
 import * as path from "path";
 import { debugLog } from "./shared.js";
+import { logger } from "./logger.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];
@@ -101,7 +102,9 @@ export function queryRows(db: SqlJsDatabase, sql: string, params: (string | numb
     if (!Array.isArray(results) || !results.length || !results[0]?.values?.length) return null;
     return results[0].values;
   } catch (err: unknown) {
-    debugLog(`queryRows failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    const msg = err instanceof Error ? err.message : "unknown error";
+    logger.debug("queryRows", `DB query failed: ${msg}`);
+    debugLog(`queryRows failed: ${msg}`);
     return null;
   }
 }
