@@ -6,6 +6,39 @@ import { register } from "../tools/tasks.js";
 import { readTasks } from "../data/access.js";
 import type { McpContext } from "../tools/types.js";
 
+describe("tasks-github helpers", () => {
+  it("parses GitHub issue URLs into repo and issue number", async () => {
+    const { parseGithubIssueUrl } = await vi.importActual<typeof import("../task/github.js")>("../task/github.js");
+    expect(parseGithubIssueUrl("https://github.com/alaarab/phren/issues/14")).toEqual({
+      repo: "alaarab/phren",
+      issueNumber: 14,
+      url: "https://github.com/alaarab/phren/issues/14",
+    });
+  });
+
+  it("extracts a GitHub repo from markdown text", async () => {
+    const { extractGithubRepoFromText } = await vi.importActual<typeof import("../task/github.js")>("../task/github.js");
+    expect(extractGithubRepoFromText("Repo: https://github.com/alaarab/phren\n")).toBe("alaarab/phren");
+  });
+
+  it("builds an issue body from task item context", async () => {
+    const { buildTaskIssueBody } = await vi.importActual<typeof import("../task/github.js")>("../task/github.js");
+    const body = buildTaskIssueBody("phren", {
+      id: "Q1",
+      stableId: "deadbeef",
+      section: "Queue",
+      line: "Ship GitHub issue linkage [high]",
+      checked: false,
+      context: "Need optional issue linkage for task items",
+      githubIssue: undefined,
+      githubUrl: undefined,
+    });
+    expect(body).toContain("Ship GitHub issue linkage");
+    expect(body).toContain("Need optional issue linkage");
+    expect(body).toContain("bid:deadbeef");
+  });
+});
+
 vi.mock("../task/github.js", () => ({
   buildTaskIssueBody: vi.fn(() => "generated body"),
   createGithubIssueForTask: vi.fn(() => ({

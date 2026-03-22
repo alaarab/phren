@@ -4,7 +4,7 @@
  * The write queue is a closure inside createServer() so we test the logic
  * directly using an equivalent standalone implementation that mirrors it exactly.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Mirror of the withWriteQueue pattern from index.ts, parameterized for testing
 function makeWriteQueue(maxDepth = 50, timeoutMs = 30_000) {
@@ -134,6 +134,10 @@ describe("withWriteQueue: serial execution", () => {
 });
 
 describe("withWriteQueue: timeout behavior", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("times out and rejects if fn takes too long", async () => {
     vi.useFakeTimers();
     const { withWriteQueue } = makeWriteQueue(50, 1000); // 1s timeout
@@ -146,6 +150,5 @@ describe("withWriteQueue: timeout behavior", () => {
 
     await vi.advanceTimersByTimeAsync(1100);
     await expect(slow).rejects.toThrow("Write timeout after 30s");
-    vi.useRealTimers();
   });
 });
