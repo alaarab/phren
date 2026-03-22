@@ -8,7 +8,7 @@ import {
   removeTask,
   readTasks,
   TASKS_FILENAME,
-} from "../data-access.js";
+} from "../data/data-access.js";
 
 const PROJECT = "testproject";
 

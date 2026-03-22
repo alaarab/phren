@@ -36,10 +36,10 @@ vi.mock("../hooks.js", () => ({
   commandExists: vi.fn(() => false),
 }));
 
-import { handleExtractMemories } from "../cli-extract.js";
+import { handleExtractMemories } from "../cli/cli-extract.js";
 import { runGit } from "../utils.js";
-import { appendFindingJournal } from "../finding-journal.js";
-import { appendReviewQueue } from "../shared-governance.js";
+import { appendFindingJournal } from "../finding/finding-journal.js";
+import { appendReviewQueue } from "../shared/shared-governance.js";
 import { appendAuditLog } from "../shared.js";
 
 function gitLog(subject: string, body = "", hash = "abc12345"): string {

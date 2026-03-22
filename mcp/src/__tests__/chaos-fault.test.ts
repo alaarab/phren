@@ -11,7 +11,7 @@ import {
   listProfiles,
   loadShellState,
   saveShellState,
-} from "../data-access.js";
+} from "../data/data-access.js";
 import { PhrenError } from "../shared.js";
 import { grantAdmin, makeTempDir, writeFile as write, resultMsg } from "../test-helpers.js";
 import { readCustomHooks, runCustomHooks } from "../hooks.js";

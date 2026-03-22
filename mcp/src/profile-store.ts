@@ -13,9 +13,8 @@ import {
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { TASK_FILE_ALIASES } from "./data-tasks.js";
-import { withSafeLock } from "./shared-data-utils.js";
-import { logDebug } from "./logger.js";
+import { TASK_FILE_ALIASES } from "./data/data-tasks.js";
+import { withSafeLock } from "./shared/shared-data-utils.js";
 
 export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
@@ -102,7 +101,7 @@ export function listMachines(phrenPath: string): PhrenResult<Record<string, stri
     }
     return phrenOk(cleaned);
   } catch (err: unknown) {
-    logDebug("listMachines yaml parse", errorMessage(err));
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listMachines yaml parse: ${errorMessage(err)}\n`);
     return phrenErr(`Could not parse machines.yaml. Check the file for syntax errors or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
   }
 }
@@ -256,7 +255,7 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
       const defaults = parseProfilePolicyDefaults(data?.defaults);
       profiles.push({ name, file: full, projects, ...(defaults ? { defaults } : {}) });
     } catch (err: unknown) {
-      logDebug("listProfiles yamlParse", errorMessage(err));
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] listProfiles yamlParse: ${errorMessage(err)}\n`);
       return phrenErr(`profiles/${file}`, PhrenError.MALFORMED_YAML);
     }
   }

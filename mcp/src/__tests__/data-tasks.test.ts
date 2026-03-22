@@ -17,8 +17,8 @@ import {
   promoteTask,
   updateTask,
   TASKS_FILENAME,
-} from "../data-access.js";
-import { reorderTask, applyGravity, type TaskItem } from "../data-tasks.js";
+} from "../data/data-access.js";
+import { reorderTask, applyGravity, type TaskItem } from "../data/data-tasks.js";
 
 const PROJECT = "test-tasks";
 

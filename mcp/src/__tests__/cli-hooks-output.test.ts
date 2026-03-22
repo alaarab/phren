@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildHookOutput } from "../cli-hooks-output.js";
-import type { SelectedSnippet } from "../shared-retrieval.js";
+import { buildHookOutput } from "../cli/cli-hooks-output.js";
+import type { SelectedSnippet } from "../shared/shared-retrieval.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";

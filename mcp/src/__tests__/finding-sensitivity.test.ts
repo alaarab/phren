@@ -17,8 +17,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile, runCliExec } from "../test-helpers.js";
-import { FINDING_SENSITIVITY_CONFIG } from "../cli-config.js";
-import { getWorkflowPolicy, updateWorkflowPolicy } from "../shared-governance.js";
+import { FINDING_SENSITIVITY_CONFIG } from "../cli/cli-config.js";
+import { getWorkflowPolicy, updateWorkflowPolicy } from "../shared/shared-governance.js";
 
 const runCli = runCliExec;
 

@@ -5,7 +5,7 @@ import * as path from "path";
 import * as http from "http";
 import * as os from "os";
 import * as querystring from "querystring";
-import { createWebUiServer } from "../memory-ui.js";
+import { createWebUiServer } from "../ui/memory-ui.js";
 
 function seedProject(root: string): void {
   write(

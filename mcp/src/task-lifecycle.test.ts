@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
-import { handleTaskPromptLifecycle, finalizeTaskSession } from "./task-lifecycle.js";
-import { readTasks, addTask, appendChildFinding } from "./data-access.js";
+import { handleTaskPromptLifecycle, finalizeTaskSession } from "./task/task-lifecycle.js";
+import { readTasks, addTask, appendChildFinding } from "./data/data-access.js";
 
 describe("task lifecycle", () => {
   let tmp: { path: string; cleanup: () => void };

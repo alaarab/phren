@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { buildIndex, type SqlJsDatabase } from "../shared-index.js";
+import { buildIndex, type SqlJsDatabase } from "../shared/shared-index.js";
 
 describe("index invalidation: file changes trigger rebuild", () => {
   let tmp: { path: string; cleanup: () => void };

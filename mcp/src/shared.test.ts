@@ -35,14 +35,14 @@ import {
   flushEntryScores,
   entryScoreKey,
   pruneDeadMemories,
-} from "./shared-governance.js";
+} from "./shared/shared-governance.js";
 import {
   buildIndex,
   queryRows,
   detectProject,
   resolveImports,
   extractSnippet,
-} from "./shared-index.js";
+} from "./shared/shared-index.js";
 import {
   addFindingToFile,
   checkConsolidationNeeded,
@@ -56,7 +56,7 @@ import {
   stripTaskDoneSection,
   isDuplicateFinding,
   extractConflictVersions,
-} from "./shared-content.js";
+} from "./shared/shared-content.js";
 import { isValidProjectName } from "./utils.js";
 import { grantAdmin, initTestPhrenRoot, makeTempDir, suppressOutput } from "./test-helpers.js";
 import * as path from "path";

@@ -11,16 +11,15 @@ import {
   homeDir,
   readRootManifest,
 } from "./shared.js";
-import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared-index.js";
-import { mergeConfig, getWorkflowPolicy } from "./shared-governance.js";
-import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init.js";
+import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared/shared-index.js";
+import { mergeConfig, getWorkflowPolicy } from "./shared/shared-governance.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
-import { readRuntimeHealth, resolveTaskFilePath } from "./data-access.js";
+import { readRuntimeHealth, resolveTaskFilePath } from "./data/data-access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
-import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell-render.js";
-import { logger } from "./logger.js";
+import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/shell-render.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +29,7 @@ function readPackageVersion(): string {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : "unknown";
   } catch (err: unknown) {
-    logger.debug("status", `readPackageVersion: ${errorMessage(err)}`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] readPackageVersion: ${errorMessage(err)}\n`);
     return "unknown";
   }
 }
@@ -102,7 +101,7 @@ export async function runStatus() {
         console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
       }
     } catch (err: unknown) {
-      logger.debug("status", `statusConfig: ${errorMessage(err)}`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusConfig: ${errorMessage(err)}\n`);
     }
   }
 
@@ -137,7 +136,7 @@ export async function runStatus() {
         const servers = isRecord(settings.servers) ? settings.servers : undefined;
         mcpConfigured = Boolean(servers?.phren || servers?.phren);
       } catch (err: unknown) {
-        logger.debug("status", `statusWorkspaceMcp parse: ${errorMessage(err)}`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusWorkspaceMcp parse: ${errorMessage(err)}\n`);
       }
     }
   } else {
@@ -152,7 +151,7 @@ export async function runStatus() {
         const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
         hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
       } catch (err: unknown) {
-        logger.debug("status", `statusHooks settingsParse: ${errorMessage(err)}`);
+        if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusHooks settingsParse: ${errorMessage(err)}\n`);
       }
     }
   }
@@ -181,7 +180,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    logger.debug("status", `statusFtsIndex: ${errorMessage(err)}`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusFtsIndex: ${errorMessage(err)}\n`);
   }
   const ftsLabel = ftsIndexOk
     ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
@@ -189,8 +188,8 @@ export async function runStatus() {
   console.log(`  ${DIM}fts${RESET}      ${ftsLabel}`);
 
   try {
-    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared-ollama.js");
-    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared-embedding-cache.js");
+    const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared/shared-ollama.js");
+    const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared/shared-embedding-cache.js");
     const ollamaUrl = getOllamaUrl();
     if (!ollamaUrl) {
       console.log(`  ${DIM}semantic${RESET} ${DIM}disabled (optional)${RESET}`);
@@ -212,7 +211,7 @@ export async function runStatus() {
       }
     }
   } catch (err: unknown) {
-    logger.debug("status", `statusSemantic: ${errorMessage(err)}`);
+    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] statusSemantic: ${errorMessage(err)}\n`);
   }
 
   // Agent integration status
@@ -222,7 +221,7 @@ export async function runStatus() {
       const raw = fs.readFileSync(filePath, "utf8");
       return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
     } catch (err: unknown) {
-      logger.debug("status", `hasPhrenEntry: ${errorMessage(err)}`);
+      if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] hasPhrenEntry: ${errorMessage(err)}\n`);
       return false;
     }
   }

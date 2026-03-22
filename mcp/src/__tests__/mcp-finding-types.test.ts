@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { addFindingToFile } from "../content-learning.js";
+import { addFindingToFile } from "../content/content-learning.js";
 
 function seedProject(phrenPath: string, project = "myapp") {
   const dir = path.join(phrenPath, project);

@@ -9,7 +9,7 @@ import {
   isQueryCorrelationEnabled,
   type CorrelationEntry,
 } from "../query-correlation.js";
-import type { SelectedSnippet } from "../shared-retrieval.js";
+import type { SelectedSnippet } from "../shared/shared-retrieval.js";
 
 let tmp: { path: string; cleanup: () => void };
 

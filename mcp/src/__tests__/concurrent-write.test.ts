@@ -12,7 +12,7 @@ import {
   readReviewQueue,
   setMachineProfile,
   listMachines,
-} from "../data-access.js";
+} from "../data/data-access.js";
 import { PhrenError } from "../shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "../test-helpers.js";
 import * as path from "path";

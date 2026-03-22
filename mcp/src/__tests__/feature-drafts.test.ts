@@ -14,8 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile, runCliExec } from "../test-helpers.js";
-import { applyGravity } from "../data-tasks.js";
-import type { TaskItem } from "../data-tasks.js";
+import { applyGravity } from "../data/data-tasks.js";
+import type { TaskItem } from "../data/data-tasks.js";
 
 const runCli = runCliExec;
 

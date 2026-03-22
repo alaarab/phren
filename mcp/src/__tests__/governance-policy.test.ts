@@ -21,7 +21,7 @@ import {
   type IndexPolicy,
   VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
-} from "../governance-policy.js";
+} from "../governance/governance-policy.js";
 
 function writeGovJson(phrenPath: string, filename: string, data: Record<string, unknown>): void {
   const dir = path.join(phrenPath, ".config");

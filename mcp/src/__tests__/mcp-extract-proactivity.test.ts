@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import type { McpContext } from "../mcp-types.js";
+import type { McpContext } from "../tools/mcp-types.js";
 
 vi.mock("../shared-ollama.js", () => ({
   checkOllamaAvailable: vi.fn(async () => true),
@@ -23,9 +23,9 @@ vi.mock("../shared-content.js", () => ({
   })),
 }));
 
-import { register } from "../mcp-extract.js";
-import { addFindingsToFile } from "../shared-content.js";
-import { generateText } from "../shared-ollama.js";
+import { register } from "../tools/mcp-extract.js";
+import { addFindingsToFile } from "../shared/shared-content.js";
+import { generateText } from "../shared/shared-ollama.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

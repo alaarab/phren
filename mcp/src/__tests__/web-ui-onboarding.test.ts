@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
-import { createWebUiServer } from "../memory-ui.js";
+import { createWebUiServer } from "../ui/memory-ui.js";
 import type { Server } from "http";
 
 describe.sequential("web-ui onboarding repair", () => {

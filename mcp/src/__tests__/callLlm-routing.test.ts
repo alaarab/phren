@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { callLlm } from "../content-dedup.js";
+import { callLlm } from "../content/content-dedup.js";
 
 describe("callLlm provider routing", () => {
   const originalEnv = { ...process.env };

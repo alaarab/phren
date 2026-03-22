@@ -7,9 +7,9 @@ import {
   mergeConfig,
   getRetentionPolicy,
   getWorkflowPolicy,
-} from "./governance-policy.js";
+} from "./governance/governance-policy.js";
 import { writeProjectConfig, readProjectConfig, projectConfigPath } from "./project-config.js";
-import { writeGovernanceInstallPreferences } from "./init-preferences.js";
+import { writeGovernanceInstallPreferences } from "./init/init-preferences.js";
 
 function writeGlobalRetentionPolicy(phrenPath: string, policy: Record<string, unknown>): void {
   const dir = path.join(phrenPath, ".config");
