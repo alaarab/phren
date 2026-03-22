@@ -93,7 +93,7 @@ export async function handleHookContext() {
     }
   }
 
-  parts.push("<phren-context>");
+  parts.push("</phren-context>");
 
   if (parts.length > 2) {
     console.log(parts.join("\n"));
