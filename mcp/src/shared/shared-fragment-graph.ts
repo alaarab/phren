@@ -2,6 +2,7 @@ import { decodeStringRow } from "./shared-index.js";
 import type { SqlJsDatabase } from "./shared-index.js";
 import * as fs from "fs";
 import { runtimeFile } from "../shared.js";
+import { logger } from "../logger.js";
 import { UNIVERSAL_TECH_TERMS_RE } from "../phren-core.js";
 import { errorMessage } from "../utils.js";
 
@@ -125,7 +126,7 @@ function getOrCreateFragment(db: SqlJsDatabase, name: string, type: string): num
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [name, type, new Date().toISOString().slice(0, 10)]);
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] fragmentInsert: ${errorMessage(err)}\n`);
+    logger.debug("fragmentInsert", errorMessage(err));
   }
   const result = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [name, type]);
   if (result?.length && result[0]?.values?.length) {
@@ -149,7 +150,7 @@ export function ensureGlobalEntitiesTable(db: SqlJsDatabase): void {
       )`
     );
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] ensureGlobalEntitiesTable: ${errorMessage(err)}\n`);
+    logger.debug("ensureGlobalEntitiesTable", errorMessage(err));
   }
 }
 
@@ -196,7 +197,7 @@ export function beginUserFragmentBuildCache(phrenPath: string, projects: Iterabl
       _userFragmentCache.set(cacheKey, loaded);
       _buildUserFragmentCache.set(cacheKey, loaded.fragments);
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] beginUserFragmentBuildCache: ${errorMessage(err)}\n`);
+      logger.debug("beginUserFragmentBuildCache", errorMessage(err));
       _buildUserFragmentCache.set(cacheKey, []);
     }
   }
@@ -235,7 +236,7 @@ function parseUserDefinedFragments(phrenPath: string, project: string): string[]
           return cached.fragments;
         }
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] parseUserDefinedFragments statCheck: ${errorMessage(err)}\n`);
+        logger.debug("parseUserDefinedFragments statCheck", errorMessage(err));
       }
     }
 
@@ -244,7 +245,7 @@ function parseUserDefinedFragments(phrenPath: string, project: string): string[]
     _userFragmentCache.set(cacheKey, loaded);
     return loaded.fragments;
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] parseUserDefinedFragments: ${errorMessage(err)}\n`);
+    logger.debug("parseUserDefinedFragments", errorMessage(err));
     return [];
   }
 }
@@ -373,7 +374,7 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
         [docFragmentId, fragmentId, "mentions", sourceDoc]
       );
     } catch (err: unknown) {
-      if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] fragmentLinksInsert: ${errorMessage(err)}\n`);
+      logger.debug("fragmentLinksInsert", errorMessage(err));
     }
 
     // Write to global_entities for cross-project queries
@@ -384,7 +385,7 @@ export function extractAndLinkFragments(db: SqlJsDatabase, content: string, sour
           [name, project, sourceDoc]
         );
       } catch (err: unknown) {
-        if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] globalFragmentsInsert: ${errorMessage(err)}\n`);
+        logger.debug("globalFragmentsInsert", errorMessage(err));
       }
     }
   }
@@ -416,7 +417,7 @@ export function queryFragmentLinks(db: SqlJsDatabase, name: string): { related: 
       }
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] queryFragmentLinks: ${errorMessage(err)}\n`);
+    logger.debug("queryFragmentLinks", errorMessage(err));
   }
   return { related };
 }
@@ -456,7 +457,7 @@ export function queryCrossProjectFragments(
       }
     }
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] queryCrossProjectFragments: ${errorMessage(err)}\n`);
+    logger.debug("queryCrossProjectFragments", errorMessage(err));
   }
   return results;
 }
@@ -479,7 +480,7 @@ export function getFragmentBoostDocs(db: SqlJsDatabase, query: string): Set<stri
     }
     return boostDocs;
   } catch (err: unknown) {
-    if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] getFragmentBoostDocs: ${errorMessage(err)}\n`);
+    logger.debug("getFragmentBoostDocs", errorMessage(err));
     return new Set();
   }
 }
