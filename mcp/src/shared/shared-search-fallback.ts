@@ -147,8 +147,10 @@ function tfidfCosine(docs: string[], query: string, corpusN?: number): number[] 
 
   // Compute document frequency for each term, keyed by a fingerprint of the candidate doc set
   // so that different subsets and incremental index mutations get distinct cache entries.
+  const corpusSize = docTokenLists.length;
+  const corpusLengthSum = docTokenLists.reduce((sum, tl) => sum + tl.length, 0);
   const candidateFingerprint = docTokenLists.map(tl => tl.slice(0, 4).join(",")).join("|").slice(0, 128);
-  const cacheKey = `fp:${candidateFingerprint}`;
+  const cacheKey = `fp:${corpusSize}:${corpusLengthSum}:${candidateFingerprint}`;
   const cachedDf = dfCache.get(cacheKey);
   const df: Map<string, number> = cachedDf ?? new Map<string, number>();
   // Compute DF for any terms not yet in cache

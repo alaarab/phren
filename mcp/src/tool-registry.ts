@@ -83,11 +83,17 @@ export function getRegisteredTools(): ToolMetadata[] {
   const dir = sourceDir();
   const entries: ToolMetadata[] = [];
 
+  const toolsDir = path.join(dir, "tools");
   for (const moduleName of MODULE_ORDER) {
-    const tsPath = path.join(dir, `${moduleName}.ts`);
-    const jsPath = path.join(dir, `${moduleName}.js`);
-    const sourcePath = fs.existsSync(tsPath) ? tsPath : jsPath;
-    if (!fs.existsSync(sourcePath)) continue;
+    // Tool files may live in the tools/ subdirectory or alongside tool-registry.ts
+    let sourcePath: string | undefined;
+    for (const base of [toolsDir, dir]) {
+      const tsPath = path.join(base, `${moduleName}.ts`);
+      const jsPath = path.join(base, `${moduleName}.js`);
+      if (fs.existsSync(tsPath)) { sourcePath = tsPath; break; }
+      if (fs.existsSync(jsPath)) { sourcePath = jsPath; break; }
+    }
+    if (!sourcePath) continue;
     entries.push(...parseModuleTools(moduleName, fs.readFileSync(sourcePath, "utf8")));
   }
 
