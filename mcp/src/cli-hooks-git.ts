@@ -6,7 +6,7 @@ import {
   recordFeedback,
   getQualityMultiplier,
   errorMessage,
-} from "./cli-hooks-context.js";
+} from "./hooks-context.js";
 import {
   sessionMetricsFile,
 } from "./shared.js";
@@ -14,10 +14,10 @@ import {
   autoMergeConflicts,
   mergeTask,
   mergeFindings,
-} from "./shared-content.js";
+} from "./content.js";
 import { runGit } from "./utils.js";
-import { isTaskFileName } from "./data-tasks.js";
-import type { SelectedSnippet } from "./shared-retrieval.js";
+import { isTaskFileName } from "./tasks.js";
+import type { SelectedSnippet } from "./retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";

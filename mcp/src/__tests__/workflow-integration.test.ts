@@ -4,15 +4,15 @@ import * as http from "http";
 import * as path from "path";
 import { makeTempDir, grantAdmin, suppressOutput } from "../test-helpers.js";
 import { runInit } from "../init/init.js";
-import { runPostInitVerify } from "../init/init-setup.js";
+import { runPostInitVerify } from "../init/setup.js";
 import { runTopLevelCommand } from "../entrypoint.js";
-import { getUntrackedProjectNotice } from "../cli/cli-hooks-session.js";
+import { getUntrackedProjectNotice } from "../cli/hooks-session.js";
 import { createWebUiServer } from "../ui/memory-ui.js";
-import { register as registerMcpOps } from "../tools/mcp-ops.js";
-import { register as registerSearch } from "../tools/mcp-search.js";
-import { register as registerFinding } from "../tools/mcp-finding.js";
-import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared/shared-index.js";
-import type { McpContext } from "../tools/mcp-types.js";
+import { register as registerMcpOps } from "../tools/ops.js";
+import { register as registerSearch } from "../tools/search.js";
+import { register as registerFinding } from "../tools/finding.js";
+import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared/index.js";
+import type { McpContext } from "../tools/types.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

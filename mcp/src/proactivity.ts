@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 import { debugLog, findPhrenPath } from "./phren-paths.js";
-import { governanceInstallPreferencesFile, readInstallPreferences } from "./init/init-preferences.js";
+import { governanceInstallPreferencesFile, readInstallPreferences } from "./init/preferences.js";
 import { errorMessage } from "./utils.js";
-import { getWorkflowPolicy } from "./governance/governance-policy.js";
+import { getWorkflowPolicy } from "./governance/policy.js";
 
 export const PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
 export type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];

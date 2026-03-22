@@ -10,7 +10,7 @@ import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 import { logDebug } from "./logger.js";
-import { withFileLock } from "./shared/shared-governance.js";
+import { withFileLock } from "./shared/governance.js";
 
 export interface HookError {
   code: PhrenErrorCode;

@@ -21,8 +21,8 @@ export {
   filterToolFindingsForProactivity,
   type HookPromptInput,
   type SelectedSnippet,
-} from "./cli-hooks.js";
-export { scoreFindingCandidate } from "./cli-extract.js";
+} from "./hooks.js";
+export { scoreFindingCandidate } from "./extract.js";
 
 import {
   handleHookPrompt,
@@ -31,22 +31,22 @@ import {
   handleBackgroundSync,
   handleHookContext,
   handleHookTool,
-} from "./cli-hooks.js";
-import { handleExtractMemories } from "./cli-extract.js";
+} from "./hooks.js";
+import { handleExtractMemories } from "./extract.js";
 import {
   handleGovernMemories,
   handlePruneMemories,
   handleConsolidateMemories,
   handleMaintain,
   handleBackgroundMaintenance,
-} from "./cli-govern.js";
+} from "./govern.js";
 import {
   handleConfig,
   handleIndexPolicy,
   handleRetentionPolicy,
   handleWorkflowPolicy,
-} from "./cli-config.js";
-import { parseSearchArgs } from "./cli-search.js";
+} from "./config.js";
+import { parseSearchArgs } from "./search.js";
 import {
   handleDetectSkills,
   handleFindingNamespace,
@@ -55,14 +55,14 @@ import {
   handleSkillsNamespace,
   handleSkillList,
   handleTaskNamespace,
-} from "./cli-namespaces.js";
+} from "./namespaces.js";
 import {
   handleTaskView,
   handleSessionsView,
   handleQuickstart,
   handleDebugInjection,
   handleInspectIndex,
-} from "./cli-ops.js";
+} from "./ops.js";
 import {
   handleAddFinding,
   handleDoctor,
@@ -78,8 +78,8 @@ import {
   handleShell,
   handleStatus,
   handleUpdate,
-} from "./cli-actions.js";
-import { handleGraphNamespace } from "./cli-graph.js";
+} from "./actions.js";
+import { handleGraphNamespace } from "./graph.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 
 // ── CLI router ───────────────────────────────────────────────────────────────

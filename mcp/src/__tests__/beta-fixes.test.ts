@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { escapeRegex, escapeLike } from "../shared/shared-fragment-graph.js";
-import { applyTrustFilter, markStaleCitations } from "../shared/shared-retrieval.js";
-import { autoArchiveToReference, countActiveFindings } from "../content/content-archive.js";
-import type { DocRow } from "../shared/shared-index.js";
+import { escapeRegex, escapeLike } from "../shared/fragment-graph.js";
+import { applyTrustFilter, markStaleCitations } from "../shared/retrieval.js";
+import { autoArchiveToReference, countActiveFindings } from "../content/archive.js";
+import type { DocRow } from "../shared/index.js";
 
 // ── escapeRegex / escapeLike ─────────────────────────────────────────────────
 

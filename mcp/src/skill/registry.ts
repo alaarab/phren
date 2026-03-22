@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getProjectDirs } from "../shared.js";
-import { parseSkillFrontmatter } from "../link/link-skills.js";
-import { isSkillEnabled } from "./skill-state.js";
+import { parseSkillFrontmatter } from "../link/skills.js";
+import { isSkillEnabled } from "./state.js";
 import { safeProjectPath } from "../utils.js";
 
 export interface SkillEntry {

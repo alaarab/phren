@@ -1,4 +1,4 @@
-import { readInstallPreferences, writeInstallPreferences } from "../init/init-preferences.js";
+import { readInstallPreferences, writeInstallPreferences } from "../init/preferences.js";
 
 export type SkillScope = string;
 

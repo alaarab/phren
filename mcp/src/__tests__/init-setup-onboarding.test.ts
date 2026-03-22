@@ -11,7 +11,7 @@ import {
   inferInitScaffoldFromRepo,
   isProjectTracked,
   upsertProjectEnvVar,
-} from "../init/init-setup.js";
+} from "../init/setup.js";
 
 describe("init setup onboarding helpers", () => {
   let tmp: { path: string; cleanup: () => void };

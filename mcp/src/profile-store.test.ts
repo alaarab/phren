@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
 import { defaultMachineName, persistMachineName } from "./machine-identity.js";
-import { updateMachinesYaml } from "./init/init-setup.js";
+import { updateMachinesYaml } from "./init/setup.js";
 import { resolveActiveProfile } from "./profile-store.js";
 
 describe("machine identity and profile resolution", () => {

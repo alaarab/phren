@@ -1,5 +1,5 @@
-import { decodeStringRow } from "./shared-index.js";
-import type { SqlJsDatabase } from "./shared-index.js";
+import { decodeStringRow } from "./index.js";
+import type { SqlJsDatabase } from "./index.js";
 import * as fs from "fs";
 import { runtimeFile } from "../shared.js";
 import { logger } from "../logger.js";

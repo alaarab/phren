@@ -32,7 +32,7 @@ function installPrefsPath(): string {
 
 async function importCliConfig() {
   vi.resetModules();
-  return await import("./cli/cli-config.js");
+  return await import("./cli/config.js");
 }
 
 function captureConsole() {

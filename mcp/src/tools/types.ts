@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { SqlJsDatabase } from "../shared/shared-index.js";
+import type { SqlJsDatabase } from "../shared/index.js";
 
 export interface McpContext {
   phrenPath: string;

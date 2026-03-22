@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
-import { handleTaskPromptLifecycle } from "../task/task-lifecycle.js";
-import { readTasks } from "../data/data-access.js";
+import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
+import { readTasks } from "../data/access.js";
 import { hasSuppressTaskIntent, hasCodeChangeContext } from "../proactivity.js";
 
 describe("hasSuppressTaskIntent", () => {

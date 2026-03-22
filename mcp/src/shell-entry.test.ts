@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as path from "path";
-import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell/shell-entry.js";
+import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell/entry.js";
 import { makeTempDir, writeFile } from "./test-helpers.js";
 
 describe("startLiveStatePoller", () => {

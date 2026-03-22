@@ -8,8 +8,8 @@ import { makeTempDir, grantAdmin } from "../test-helpers.js";
 const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"));
 process.env.PHREN_PATH = tmpPhren;
 
-import { rankResults, searchDocuments } from "../cli/cli-hooks.js";
-import type { DocRow } from "../shared/shared-index.js";
+import { rankResults, searchDocuments } from "../cli/hooks.js";
+import type { DocRow } from "../shared/index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
 afterEach(() => {

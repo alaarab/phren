@@ -8,11 +8,11 @@ import {
   normalizeProjectNameForCreate,
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import { readTasksAcrossProjects, TASKS_FILENAME } from "../data/data-access.js";
-import { applyGravity } from "../data/data-tasks.js";
-import { buildIndex, queryRows } from "../shared/shared-index.js";
-import { resolveSubprocessArgs } from "./cli-hooks.js";
-import { listAllSessions, getSessionArtifacts } from "../tools/mcp-session.js";
+import { readTasksAcrossProjects, TASKS_FILENAME } from "../data/access.js";
+import { applyGravity } from "../data/tasks.js";
+import { buildIndex, queryRows } from "../shared/index.js";
+import { resolveSubprocessArgs } from "./hooks.js";
+import { listAllSessions, getSessionArtifacts } from "../tools/session.js";
 
 export function handleTaskView(profile: string) {
   const docs = readTasksAcrossProjects(getPhrenPath(), profile);

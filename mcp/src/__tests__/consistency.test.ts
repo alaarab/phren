@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { FINDING_TYPES, FINDING_TAGS, DOC_TYPES } from "../shared.js";
-import { entryScoreKey } from "../shared/shared-governance.js";
+import { entryScoreKey } from "../shared/governance.js";
 
 describe("taxonomy consistency", () => {
   it("FINDING_TYPES is a subset of FINDING_TAGS", () => {

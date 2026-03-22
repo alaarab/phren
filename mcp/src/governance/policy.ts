@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
-import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/shared-governance.js";
+import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "../project-config.js";
 import { getActiveProfileDefaults, type ProfilePolicyDefaults } from "../profile-store.js";
@@ -13,7 +13,7 @@ import {
   isArchiveStart as isArchiveStartMeta,
   isArchiveEnd as isArchiveEndMeta,
   stripLifecycleMetadata as stripLifecycleMetadataMeta,
-} from "../content/content-metadata.js";
+} from "../content/metadata.js";
 
 export const MAX_QUEUE_ENTRY_LENGTH = 500;
 

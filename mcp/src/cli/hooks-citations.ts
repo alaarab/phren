@@ -2,7 +2,7 @@ import {
   type FindingCitation,
   parseCitationComment,
   validateFindingCitation,
-} from "../content/content-citation.js";
+} from "../content/citation.js";
 import { capCache } from "../shared.js";
 
 // ── Citation validation ──────────────────────────────────────────────────────

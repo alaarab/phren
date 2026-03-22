@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { countActiveFindings, autoArchiveToReference } from "../content/content-archive.js";
+import { countActiveFindings, autoArchiveToReference } from "../content/archive.js";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";

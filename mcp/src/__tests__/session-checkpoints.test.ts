@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import type { SqlJsDatabase } from "../shared/shared-index.js";
-import type { McpContext } from "../tools/mcp-types.js";
+import type { SqlJsDatabase } from "../shared/index.js";
+import type { McpContext } from "../tools/types.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { register as registerSession } from "../tools/mcp-session.js";
-import { register as registerTasks } from "../tools/mcp-tasks.js";
-import { checkpointPath, clearTaskCheckpoint, listTaskCheckpoints, writeTaskCheckpoint } from "../session/session-checkpoints.js";
+import { register as registerSession } from "../tools/session.js";
+import { register as registerTasks } from "../tools/tasks.js";
+import { checkpointPath, clearTaskCheckpoint, listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

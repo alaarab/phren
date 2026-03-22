@@ -13,23 +13,23 @@ import { errorMessage } from "./utils.js";
 import {
   configureVSCode,
   logMcpTargetStatus,
-} from "./init-config.js";
+} from "./config.js";
 import {
   writeInstallPreferences,
   readInstallPreferences,
-} from "./init-preferences.js";
+} from "./preferences.js";
 import {
   ensureGovernanceFiles,
   repairPreexistingInstall,
   runPostInitVerify,
   bootstrapFromExisting,
   detectProjectDir,
-} from "./init-setup.js";
+} from "./setup.js";
 import {
   getProjectOwnershipDefault,
   type ProjectOwnershipMode,
 } from "./project-config.js";
-import { VERSION, log } from "./init-shared.js";
+import { VERSION, log } from "./shared.js";
 import { applyOnboardingPreferences } from "./init-env.js";
 import type { InitOptions } from "./init-types.js";
 

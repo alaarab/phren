@@ -5,7 +5,7 @@ import type { InstallMode } from "./shared.js";
 import type { ProjectOwnershipMode } from "./project-config.js";
 import type { ProactivityLevel } from "./proactivity.js";
 import type { McpMode, WorkflowRiskSection, StorageLocationChoice } from "./init-walkthrough.js";
-import type { InitProjectDomain, InferredInitScaffold } from "./init-setup.js";
+import type { InitProjectDomain, InferredInitScaffold } from "./setup.js";
 
 export type SkillsScope = "global" | "project";
 

@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
-import { withFileLock } from "../shared/shared-governance.js";
+import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import { getMachineName } from "../machine-identity.js";
 import {
@@ -16,25 +16,25 @@ import {
   getRepoRoot,
   inferCitationLocation,
   isFindingProvenanceSource,
-} from "./content-citation.js";
-import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./content-dedup.js";
-import { validateFindingsFormat, validateFinding } from "./content-validate.js";
-import { countActiveFindings, autoArchiveToReference } from "./content-archive.js";
+} from "./citation.js";
+import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./dedup.js";
+import { validateFindingsFormat, validateFinding } from "./validate.js";
+import { countActiveFindings, autoArchiveToReference } from "./archive.js";
 import {
   resolveAutoFindingTaskItem,
   resolveFindingTaskReference,
   resolveFindingSessionId,
-} from "../finding/finding-context.js";
+} from "../finding/context.js";
 import {
   buildLifecycleComments,
   extractFindingType,
   parseFindingLifecycle,
   stripLifecycleComments,
   type FindingLifecycleMetadata,
-} from "../finding/finding-lifecycle.js";
+} from "../finding/lifecycle.js";
 import {
   METADATA_REGEX,
-} from "./content-metadata.js";
+} from "./metadata.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;

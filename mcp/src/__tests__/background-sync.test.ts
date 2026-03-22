@@ -23,7 +23,7 @@ describe("handleBackgroundSync", () => {
   });
 
   it("records saved-local state when no remote is configured", async () => {
-    const { handleBackgroundSync } = await import("../cli/cli-hooks-session.js");
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
     await handleBackgroundSync();
 
     const runtimePath = path.join(tmp.path, ".runtime", "runtime-health.json");

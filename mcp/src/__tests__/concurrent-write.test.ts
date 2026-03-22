@@ -12,7 +12,7 @@ import {
   readReviewQueue,
   setMachineProfile,
   listMachines,
-} from "../data/data-access.js";
+} from "../data/access.js";
 import { PhrenError } from "../shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "../test-helpers.js";
 import * as path from "path";
@@ -196,7 +196,7 @@ describe("concurrent write safety - in-process", () => {
 describe.skipIf(process.platform === "win32")("concurrent write safety - cross-process", () => {
   it("three concurrent task adds from separate processes all succeed", async () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
-    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data/access.ts").replace(/\\/g, "/");
 
     const mkCode = (item: string) =>
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
@@ -225,7 +225,7 @@ describe.skipIf(process.platform === "win32")("concurrent write safety - cross-p
 
   it("concurrent finding and task writes from separate processes both succeed", async () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
-    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data/access.ts").replace(/\\/g, "/");
 
     const taskCode =
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
