@@ -313,11 +313,15 @@ export function trackSessionMetrics(
 
 
 export function resolveSubprocessArgs(command: string): string[] | null {
-  const distEntry = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
-  if (fs.existsSync(distEntry)) return [distEntry, command];
-  const sourceEntry = process.argv.find((a) => /[\\/]index\.(ts|js)$/.test(a) && fs.existsSync(a));
-  const runner = process.argv[1];
-  if (sourceEntry && runner) return [runner, sourceEntry, command];
+  // Prefer the entry script that started this process
+  const entry = process.argv[1];
+  if (entry && fs.existsSync(entry) && /index\.(ts|js)$/.test(entry)) return [entry, command];
+  // Fallback: look for index.js next to this file or one level up (for subdirectory builds)
+  const thisDir = path.dirname(fileURLToPath(import.meta.url));
+  for (const dir of [thisDir, path.dirname(thisDir)]) {
+    const candidate = path.join(dir, "index.js");
+    if (fs.existsSync(candidate)) return [candidate, command];
+  }
   return null;
 }
 
