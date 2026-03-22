@@ -567,7 +567,21 @@ export function buildRobustFtsQuery(raw: string, project?: string | null, phrenP
 // nothing; it trades precision for recall while staying in the FTS index.
 export function buildRelaxedFtsQuery(raw: string, project?: string | null, phrenPath?: string): string {
   const clauses = buildFtsClauses(raw, project, phrenPath);
-  if (clauses.length < 3) return "";
+  if (clauses.length === 0) return "";
+
+  // Short queries (1-2 terms): OR the clauses together with prefix expansion
+  if (clauses.length === 1) {
+    const term = clauses[0];
+    // Add prefix wildcard for unquoted-style terms to broaden recall
+    const inner = term.replace(/^"(.*)"$/, "$1");
+    if (inner.length >= 3) {
+      return `(${term} OR "${inner}"*)`;
+    }
+    return term;
+  }
+  if (clauses.length === 2) {
+    return `(${clauses[0]} OR ${clauses[1]})`;
+  }
 
   const salientClauses = clauses
     .map((clause, index) => ({ clause, index, score: clauseSignalScore(clause) }))
@@ -596,5 +610,18 @@ export function buildFtsQueryVariants(raw: string, project?: string | null, phre
     buildRobustFtsQuery(raw, project, phrenPath),
     buildRelaxedFtsQuery(raw, project, phrenPath),
   ].filter(Boolean);
+
+  // For short queries, add a prefix-expanded variant to catch partial matches
+  const clauses = buildFtsClauses(raw, project, phrenPath);
+  if (clauses.length <= 2) {
+    const prefixParts = clauses
+      .map(c => c.replace(/^"(.*)"$/, "$1"))
+      .filter(t => t.length >= 3)
+      .map(t => `"${t}"*`);
+    if (prefixParts.length > 0) {
+      variants.push(prefixParts.join(" OR "));
+    }
+  }
+
   return [...new Set(variants)];
 }
