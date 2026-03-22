@@ -1196,7 +1196,6 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">remove_finding</span><span class="ref-card-desc">Remove one or more findings by match</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, finding: string | string[])</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">push_changes</span><span class="ref-card-desc">Commit and push phren changes</span></summary><div class="ref-card-details"><div class="ref-card-params">(message?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">auto_extract_findings</span><span class="ref-card-desc">Extract findings from conversation context</span></summary><div class="ref-card-details"><div class="ref-card-params">(context)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_finding_sensitivity</span><span class="ref-card-desc">Set capture sensitivity level</span></summary><div class="ref-card-details"><div class="ref-card-params">(level)</div></div></details>
 
         <h2 id="mcp-memory">Memory Quality <span class="cat-badge cat-memory">2 tools</span> <a href="#mcp-memory" class="anchor-link">#</a></h2>
 
@@ -1240,14 +1239,10 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">add_custom_hook</span><span class="ref-card-desc">Add a custom integration hook</span></summary><div class="ref-card-details"><div class="ref-card-params">(event, command, timeout?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">remove_custom_hook</span><span class="ref-card-desc">Remove custom hooks by event/command</span></summary><div class="ref-card-details"><div class="ref-card-params">(event, command?)</div></div></details>
 
-        <h2 id="mcp-config">Configuration <span class="cat-badge cat-config">6 tools</span> <a href="#mcp-config" class="anchor-link">#</a></h2>
+        <h2 id="mcp-config">Configuration <span class="cat-badge cat-config">2 tools</span> <a href="#mcp-config" class="anchor-link">#</a></h2>
 
-        <details class="ref-card"><summary><span class="ref-card-name">get_config</span><span class="ref-card-desc">Read current governance config</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_proactivity</span><span class="ref-card-desc">Set proactivity level</span></summary><div class="ref-card-details"><div class="ref-card-params">(level)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_task_mode</span><span class="ref-card-desc">Set task management mode</span></summary><div class="ref-card-details"><div class="ref-card-params">(mode)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_retention_policy</span><span class="ref-card-desc">Configure retention and decay</span></summary><div class="ref-card-details"><div class="ref-card-params">(settings)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_workflow_policy</span><span class="ref-card-desc">Configure workflow approval gates</span></summary><div class="ref-card-details"><div class="ref-card-params">(settings)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">set_index_policy</span><span class="ref-card-desc">Configure indexer include/exclude globs</span></summary><div class="ref-card-details"><div class="ref-card-params">(settings)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_config</span><span class="ref-card-desc">Read current governance config (all domains including topic)</span></summary><div class="ref-card-details"><div class="ref-card-params">(domain?, project?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">set_config</span><span class="ref-card-desc">Update config for any domain</span></summary><div class="ref-card-details"><div class="ref-card-params">(domain, settings, project?)</div></div></details>
 
         <h2 id="mcp-return">Return Format <a href="#mcp-return" class="anchor-link">#</a></h2>
         <pre><code>{

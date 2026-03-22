@@ -39,7 +39,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (66)
+## MCP Tools (61)
 
 ### Search and Browse
 
@@ -59,12 +59,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `add_task` | `project`, `item: string \| string[]` | Add one or more tasks to a project's Queue section. Pass a string or array. |
 | `complete_task` | `project`, `item: string \| string[]` | Move one or more tasks to Done by text match. Pass a string or array. |
 | `remove_task` | `project`, `item: string \| string[]` | Remove one or more tasks by matching text or ID. Pass a string or array. |
-| `update_task` | `project`, `item`, `updates` | Update an item's text, priority, context, section, or linked GitHub issue. |
-| `link_task_issue` | `project`, `item`, `issue_number?`, `issue_url?`, `unlink?` | Link or unlink an existing GitHub issue on a task item. |
-| `promote_task_to_issue` | `project`, `item`, `repo?`, `title?`, `body?`, `mark_done?` | Create a GitHub issue from a task item and write the link back. |
-| `pin_task` | `project`, `item` | Pin a task so it stays visible across sessions. |
-| `work_next_task` | `project` | Pick the next highest-priority task to work on. |
-| `promote_task` | `project`, `item`, `move_to_active?` | Promote a task to a higher priority section. |
+| `update_task` | `project`, `item?`, `updates` | Update text, priority, context, section, GitHub metadata, pin, promote, or work_next. Item optional when work_next is true. |
 | `tidy_done_tasks` | `project`, `keep?`, `dry_run?` | Archive completed tasks to keep the list clean. |
 
 ### Finding Capture
@@ -155,15 +150,8 @@ Skill system behavior:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_config` | `domain?` | Read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, or all). |
-| `set_proactivity` | `level`, `scope?` | Set agent proactivity level (high/medium/low) with optional scope (base/findings/tasks). |
-| `set_task_mode` | `mode` | Set task management mode (`auto`, `manual`, `off`). |
-| `set_finding_sensitivity` | `level` | Set finding capture sensitivity (`minimal`, `conservative`, `balanced`, `aggressive`). |
-| `set_retention_policy` | `settings` | Configure retention and decay policy. |
-| `set_workflow_policy` | `settings` | Configure workflow approval gates. |
-| `set_index_policy` | `settings` | Configure indexer include/exclude globs. |
-| `get_topic_config` | `project` | Read topic-config.json for a project (topics, domain, pinned). |
-| `set_topic_config` | `project`, `topics`, `domain?` | Write topic-config.json for a project. |
+| `get_config` | `domain?`, `project?` | Read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, or all). |
+| `set_config` | `domain`, `settings`, `project?` | Update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic). |
 
 Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
