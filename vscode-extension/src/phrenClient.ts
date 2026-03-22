@@ -140,7 +140,7 @@ export class PhrenClient {
   }
 
   async getTopicConfig(project: string): Promise<unknown> {
-    return this.callTool("get_topic_config", { project });
+    return this.callTool("get_config", { domain: "topic", project });
   }
 
   async listSkills(): Promise<unknown> {
@@ -208,7 +208,7 @@ export class PhrenClient {
   }
 
   async pinTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("pin_task", { project, item });
+    return this.callTool("update_task", { project, item, updates: { pin: true } });
   }
 
   async pinMemory(project: string, memory: string): Promise<unknown> {
@@ -314,58 +314,23 @@ export class PhrenClient {
     issue_url?: string,
     unlink?: boolean,
   ): Promise<unknown> {
-    const args: Record<string, unknown> = { project, item };
-    if (issue_number !== undefined) args.issue_number = issue_number;
-    if (issue_url) args.issue_url = issue_url;
-    if (unlink) args.unlink = unlink;
-    return this.callTool("link_task_issue", args);
+    const updates: Record<string, unknown> = {};
+    if (issue_number !== undefined) updates.github_issue = issue_number;
+    if (issue_url) updates.github_url = issue_url;
+    if (unlink) updates.unlink_github = unlink;
+    return this.callTool("update_task", { project, item, updates });
   }
 
-  async getConfig(project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { domain: "all" };
+  async getConfig(domain?: string, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { domain: domain ?? "all" };
     if (project) args.project = project;
     return this.callTool("get_config", args);
   }
 
-  async setProactivity(level: string, project?: string, scope?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { level };
+  async setConfig(domain: string, settings: Record<string, unknown>, project?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { domain, settings };
     if (project) args.project = project;
-    if (scope) args.scope = scope;
-    return this.callTool("set_proactivity", args);
-  }
-
-  async setTaskMode(mode: string, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { mode };
-    if (project) args.project = project;
-    return this.callTool("set_task_mode", args);
-  }
-
-  async setFindingSensitivity(level: string, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { level };
-    if (project) args.project = project;
-    return this.callTool("set_finding_sensitivity", args);
-  }
-
-  async setRetentionPolicy(settings: Record<string, unknown>, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { ...settings };
-    if (project) args.project = project;
-    return this.callTool("set_retention_policy", args);
-  }
-
-  async promoteTaskToIssue(
-    project: string,
-    item: string,
-    repo?: string,
-    title?: string,
-    body?: string,
-    mark_done?: boolean,
-  ): Promise<unknown> {
-    const args: Record<string, unknown> = { project, item };
-    if (repo) args.repo = repo;
-    if (title) args.title = title;
-    if (body) args.body = body;
-    if (mark_done !== undefined) args.mark_done = mark_done;
-    return this.callTool("promote_task_to_issue", args);
+    return this.callTool("set_config", args);
   }
 
   async dispose(): Promise<void> {

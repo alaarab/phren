@@ -188,19 +188,20 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       // Consolidation status (opt-out via include_consolidation: false)
-      let consolidation: Array<{
+      type ConsolidationEntry = {
         project: string;
         entriesSince: number;
         threshold: number;
         daysSince: number | null;
         lastConsolidated: string | null;
         recommended: boolean;
-      }> | null = null;
+      };
+      let consolidation: ConsolidationEntry[] | null = null;
 
       if (include_consolidation !== false) {
         try {
           const projectDirsForConsol = getProjectDirs(phrenPath, activeProfile);
-          const consolResults: typeof consolidation = [];
+          const consolResults: ConsolidationEntry[] = [];
           for (const dir of projectDirsForConsol) {
             const status = getProjectConsolidationStatus(dir);
             if (!status) continue;

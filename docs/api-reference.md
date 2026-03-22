@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 67 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 61 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -559,19 +559,13 @@ Remove custom hooks by event and optional command match.
 
 ## Operations and Review
 
-### `get_consolidation_status`
+### `health_check`
 
-Check whether a project's `FINDINGS.md` has crossed consolidation thresholds.
+Return runtime health status (version, profile, project count, index status, MCP/hooks state) and consolidation status for all projects.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `project` | string | no | Optional project filter. Omit to check all projects. |
-
-### `health_check`
-
-Return runtime health status (version, profile, project count, index status, MCP/hooks state).
-
-No parameters.
+| `include_consolidation` | boolean | no | Include consolidation status for all projects (default true). |
 
 ### `list_hook_errors`
 
