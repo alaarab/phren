@@ -10,13 +10,13 @@ import type { InitOptions } from "./init-types.js";
 import {
   writeInstallPreferences,
   writeGovernanceInstallPreferences,
-} from "./preferences.js";
-import { updateWorkflowPolicy } from "./governance.js";
+} from "./init/preferences.js";
+import { updateWorkflowPolicy } from "./shared/governance.js";
 import {
   repairPreexistingInstall,
   ensureGitignoreEntry,
   upsertProjectEnvVar,
-} from "./setup.js";
+} from "./init/setup.js";
 
 export function applyOnboardingPreferences(phrenPath: string, opts: InitOptions): void {
   if (opts.projectOwnershipDefault) {

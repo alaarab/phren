@@ -10,15 +10,15 @@ import {
   inferInitScaffoldFromRepo,
   type InitProjectDomain,
   type InferredInitScaffold,
-} from "./setup.js";
+} from "./init/setup.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
 } from "./project-config.js";
 import { type ProactivityLevel } from "./proactivity.js";
-import { log } from "./shared.js";
+import { log } from "./init/shared.js";
 import * as path from "path";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 
 export type WorkflowRiskSection = "Review" | "Stale" | "Conflicts";
 export type StorageLocationChoice = "global" | "project" | "custom";
@@ -414,7 +414,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  Change later: set PHREN_OLLAMA_URL=off to disable");
   let ollamaEnabled = false;
   try {
-    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./ollama.js");
+    const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared/ollama.js");
     if (getOllamaUrl()) {
       const ollamaUp = await checkOllamaAvailable();
       if (ollamaUp) {
@@ -443,7 +443,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
       }
     }
   } catch (err: unknown) {
-    logDebug("init ollamaCheck", errorMessage(err));
+    logger.debug("init ollamaCheck", errorMessage(err));
   }
 
   printSection("Auto-Capture (Optional)");

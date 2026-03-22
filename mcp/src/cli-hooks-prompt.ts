@@ -15,16 +15,16 @@ import {
   isProjectHookEnabled,
   getProactivityLevelForFindings,
   errorMessage,
-} from "./hooks-context.js";
+} from "./cli/hooks-context.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
   buildIndex,
   queryRows,
-} from "./index.js";
-import { filterTaskByPriority } from "./retrieval.js";
+} from "./shared/index.js";
+import { filterTaskByPriority } from "./shared/retrieval.js";
 import { readStdinJson, getSessionCap } from "./cli-hooks-stop.js";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 
 export async function handleHookContext() {
   const ctx = buildHookContext();
@@ -156,7 +156,7 @@ export async function handleHookTool() {
       try {
         raw = fs.readFileSync(0, "utf-8");
       } catch (err: unknown) {
-        logDebug("hookTool stdinRead", errorMessage(err));
+        logger.debug("hookTool stdinRead", errorMessage(err));
         process.exit(0);
       }
     }
@@ -165,7 +165,7 @@ export async function handleHookTool() {
     try {
       data = JSON.parse(raw) as Record<string, unknown>;
     } catch (err: unknown) {
-      logDebug("hookTool stdinParse", errorMessage(err));
+      logger.debug("hookTool stdinParse", errorMessage(err));
       process.exit(0);
     }
 
@@ -215,7 +215,7 @@ export async function handleHookTool() {
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
     } catch (err: unknown) {
-      logDebug("hookTool toolLog", errorMessage(err));
+      logger.debug("hookTool toolLog", errorMessage(err));
     }
 
     const cooldownFile = runtimeFile(ctx.phrenPath, "hook-tool-cooldown");
@@ -228,7 +228,7 @@ export async function handleHookTool() {
         }
       }
     } catch (err: unknown) {
-      logDebug("hookTool cooldownStat", errorMessage(err));
+      logger.debug("hookTool cooldownStat", errorMessage(err));
     }
 
     if (activeProject && sessionId) {
@@ -244,7 +244,7 @@ export async function handleHookTool() {
           activeProject = null;
         }
       } catch (err: unknown) {
-        logDebug("hookTool sessionCapCheck", errorMessage(err));
+        logger.debug("hookTool sessionCapCheck", errorMessage(err));
       }
     }
 
@@ -262,19 +262,19 @@ export async function handleHookTool() {
 
         if (candidates.length > 0) {
           try { fs.writeFileSync(cooldownFile, Date.now().toString()); } catch (err: unknown) {
-            logDebug("hookTool cooldownWrite", errorMessage(err));
+            logger.debug("hookTool cooldownWrite", errorMessage(err));
           }
           if (sessionId) {
             try {
               const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
               let count = 0;
               try { count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0; } catch (err: unknown) {
-                logDebug("hookTool capFileRead", errorMessage(err));
+                logger.debug("hookTool capFileRead", errorMessage(err));
               }
               count += candidates.length;
               fs.writeFileSync(capFile, count.toString());
             } catch (err: unknown) {
-              logDebug("hookTool capFileWrite", errorMessage(err));
+              logger.debug("hookTool capFileWrite", errorMessage(err));
             }
           }
         }

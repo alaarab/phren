@@ -4,8 +4,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { expandHomePath } from "./shared.js";
-import { detectProjectDir, isProjectTracked } from "./setup.js";
-import { DEFAULT_PHREN_PATH } from "./shared.js";
+import { detectProjectDir, isProjectTracked } from "./init/setup.js";
+import { DEFAULT_PHREN_PATH } from "./init/shared.js";
 import type { InitOptions } from "./init-types.js";
 
 export function normalizedBootstrapProjectName(projectPath: string): string {

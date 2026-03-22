@@ -9,7 +9,7 @@ import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, ins
 import { errorMessage } from "./utils.js";
 import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 import { withFileLock } from "./shared/governance.js";
 
 export interface HookError {
@@ -539,11 +539,11 @@ function appendHookErrorLog(phrenPath: string, event: string, message: string): 
           atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
         }
       } catch (err: unknown) {
-        logDebug("appendHookErrorLog rotate", errorMessage(err));
+        logger.debug("appendHookErrorLog rotate", errorMessage(err));
       }
     });
   } catch (err: unknown) {
-    logDebug("appendHookErrorLog lock", errorMessage(err));
+    logger.debug("appendHookErrorLog lock", errorMessage(err));
   }
 }
 
@@ -596,7 +596,7 @@ export function runCustomHooks(
           try {
             appendHookErrorLog(phrenPath, event, message);
           } catch (logErr: unknown) {
-            logDebug("runCustomHooks webhookErrorLog", errorMessage(logErr));
+            logger.debug("runCustomHooks webhookErrorLog", errorMessage(logErr));
           }
         });
       continue;
@@ -612,7 +612,7 @@ export function runCustomHooks(
     const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
     // On Windows, cmd /c expands %VAR% in the command string.
     // Sanitize env values to prevent shell metacharacter injection.
-    const mergedEnv = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env };
+    const mergedEnv: Record<string, string | undefined> = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env };
     if (isWindows) {
       for (const [key, val] of Object.entries(mergedEnv)) {
         if (typeof val === "string") {
@@ -635,7 +635,7 @@ export function runCustomHooks(
       try {
         appendHookErrorLog(phrenPath, event, errorMessage(err));
       } catch (logErr: unknown) {
-        logDebug("runCustomHooks hookErrorLog", errorMessage(logErr));
+        logger.debug("runCustomHooks hookErrorLog", errorMessage(logErr));
       }
     }
   }
@@ -690,7 +690,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch (err: unknown) {
-        logDebug("configureAllHooks cursorRead", errorMessage(err));
+        logger.debug("configureAllHooks cursorRead", errorMessage(err));
       }
       const config: CursorHookConfig = {
         ...existing,
@@ -716,7 +716,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
       const codexLifecycle = withHookToolLifecycleCommands(buildSharedLifecycleCommands(), "codex");
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
-        logDebug("configureAllHooks codexRead", errorMessage(err));
+        logger.debug("configureAllHooks codexRead", errorMessage(err));
       }
       const config: CodexHookConfig = {
         ...existing,

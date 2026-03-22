@@ -13,7 +13,7 @@ async function ensureLogDebug(): Promise<void> {
   if (!_logDebug) {
     try {
       const mod = await import("./logger.js");
-      _logDebug = mod.logDebug;
+      _logDebug = mod.logger.debug;
     } catch {
       _logDebug = () => {};
     }

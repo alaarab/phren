@@ -27,7 +27,7 @@ import {
   appendFindingJournal,
   homePath,
   resolveRuntimeProfile,
-} from "./hooks-context.js";
+} from "./cli/hooks-context.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -38,7 +38,7 @@ import {
   countUnsyncedCommits,
   recoverPushConflict,
 } from "./cli-hooks-git.js";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 
 function getRuntimeProfile(): string {
   return resolveRuntimeProfile(getPhrenPath());
@@ -50,7 +50,7 @@ export function readStdinJson<T>(): T | null {
   try {
     return JSON.parse(fs.readFileSync(0, "utf-8")) as T;
   } catch (err: unknown) {
-    logDebug("readStdinJson", errorMessage(err));
+    logger.debug("readStdinJson", errorMessage(err));
     return null;
   }
 }
@@ -265,7 +265,7 @@ export async function handleHookStop() {
                 }
               }
             } catch (err: unknown) {
-              logDebug("hookStop transcriptParse", errorMessage(err));
+              logger.debug("hookStop transcriptParse", errorMessage(err));
             }
           }
           captureInput = assistantTexts.join("\n");
@@ -288,7 +288,7 @@ export async function handleHookStop() {
                 capReached = true;
               }
             } catch (err: unknown) {
-              logDebug("hookStop sessionCapCheck", errorMessage(err));
+              logger.debug("hookStop sessionCapCheck", errorMessage(err));
             }
           }
           if (!capReached) {

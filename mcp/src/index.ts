@@ -9,7 +9,7 @@ import {
   debugLog,
   runtimeDir,
 } from "./shared.js";
-import { log as structuredLog, logWarn } from "./logger.js";
+import { log as structuredLog, logger } from "./logger.js";
 import {
   buildIndex,
   updateFileInIndex as updateFileInIndexFn,
@@ -58,11 +58,11 @@ function cleanStaleLocks(phrenPath: string): void {
           debugLog(`Cleaned stale lock: ${entry}`);
         }
       } catch (err: unknown) {
-        logWarn("cleanStaleLocks", `statFile: ${errorMessage(err)}`);
+        logger.warn("cleanStaleLocks", `statFile: ${errorMessage(err)}`);
       }
     }
   } catch (err: unknown) {
-    logWarn("cleanStaleLocks", `readdir: ${errorMessage(err)}`);
+    logger.warn("cleanStaleLocks", `readdir: ${errorMessage(err)}`);
   }
 }
 
@@ -97,7 +97,7 @@ async function main() {
       db = await buildIndex(phrenPath, profile);
       indexReady = true;
       try { oldDb?.close(); } catch (err: unknown) {
-        logWarn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
+        logger.warn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
       }
     } catch (err) {
       // Restore old state on failure
@@ -171,7 +171,7 @@ async function main() {
         };
       }
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
-        logWarn("trackToolCall", errorMessage(err));
+        logger.warn("trackToolCall", errorMessage(err));
       }
       return handler(...args);
     };
@@ -220,7 +220,7 @@ async function main() {
       // Write queue errors already logged
     }
     try { db?.close(); } catch (err: unknown) {
-      logWarn("shutdown", `dbClose: ${errorMessage(err)}`);
+      logger.warn("shutdown", `dbClose: ${errorMessage(err)}`);
     }
     process.exit(0);
   }
