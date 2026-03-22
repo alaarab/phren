@@ -13,7 +13,7 @@ describe("tool registry", () => {
   });
 
   it("renders grouped markdown for phren.SKILL.md", () => {
-    expect(getToolCount()).toBe(67);
+    expect(getToolCount()).toBe(64);
     const markdown = renderToolCatalogMarkdown();
     expect(markdown).toContain("**Search and browse:**");
     expect(markdown).toContain("**Configuration:**");
