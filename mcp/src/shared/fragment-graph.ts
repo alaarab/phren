@@ -6,10 +6,12 @@ import { logger } from "../logger.js";
 import { UNIVERSAL_TECH_TERMS_RE } from "../phren-core.js";
 import { errorMessage } from "../utils.js";
 
-function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+/** @internal Exported for tests. */
+export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-/** Escape SQL LIKE wildcard characters so user input is treated literally. */
-function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
+/** Escape SQL LIKE wildcard characters so user input is treated literally.
+ * @internal Exported for tests. */
+export function escapeLike(s: string): string { return s.replace(/[%_\\]/g, '\\$&'); }
 
 /**
  * Log fragment resolution misses to .runtime/fragment-misses.jsonl.

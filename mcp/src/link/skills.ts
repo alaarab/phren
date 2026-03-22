@@ -233,7 +233,7 @@ function cleanupManagedSkillLinks(destDir: string, expectedNames: Set<string>, m
   }
 }
 
-function linkSkillsDir(
+export function linkSkillsDir(
   srcDir: string,
   destDir: string,
   managedRoot: string,

@@ -397,7 +397,7 @@ interface HookEntrypointCheckDeps {
   versionReader?: typeof commandVersion;
 }
 
-function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
+export function getHookEntrypointCheck(deps: HookEntrypointCheckDeps = {}): PostInitCheck {
   const pathExists = deps.pathExists ?? fs.existsSync;
   const versionReader = deps.versionReader ?? commandVersion;
   const distIndex = resolveEntryScript();

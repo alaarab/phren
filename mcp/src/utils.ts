@@ -79,7 +79,7 @@ function needsCommandShell(cmd: string): boolean {
   return /\.(cmd|bat)$/i.test(path.basename(cmd));
 }
 
-function normalizeExecCommand(
+export function normalizeExecCommand(
   cmd: string,
   platform: NodeJS.Platform = process.platform,
   whereOutput?: string | null,

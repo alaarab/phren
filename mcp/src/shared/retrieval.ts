@@ -211,7 +211,8 @@ const RRF_K = 60;
  * Documents appearing in multiple tiers get a higher combined score.
  * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
  */
-function rrfMerge(tiers: DocRow[][], k = RRF_K): DocRow[] {
+/** @internal Exported for tests. */
+export function rrfMerge(tiers: DocRow[][], k = RRF_K): DocRow[] {
   const scores = new Map<string, number>();
   const docs = new Map<string, DocRow>();
   for (const tier of tiers) {
@@ -298,7 +299,8 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
   return scored;
 }
 
-function shouldRunVectorExpansion(
+/** @internal Exported for tests. */
+export function shouldRunVectorExpansion(
   rows: DocRow[] | null,
   prompt: string,
   desiredResults = VECTOR_FALLBACK_SKIP_COUNT
@@ -919,8 +921,9 @@ export interface SelectedSnippet {
   key: string;
 }
 
-/** Mark snippet lines with stale citations (cited file missing or line content changed). */
-function markStaleCitations(snippet: string): string {
+/** Mark snippet lines with stale citations (cited file missing or line content changed).
+ * @internal Exported for tests. */
+export function markStaleCitations(snippet: string): string {
   const lines = snippet.split("\n");
   const result: string[] = [];
   for (let i = 0; i < lines.length; i++) {

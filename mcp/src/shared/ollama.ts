@@ -10,7 +10,8 @@ const OLLAMA_HEALTH_TIMEOUT_MS = 2_000;
 const OLLAMA_EMBEDDING_TIMEOUT_MS = 10_000;
 const OLLAMA_GENERATE_TIMEOUT_MS = 60_000;
 
-function prepareEmbeddingInput(text: string): string {
+/** @internal Exported for tests. */
+export function prepareEmbeddingInput(text: string): string {
   return text
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, " "))

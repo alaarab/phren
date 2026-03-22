@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { sanitizeFts5Query, buildRobustFtsQuery } from "../utils.js";
 
 describe("sanitizeFts5Query: adversarial inputs", () => {
-  it("preserves double quotes for quoted phrases", () => {
+  it("strips double quotes from input", () => {
     const result = sanitizeFts5Query(`"unclosed quote`);
-    expect(result).toContain('"');
-    expect(result).toBe('"unclosed quote');
+    expect(result).not.toContain('"');
+    expect(result).toBe("unclosed quote");
   });
 
   it("strips NEAR() injection", () => {

@@ -35,7 +35,7 @@ function checkpointFileName(project: string, taskId: string): string {
   return `checkpoint-${sanitizeFileSegment(project)}-${sanitizeFileSegment(taskId)}.json`;
 }
 
-function checkpointPath(phrenPath: string, project: string, taskId: string): string {
+export function checkpointPath(phrenPath: string, project: string, taskId: string): string {
   return sessionMarker(phrenPath, checkpointFileName(project, taskId));
 }
 

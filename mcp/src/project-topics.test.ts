@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
-import { getBuiltinTopics, pinProjectTopicSuggestion, readProjectTopics, suggestProjectTopics, suggestTopics, writeProjectTopics } from "./project-topics.js";
+import { getBuiltinTopics, pinProjectTopicSuggestion, readProjectTopics, suggestTopics, writeProjectTopics } from "./project-topics.js";
 
 let tmpDir = "";
 let tmpCleanup: (() => void) | undefined;
@@ -111,7 +111,7 @@ describe("project topic config", () => {
         "- Combat gameplay state resets after pause",
       ].join("\n"),
     });
-    const suggestions = suggestProjectTopics(tmpDir, "game", [
+    const suggestions = suggestTopics(tmpDir, "game", [
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(suggestions.length).toBeGreaterThan(0);
@@ -132,7 +132,7 @@ describe("project topic config", () => {
         "- Navmesh rebuild hitches on large levels",
       ].join("\n"),
     });
-    const suggestions = suggestProjectTopics(tmpDir, "game", [
+    const suggestions = suggestTopics(tmpDir, "game", [
       { slug: "general", label: "General", description: "Fallback", keywords: [] },
     ]);
     expect(suggestions.some((topic) => topic.slug === "navmesh" || topic.keywords.includes("navmesh"))).toBe(true);

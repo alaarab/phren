@@ -49,6 +49,7 @@ export {
   extractFragmentNames,
 } from "./fragment-graph.js";
 export {
+  buildSourceDocKey,
   decodeFiniteNumber,
   decodeStringRow,
   extractSnippet,
@@ -217,7 +218,8 @@ function _resolveImportsRecursive(
  * The import path is resolved relative to the phren root (e.g. `shared/foo.md` -> `~/.phren/global/shared/foo.md`).
  * Circular imports are detected and skipped. Depth is capped to prevent runaway recursion.
  */
-function resolveImports(
+/** @internal Exported for tests. */
+export function resolveImports(
   content: string,
   phrenPath: string,
 ): string {
