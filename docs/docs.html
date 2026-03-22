@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Documentation | phren</title>
-  <meta name="description" content="Complete phren documentation: getting started, concepts, configuration, CLI, MCP tools, skills, shell, VS Code extension, and architecture." />
+  <meta name="description" content="Complete phren documentation: getting started, CLI and MCP reference, shell and VS Code workflows, team sharing, security, contributing, FAQ, and architecture." />
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="docs.css">
@@ -85,6 +85,12 @@
     /* Section dividers between major sections */
     .docs-section {
       scroll-margin-top: 80px;
+    }
+
+    .docs-content .docs-section {
+      margin-bottom: 0;
+      padding: 0;
+      border-bottom: none;
     }
 
     .docs-section + .docs-section {
@@ -238,6 +244,224 @@
       overflow-x: auto;
     }
 
+    .docs-overview {
+      position: relative;
+      padding: 32px 32px 28px;
+      margin-bottom: 8px;
+      border: 1px solid rgba(0,229,255,0.14);
+      border-radius: 18px;
+      background:
+        radial-gradient(circle at top right, rgba(0,229,255,0.12), transparent 34%),
+        linear-gradient(135deg, rgba(22,22,53,0.96), rgba(18,18,42,0.98));
+      overflow: hidden;
+    }
+
+    .docs-overview::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 30px 30px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent 80%);
+      pointer-events: none;
+    }
+
+    .docs-overview > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .docs-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      margin-bottom: 14px;
+      border: 1px solid rgba(0,229,255,0.18);
+      border-radius: 999px;
+      background: rgba(0,229,255,0.08);
+      color: var(--indigo);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .docs-overview h1 {
+      margin: 0 0 10px;
+      font-size: 38px;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      color: var(--text);
+    }
+
+    .docs-overview p {
+      max-width: 720px;
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.7;
+      color: var(--text-muted);
+    }
+
+    .docs-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin: 26px 0 18px;
+    }
+
+    .docs-overview-card {
+      display: block;
+      padding: 18px 20px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      background: rgba(18,18,42,0.76);
+      text-decoration: none;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .docs-overview-card:hover {
+      transform: translateY(-1px);
+      border-color: rgba(0,229,255,0.2);
+      background: rgba(22,22,53,0.92);
+    }
+
+    .docs-overview-card-label {
+      display: inline-block;
+      margin-bottom: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--copper);
+    }
+
+    .docs-overview-card-title {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 650;
+      color: var(--text);
+    }
+
+    .docs-overview-card p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .docs-overview-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .docs-pill-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .docs-pill-link:hover {
+      color: var(--text);
+      border-color: rgba(0,229,255,0.18);
+      background: rgba(0,229,255,0.05);
+    }
+
+    .security-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin: 20px 0 28px;
+    }
+
+    .security-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+
+    .security-card .card-icon {
+      font-size: 20px;
+      margin-bottom: 8px;
+      display: block;
+      color: var(--indigo);
+    }
+
+    .security-card .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .security-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.6;
+    }
+
+    .style-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0 24px;
+    }
+
+    .style-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .style-card-do { border-color: rgba(40,200,64,0.25); }
+    .style-card-dont { border-color: rgba(255,95,87,0.25); }
+
+    .style-card-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .style-card-do .style-card-label { color: #28C840; }
+    .style-card-dont .style-card-label { color: #FF5F57; }
+
+    .style-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 0;
+      line-height: 1.5;
+    }
+
+    .callout.danger {
+      background: rgba(255,95,87,0.06);
+      border-color: rgba(255,95,87,0.2);
+    }
+
+    .callout.danger strong { color: #FF5F57; }
+
+    .section-divider {
+      border: none;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+      margin: 64px 0;
+    }
+
     /* Collapsible sidebar groups */
     .sidebar-group {
       margin-bottom: 2px;
@@ -271,8 +495,24 @@
       display: block;
     }
 
+    @media (min-width: 901px) {
+      .sidebar-group-items {
+        display: block;
+      }
+    }
+
     @media (max-width: 900px) {
       body.docs-page .docs-layout.docs-consolidated {
+        grid-template-columns: 1fr;
+      }
+
+      .docs-overview {
+        padding: 26px 22px 22px;
+      }
+
+      .docs-overview-grid,
+      .security-grid,
+      .style-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -293,7 +533,6 @@
       <a href="index.html#demo" class="nav-link">Shell</a>
       <a href="index.html#web-ui" class="nav-link">Graph</a>
       <a href="docs.html" class="nav-link active">Docs</a>
-      <a href="community.html" class="nav-link">Community</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
@@ -306,6 +545,20 @@
     <aside class="docs-sidebar" id="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-heading">Documentation</div>
+
+        <div class="sidebar-group">
+          <a href="#overview" class="sidebar-section-link sidebar-group-toggle" data-group="overview">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Start Here
+          </a>
+          <div class="sidebar-group-items" data-group="overview">
+            <a href="#overview" class="sidebar-link sub">Overview</a>
+            <a href="#getting-started" class="sidebar-link sub">Install & First Run</a>
+            <a href="#cli" class="sidebar-link sub">CLI & MCP Reference</a>
+            <a href="#sharing" class="sidebar-link sub">Teams & Sync</a>
+            <a href="#contributing" class="sidebar-link sub">Build on phren</a>
+          </div>
+        </div>
 
         <div class="sidebar-group">
           <a href="#getting-started" class="sidebar-section-link sidebar-group-toggle" data-group="gs">
@@ -446,11 +699,124 @@
           </div>
         </div>
 
+        <div class="sidebar-group">
+          <a href="#contributing" class="sidebar-section-link sidebar-group-toggle" data-group="contrib">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Contributing
+          </a>
+          <div class="sidebar-group-items" data-group="contrib">
+            <a href="#dev-setup" class="sidebar-link sub">Dev Setup</a>
+            <a href="#project-structure" class="sidebar-link sub">Project Structure</a>
+            <a href="#testing" class="sidebar-link sub">Testing</a>
+            <a href="#code-style" class="sidebar-link sub">Code Style</a>
+            <a href="#making-changes" class="sidebar-link sub">Making Changes</a>
+            <a href="#pull-requests" class="sidebar-link sub">Pull Requests</a>
+            <a href="#commit-conventions" class="sidebar-link sub">Commit Conventions</a>
+            <a href="#adding-mcp-tool" class="sidebar-link sub">Adding MCP Tools</a>
+            <a href="#adding-global-skill" class="sidebar-link sub">Adding a Global Skill</a>
+            <a href="#reporting-bugs" class="sidebar-link sub">Reporting Bugs</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#security" class="sidebar-section-link sidebar-group-toggle" data-group="security">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Security
+          </a>
+          <div class="sidebar-group-items" data-group="security">
+            <a href="#data-storage" class="sidebar-link sub">Data Storage</a>
+            <a href="#credential-handling" class="sidebar-link sub">Credentials</a>
+            <a href="#secret-scanning" class="sidebar-link sub">Secret Scanning</a>
+            <a href="#access-control" class="sidebar-link sub">Access Control</a>
+            <a href="#web-ui-security" class="sidebar-link sub">Web UI Security</a>
+            <a href="#network" class="sidebar-link sub">Network Activity</a>
+            <a href="#auto-extract-privacy" class="sidebar-link sub">Auto-Extract Privacy</a>
+            <a href="#security-telemetry" class="sidebar-link sub">Telemetry</a>
+            <a href="#reporting" class="sidebar-link sub">Reporting</a>
+            <a href="#security-issues" class="sidebar-link sub">What Counts</a>
+            <a href="#security-timeline" class="sidebar-link sub">Response Timeline</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#faq" class="sidebar-section-link sidebar-group-toggle" data-group="faq">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            FAQ
+          </a>
+          <div class="sidebar-group-items" data-group="faq">
+            <a href="#vs-claude-md" class="sidebar-link sub">vs CLAUDE.md</a>
+            <a href="#performance" class="sidebar-link sub">Performance</a>
+            <a href="#trust-decay" class="sidebar-link sub">Trust Decay</a>
+            <a href="#multi-agent" class="sidebar-link sub">Multiple Agents</a>
+            <a href="#failure-modes" class="sidebar-link sub">Failure Modes</a>
+            <a href="#auto-vs-manual" class="sidebar-link sub">Auto vs Manual</a>
+            <a href="#add-project" class="sidebar-link sub">Add Project</a>
+            <a href="#mcp-required" class="sidebar-link sub">MCP Required?</a>
+            <a href="#agents-supported" class="sidebar-link sub">Supported Agents</a>
+            <a href="#faq-web-ui" class="sidebar-link sub">Web UI</a>
+            <a href="#faq-uninstall" class="sidebar-link sub">Uninstall</a>
+          </div>
+        </div>
+
+        <div class="sidebar-group">
+          <a href="#sharing" class="sidebar-section-link sidebar-group-toggle" data-group="sharing">
+            <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Sharing & Teams
+          </a>
+          <div class="sidebar-group-items" data-group="sharing">
+            <a href="#profiles" class="sidebar-link sub">Profiles</a>
+            <a href="#machines" class="sidebar-link sub">Machines</a>
+            <a href="#syncing" class="sidebar-link sub">Git Sync</a>
+            <a href="#consolidation" class="sidebar-link sub">Consolidation</a>
+            <a href="#rbac" class="sidebar-link sub">RBAC Roles</a>
+            <a href="#team-workflows" class="sidebar-link sub">Team Workflows</a>
+            <a href="#project-ownership" class="sidebar-link sub">Project Ownership</a>
+          </div>
+        </div>
+
       </div>
     </aside>
 
     <!-- Content -->
     <main class="docs-content">
+
+      <section class="docs-section" id="overview">
+        <div class="docs-overview">
+          <div class="docs-kicker">Docs, Setup, Teams, and Internals</div>
+          <h1>Everything for phren lives here now.</h1>
+          <p>This page is the full manual: install and first run, CLI and MCP reference, shell and VS Code workflows, team sharing, security, FAQ, contributing, and architecture. No split docs island, no separate community page to hunt through.</p>
+
+          <div class="docs-overview-grid">
+            <a href="#getting-started" class="docs-overview-card">
+              <span class="docs-overview-card-label">New Here</span>
+              <div class="docs-overview-card-title">Set up phren fast</div>
+              <p>Install it, initialize your store, add a project, and get hooks and MCP working without guessing.</p>
+            </a>
+            <a href="#cli" class="docs-overview-card">
+              <span class="docs-overview-card-label">Daily Use</span>
+              <div class="docs-overview-card-title">Find the command or tool you need</div>
+              <p>CLI reference, MCP tool catalog, shell workflows, and VS Code integration are grouped in one place.</p>
+            </a>
+            <a href="#sharing" class="docs-overview-card">
+              <span class="docs-overview-card-label">Teams</span>
+              <div class="docs-overview-card-title">Run phren across machines</div>
+              <p>Profiles, syncing, RBAC, consolidation, and project ownership all fit into the same operating model.</p>
+            </a>
+            <a href="#contributing" class="docs-overview-card">
+              <span class="docs-overview-card-label">Build on phren</span>
+              <div class="docs-overview-card-title">Contribute without spelunking</div>
+              <p>Dev setup, testing, style rules, PR expectations, and architecture notes are part of the same docs flow.</p>
+            </a>
+          </div>
+
+          <div class="docs-overview-links">
+            <a href="#security" class="docs-pill-link">Security model</a>
+            <a href="#faq" class="docs-pill-link">Common questions</a>
+            <a href="#architecture" class="docs-pill-link">Architecture</a>
+            <a href="https://github.com/alaarab/phren" class="docs-pill-link" target="_blank" rel="noopener">GitHub</a>
+          </div>
+        </div>
+      </section>
 
       <!-- ============================================================ -->
       <!--  GETTING STARTED                                              -->
@@ -1633,6 +1999,480 @@ sequenceDiagram
         </ul>
       </section>
 
+      <section class="docs-section" id="contributing">
+        <h1>Contributing</h1>
+        <p class="docs-subtitle">How to set up, build, test, and submit changes to phren.</p>
+
+        <h2 id="dev-setup">Dev Setup <a href="#dev-setup" class="anchor-link">#</a></h2>
+        <p>Clone, build, and test in under a minute.</p>
+        <pre><code>git clone https://github.com/alaarab/phren.git
+cd phren
+npm install
+npm run build
+npm test</code></pre>
+        <p>The build compiles TypeScript from <code>mcp/src/</code> into <code>mcp/dist/</code> and marks the entry point executable.</p>
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Node.js 20+</li>
+          <li>npm 9+</li>
+        </ul>
+
+        <h2 id="project-structure">Project Structure <a href="#project-structure" class="anchor-link">#</a></h2>
+        <p>Key files and what they do.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Path</th><th>What it does</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (51 public tools across 12 modules)</td></tr>
+            <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
+            <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
+            <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
+            <tr><td><code>mcp/src/init.ts</code></td><td><code>npx phren init</code>: configures MCP + hooks</td></tr>
+            <tr><td><code>mcp/src/link.ts</code></td><td>Profile sync, symlinks, hooks, context</td></tr>
+            <tr><td><code>mcp/src/data-access.ts</code></td><td>Task CRUD, machine/profile listing, learning management</td></tr>
+            <tr><td><code>mcp/src/mcp-*.ts</code></td><td>MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config)</td></tr>
+            <tr><td><code>mcp/src/skill-registry.ts</code></td><td>Skill precedence, alias collision handling, visibility gating</td></tr>
+            <tr><td><code>mcp/src/governance-policy.ts</code></td><td>RBAC, policy files, actor resolution</td></tr>
+            <tr><td><code>mcp/src/memory-ui-server.ts</code></td><td>Web UI server, auth/CSRF/CSP/loopback security</td></tr>
+            <tr><td><code>mcp/src/telemetry.ts</code></td><td>Opt-in local telemetry collection and summaries</td></tr>
+            <tr><td><code>starter/</code></td><td>Template files copied to ~/.phren on init</td></tr>
+            <tr><td><code>docs/</code></td><td>GitHub Pages site and documentation</td></tr>
+            <tr><td><code>skills/</code></td><td>Phren slash command definitions</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="testing">Testing <a href="#testing" class="anchor-link">#</a></h2>
+        <p>Running the test suite and filtering by pattern.</p>
+        <pre><code>npm test                              # run all tests
+npm test -- --grep "pattern"          # filter by test name
+npm test -- mcp/src/data-access.test  # run one file
+npx vitest --watch                    # watch mode</code></pre>
+        <p>Test files live as <code>*.test.ts</code> in <code>mcp/src/</code>. When adding a new feature, add tests in the same directory as the source file.</p>
+
+        <h2 id="code-style">Code Style <a href="#code-style" class="anchor-link">#</a></h2>
+        <p>Read <code>CLAUDE.md</code> for the full set of conventions. The highlights:</p>
+        <div class="style-grid">
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>AI voice: "robust", "seamless", "leverage", "comprehensive"</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Write like a person. Be direct.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Em dashes, filler comments, over-documentation</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Colons, commas, or just rewrite the sentence. Comment only where logic is not self-evident.</p>
+          </div>
+          <div class="style-card style-card-dont">
+            <div class="style-card-label">Don't</div>
+            <p>Premature abstractions for one-time operations</p>
+          </div>
+          <div class="style-card style-card-do">
+            <div class="style-card-label">Do</div>
+            <p>Three similar lines beat a premature helper function</p>
+          </div>
+        </div>
+
+        <h2 id="making-changes">Making Changes <a href="#making-changes" class="anchor-link">#</a></h2>
+        <ol>
+          <li>Create a feature branch from <code>main</code></li>
+          <li>Make your changes with tests</li>
+          <li>Run <code>npm run build && npm test</code> and make sure everything passes</li>
+          <li>Keep commits focused: one logical change per commit</li>
+          <li>Write commit messages that explain <em>why</em>, not just <em>what</em></li>
+        </ol>
+
+        <h2 id="pull-requests">Pull Requests <a href="#pull-requests" class="anchor-link">#</a></h2>
+        <p>Keep PRs small and focused. One feature or fix per PR.</p>
+        <ul>
+          <li>Include a short description of what changed and why</li>
+          <li>If your PR changes user-facing behavior, update the README</li>
+          <li>If your PR adds or changes MCP tools, update <code>docs/api-reference.md</code>, <code>docs/llms-install.md</code>, and <code>docs/llms-full.txt</code></li>
+          <li>If your PR changes finding lifecycle, session checkpoints, web-ui security, RBAC, or telemetry, update the matching docs in the same PR</li>
+          <li>Make sure CI passes before requesting review</li>
+        </ul>
+
+        <h3 id="commit-conventions">Commit Conventions</h3>
+        <p>Use conventional commits.</p>
+        <pre><code>feat: add synonym expansion for search queries
+fix: FTS5 sanitizer stripping valid URLs
+docs: update API reference with bulk tools
+test: add coverage for session checkpoint edge cases
+refactor: extract keyword logic from hook-prompt</code></pre>
+        <p>Prefixes: <code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>test:</code>, <code>refactor:</code></p>
+
+        <h2 id="adding-mcp-tool">Adding a New MCP Tool <a href="#adding-mcp-tool" class="anchor-link">#</a></h2>
+        <p>Five steps to ship a new tool.</p>
+        <ol>
+          <li>Add the tool definition in the correct module (<code>mcp/src/mcp-&lt;domain&gt;.ts</code>) following the existing <code>server.registerTool()</code> pattern</li>
+          <li>Implement the handler: call data-access functions, return <code>{ ok, message, data }</code></li>
+          <li>Register or verify the module from <code>mcp/src/index.ts</code> if you created a new module</li>
+          <li>Add tests in the relevant <code>*.test.ts</code> file</li>
+          <li>Update docs: <code>docs/api-reference.md</code>, <code>docs/llms-install.md</code>, <code>docs/llms-full.txt</code>, and integration/security/governance docs when behavior affects hooks, skills, RBAC, web UI, or telemetry</li>
+        </ol>
+
+        <h3 id="adding-global-skill">Adding a Global Skill</h3>
+        <ol>
+          <li>Create a markdown file in <code>global/skills/your-skill.md</code></li>
+          <li>Follow the existing skill format: name, description, steps</li>
+          <li>Test locally by running <code>phren init</code> and invoking <code>/your-skill</code> in a Claude Code session</li>
+        </ol>
+
+        <h3 id="reporting-bugs">Reporting Bugs</h3>
+        <p>Open an issue with:</p>
+        <ul>
+          <li>What you expected to happen</li>
+          <li>What actually happened</li>
+          <li>Steps to reproduce</li>
+          <li>Your Node.js version and OS</li>
+        </ul>
+
+        <div class="callout callout-tip">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            Questions?
+          </div>
+          <p>Open a <a href="https://github.com/alaarab/phren/discussions" style="color: var(--indigo);">discussion</a> or <a href="https://github.com/alaarab/phren/issues" style="color: var(--indigo);">issue</a>.</p>
+        </div>
+      </section>
+
+      <section class="docs-section" id="security">
+        <h1>Security</h1>
+        <p class="docs-subtitle">Phren is local-first. Your data never leaves your machine unless you push it.</p>
+
+        <div class="security-grid">
+          <div class="security-card">
+            <span class="card-icon">&#x1f512;</span>
+            <div class="card-title">Local-First Storage</div>
+            <p>All data lives in <code>~/.phren</code> as plain markdown and JSON files. No external database, no cloud sync by default.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f511;</span>
+            <div class="card-title">No Credentials Stored</div>
+            <p>Phren never stores API keys, tokens, or passwords. All credentials come from environment variables at runtime.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f6e1;</span>
+            <div class="card-title">Path Traversal Prevention</div>
+            <p>All file operations validate project names and paths to prevent directory traversal attacks.</p>
+          </div>
+          <div class="security-card">
+            <span class="card-icon">&#x1f50d;</span>
+            <div class="card-title">FTS5 Input Sanitization</div>
+            <p>Search queries are sanitized to prevent FTS5 injection. Known column prefixes are stripped, URLs preserved.</p>
+          </div>
+        </div>
+
+        <h2 id="data-storage">Data Storage <a href="#data-storage" class="anchor-link">#</a></h2>
+        <p>Phren stores all state as local files under <code>~/.phren</code> (shared mode) or <code>&lt;repo&gt;/.phren</code> (project-local mode). The data is:</p>
+        <ul>
+          <li><strong>Plain text:</strong> markdown files for findings, tasks, summaries, and skills</li>
+          <li><strong>Structured JSON:</strong> governance policies, session data, runtime state</li>
+          <li><strong>Git-backed:</strong> changes are committed locally and optionally pushed to a remote you control</li>
+        </ul>
+
+        <div class="callout callout-tip">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            No cloud dependency
+          </div>
+          <p>Phren works entirely offline. Git push is optional and goes to your own remote.</p>
+        </div>
+
+        <h3 id="credential-handling">Credential Handling</h3>
+        <p>Phren reads credentials exclusively from environment variables. It never writes secrets to disk.</p>
+        <table class="docs-table">
+          <thead>
+            <tr><th>Variable</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>PHREN_EMBEDDING_API_KEY</code></td><td>Bearer token for external embedding endpoint</td></tr>
+            <tr><td><code>PHREN_LLM_KEY</code></td><td>API key for semantic dedup/conflict LLM</td></tr>
+            <tr><td><code>OPENAI_API_KEY</code></td><td>Fallback for embedding and LLM calls</td></tr>
+            <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Fallback for LLM calls (Claude models)</td></tr>
+            <tr><td><code>GITHUB_TOKEN</code></td><td>Used by <code>phren maintain extract</code> for GitHub API</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="secret-scanning">Secret Scanning</h3>
+        <p>The finding quality filter rejects entries that match common secret patterns:</p>
+        <ul>
+          <li>API keys and tokens (common prefixes like <code>sk-</code>, <code>ghp_</code>, <code>Bearer</code>)</li>
+          <li>Connection strings with embedded credentials</li>
+          <li>PII patterns (emails, phone numbers in certain formats)</li>
+        </ul>
+        <div class="callout callout-warning">
+          <div class="callout-title">
+            <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            Defense in depth
+          </div>
+          <p>Secret scanning is a heuristic filter, not a guarantee. Do not rely on it as your only protection. Use <code>.gitignore</code> and environment variables.</p>
+        </div>
+
+        <h2 id="access-control">Access Control <a href="#access-control" class="anchor-link">#</a></h2>
+        <p>RBAC and authentication for shared environments and the web UI.</p>
+
+        <h3 id="role-based-access-control">Role-Based Access Control</h3>
+        <p>Identity is resolved from <code>PHREN_ACTOR</code> (in trusted/test contexts) or the OS user identity.</p>
+        <table class="docs-table">
+          <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+          <tbody>
+            <tr><td><code>admin</code></td><td>Full access: read, write, delete, policy changes</td></tr>
+            <tr><td><code>maintainer</code></td><td>Read, write, delete. No policy changes.</td></tr>
+            <tr><td><code>contributor</code></td><td>Read and write. No delete or policy changes.</td></tr>
+            <tr><td><code>viewer</code></td><td>Read only</td></tr>
+          </tbody>
+        </table>
+        <p>All write, policy, and delete operations are checked against RBAC before mutation. Unauthorized attempts are logged in <code>.runtime/audit.log</code>.</p>
+
+        <h3 id="web-ui-security">Web UI Security</h3>
+        <p>The memory web UI (<code>phren web-ui</code>) applies layered security:</p>
+        <ul>
+          <li><strong>Loopback binding:</strong> listens only on <code>127.0.0.1</code>, not on network interfaces</li>
+          <li><strong>Auth token:</strong> random per-run token required for all requests</li>
+          <li><strong>CSRF protection:</strong> mutating routes require a single-use CSRF token with TTL</li>
+          <li><strong>Security headers:</strong> <code>Content-Security-Policy</code>, <code>X-Frame-Options: DENY</code>, <code>X-Content-Type-Options: nosniff</code></li>
+        </ul>
+
+        <h2 id="network">Network Activity <a href="#network" class="anchor-link">#</a></h2>
+        <p>Phren makes no network calls by default. All external calls are opt-in.</p>
+        <table class="docs-table">
+          <thead><tr><th>Feature</th><th>Network call</th><th>Controlled by</th></tr></thead>
+          <tbody>
+            <tr><td>Core operation</td><td>None</td><td>Always local</td></tr>
+            <tr><td>Git sync</td><td>git push/pull to your remote</td><td>Stop hook (only if remote configured)</td></tr>
+            <tr><td>Embeddings (Ollama)</td><td>localhost:11434</td><td><code>PHREN_OLLAMA_URL</code></td></tr>
+            <tr><td>Embeddings (API)</td><td>Your configured endpoint</td><td><code>PHREN_EMBEDDING_API_URL</code></td></tr>
+            <tr><td>Semantic dedup/conflict</td><td>Your configured LLM endpoint</td><td><code>PHREN_LLM_ENDPOINT</code></td></tr>
+            <tr><td>GitHub extraction</td><td>api.github.com</td><td><code>phren maintain extract</code> (manual)</td></tr>
+          </tbody>
+        </table>
+
+        <h3 id="auto-extract-privacy">Auto-Extract Privacy</h3>
+        <p>When <code>PHREN_FEATURE_AUTO_EXTRACT</code> is enabled, phren extracts insights from project context on each prompt. The extraction:</p>
+        <ul>
+          <li>Runs entirely locally using the configured model</li>
+          <li>Respects a per-session cooldown (<code>PHREN_AUTOCAPTURE_COOLDOWN_MS</code>, default 30s)</li>
+          <li>Caps findings per session (<code>PHREN_AUTOCAPTURE_SESSION_CAP</code>, default 10)</li>
+          <li>Applies the same quality filter that rejects secrets and PII</li>
+          <li>Tags extracted findings with <code>source: extract</code> provenance for auditability</li>
+        </ul>
+
+        <h3 id="security-telemetry">Telemetry</h3>
+        <p>Opt-in, local-only usage tracking. Disabled by default. Enable with <code>phren config telemetry on</code>. Data is stored in <code>.runtime/telemetry.json</code> and never sent anywhere.</p>
+
+        <h2 id="reporting">Reporting a Vulnerability <a href="#reporting" class="anchor-link">#</a></h2>
+        <p>If you find a security issue, report it privately. Do not open a public issue.</p>
+        <div class="callout danger" style="border-left: 4px solid #FF5F57;">
+          <strong>Email:</strong> <a href="mailto:security@alaarab.com" style="color: #FF5F57;">security@alaarab.com</a>
+        </div>
+        <p>Include: a description of the vulnerability, steps to reproduce, the impact, and your suggested fix.</p>
+
+        <h3 id="security-issues">What Counts as a Security Issue</h3>
+        <ul>
+          <li>Path traversal: reading or writing files outside the phren directory</li>
+          <li>Arbitrary code execution through MCP tool inputs</li>
+          <li>Information disclosure: leaking data from other projects or profiles</li>
+          <li>Injection attacks through FTS5 queries or CLI arguments</li>
+          <li>Bypass of memory access controls or role-based permissions</li>
+        </ul>
+
+        <h3 id="security-timeline">Response Timeline</h3>
+        <table class="docs-table">
+          <thead><tr><th>Stage</th><th>Timeline</th></tr></thead>
+          <tbody>
+            <tr><td>Acknowledgment</td><td>Within 48 hours</td></tr>
+            <tr><td>Initial assessment</td><td>Within 1 week</td></tr>
+            <tr><td>Fix or mitigation</td><td>30 days for critical issues</td></tr>
+          </tbody>
+        </table>
+        <p>Security fixes are applied to the latest release only. We follow coordinated disclosure and credit reporters in the changelog unless they prefer anonymity.</p>
+      </section>
+
+      <section class="docs-section" id="faq">
+        <h1>Frequently Asked Questions</h1>
+        <p class="docs-subtitle">Common questions about phren, answered.</p>
+
+        <h2 id="vs-claude-md">How is this different from just using CLAUDE.md? <a href="#vs-claude-md" class="anchor-link">#</a></h2>
+        <p><code>CLAUDE.md</code> loads the entire file on every prompt. If your file is 2,000 tokens, you pay 2,000 tokens every single time, whether the content is relevant or not. With five agents running in parallel, that is 10,000 tokens of context before anyone types a word.</p>
+        <p>Phren searches what you wrote and injects only what matches the current prompt. By default it targets roughly 550 tokens with <code>PHREN_CONTEXT_TOKEN_BUDGET</code>, regardless of how large your knowledge base grows.</p>
+        <p><code>CLAUDE.md</code> is also static. Phren learns as you work. Every bug traced, every decision made, every pattern discovered gets saved automatically. The next session starts with that knowledge already in context.</p>
+
+        <h2 id="performance">Does this slow down my prompts? <a href="#performance" class="anchor-link">#</a></h2>
+        <p>Usually not on a warm local repo. The hook runs locally: keyword extraction, FTS5 search, and context injection all happen against a local SQLite index with no network calls in the default path.</p>
+        <p>The main exceptions are the first prompt in a session (where SessionStart pulls the repo from git) and very large or slow filesystems. On a fast connection the pull is often under a second.</p>
+
+        <h2 id="multi-agent">What happens when I run multiple agents at the same time? <a href="#multi-agent" class="anchor-link">#</a></h2>
+        <p>They all read and write the same <code>~/.phren</code> directory. Concurrent reads are safe. Writes are serialized within a process by file locks; cross-process synchronization happens at the git layer.</p>
+        <p>In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing, just a shared git repo.</p>
+
+        <h2 id="failure-modes">What failure modes should I expect? <a href="#failure-modes" class="anchor-link">#</a></h2>
+        <ul>
+          <li><strong>No remote configured:</strong> auto-save still commits locally, but nothing syncs across machines until you add a remote.</li>
+          <li><strong>Push failed:</strong> the commit stays local and phren records the error so <code>phren status</code> can show it.</li>
+          <li><strong>Hooks disabled or stale:</strong> retrieval stops, but your files are still there; rerun <code>phren init</code>.</li>
+          <li><strong>Stale index:</strong> search quality drops until the next rebuild; <code>phren doctor</code> will flag index trouble.</li>
+          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.governance/access-control.json</code>.</li>
+        </ul>
+
+        <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
+        <p>Every finding has a confidence score. The score degrades over time:</p>
+        <table class="docs-table">
+          <thead><tr><th>Age</th><th>Cited entry</th><th>Uncited entry</th></tr></thead>
+          <tbody>
+            <tr><td>0-30 days</td><td>1.00</td><td>0.80</td></tr>
+            <tr><td>31-60 days</td><td>1.00</td><td>0.80</td></tr>
+            <tr><td>61-90 days</td><td>0.85</td><td>0.68</td></tr>
+            <tr><td>91-120 days</td><td>0.65</td><td>0.52</td></tr>
+            <tr><td>120+ days</td><td>0.45</td><td>0.36</td></tr>
+          </tbody>
+        </table>
+        <p>Entries below 0.35 are suppressed and move to the review queue. You can pin a truth with <code>pin_memory</code> to make it never decay.</p>
+
+        <h2 id="auto-vs-manual">What gets saved automatically vs manually? <a href="#auto-vs-manual" class="anchor-link">#</a></h2>
+        <h3 id="faq-automatic">Automatic</h3>
+        <ul>
+          <li>Findings added via <code>add_finding</code> MCP tool</li>
+          <li>Task items via <code>add_task</code></li>
+          <li>Session state committed and pushed by the Stop hook after every response</li>
+        </ul>
+        <h3 id="faq-manual">Manual</h3>
+        <ul>
+          <li>Running <code>/phren-consolidate</code> when findings pile up</li>
+          <li>Running <code>phren maintain govern</code> to queue low-value entries for review</li>
+          <li>Pinning findings that should never decay</li>
+        </ul>
+
+        <h2 id="add-project">How do I add a new project? <a href="#add-project" class="anchor-link">#</a></h2>
+        <pre><code>cd ~/code/my-project
+phren add</code></pre>
+        <p>Phren bootstraps <code>~/.phren/my-project/</code> and adds it to your active profile. For a brand-new scaffold: <code>/phren-init my-project</code></p>
+
+        <h2 id="mcp-required">Does phren require MCP? <a href="#mcp-required" class="anchor-link">#</a></h2>
+        <p>No. MCP is recommended for the full 51-tool experience, but phren also works in hooks-only mode where context injection still happens automatically via the prompt hook.</p>
+        <pre><code>phren init --mcp off    # Install without MCP
+phren mcp-mode on       # Toggle anytime</code></pre>
+
+        <h2 id="agents-supported">Which agents are supported? <a href="#agents-supported" class="anchor-link">#</a></h2>
+        <p>Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex. Claude gets full native lifecycle hooks plus MCP. The others get generated hook configs plus session wrappers.</p>
+
+        <h2 id="platforms">Platforms <a href="#platforms" class="anchor-link">#</a></h2>
+        <p>Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts.</p>
+
+        <h2 id="faq-web-ui">Web UI <a href="#faq-web-ui" class="anchor-link">#</a></h2>
+        <pre><code>phren web-ui</code></pre>
+        <p>Opens a browser-based interface at <code>localhost:3499</code>. The review queue is read-only there. Filter by machine, model, and project. Loopback-only bind, random per-run auth token, CSRF protection, and CSP headers.</p>
+
+        <h2 id="faq-telemetry">Telemetry <a href="#faq-telemetry" class="anchor-link">#</a></h2>
+        <p>No, telemetry is not on by default. It is opt-in and local-only. <code>phren config telemetry on</code></p>
+
+        <h2 id="faq-uninstall">Uninstall <a href="#faq-uninstall" class="anchor-link">#</a></h2>
+        <p><code>phren uninstall</code> removes the active install. Shared mode removes config, hooks, and the active phren root. Project-local mode removes <code>&lt;repo&gt;/.phren</code> and workspace MCP entry. Export or back up before uninstalling.</p>
+      </section>
+
+      <section class="docs-section" id="sharing">
+        <h1>Sharing & Teams</h1>
+        <p class="docs-subtitle">Sync phren knowledge across machines, manage access with RBAC, and collaborate across projects.</p>
+
+        <h2 id="profiles">Profiles <a href="#profiles" class="anchor-link">#</a></h2>
+        <p>A <strong>profile</strong> defines which projects a machine should have access to. Profiles live as YAML files in <code>~/.phren/profiles/</code>.</p>
+        <pre><code># ~/.phren/profiles/work.yaml
+name: work
+projects:
+  - global
+  - web-app
+  - api-server
+  - shared-lib</code></pre>
+        <p>Each profile lists the project directories that should be synced and linked. The <code>global</code> entry is special: it contains skills and config that apply everywhere.</p>
+        <pre><code>phren config profiles                              # List all profiles
+:profile add-project work my-new-project            # Add a project
+:profile remove-project work old-project            # Remove a project</code></pre>
+
+        <h2 id="machines">Machines <a href="#machines" class="anchor-link">#</a></h2>
+        <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren link</code> runs on a new machine, it prompts you to register and picks a profile.</p>
+        <pre><code># ~/.phren/machines.yaml
+work-desktop: work
+home-laptop: personal
+ci-server: minimal</code></pre>
+
+        <h2 id="syncing">Syncing via Git <a href="#syncing" class="anchor-link">#</a></h2>
+        <p>The <code>~/.phren</code> directory is a git repository. Syncing is plain git, automated through hooks:</p>
+        <ul>
+          <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
+          <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
+        </ul>
+        <p>Findings, tasks, and skills sync automatically as you work. <code>phren link</code> configures git sparse checkout so each machine only downloads the projects in its profile.</p>
+
+        <h3 id="linking">Linking</h3>
+        <p><code>phren link</code> wires everything together on a machine. It identifies the machine, configures sparse checkout, symlinks knowledge files, patches MCP settings for all agents, registers hooks, writes context, and rebuilds memory pointers.</p>
+
+        <h2 id="consolidation">Consolidation <a href="#consolidation" class="anchor-link">#</a></h2>
+        <p>As findings accumulate, phren detects when they need consolidation. Thresholds: 25 entries since last consolidation marker, or 60 days + 10 entries. Consolidation archives old entries, deduplicates, and promotes patterns that appear in 2+ projects to global scope.</p>
+        <pre><code>phren consolidation-status
+phren maintain consolidate my-project</code></pre>
+
+        <h3 id="fragment-graph">Fragment Graph</h3>
+        <p>Fragments are named concepts that connect findings across projects. Use <code>cross_project_fragments</code> to find fragments shared across multiple projects.</p>
+        <pre><code>phren graph
+phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></pre>
+
+        <h3 id="cross-project-search">Cross-Project Search</h3>
+        <p>The <code>search_knowledge</code> MCP tool searches across all indexed projects by default. Cross-project findings from <code>global/FINDINGS.md</code> are included in all searches.</p>
+
+        <h2 id="rbac">RBAC Roles <a href="#rbac" class="anchor-link">#</a></h2>
+        <p>Phren supports four role levels. The actor is identified by <code>PHREN_ACTOR</code> (defaults to <code>$USER</code>).</p>
+        <table class="docs-table">
+          <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
+          <tbody>
+            <tr><td><code>admin</code></td><td>Full access. Can modify governance, access control, workflow policies, and all project data.</td></tr>
+            <tr><td><code>maintainer</code></td><td>Can add/edit/remove findings, tasks, and skills. Cannot modify governance or access control.</td></tr>
+            <tr><td><code>contributor</code></td><td>Can add findings and tasks. Cannot remove or edit existing entries.</td></tr>
+            <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
+          </tbody>
+        </table>
+        <p>Access control is configured in <code>~/.phren/.governance/access-control.json</code>. If no file exists, all users have full access.</p>
+
+        <h3 id="audit-log">Audit Log</h3>
+        <p>All mutations are recorded in <code>~/.phren/.runtime/audit.log</code>. Each entry includes the actor, action, timestamp, and relevant parameters.</p>
+
+        <h2 id="team-workflows">Team Workflows <a href="#team-workflows" class="anchor-link">#</a></h2>
+        <p>For teams sharing a phren repository:</p>
+        <ol>
+          <li><strong>Create a shared git remote</strong> for <code>~/.phren</code></li>
+          <li><strong>Define profiles</strong> per team role (e.g. <code>frontend.yaml</code>, <code>backend.yaml</code>)</li>
+          <li><strong>Register each machine</strong> with <code>phren link --register</code></li>
+          <li><strong>Set up RBAC</strong> so team leads are admins, developers are maintainers or contributors</li>
+        </ol>
+
+        <h3 id="two-person-team">Example: Two-Person Team</h3>
+        <pre><code># Alice's laptop
+phren init
+phren link --register   # name: alice-mbp, profile: fullstack
+
+# Bob's desktop
+git clone &lt;phren-remote&gt; ~/.phren
+phren link --register   # name: bob-desktop, profile: fullstack
+
+# Both work independently; Stop hook syncs after each response
+# Weekly: run /phren-consolidate to merge insights</code></pre>
+
+        <h3 id="project-ownership">Project Ownership</h3>
+        <table class="docs-table">
+          <thead><tr><th>Mode</th><th>Behavior</th></tr></thead>
+          <tbody>
+            <tr><td><code>phren-managed</code></td><td>Default. phren symlinks <code>CLAUDE.md</code>, <code>FINDINGS.md</code>, skills into the project directory.</td></tr>
+            <tr><td><code>repo-owned</code></td><td>The project's repo owns its own <code>CLAUDE.md</code>. phren stores findings and tasks but does not symlink.</td></tr>
+            <tr><td><code>read-only</code></td><td>phren indexes and searches the project but does not write to it.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
     </main>
   </div>
 
@@ -1644,6 +2484,7 @@ sequenceDiagram
 <script>
 // Sidebar toggle (mobile)
 const sidebar = document.getElementById('sidebar');
+const isMobileSidebar = () => window.matchMedia('(max-width: 900px)').matches;
 document.getElementById('sidebar-toggle').addEventListener('click', () => {
   sidebar.classList.toggle('open');
 });
@@ -1652,11 +2493,9 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
 const groupToggles = document.querySelectorAll('.sidebar-group-toggle');
 groupToggles.forEach(toggle => {
   toggle.addEventListener('click', (e) => {
+    if (!isMobileSidebar()) return;
     const group = toggle.closest('.sidebar-group');
-    // If clicking to navigate, let it happen but also toggle
     group.classList.toggle('open');
-    // Close mobile sidebar on click
-    sidebar.classList.remove('open');
   });
 });
 
@@ -1668,50 +2507,55 @@ document.querySelectorAll('.sidebar-group-items .sidebar-link').forEach(link => 
 });
 
 // Active sidebar link on scroll (IntersectionObserver)
-// Track both section-level and sub-item-level elements
-const allSidebarLinks = document.querySelectorAll('.sidebar-section-link, .sidebar-group-items .sidebar-link');
-const sections = document.querySelectorAll('.docs-section');
-const allTargets = document.querySelectorAll('.docs-section, .docs-section h2[id]');
+// Stable scroll spy for section and subsection links.
+const allSidebarLinks = Array.from(document.querySelectorAll('.sidebar-section-link, .sidebar-group-items .sidebar-link'));
+const allTargets = Array.from(document.querySelectorAll('.docs-section, .docs-section h2[id], .docs-section h3[id]'));
 
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      const id = entry.target.id;
-      // Clear all active states
-      allSidebarLinks.forEach(l => l.classList.remove('active'));
+function setActiveSidebarLink(targetId) {
+  allSidebarLinks.forEach(link => link.classList.remove('active'));
 
-      // Try to find a sub-link first
-      let link = document.querySelector(`.sidebar-group-items .sidebar-link[href="#${id}"]`);
-      if (link) {
-        link.classList.add('active');
-        // Expand the parent group
-        const group = link.closest('.sidebar-group');
-        if (group) group.classList.add('open');
-      }
+  const target = document.getElementById(targetId);
+  if (!target) return;
 
-      // Also highlight the section-level link
-      const sectionEl = entry.target.closest('.docs-section') || entry.target;
-      const sectionLink = document.querySelector(`.sidebar-section-link[href="#${sectionEl.id}"]`);
-      if (sectionLink) {
-        sectionLink.classList.add('active');
-        const group = sectionLink.closest('.sidebar-group');
-        if (group) group.classList.add('open');
-      }
+  const sectionEl = target.closest('.docs-section') || target;
+  const sectionLink = document.querySelector(`.sidebar-section-link[href="#${sectionEl.id}"]`);
+  const detailLink = document.querySelector(`.sidebar-group-items .sidebar-link[href="#${targetId}"]`);
+
+  if (sectionLink) sectionLink.classList.add('active');
+  if (detailLink) detailLink.classList.add('active');
+}
+
+function updateActiveSidebarLink() {
+  if (allTargets.length === 0) return;
+
+  const offset = 120;
+  let activeTarget = allTargets[0];
+
+  for (const target of allTargets) {
+    if (target.getBoundingClientRect().top - offset <= 0) {
+      activeTarget = target;
+      continue;
     }
-  });
-}, { rootMargin: '-80px 0px -60% 0px' });
+    break;
+  }
 
-allTargets.forEach(el => observer.observe(el));
+  setActiveSidebarLink(activeTarget.id);
+}
 
-// Open the first group by default
+// Open the first group by default on mobile only.
 const firstGroup = document.querySelector('.sidebar-group');
-if (firstGroup) firstGroup.classList.add('open');
+if (firstGroup && isMobileSidebar()) firstGroup.classList.add('open');
 
 // Nav scroll effect
 const nav = document.getElementById('nav');
 window.addEventListener('scroll', () => {
   nav.classList.toggle('scrolled', window.scrollY > 10);
+  updateActiveSidebarLink();
 }, { passive: true });
+
+window.addEventListener('resize', updateActiveSidebarLink, { passive: true });
+window.addEventListener('load', updateActiveSidebarLink);
+updateActiveSidebarLink();
 </script>
 <script src="docs.js"></script>
 </body>

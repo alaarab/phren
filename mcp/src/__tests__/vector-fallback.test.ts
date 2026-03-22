@@ -3,7 +3,7 @@ import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 
 // Mock the ollama/embedding modules before importing vectorFallback
-vi.mock("../ollama.js", () => ({
+vi.mock("../shared/ollama.js", () => ({
   embedText: vi.fn(),
   cosineSimilarity: vi.fn(),
   getEmbeddingModel: vi.fn().mockReturnValue("nomic-embed-text"),
@@ -11,7 +11,7 @@ vi.mock("../ollama.js", () => ({
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("../embedding-cache.js", () => {
+vi.mock("../shared/embedding-cache.js", () => {
   let entries: Array<{ path: string; model: string; vec: number[] }> = [];
   return {
     getEmbeddingCache: vi.fn().mockReturnValue({

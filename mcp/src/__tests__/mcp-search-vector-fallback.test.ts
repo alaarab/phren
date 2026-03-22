@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SqlJsDatabase } from "../shared/index.js";
 import type { McpContext } from "../tools/types.js";
 
-vi.mock("../search-fallback.js", async () => {
-  const actual = await vi.importActual<typeof import("../shared/search-fallback.js")>("../search-fallback.js");
+vi.mock("../shared/search-fallback.js", async () => {
+  const actual = await vi.importActual<typeof import("../shared/search-fallback.js")>("../shared/search-fallback.js");
   return {
     ...actual,
     vectorFallback: vi.fn(),

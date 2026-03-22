@@ -4,7 +4,7 @@ import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import type { McpContext } from "../tools/types.js";
 
-vi.mock("../ollama.js", () => ({
+vi.mock("../shared/ollama.js", () => ({
   checkOllamaAvailable: vi.fn(async () => true),
   checkModelAvailable: vi.fn(async () => true),
   generateText: vi.fn(async () => '["[pattern] Retry socket setup after ECONNRESET"]'),
@@ -12,7 +12,7 @@ vi.mock("../ollama.js", () => ({
   getExtractModel: vi.fn(() => "llama3.2"),
 }));
 
-vi.mock("../content.js", () => ({
+vi.mock("../shared/content.js", () => ({
   addFindingsToFile: vi.fn(() => ({
     ok: true,
     data: {
