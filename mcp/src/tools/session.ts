@@ -18,6 +18,7 @@ import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import { atomicWriteJson, debugError, scanSessionFiles } from "../session/utils.js";
+import { getRuntimeHealth } from "../governance/policy.js";
 
 interface SessionState {
   sessionId: string;
@@ -623,11 +624,32 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
     }
 
+    // ── Surface sync/health warnings ────────────────────────────────────
+    const sessionWarnings: string[] = [];
+    try {
+      const health = getRuntimeHealth(phrenPath);
+      if (health.lastAutoSave?.status === "error") {
+        sessionWarnings.push(`Last auto-save failed: ${health.lastAutoSave.detail ?? "unknown"}`);
+      }
+      if (health.lastSync?.lastPushStatus === "error") {
+        sessionWarnings.push(`Last push failed: ${health.lastSync.lastPushDetail ?? "unknown"}`);
+      }
+      const unsynced = health.lastSync?.unsyncedCommits;
+      if (typeof unsynced === "number" && unsynced > 0) {
+        sessionWarnings.push(`${unsynced} unsynced commit${unsynced === 1 ? "" : "s"} — run 'phren doctor' or check git remote`);
+      }
+    } catch (err: unknown) {
+      debugError("session_start runtimeHealth", err);
+    }
+    if (sessionWarnings.length > 0) {
+      parts.push(`## Sync warnings\n${sessionWarnings.map(w => `- ${w}`).join("\n")}`);
+    }
+
     const message = parts.length > 0
       ? `Session started (${sessionId.slice(0, 8)}).\n\n${parts.join("\n\n")}`
       : `Session started (${sessionId.slice(0, 8)}). No prior context found.`;
 
-    return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject, agentScope: activeScope } });
+    return mcpResponse({ ok: true, message, data: { sessionId, project: activeProject, agentScope: activeScope, warnings: sessionWarnings.length > 0 ? sessionWarnings : undefined } });
   });
 
   server.registerTool("session_end", {
