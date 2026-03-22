@@ -111,7 +111,7 @@ async function editProactivity(client: PhrenClient, project: string, current: st
   if (!choice) return;
 
   try {
-    const raw = await client.setProactivity(choice.label, project, "base");
+    const raw = await client.setConfig("proactivity", { level: choice.label, scope: "base" }, project);
     maybeWarn(raw);
     await vscode.window.showInformationMessage(`Proactivity for "${project}" set to "${choice.label}".`);
   } catch (error) {
@@ -133,7 +133,7 @@ async function editTaskMode(client: PhrenClient, project: string, current: strin
   if (!choice) return;
 
   try {
-    const raw = await client.setTaskMode(choice.label, project);
+    const raw = await client.setConfig("taskMode", { mode: choice.label }, project);
     maybeWarn(raw);
     await vscode.window.showInformationMessage(`Task mode for "${project}" set to "${choice.label}".`);
   } catch (error) {
@@ -155,7 +155,7 @@ async function editFindingSensitivity(client: PhrenClient, project: string, curr
   if (!choice) return;
 
   try {
-    const raw = await client.setFindingSensitivity(choice.label, project);
+    const raw = await client.setConfig("findingSensitivity", { level: choice.label }, project);
     maybeWarn(raw);
     await vscode.window.showInformationMessage(`Finding sensitivity for "${project}" set to "${choice.label}".`);
   } catch (error) {
@@ -177,7 +177,7 @@ async function editRetentionTtl(client: PhrenClient, project: string, current: n
 
   const ttlDays = parseInt(input, 10);
   try {
-    const raw = await client.setRetentionPolicy({ ttlDays }, project);
+    const raw = await client.setConfig("retention", { ttlDays }, project);
     maybeWarn(raw);
     await vscode.window.showInformationMessage(`Retention TTL for "${project}" set to ${ttlDays} days.`);
   } catch (error) {
