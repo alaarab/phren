@@ -70,6 +70,32 @@ function detectMcpServerPath(): string | undefined {
 
   candidates.add(path.resolve(__dirname, "..", "..", "mcp", "dist", "index.js"));
 
+  // Fallback: extract path from Claude Code or VS Code MCP config files
+  const mcpConfigFiles = [
+    path.join(os.homedir(), ".claude", "settings.json"),
+    path.join(os.homedir(), ".claude.json"),
+    path.join(os.homedir(), ".vscode-server", "data", "User", "mcp.json"),
+  ];
+  for (const configFile of mcpConfigFiles) {
+    const mcpPath = extractPhrenPathFromMcpConfig(configFile);
+    if (mcpPath) {
+      candidates.add(mcpPath);
+    }
+  }
+
+  // Fallback: scan npx cache for @phren/cli (most recently modified first)
+  const npxCacheDir = path.join(os.homedir(), ".npm", "_npx");
+  try {
+    const hashes = fs.readdirSync(npxCacheDir)
+      .map((name) => ({ name, mtime: safeStat(path.join(npxCacheDir, name))?.mtimeMs ?? 0 }))
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const { name } of hashes) {
+      candidates.add(path.join(npxCacheDir, name, "node_modules", "@phren/cli", MCP_ENTRYPOINT_RELATIVE_PATH));
+    }
+  } catch {
+    // npx cache dir doesn't exist — skip
+  }
+
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       return candidate;
@@ -122,6 +148,34 @@ function safeRealpath(targetPath: string): string {
     return fs.realpathSync(targetPath);
   } catch {
     return targetPath;
+  }
+}
+
+function extractPhrenPathFromMcpConfig(configFile: string): string | undefined {
+  try {
+    const raw = fs.readFileSync(configFile, "utf8");
+    const parsed = JSON.parse(raw);
+    // Claude Code uses mcpServers.phren, VS Code MCP uses servers.phren
+    const phrenEntry = parsed?.mcpServers?.phren ?? parsed?.servers?.phren;
+    const args: unknown[] = phrenEntry?.args;
+    if (Array.isArray(args)) {
+      // args[0] is the path to index.js
+      const candidate = typeof args[0] === "string" ? args[0] : undefined;
+      if (candidate) {
+        return candidate;
+      }
+    }
+  } catch {
+    // File doesn't exist or isn't valid JSON — skip
+  }
+  return undefined;
+}
+
+function safeStat(targetPath: string): fs.Stats | undefined {
+  try {
+    return fs.statSync(targetPath);
+  } catch {
+    return undefined;
   }
 }
 
