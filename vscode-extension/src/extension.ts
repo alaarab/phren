@@ -1684,7 +1684,7 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
     const globallyInstalled = await isGlobalPhrenInstalled();
     if (!globallyInstalled) {
       const installChoice = await vscode.window.showInformationMessage(
-        "Phren is not installed globally. Install it now to enable the extension backend?",
+        "Install Phren globally for the 'phren' CLI command? (Optional — the extension works without it.)",
         "Install Phren",
         "Skip",
       );

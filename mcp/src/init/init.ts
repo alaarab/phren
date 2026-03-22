@@ -6,7 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync, spawnSync } from "child_process";
-import { configureAllHooks } from "../hooks.js";
+import { configureAllHooks, installPhrenCliWrapper } from "../hooks.js";
 import { getMachineName, machineFilePath, persistMachineName } from "../machine-identity.js";
 import {
   atomicWriteText,
@@ -1283,6 +1283,13 @@ function configureHooksIfEnabled(phrenPath: string, hooksEnabled: boolean, verb:
   } else {
     log(`  Hooks are disabled by preference (run: npx phren hooks-mode on)`);
   }
+
+  // Install phren CLI wrapper at ~/.local/bin/phren so the bare command works
+  try {
+    if (installPhrenCliWrapper(phrenPath)) {
+      log(`  ${verb} CLI wrapper: ~/.local/bin/phren`);
+    }
+  } catch (err: unknown) { debugLog(`installPhrenCliWrapper failed: ${errorMessage(err)}`); }
 }
 
 export async function runInit(opts: InitOptions = {}) {
@@ -2267,9 +2274,9 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexHooksFile}: ${errorMessage(err)}`); }
 
-  // Remove session wrapper scripts (written by installSessionWrapper)
+  // Remove session wrapper scripts (written by installSessionWrapper) and CLI wrapper
   const localBinDir = path.join(home, ".local", "bin");
-  for (const tool of ["copilot", "cursor", "codex"]) {
+  for (const tool of ["copilot", "cursor", "codex", "phren"]) {
     const wrapperPath = path.join(localBinDir, tool);
     try {
       if (fs.existsSync(wrapperPath)) {

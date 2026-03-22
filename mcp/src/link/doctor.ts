@@ -443,6 +443,16 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     });
   }
 
+  // Check phren CLI wrapper
+  const phrenCliActive = isWrapperActive("phren");
+  checks.push({
+    name: "wrapper:phren-cli",
+    ok: phrenCliActive,
+    detail: phrenCliActive
+      ? "phren CLI wrapper active via ~/.local/bin/phren"
+      : "phren CLI wrapper missing — run init to install, or npm i -g @phren/cli",
+  });
+
   if (fix) {
     const repaired = repairPreexistingInstall(phrenPath);
     const details: string[] = [];

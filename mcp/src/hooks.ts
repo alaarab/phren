@@ -230,6 +230,45 @@ exit $status
   }
 }
 
+/**
+ * Install a lightweight `phren` CLI wrapper at ~/.local/bin/phren so the bare
+ * `phren` command works without a global npm install. The wrapper simply execs
+ * `node <entry_script> "$@"`.
+ */
+export function installPhrenCliWrapper(phrenPath: string): boolean {
+  const entry = resolveCliEntryScript();
+  if (!entry) return false;
+
+  const localBinDir = homePath(".local", "bin");
+  const wrapperPath = path.join(localBinDir, "phren");
+
+  // Don't overwrite a real global install — only our own wrapper
+  if (fs.existsSync(wrapperPath)) {
+    try {
+      const existing = fs.readFileSync(wrapperPath, "utf8");
+      if (!existing.includes("PHREN_CLI_WRAPPER")) return false;
+    } catch { /* unreadable — skip */ }
+  }
+
+  const content = `#!/bin/sh
+# PHREN_CLI_WRAPPER — managed by phren init; safe to delete
+set -u
+PHREN_PATH="\${PHREN_PATH:-${shellEscape(phrenPath)}}"
+export PHREN_PATH
+exec node ${shellEscape(entry)} "$@"
+`;
+
+  try {
+    fs.mkdirSync(localBinDir, { recursive: true });
+    atomicWriteText(wrapperPath, content);
+    fs.chmodSync(wrapperPath, 0o755);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`installPhrenCliWrapper: failed: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 // Hook config schemas for each tool. Validates shape before writing to catch
 // breaking changes if any tool updates its config format.
 interface HookEntry { type: string; [k: string]: unknown }
