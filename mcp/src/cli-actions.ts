@@ -16,6 +16,7 @@ import { runPhrenUpdate } from "./update.js";
 import { readRuntimeHealth, readReviewQueue, readReviewQueueAcrossProjects } from "./data-access.js";
 import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, parseRelatedDocsArgs, type SearchOptions } from "./cli-search.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { logger } from "./logger.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "./content-validate.js";
 import { listAllSessions } from "./mcp-session.js";
 
@@ -166,7 +167,7 @@ export async function handleDoctor(args: string[]) {
               tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
             }
           } catch (err: unknown) {
-            if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissParse: ${errorMessage(err)}\n`);
+            logger.debug("doctor", `searchMissParse: ${errorMessage(err)}`);
           }
         }
         const topMisses = [...tokenCounts.entries()]
@@ -181,7 +182,7 @@ export async function handleDoctor(args: string[]) {
       }
     }
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] doctor searchMissAnalysis: ${errorMessage(err)}\n`);
+    logger.debug("doctor", `searchMissAnalysis: ${errorMessage(err)}`);
   }
 
   const semStatus = await getSemanticSearchStatus(getPhrenPath(), profile || undefined);
@@ -221,7 +222,7 @@ async function getSemanticSearchStatus(phrenPath: string, profile: string | unde
     const coverage = formatEmbeddingCoverage(cache.coverage(listIndexedDocumentPaths(phrenPath, profile)));
     return { ollamaUrl, available: true, modelReady: true, model, coverage };
   } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getSemanticSearchStatus: ${errorMessage(err)}\n`);
+    logger.debug("doctor", `getSemanticSearchStatus: ${errorMessage(err)}`);
     return { ollamaUrl: null, status: "error", error: errorMessage(err) };
   }
 }

@@ -2,6 +2,7 @@ import { getPhrenPath } from "./shared.js";
 import { buildIndex, queryRows } from "./shared-index.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { isValidProjectName, errorMessage } from "./utils.js";
+import { logger } from "./logger.js";
 
 /**
  * CLI: phren graph [--project <name>] [--limit <n>]
@@ -119,7 +120,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
 
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [normalizedFragment, "fragment", new Date().toISOString().slice(0, 10)]);
-  } catch (err: unknown) { if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] graph link insert fragment: ${errorMessage(err)}\n`); }
+  } catch (err: unknown) { logger.debug("cli-graph", `graph link insert fragment: ${errorMessage(err)}`); }
 
   const fragmentResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [normalizedFragment, "fragment"]);
   if (!fragmentResult?.length || !fragmentResult[0]?.values?.length) {
@@ -130,7 +131,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
 
   try {
     db.run("INSERT OR IGNORE INTO entities (name, type, first_seen_at) VALUES (?, ?, ?)", [sourceDoc, "document", new Date().toISOString().slice(0, 10)]);
-  } catch (err: unknown) { if (process.env.PHREN_DEBUG) process.stderr.write(`[phren] graph link insert document: ${errorMessage(err)}\n`); }
+  } catch (err: unknown) { logger.debug("cli-graph", `graph link insert document: ${errorMessage(err)}`); }
 
   const docResult = db.exec("SELECT id FROM entities WHERE name = ? AND type = ?", [sourceDoc, "document"]);
   if (!docResult?.length || !docResult[0]?.values?.length) {
@@ -161,7 +162,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
       let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
       if (fs.existsSync(manualLinksPath)) {
         try { existing = JSON.parse(fs.readFileSync(manualLinksPath, "utf8")); } catch (err) {
-          process.stderr.write(`[phren] link_fragment: manual-links.json is malformed — aborting to avoid data loss: ${err instanceof Error ? err.message : String(err)}\n`);
+          logger.error("cli-graph", `link_fragment: manual-links.json is malformed — aborting to avoid data loss: ${err instanceof Error ? err.message : String(err)}`);
           throw err;
         }
       }

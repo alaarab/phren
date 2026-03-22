@@ -303,6 +303,19 @@ export function debugLog(msg: string): void {
   }
 }
 
+/** Always-on structured error log (no PHREN_DEBUG gate). */
+export function errorLog(tool: string, msg: string): void {
+  try {
+    const phrenPath = findPhrenPath();
+    if (!phrenPath) return;
+    const logFile = runtimeFile(phrenPath, "debug.log");
+    const line = JSON.stringify({ ts: new Date().toISOString(), level: "error", tool, message: msg });
+    fs.appendFileSync(logFile, line + "\n");
+  } catch {
+    // Logging must never throw
+  }
+}
+
 export function appendIndexEvent(phrenPath: string, event: Record<string, unknown>): void {
   try {
     const file = runtimeFile(phrenPath, "index-events.jsonl");
@@ -376,26 +389,26 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
 
   if (profile) {
     if (!isValidProjectName(profile)) {
-      console.error(`${PhrenError.VALIDATION_ERROR}: Invalid PHREN_PROFILE value: ${profile}`);
+      errorLog("getProjectDirs", `${PhrenError.VALIDATION_ERROR}: Invalid PHREN_PROFILE value: ${profile}`);
       return [];
     }
     const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
     if (!fs.existsSync(profilePath)) {
-      console.error(`${PhrenError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
+      errorLog("getProjectDirs", `${PhrenError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
       return [];
     }
     try {
       const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
       const projects = isRecord(data) ? data.projects : undefined;
       if (!Array.isArray(projects)) {
-        console.error(`${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
+        errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
         return [];
       }
       const listed = projects
         .map((p: unknown) => {
           const name = String(p);
           if (!isValidProjectName(name)) {
-            console.error(`${PhrenError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
+            errorLog("getProjectDirs", `${PhrenError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
             return null;
           }
           return safeProjectPath(phrenPath, name);
@@ -409,7 +422,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       return [...new Set([...listed, ...sharedDirs])];
     } catch (err: unknown) {
       if ((process.env.PHREN_DEBUG)) process.stderr.write(`[phren] getProjectDirs yamlParse: ${errorMessage(err)}\n`);
-      console.error(`${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
+      errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
       return [];
     }
   }
