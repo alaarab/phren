@@ -283,16 +283,19 @@ export function queueFilePath(phrenPath: string, project: string): string {
 export function sanitizeFts5Query(raw: string): string {
   if (!raw) return "";
   if (raw.length > 500) raw = raw.slice(0, 500);
-  // Whitelist approach: only allow alphanumeric, spaces, hyphens, apostrophes, double quotes, asterisks
+  // Whitelist approach: only allow alphanumeric, spaces, hyphens, apostrophes, asterisks
   let q = raw.replace(/[^a-zA-Z0-9 \-"*]/g, " ");
-  q = q.replace(/\s+/g, " ");
-  q = q.trim();
+  // Strip all double quotes — buildFtsClauses wraps terms in quotes itself,
+  // so user-supplied quotes only risk producing unbalanced FTS5 syntax.
+  q = q.replace(/"/g, "");
   // Q83: see docs/decisions/Q83-fts5-asterisk-validation.md
   q = q.replace(/(?<!\w)\*/g, "");
   // Also strip a trailing asterisk that is preceded only by whitespace at word
   // end of the whole query (handles "foo *" → "foo").
   q = q.replace(/\s+\*$/g, "");
-  return q.trim();
+  // Normalize spaces after all stripping to avoid double spaces from removed characters
+  q = q.replace(/\s+/g, " ").trim();
+  return q;
 }
 
 function parseSynonymsYaml(filePath: string): Record<string, string[]> {

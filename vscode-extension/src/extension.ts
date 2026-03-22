@@ -29,6 +29,7 @@ import {
 
 let client: PhrenClient | undefined;
 let outputChannel: vscode.OutputChannel;
+let hooksOutputChannel: vscode.OutputChannel;
 
 const GLOBAL_PHREN_STORE_PATH = path.join(os.homedir(), ".phren");
 const PHREN_PACKAGE_NAME = "@phren/cli";
@@ -48,6 +49,8 @@ interface CommandOptions {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("Phren");
   context.subscriptions.push(outputChannel);
+  hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
+  context.subscriptions.push(hooksOutputChannel);
   outputChannel.appendLine("Phren extension activating...");
   const config = vscode.workspace.getConfiguration("phren");
   await runOnboardingIfNeeded(config);
@@ -745,7 +748,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
       const raw = await phrenClient.listHooks();
       const data = asRecord(asRecord(raw)?.data);
-      const hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
       hooksOutputChannel.clear();
       hooksOutputChannel.appendLine("=== Phren Hooks Status ===");
       hooksOutputChannel.appendLine("");
@@ -1009,6 +1011,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         { placeHolder: "Select ownership mode" },
       );
       const ownership = ownershipPick?.label;
+      if (!ownership) return;
 
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: "Adding project to Phren...", cancellable: false },

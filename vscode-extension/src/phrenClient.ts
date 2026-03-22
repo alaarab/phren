@@ -232,7 +232,7 @@ export class PhrenClient {
   }
 
   async searchFragments(query: string, project?: string): Promise<unknown> {
-    const args: Record<string, unknown> = { query };
+    const args: Record<string, unknown> = { name: query };
     if (project) args.project = project;
     return this.callTool("search_fragments", args);
   }

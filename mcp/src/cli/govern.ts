@@ -277,7 +277,7 @@ interface GcReport {
 export async function handleGcMaintain(args: string[] = []): Promise<void> {
   const dryRun = args.includes("--dry-run");
   const phrenPath = getPhrenPath();
-  const { execSync } = await import("child_process");
+  const { execFileSync } = await import("child_process");
   const report: GcReport = {
     gitGcRan: false,
     commitsSquashed: 0,
@@ -290,7 +290,7 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
     console.log("[dry-run] Would run: git gc --aggressive");
   } else {
     try {
-      execSync("git gc --aggressive --quiet", { cwd: phrenPath, stdio: "pipe" });
+      execFileSync("git", ["gc", "--aggressive", "--quiet"], { cwd: phrenPath, stdio: "pipe" });
       report.gitGcRan = true;
       console.log("git gc --aggressive: done");
     } catch (err: unknown) {
@@ -302,10 +302,10 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
   let oldCommits: string[] = [];
   try {
-    const raw = execSync(
-      `git log --before="${sevenDaysAgo}" --format="%H %ci %s"`,
-      { cwd: phrenPath, encoding: "utf8" }
-    ).trim();
+    const raw = execFileSync("git", ["log", `--before=${sevenDaysAgo}`, "--format=%H %ci %s"], {
+      cwd: phrenPath,
+      encoding: "utf8",
+    }).trim();
     if (raw) {
       oldCommits = raw.split("\n").filter((l) => l.includes("auto-save:") || l.includes("[auto]"));
     }
@@ -340,11 +340,11 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
       try {
         const oldest = hashes[hashes.length - 1];
         const newest = hashes[0];
-        // Use git rebase --onto to squash: squash all into the oldest parent
-        const parentOfOldest = execSync(
-          `git rev-parse ${oldest}^`,
-          { cwd: phrenPath, encoding: "utf8" }
-        ).trim();
+        // Use git rev-parse to get the parent of the oldest commit
+        const parentOfOldest = execFileSync("git", ["rev-parse", `${oldest}^`], {
+          cwd: phrenPath,
+          encoding: "utf8",
+        }).trim();
         // Build rebase script via env variable to squash all but first to "squash"
         const rebaseScript = hashes
           .map((h, i) => `${i === hashes.length - 1 ? "pick" : "squash"} ${h} auto-save`)
@@ -352,11 +352,12 @@ export async function handleGcMaintain(args: string[] = []): Promise<void> {
           .join("\n");
         const scriptPath = path.join(phrenPath, ".runtime", `gc-rebase-${weekKey}.sh`);
         fs.writeFileSync(scriptPath, rebaseScript);
-        // Use GIT_SEQUENCE_EDITOR to feed our script
-        execSync(
-          `GIT_SEQUENCE_EDITOR="cat ${scriptPath} >" git rebase -i ${parentOfOldest}`,
-          { cwd: phrenPath, stdio: "pipe" }
-        );
+        // Use GIT_SEQUENCE_EDITOR env var to feed our script to git rebase
+        execFileSync("git", ["rebase", "-i", parentOfOldest], {
+          cwd: phrenPath,
+          stdio: "pipe",
+          env: { ...process.env, GIT_SEQUENCE_EDITOR: `cat ${scriptPath} >` },
+        });
         fs.unlinkSync(scriptPath);
         report.commitsSquashed += hashes.length - 1;
         console.log(`Squashed ${hashes.length} auto-save commits for week of ${weekKey} (${newest.slice(0, 7)}..${oldest.slice(0, 7)}).`);

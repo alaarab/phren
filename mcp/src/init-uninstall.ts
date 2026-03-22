@@ -440,6 +440,28 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     debugLog(`uninstall: cleanup failed for ${contextFile}: ${errorMessage(err)}`);
   }
 
+  // Remove global CLAUDE.md symlink (created by linkGlobal -> ~/.claude/CLAUDE.md)
+  const globalClaudeLink = homePath(".claude", "CLAUDE.md");
+  try {
+    if (fs.lstatSync(globalClaudeLink).isSymbolicLink()) {
+      fs.unlinkSync(globalClaudeLink);
+      log(`  Removed global CLAUDE.md symlink (${globalClaudeLink})`);
+    }
+  } catch {
+    // Does not exist or not a symlink — nothing to do
+  }
+
+  // Remove copilot-instructions.md symlink (created by linkGlobal -> ~/.github/copilot-instructions.md)
+  const copilotInstrLink = homePath(".github", "copilot-instructions.md");
+  try {
+    if (fs.lstatSync(copilotInstrLink).isSymbolicLink()) {
+      fs.unlinkSync(copilotInstrLink);
+      log(`  Removed copilot-instructions.md symlink (${copilotInstrLink})`);
+    }
+  } catch {
+    // Does not exist or not a symlink — nothing to do
+  }
+
   // Sweep agent skill directories for symlinks pointing into the phren store
   if (phrenPath) {
     try {
