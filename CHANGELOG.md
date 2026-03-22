@@ -10,8 +10,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Parallel test execution**: enabled `fileParallelism` in vitest config for ~3x faster test runs
 - **Deduplicated memory-ui-extended tests**: consolidated triple-tested auth and repeated GET 401 checks into `it.each` patterns
 
+### Security
+- **Shell injection in govern.ts**: replaced `execSync` with `execFileSync` using array arguments
+- **VS Code searchFragments param mismatch**: fixed `query` → `name` parameter so graph search actually works
+
 ### Fixed
 - **VS Code addTask feedback**: wrapped `addTask` command in `withProgress` notification so users see activity during the operation
+- **Atomic FINDINGS.md writes**: all finding creation, batch add, supersede, retract, and contradiction resolution now use atomic tmp+rename to prevent corruption on crash
+- **FTS5 unbalanced quotes**: strip user-supplied double quotes to prevent silent no-results on queries like `"rate limit`
+- **Finding insertion into archived blocks**: date header search now skips `<details>` consolidated sections
+- **Hook-context stale data**: filter out retracted and superseded findings before injecting into session context
+- **addProject ownership cancel**: dismissing the ownership picker now cancels instead of sending undefined
+- **FTS5 asterisk space normalization**: moved space normalization after asterisk stripping to prevent double spaces
+- **VS Code output channel leak**: hooksStatus output channel created once at activation, not per-invocation
+- **VS Code healthTimer stacking**: clear existing interval before creating a new one in statusBar.initialize()
+
+### Performance
+- **saveHashMap optimization**: replaced N `fs.existsSync` calls with Set lookup using known indexed paths
+- **getProjectDirs caching**: cached result during buildIndex (was called 3 times per build)
 
 ### Removed
 - **Brittle tool-registry test**: deleted hardcoded tool-count assertion that broke on every tool change
