@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog, runtimeFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
-import { logWarn } from "./logger.js";
+import { logger } from "./logger.js";
 import { withFileLock } from "./governance/locks.js";
 
 export type { HookToolName } from "./provider-adapters.js";

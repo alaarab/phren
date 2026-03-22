@@ -24,17 +24,17 @@ import {
   errorMessage,
   runDoctor,
   resolveRuntimeProfile,
-} from "./hooks-context.js";
+} from "./cli/hooks-context.js";
 import {
   qualityMarkers,
   runtimeFile,
 } from "./shared.js";
-import { readInstallPreferences } from "./preferences.js";
-import { logDebug } from "./logger.js";
+import { readInstallPreferences } from "./init/preferences.js";
+import { logger } from "./logger.js";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
-import { TASKS_FILENAME } from "./tasks.js";
+import { TASKS_FILENAME } from "./data/tasks.js";
 import {
   resolveSubprocessArgs as _resolveSubprocessArgs,
   runBestEffortGit,
@@ -171,7 +171,7 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
       fd = fs.openSync(markers.lock, "wx");
     } catch (err: unknown) {
       // Another process already claimed the lock
-      logDebug("backgroundMaintenance lockClaim", errorMessage(err));
+      logger.debug("backgroundMaintenance lockClaim", errorMessage(err));
       return false;
     }
     try {
@@ -201,24 +201,24 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
     child.on("exit", (code, signal) => {
       const msg = `[${new Date().toISOString()}] exit code=${code ?? "null"} signal=${signal ?? "none"}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        logDebug("backgroundMaintenance exitLog", errorMessage(err));
+        logger.debug("backgroundMaintenance exitLog", errorMessage(err));
       }
       if (code === 0) {
         try { fs.writeFileSync(markers.done, new Date().toISOString() + "\n"); } catch (err: unknown) {
-          logDebug("backgroundMaintenance doneMarker", errorMessage(err));
+          logger.debug("backgroundMaintenance doneMarker", errorMessage(err));
         }
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        logDebug("backgroundMaintenance unlockOnExit", errorMessage(err));
+        logger.debug("backgroundMaintenance unlockOnExit", errorMessage(err));
       }
     });
     child.on("error", (spawnErr) => {
       const msg = `[${new Date().toISOString()}] spawn error: ${spawnErr.message}\n`;
       try { fs.appendFileSync(logPath, msg); } catch (err: unknown) {
-        logDebug("backgroundMaintenance errorLog", errorMessage(err));
+        logger.debug("backgroundMaintenance errorLog", errorMessage(err));
       }
       try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-        logDebug("backgroundMaintenance unlockOnError", errorMessage(err));
+        logger.debug("backgroundMaintenance unlockOnError", errorMessage(err));
       }
     });
     fs.closeSync(logFd);
@@ -234,10 +234,10 @@ function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string)
         `[${new Date().toISOString()}] spawn failed: ${errMsg}\n`
       );
     } catch (err: unknown) {
-      logDebug("backgroundMaintenance logSpawnFailure", errorMessage(err));
+      logger.debug("backgroundMaintenance logSpawnFailure", errorMessage(err));
     }
     try { fs.unlinkSync(markers.lock); } catch (err: unknown) {
-      logDebug("backgroundMaintenance unlockOnFailure", errorMessage(err));
+      logger.debug("backgroundMaintenance unlockOnFailure", errorMessage(err));
     }
     return false;
   }
@@ -300,7 +300,7 @@ export async function handleHookSessionStart() {
   const unsyncedCommits = hasRemote ? await countUnsyncedCommits(phrenPath) : 0;
 
   try { const { trackSession } = await import("./telemetry.js"); trackSession(phrenPath); } catch (err: unknown) {
-    logDebug("hookSessionStart trackSession", errorMessage(err));
+    logger.debug("hookSessionStart trackSession", errorMessage(err));
   }
 
   updateRuntimeHealth(phrenPath, {

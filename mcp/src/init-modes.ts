@@ -7,8 +7,8 @@ import {
   configureCursorMcp,
   configureCopilotMcp,
   configureCodexMcp,
-} from "./config.js";
-import type { ToolStatus } from "./config.js";
+} from "./init/config.js";
+import type { ToolStatus } from "./init/config.js";
 import type { McpMode } from "./init-walkthrough.js";
 import { configureAllHooks } from "./hooks.js";
 import {
@@ -22,8 +22,8 @@ import {
   getHooksEnabledPreference,
   setMcpEnabledPreference,
   setHooksEnabledPreference,
-} from "./preferences.js";
-import { DEFAULT_PHREN_PATH, log } from "./shared.js";
+} from "./init/preferences.js";
+import { DEFAULT_PHREN_PATH, log } from "./init/shared.js";
 
 export function parseMcpMode(raw?: string): McpMode | undefined {
   if (!raw) return undefined;
