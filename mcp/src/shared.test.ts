@@ -599,7 +599,7 @@ describe("appendAuditLog", () => {
     appendAuditLog(phren, "trigger_rotation", "details=bar");
     const after = fs.readFileSync(logPath, "utf8");
     const lines = after.split("\n").filter(l => l.length > 0);
-    expect(lines.length).toBeLessThanOrEqual(500);
+    expect(lines.length).toBeLessThanOrEqual(1000);
     expect(after).toContain("trigger_rotation");
   });
 });

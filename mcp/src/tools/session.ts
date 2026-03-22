@@ -201,8 +201,9 @@ function writeLastSummary(phrenPath: string, summary: string, sessionId: string,
   }
 }
 
-/** Find the most recent session with a summary (including ended sessions). */
-function findMostRecentSummary(phrenPath: string): string | null {
+/** Find the most recent session with a summary (including ended sessions).
+ * @internal Exported for tests. */
+export function findMostRecentSummary(phrenPath: string): string | null {
   return findMostRecentSummaryWithProject(phrenPath).summary;
 }
 

@@ -632,7 +632,7 @@ function readProjectDomain(phrenPath: string, project: string): string | undefin
   return typeof parsed?.domain === "string" ? parsed.domain : undefined;
 }
 
-function getBuiltinTopics(phrenPath?: string, project?: string): ProjectTopic[] {
+export function getBuiltinTopics(phrenPath?: string, project?: string): ProjectTopic[] {
   const domain = (phrenPath && project) ? readProjectDomain(phrenPath, project) : undefined;
   const fallback = ensureGeneralTopic(resolveDomainTopics(domain)).map((topic) => ({ ...topic, keywords: [...topic.keywords] }));
   if (!phrenPath || !project || !isValidProjectName(project)) return fallback;
@@ -1013,7 +1013,7 @@ function collectSuggestionCorpus(phrenPath: string, project: string): string {
   return parts.join("\n");
 }
 
-function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
+export function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic[]): ProjectTopicSuggestion[] {
   const currentTopics = topics ?? readProjectTopics(phrenPath, project).topics;
   const pinnedTopics = readPinnedTopics(phrenPath, project);
   if (pinnedTopics.length > 0) {
@@ -1097,6 +1097,9 @@ function suggestTopics(phrenPath: string, project: string, topics?: ProjectTopic
   }
   return deduped;
 }
+
+/** @internal Exported for tests. */
+export const suggestProjectTopics = suggestTopics;
 
 export function getProjectTopicsResponse(phrenPath: string, project: string): ProjectTopicsResponse {
   const { source, topics } = readProjectTopics(phrenPath, project);

@@ -21,7 +21,8 @@ function splitPathSegments(filePath: string): string[] {
   return filePath.split(/[\\/]+/).filter(Boolean);
 }
 
-function deriveVectorDocIdentity(
+/** @internal Exported for tests. */
+export function deriveVectorDocIdentity(
   phrenPath: string,
   fullPath: string
 ): { project: string; filename: string; relFile: string } {

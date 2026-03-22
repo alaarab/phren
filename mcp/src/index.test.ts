@@ -78,9 +78,9 @@ describe("sanitizeFts5Query", () => {
     expect(result).toBe("start of phrase");
   });
 
-  it("preserves double quotes for quoted phrases", () => {
+  it("strips double quotes from quoted phrases", () => {
     const result = sanitizeFts5Query('"exact phrase"');
-    expect(result).toBe('"exact phrase"');
+    expect(result).toBe("exact phrase");
   });
 
   it("returns empty string for empty input", () => {

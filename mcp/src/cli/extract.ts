@@ -45,7 +45,7 @@ function inferProject(arg?: string): string | null {
 
 // ── Git log parsing ──────────────────────────────────────────────────────────
 
-function parseGitLogRecords(cwd: string, days: number): Array<{ hash: string; subject: string; body: string }> {
+export function parseGitLogRecords(cwd: string, days: number): Array<{ hash: string; subject: string; body: string }> {
   const fmt = "%H%x1f%s%x1f%b%x1e";
   const raw = runGit(cwd, ["log", `--since=${days} days ago`, "--first-parent", `--pretty=format:${fmt}`]) || "";
   const records: Array<{ hash: string; subject: string; body: string }> = [];
@@ -92,7 +92,7 @@ interface Candidate {
   sourceText?: string;
 }
 
-async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
+export async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
   if (!commandExists("gh")) return null;
   const retries = clampInt((process.env.PHREN_GH_RETRIES), 2, 0, 5);
   const timeoutMs = clampInt((process.env.PHREN_GH_TIMEOUT_MS), 10000, 1000, 60000);
@@ -118,7 +118,7 @@ async function runGhJson<T>(cwd: string, args: string[]): Promise<T | null> {
   return null;
 }
 
-function ghCachePath(repoRoot: string): string {
+export function ghCachePath(repoRoot: string): string {
   const absPath = path.resolve(repoRoot);
   const repoHash = crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 12);
   const dateKey = new Date().toISOString().slice(0, 10);
@@ -127,7 +127,7 @@ function ghCachePath(repoRoot: string): string {
 
 const GH_CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
-async function mineGithubCandidates(repoRoot: string): Promise<Candidate[]> {
+export async function mineGithubCandidates(repoRoot: string): Promise<Candidate[]> {
   const cacheFile = ghCachePath(repoRoot);
   try {
     const stat = fs.statSync(cacheFile);
