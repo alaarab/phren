@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DbRow, SqlJsDatabase } from "../shared/index.js";
 
-vi.mock("../search-fallback.js", () => ({
+vi.mock("../shared/search-fallback.js", () => ({
   vectorFallback: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("../ollama.js", () => ({
+vi.mock("../shared/ollama.js", () => ({
   getOllamaUrl: vi.fn().mockReturnValue("http://127.0.0.1:11434"),
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));

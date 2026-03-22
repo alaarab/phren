@@ -19,7 +19,7 @@ vi.mock("../shared.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../governance.js", () => ({
+vi.mock("../shared/governance.js", () => ({
   appendReviewQueue: vi.fn(() => ({ ok: true, data: 1 })),
   getRetentionPolicy: vi.fn(() => ({ autoAcceptThreshold: 0.5 })),
   recordFeedback: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("../governance.js", () => ({
   entryScoreKey: vi.fn(() => "score-key"),
 }));
 
-vi.mock("../journal.js", () => ({
+vi.mock("../finding/journal.js", () => ({
   appendFindingJournal: vi.fn(() => ({ ok: true, data: "journal" })),
   compactFindingJournals: vi.fn(() => ({ added: 0, skipped: 0, failed: 0 })),
 }));

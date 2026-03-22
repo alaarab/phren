@@ -11,18 +11,18 @@ export interface ToolMetadata {
 }
 
 const CATEGORY_BY_MODULE: Record<string, string> = {
-  "mcp-search": "Search and browse",
-  "mcp-tasks": "Task management",
-  "mcp-finding": "Finding capture",
-  "mcp-memory": "Memory quality",
-  "mcp-data": "Data management",
-  "mcp-graph": "Fragments and graph",
-  "mcp-session": "Session management",
-  "mcp-ops": "Operations and review",
-  "mcp-skills": "Skills management",
-  "mcp-hooks": "Hooks management",
-  "mcp-config": "Configuration",
-  "mcp-extract": "Extraction",
+  "search": "Search and browse",
+  "tasks": "Task management",
+  "finding": "Finding capture",
+  "memory": "Memory quality",
+  "data": "Data management",
+  "graph": "Fragments and graph",
+  "session": "Session management",
+  "ops": "Operations and review",
+  "skills": "Skills management",
+  "hooks": "Hooks management",
+  "config": "Configuration",
+  "extract": "Extraction",
 };
 
 const MODULE_ORDER = Object.keys(CATEGORY_BY_MODULE);
