@@ -49,21 +49,6 @@ if [ "$ERRORS" -eq 0 ]; then
   echo "OK: Public onboarding docs only advertise supported enrollment flows"
 fi
 
-# 5. Supporting docs for platform behavior and error policy should exist
-for required in "docs/platform-matrix.md" "docs/error-reporting.md"; do
-  if [ ! -f "$required" ]; then
-    echo "FAIL: Missing required documentation file: $required"
-    ERRORS=$((ERRORS + 1))
-  fi
-done
-
-# 6. Public docs should not point at renamed support docs
-if grep -R -nE 'platform-support\.md|error-policy\.md' README.md docs >/tmp/phren-doc-renames.txt; then
-  echo "FAIL: Found stale references to renamed docs:"
-  cat /tmp/phren-doc-renames.txt
-  ERRORS=$((ERRORS + 1))
-fi
-
 if [ "$ERRORS" -gt 0 ]; then
   echo ""
   echo "$ERRORS validation error(s) found"

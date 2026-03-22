@@ -1,3 +1,6 @@
+// Barrel module: re-exports task, profile, and shell-state APIs from their
+// dedicated modules (data-tasks.ts, profile-store.ts, shell-state-store.ts)
+// and owns finding/queue logic directly.
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
