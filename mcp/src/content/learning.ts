@@ -286,7 +286,11 @@ function insertFindingIntoContent(content: string, today: string, bullet: string
   // Use positional insertion (not String.replace) to avoid: (1) special $& replacement patterns
   // if bullet contains $ chars, and (2) inserting inside an archived <details> block when a
   // duplicate date header exists from a prior consolidation run.
-  const idx = content.indexOf(todayHeader);
+  // Search for todayHeader only after the last </details> close tag so we never
+  // insert into an archived block whose date happens to match today.
+  const lastDetailsClose = content.lastIndexOf("</details>");
+  const searchFrom = lastDetailsClose >= 0 ? lastDetailsClose : 0;
+  const idx = content.indexOf(todayHeader, searchFrom);
   if (idx !== -1) {
     const insertAt = idx + todayHeader.length;
     return content.slice(0, insertAt) + `\n\n${bullet}\n${citationComment}` + content.slice(insertAt);
@@ -381,7 +385,9 @@ export function addFindingToFile(
         return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
       }
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
-      fs.writeFileSync(learningsPath, newContent);
+      const tmpPath = learningsPath + ".tmp." + process.pid;
+      fs.writeFileSync(tmpPath, newContent);
+      fs.renameSync(tmpPath, learningsPath);
       return phrenOk({
         content: newContent,
         citation: buildFindingCitation(resolvedCitationInput, nowIso, inferredRepo, headCommit),
@@ -543,7 +549,9 @@ export function addFindingsToFile(
         added.push(learning);
       }
       if (added.length > 0) {
-        fs.writeFileSync(learningsPath, content.endsWith("\n") ? content : `${content}\n`);
+        const tmpPath = learningsPath + ".tmp." + process.pid;
+        fs.writeFileSync(tmpPath, content.endsWith("\n") ? content : `${content}\n`);
+        fs.renameSync(tmpPath, learningsPath);
       }
       return phrenOk({ content, wrote: added.length > 0 });
     }

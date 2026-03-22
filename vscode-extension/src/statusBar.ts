@@ -47,7 +47,8 @@ export class PhrenStatusBar implements vscode.Disposable {
       : projectNames[0];
     this.render();
 
-    // Start health polling
+    // Start health polling (clear any existing timer to prevent stacking)
+    if (this.healthTimer) clearInterval(this.healthTimer);
     await this.pollHealth();
     this.healthTimer = setInterval(() => { this.pollHealth().catch(() => {}); }, HEALTH_POLL_INTERVAL_MS);
   }

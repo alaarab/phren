@@ -60,7 +60,10 @@ export async function handleHookContext() {
     );
     if (findingsRow) {
       const content = findingsRow[0][0] as string;
-      const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(0, 10);
+      const bullets = content.split("\n")
+        .filter(l => l.startsWith("- "))
+        .filter(l => !(/<!--\s*superseded_by:/.test(l) || /<!--\s*(?:phren:)?retract/.test(l) || /status\s+"retracted"/.test(l) || /status\s+"superseded"/.test(l)))
+        .slice(0, 10);
       if (bullets.length > 0) {
         parts.push("## Recent findings");
         parts.push(bullets.join("\n"));
