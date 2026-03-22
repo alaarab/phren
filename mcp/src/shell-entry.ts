@@ -5,7 +5,7 @@
 
 import { PhrenShell } from "./shell.js";
 import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./shell-render.js";
-import { createPhrenAnimator, PHREN_ART_RIGHT } from "./phren-art.js";
+import { createPhrenAnimator } from "./phren-art.js";
 import { errorMessage } from "./utils.js";
 import { computePhrenLiveStateToken } from "./shared.js";
 import { VERSION } from "./init-shared.js";
@@ -87,7 +87,6 @@ async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPla
   const animator = createPhrenAnimator({ facing: "right" });
   animator.start();
 
-  const cols = process.stdout.columns || 80;
   const tagline = style.dim("local memory for working agents");
   const versionBadge = badge(`v${VERSION}`, style.boldBlue);
   const logoLines = [
