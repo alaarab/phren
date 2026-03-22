@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 66 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 51 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
 | `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |
@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.29
 
-## MCP Tools (54)
+## MCP Tools (51)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -75,7 +75,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `edit_finding(project, old_text, new_text)` : edit a finding in place while preserving inline metadata
 - `remove_finding(project, finding: string | string[])` : remove one or more findings by match
 - `push_changes(message?)` : commit and push phren changes
-- `auto_extract_findings(context)` : extract findings from conversation context automatically (Ollama → remote LLM fallback)
+- `auto_extract_findings(project, text, model?, dryRun?)` : extract findings from text automatically (Ollama → remote LLM fallback)
 
 **Memory quality:**
 - `pin_memory(project, memory)` : write canonical/pinned memory entries
