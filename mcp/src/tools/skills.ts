@@ -1,12 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
-import { parseSkillFrontmatter, validateSkillFrontmatter } from "../link/link-skills.js";
-import { removeSkillPath, setSkillEnabledAndSync } from "../skill/skill-files.js";
-import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/skill-registry.js";
+import { parseSkillFrontmatter, validateSkillFrontmatter } from "../link/skills.js";
+import { removeSkillPath, setSkillEnabledAndSync } from "../skill/files.js";
+import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/registry.js";
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;

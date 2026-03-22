@@ -13,15 +13,15 @@ import {
 } from "../shared.js";
 import {
   mergeConfig,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import {
   buildIndex,
   detectProject,
-} from "../shared/shared-index.js";
+} from "../shared/index.js";
 import { isProjectHookEnabled } from "../project-config.js";
 import {
   checkConsolidationNeeded,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import {
   buildRobustFtsQuery,
   extractKeywordEntries,
@@ -35,11 +35,11 @@ import {
 import { getHooksEnabledPreference } from "../init/init.js";
 import { logger } from "../logger.js";
 import { isToolHookEnabled } from "../hooks.js";
-import { handleExtractMemories } from "./cli-extract.js";
+import { handleExtractMemories } from "./extract.js";
 import { appendAuditLog } from "../shared.js";
-import { updateRuntimeHealth } from "../shared/shared-governance.js";
+import { updateRuntimeHealth } from "../shared/governance.js";
 import { getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
-import { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
+import { FINDING_SENSITIVITY_CONFIG } from "./config.js";
 import * as fs from "fs";
 
 // ── Re-exports from focused modules ─────────────────────────────────────────
@@ -51,13 +51,13 @@ export {
   annotateStale,
   clearCitationValidCache,
   type ParsedCitation,
-} from "./cli-hooks-citations.js";
+} from "./hooks-citations.js";
 
 // Globs
 export {
   getProjectGlobBoost,
   clearProjectGlobCache,
-} from "./cli-hooks-globs.js";
+} from "./hooks-globs.js";
 
 // Retrieval
 export {
@@ -68,12 +68,12 @@ export {
   rankResults,
   selectSnippets,
   type SelectedSnippet,
-} from "../shared/shared-retrieval.js";
+} from "../shared/retrieval.js";
 
 // Output
 export {
   buildHookOutput,
-} from "./cli-hooks-output.js";
+} from "./hooks-output.js";
 
 // Session
 export {
@@ -87,7 +87,7 @@ export {
   extractToolFindings,
   filterToolFindingsForProactivity,
   resolveSubprocessArgs,
-} from "./cli-hooks-session.js";
+} from "./hooks-session.js";
 
 // ── Imports for the orchestrator ─────────────────────────────────────────────
 
@@ -98,15 +98,15 @@ import {
   selectSnippets,
   detectTaskIntent,
   type SelectedSnippet,
-} from "../shared/shared-retrieval.js";
-import { buildHookOutput } from "./cli-hooks-output.js";
+} from "../shared/retrieval.js";
+import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
   trackSessionMetrics,
-} from "./cli-hooks-session.js";
-import { approximateTokens } from "../shared/shared-retrieval.js";
+} from "./hooks-session.js";
+import { approximateTokens } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import { handleTaskPromptLifecycle } from "../task/task-lifecycle.js";
+import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
 
 function synonymTermKnown(term: string, map: Record<string, string[]>): boolean {
   if (Object.prototype.hasOwnProperty.call(map, term)) return true;

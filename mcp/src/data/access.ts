@@ -15,22 +15,22 @@ import {
 } from "../shared.js";
 import {
   normalizeQueueEntryText,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import {
   addFindingToFile,
   type AddFindingResult,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import { isValidProjectName, queueFilePath, safeProjectPath } from "../utils.js";
 import {
   type FindingCitation,
   type FindingProvenanceSource,
   parseCitationComment,
   parseSourceComment,
-} from "../content/content-citation.js";
+} from "../content/citation.js";
 import {
   parseFindingLifecycle,
   type FindingLifecycleStatus,
-} from "../finding/finding-lifecycle.js";
+} from "../finding/lifecycle.js";
 import {
   METADATA_REGEX,
   isCitationLine,
@@ -40,9 +40,9 @@ import {
   parseAllContradictions,
   stripComments,
   normalizeFindingText,
-} from "../content/content-metadata.js";
-import { withSafeLock, ensureProject } from "../shared/shared-data-utils.js";
-export type { TaskSection, TaskItem, TaskDoc } from "./data-tasks.js";
+} from "../content/metadata.js";
+import { withSafeLock, ensureProject } from "../shared/data-utils.js";
+export type { TaskSection, TaskItem, TaskDoc } from "./tasks.js";
 export {
   readTasks,
   readTasksAcrossProjects,
@@ -68,7 +68,7 @@ export {
   resolveTaskFilePath,
   isTaskFileName,
   type AddTaskOptions,
-} from "./data-tasks.js";
+} from "./tasks.js";
 export {
   addProjectToProfile,
   listMachines,
@@ -84,8 +84,8 @@ export {
   resetShellState,
   saveShellState,
   type ShellState,
-} from "../shell/shell-state-store.js";
-export { getRuntimeHealth as readRuntimeHealth } from "../shared/shared-governance.js";
+} from "../shell/state-store.js";
+export { getRuntimeHealth as readRuntimeHealth } from "../shared/governance.js";
 
 export interface FindingItem {
   id: string;

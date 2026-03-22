@@ -3,7 +3,7 @@ import * as path from "path";
 import { debugLog, runtimeFile } from "./phren-paths.js";
 import { errorMessage } from "./utils.js";
 import { logWarn } from "./logger.js";
-import { withFileLock } from "./governance/governance-locks.js";
+import { withFileLock } from "./governance/locks.js";
 
 export type { HookToolName } from "./provider-adapters.js";
 export { HOOK_TOOL_NAMES, hookConfigPath } from "./provider-adapters.js";

@@ -8,7 +8,7 @@ import { isVersionNewer } from "./init/init.js";
 import { getMachineName } from "./machine-identity.js";
 import { PACKAGE_NAME } from "./package-metadata.js";
 import { runLink, runDoctor, parseSkillFrontmatter, validateSkillFrontmatter, validateSkillsDir, readSkillManifestHooks, updateFileChecksums, verifyFileChecksums } from "./link/link.js";
-import { linkSkillsDir, detectSkillCollisions } from "./link/link-skills.js";
+import { linkSkillsDir, detectSkillCollisions } from "./link/skills.js";
 
 describe("link", () => {
   describe("isVersionNewer", () => {

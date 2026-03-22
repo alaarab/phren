@@ -1,5 +1,5 @@
 import { getPhrenPath } from "../shared.js";
-import { buildIndex, queryRows } from "../shared/shared-index.js";
+import { buildIndex, queryRows } from "../shared/index.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
@@ -154,7 +154,7 @@ export async function handleGraphLink(args: string[]): Promise<void> {
   const { runtimeFile } = await import("../shared.js");
   const fs = await import("fs");
   const crypto = await import("crypto");
-  const { withFileLock } = await import("../shared/shared-governance.js");
+  const { withFileLock } = await import("../shared/governance.js");
 
   const manualLinksPath = runtimeFile(phrenPath, "manual-links.json");
   try {

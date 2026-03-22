@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import type { McpContext } from "../tools/mcp-types.js";
+import type { McpContext } from "../tools/types.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { register } from "../tools/mcp-finding.js";
+import { register } from "../tools/finding.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

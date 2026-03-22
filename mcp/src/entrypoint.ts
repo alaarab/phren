@@ -4,7 +4,7 @@ import { parseMcpMode, runInit } from "./init/init.js";
 import { errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { defaultPhrenPath, findPhrenPath } from "./shared.js";
-import { addProjectFromPath } from "./core/core-project.js";
+import { addProjectFromPath } from "./core/project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   getProjectOwnershipDefault,
@@ -374,7 +374,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
 
   if (argvCommand === "verify") {
     const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init/init.js");
-    const { getWorkflowPolicy } = await import("./shared/shared-governance.js");
+    const { getWorkflowPolicy } = await import("./shared/governance.js");
     const phrenPath = findPhrenPath() || defaultPhrenPath();
     const result = runPostInitVerify(phrenPath);
     console.log(`phren verify: ${result.ok ? "ok" : "issues found"}`);

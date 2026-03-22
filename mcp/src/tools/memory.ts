@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -7,8 +7,8 @@ import { runtimeDir } from "../shared.js";
 import {
   recordFeedback,
   flushEntryScores,
-} from "../shared/shared-governance.js";
-import { upsertCanonical } from "../shared/shared-content.js";
+} from "../shared/governance.js";
+import { upsertCanonical } from "../shared/content.js";
 import { isValidProjectName } from "../utils.js";
 
 

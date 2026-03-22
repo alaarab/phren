@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as crypto from "crypto";
 import { runtimeFile, debugLog } from "../shared.js";
-import { withFileLock } from "./shared-governance.js";
+import { withFileLock } from "./governance.js";
 import { errorMessage } from "../utils.js";
 
 const VECTOR_INDEX_VERSION = 1;

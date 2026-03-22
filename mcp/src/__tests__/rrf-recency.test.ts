@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rrfMerge, recencyBoost } from "../shared/shared-retrieval.js";
-import type { DocRow } from "../shared/shared-index.js";
+import { rrfMerge, recencyBoost } from "../shared/retrieval.js";
+import type { DocRow } from "../shared/index.js";
 
 function makeDocRow(project: string, filename: string, type: string, content = ""): DocRow {
   return { project, filename, type, content, path: `/tmp/${project}/${filename}` };

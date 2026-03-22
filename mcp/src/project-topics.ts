@@ -2,7 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
-import { withFileLock } from "./shared/shared-governance.js";
+import { withFileLock } from "./shared/governance.js";
 import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName, safeProjectPath } from "./utils.js";
 
 export interface ProjectTopic {

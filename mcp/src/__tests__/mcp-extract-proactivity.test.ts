@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import type { McpContext } from "../tools/mcp-types.js";
+import type { McpContext } from "../tools/types.js";
 
-vi.mock("../shared-ollama.js", () => ({
+vi.mock("../ollama.js", () => ({
   checkOllamaAvailable: vi.fn(async () => true),
   checkModelAvailable: vi.fn(async () => true),
   generateText: vi.fn(async () => '["[pattern] Retry socket setup after ECONNRESET"]'),
@@ -12,7 +12,7 @@ vi.mock("../shared-ollama.js", () => ({
   getExtractModel: vi.fn(() => "llama3.2"),
 }));
 
-vi.mock("../shared-content.js", () => ({
+vi.mock("../content.js", () => ({
   addFindingsToFile: vi.fn(() => ({
     ok: true,
     data: {
@@ -23,9 +23,9 @@ vi.mock("../shared-content.js", () => ({
   })),
 }));
 
-import { register } from "../tools/mcp-extract.js";
-import { addFindingsToFile } from "../shared/shared-content.js";
-import { generateText } from "../shared/shared-ollama.js";
+import { register } from "../tools/extract.js";
+import { addFindingsToFile } from "../shared/content.js";
+import { generateText } from "../shared/ollama.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

@@ -2,10 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { runtimeDir, PhrenResult, phrenOk, phrenErr, PhrenError } from "../shared.js";
-import { withFileLock } from "../shared/shared-governance.js";
-import { addFindingToFile } from "../shared/shared-content.js";
+import { withFileLock } from "../shared/governance.js";
+import { addFindingToFile } from "../shared/content.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import type { FindingProvenanceSource } from "../content/content-citation.js";
+import type { FindingProvenanceSource } from "../content/citation.js";
 
 export interface FindingJournalEntry {
   at: string;

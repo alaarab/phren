@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { embedText, prepareEmbeddingInput } from "./shared/shared-ollama.js";
+import { embedText, prepareEmbeddingInput } from "./shared/ollama.js";
 
 describe("prepareEmbeddingInput", () => {
   it("normalizes markdown-heavy content and caps length", () => {

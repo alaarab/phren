@@ -6,7 +6,7 @@ import {
   phrenOk,
   type PhrenResult,
 } from "../shared.js";
-import { withFileLock as withFileLockRaw } from "./shared-governance.js";
+import { withFileLock as withFileLockRaw } from "./governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 
 export function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {

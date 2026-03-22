@@ -9,8 +9,8 @@ import {
 } from "../shared.js";
 import {
   updateRuntimeHealth,
-} from "../shared/shared-governance.js";
-import { detectProject } from "../shared/shared-index.js";
+} from "../shared/governance.js";
+import { detectProject } from "../shared/index.js";
 import { getHooksEnabledPreference } from "../init/init.js";
 import { isToolHookEnabled } from "../hooks.js";
 import { isProjectHookEnabled } from "../project-config.js";
@@ -86,8 +86,8 @@ export {
   appendReviewQueue,
   recordFeedback,
   getQualityMultiplier,
-} from "../shared/shared-governance.js";
-export { detectProject } from "../shared/shared-index.js";
+} from "../shared/governance.js";
+export { detectProject } from "../shared/index.js";
 export { isProjectHookEnabled, readProjectConfig, getProjectSourcePath } from "../project-config.js";
 export { resolveRuntimeProfile } from "../runtime-profile.js";
 export {
@@ -95,14 +95,14 @@ export {
   ensureLocalGitRepo,
   isProjectTracked,
   repairPreexistingInstall,
-} from "../init/init-setup.js";
+} from "../init/setup.js";
 export { getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
 export { hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
-export { FINDING_SENSITIVITY_CONFIG } from "./cli-config.js";
+export { FINDING_SENSITIVITY_CONFIG } from "./config.js";
 export { isFeatureEnabled, errorMessage } from "../utils.js";
 export { bootstrapPhrenDotEnv } from "../phren-dotenv.js";
-export { finalizeTaskSession } from "../task/task-lifecycle.js";
-export { appendFindingJournal } from "../finding/finding-journal.js";
+export { finalizeTaskSession } from "../task/lifecycle.js";
+export { appendFindingJournal } from "../finding/journal.js";
 export { getHooksEnabledPreference } from "../init/init.js";
 export { isToolHookEnabled } from "../hooks.js";
 export { runDoctor } from "../link/link.js";

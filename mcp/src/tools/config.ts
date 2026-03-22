@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./mcp-types.js";
+import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import {
   getRetentionPolicy,
@@ -13,15 +13,15 @@ import {
   mergeConfig,
   VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import {
   PROACTIVITY_LEVELS,
   type ProactivityLevel,
 } from "../proactivity.js";
 import {
   writeGovernanceInstallPreferences,
-} from "../init/init-preferences.js";
-import { FINDING_SENSITIVITY_CONFIG, buildProactivitySnapshot, checkProjectInProfile } from "../cli/cli-config.js";
+} from "../init/preferences.js";
+import { FINDING_SENSITIVITY_CONFIG, buildProactivitySnapshot, checkProjectInProfile } from "../cli/config.js";
 import {
   readProjectConfig,
   type ProjectConfigOverrides,

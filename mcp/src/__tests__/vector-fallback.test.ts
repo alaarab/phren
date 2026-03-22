@@ -3,7 +3,7 @@ import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 
 // Mock the ollama/embedding modules before importing vectorFallback
-vi.mock("../shared-ollama.js", () => ({
+vi.mock("../ollama.js", () => ({
   embedText: vi.fn(),
   cosineSimilarity: vi.fn(),
   getEmbeddingModel: vi.fn().mockReturnValue("nomic-embed-text"),
@@ -11,7 +11,7 @@ vi.mock("../shared-ollama.js", () => ({
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock("../shared-embedding-cache.js", () => {
+vi.mock("../embedding-cache.js", () => {
   let entries: Array<{ path: string; model: string; vec: number[] }> = [];
   return {
     getEmbeddingCache: vi.fn().mockReturnValue({
@@ -23,10 +23,10 @@ vi.mock("../shared-embedding-cache.js", () => {
   };
 });
 
-import { vectorFallback } from "../shared/shared-search-fallback.js";
-import { deriveVectorDocIdentity } from "../shared/shared-search-fallback.js";
-import { embedText, cosineSimilarity } from "../shared/shared-ollama.js";
-import { getEmbeddingCache } from "../shared/shared-embedding-cache.js";
+import { vectorFallback } from "../shared/search-fallback.js";
+import { deriveVectorDocIdentity } from "../shared/search-fallback.js";
+import { embedText, cosineSimilarity } from "../shared/ollama.js";
+import { getEmbeddingCache } from "../shared/embedding-cache.js";
 
 describe("vectorFallback content hydration", () => {
   let tmp: { path: string; cleanup: () => void };

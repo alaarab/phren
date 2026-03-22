@@ -11,12 +11,12 @@ export {
   mergeFindings,
   mergeTask,
   autoMergeConflicts,
-} from "../content/content-validate.js";
+} from "../content/validate.js";
 
 export {
   filterTrustedFindings,
   filterTrustedFindingsDetailed,
-} from "../content/content-citation.js";
+} from "../content/citation.js";
 
 export {
   scanForSecrets,
@@ -26,12 +26,12 @@ export {
   extractDynamicEntities,
   checkSemanticDedup,
   checkSemanticConflicts,
-} from "../content/content-dedup.js";
+} from "../content/dedup.js";
 
 export {
   countActiveFindings,
   autoArchiveToReference,
-} from "../content/content-archive.js";
+} from "../content/archive.js";
 
 export {
   upsertCanonical,
@@ -39,7 +39,7 @@ export {
   addFindingsToFile,
   autoDetectFindingType,
   type AddFindingResult,
-} from "../content/content-learning.js";
+} from "../content/learning.js";
 
 export {
   FINDING_LIFECYCLE_STATUSES,
@@ -50,7 +50,7 @@ export {
   isInactiveFindingLine,
   type FindingLifecycleStatus,
   type FindingLifecycleMetadata,
-} from "../finding/finding-lifecycle.js";
+} from "../finding/lifecycle.js";
 
 export {
   METADATA_REGEX,
@@ -70,4 +70,4 @@ export {
   stripAllMetadata,
   stripComments,
   addMetadata,
-} from "../content/content-metadata.js";
+} from "../content/metadata.js";

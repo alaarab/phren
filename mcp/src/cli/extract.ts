@@ -10,11 +10,11 @@ import {
   recordFeedback,
   flushEntryScores,
   entryScoreKey,
-} from "../shared/shared-governance.js";
-import { detectProject } from "../shared/shared-index.js";
+} from "../shared/governance.js";
+import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, resolveExecCommand } from "../utils.js";
-import { appendFindingJournal, compactFindingJournals } from "../finding/finding-journal.js";
+import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 import { getProactivityLevelForTask, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as fs from "fs";
 import * as os from "os";
@@ -22,7 +22,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import type { FindingProvenanceSource } from "../content/content-citation.js";
+import type { FindingProvenanceSource } from "../content/citation.js";
 
 function runGit(cwd: string, args: string[]): string | null {
   return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);

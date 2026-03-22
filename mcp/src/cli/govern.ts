@@ -10,16 +10,16 @@ import {
   consolidateProjectFindings,
   updateRuntimeHealth,
   pruneDeadMemories,
-} from "../shared/shared-governance.js";
+} from "../shared/governance.js";
 import {
   filterTrustedFindingsDetailed,
-} from "../shared/shared-content.js";
+} from "../shared/content.js";
 import * as fs from "fs";
 import * as path from "path";
-import { handleExtractMemories } from "./cli-extract.js";
+import { handleExtractMemories } from "./extract.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
-import { compactFindingJournals } from "../finding/finding-journal.js";
+import { compactFindingJournals } from "../finding/journal.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────

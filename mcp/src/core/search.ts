@@ -1,6 +1,6 @@
 import { STOP_WORDS } from "../utils.js";
-import { queryDocRows } from "../shared/shared-index.js";
-import type { DocRow, SqlJsDatabase } from "../shared/shared-index.js";
+import { queryDocRows } from "../shared/index.js";
+import type { DocRow, SqlJsDatabase } from "../shared/index.js";
 
 /**
  * Keyword overlap fallback for when FTS5 returns no results.

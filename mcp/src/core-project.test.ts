@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
-import { addProjectFromPath } from "./core/core-project.js";
+import { addProjectFromPath } from "./core/project.js";
 
 describe("addProjectFromPath", () => {
   it("uses the selected profile and returns the created file paths", () => {

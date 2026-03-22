@@ -6,7 +6,7 @@ import { debugLog } from "./shared.js";
 import {
   bootstrapFromExisting,
   detectProjectDir,
-} from "./init-setup.js";
+} from "./setup.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -16,7 +16,7 @@ import {
   createWalkthroughStyle,
 } from "./init-walkthrough.js";
 import { getPendingBootstrapTarget } from "./init-detect.js";
-import { log } from "./init-shared.js";
+import { log } from "./shared.js";
 import type { InitOptions } from "./init-types.js";
 
 export interface BootstrapDecision {

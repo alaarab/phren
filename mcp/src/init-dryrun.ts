@@ -4,8 +4,8 @@
 import * as path from "path";
 import { getMachineName } from "./machine-identity.js";
 import { getPendingBootstrapTarget } from "./init-detect.js";
-import { listTemplates } from "./init-setup.js";
-import { log } from "./init-shared.js";
+import { listTemplates } from "./setup.js";
+import { log } from "./shared.js";
 import type { InitOptions } from "./init-types.js";
 
 export function printDryRun(

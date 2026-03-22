@@ -27,7 +27,7 @@ import {
   editFinding,
   removeFinding,
   TASKS_FILENAME,
-} from "./data/data-access.js";
+} from "./data/access.js";
 import { PhrenError } from "./shared.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "./test-helpers.js";
 import * as path from "path";
@@ -1030,7 +1030,7 @@ describe("file locking", () => {
     fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
 
     // Use forward slashes in import paths for Windows compatibility
-    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data/access.ts").replace(/\\/g, "/");
     const mkCode = (item: string) =>
       `import { addTask } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.PHREN_ACTOR='vitest-admin';` +
@@ -1054,7 +1054,7 @@ describe("file locking", () => {
 
   it.skipIf(process.platform === "win32")("allows concurrent finding writes from two processes without data loss", async () => {
     // Use forward slashes in import paths for Windows compatibility
-    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data-access.ts").replace(/\\/g, "/");
+    const dataAccessPath = path.join(REPO_ROOT, "mcp/src/data/access.ts").replace(/\\/g, "/");
     const mkCode = (text: string) =>
       `import { addFinding } from ${JSON.stringify(dataAccessPath)};` +
       `process.env.PHREN_ACTOR='vitest-admin';` +

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "./test-helpers.js";
-import { removeSkillPath, setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill/skill-files.js";
+import { removeSkillPath, setSkillEnabledAndSync, syncSkillLinksForScope } from "./skill/files.js";
 
 let cleanup: (() => void) | undefined;
 

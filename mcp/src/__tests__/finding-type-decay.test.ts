@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FINDING_TYPE_DECAY,
   extractFindingType,
-} from "../finding/finding-lifecycle.js";
+} from "../finding/lifecycle.js";
 
 describe("finding type decay", () => {
   it("observations decay faster than patterns", () => {

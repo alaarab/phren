@@ -3,7 +3,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { EXEC_TIMEOUT_MS, phrenErr, phrenOk, type PhrenResult, PhrenError } from "../shared.js";
 import { errorMessage, resolveExecCommand } from "../utils.js";
-import type { TaskItem } from "../data/data-tasks.js";
+import type { TaskItem } from "../data/tasks.js";
 
 const GITHUB_REPO_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?:\/|\b|$)/;
 const GITHUB_ISSUE_URL = /https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)(?:[?#][^\s]*)?$/;

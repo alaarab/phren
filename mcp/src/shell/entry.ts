@@ -4,12 +4,12 @@
  */
 
 import { PhrenShell } from "./shell.js";
-import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./shell-render.js";
+import { style, clearScreen, clearToEnd, shellStartupFrames, gradient, badge } from "./render.js";
 import { createPhrenAnimator, PHREN_ART_RIGHT } from "../phren-art.js";
 import { errorMessage } from "../utils.js";
 import { computePhrenLiveStateToken } from "../shared.js";
-import { VERSION } from "../init/init-shared.js";
-import { loadShellState, saveShellState } from "./shell-state-store.js";
+import { VERSION } from "../init/shared.js";
+import { loadShellState, saveShellState } from "./state-store.js";
 
 const LIVE_STATE_POLL_MS = 2000;
 

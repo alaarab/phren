@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { safeProjectPath } from "../utils.js";
-import { resolveTaskFilePath } from "../data/data-tasks.js";
+import { resolveTaskFilePath } from "../data/tasks.js";
 
 type TaskSection = "Active" | "Queue" | "Done";
 type TaskPriority = "high" | "medium" | "low" | undefined;

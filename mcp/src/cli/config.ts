@@ -11,8 +11,8 @@ import {
   VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
   type FindingSensitivityLevel,
-} from "../shared/shared-governance.js";
-import { listMachines as listMachinesStore, listProfiles as listProfilesStore, listProfiles } from "../data/data-access.js";
+} from "../shared/governance.js";
+import { listMachines as listMachinesStore, listProfiles as listProfilesStore, listProfiles } from "../data/access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "../telemetry.js";
 import {
   governanceInstallPreferencesFile,
@@ -20,7 +20,7 @@ import {
   readGovernanceInstallPreferences,
   writeInstallPreferences,
   writeGovernanceInstallPreferences,
-} from "../init/init-preferences.js";
+} from "../init/preferences.js";
 import {
   PROACTIVITY_LEVELS,
   getProactivityLevel,
