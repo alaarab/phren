@@ -3,6 +3,46 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.31] - 2026-03-21
+
+### Security
+- **SSRF bypass on DNS failure**: webhook validation now rejects requests when hostname resolution fails instead of falling back to unresolved URL
+- **Windows hook command injection**: sanitize environment variable values passed to `cmd /c` hook subprocesses to prevent metacharacter expansion
+- **Sync endpoint scope**: memory-ui sync now commits only its own staged files via `git commit --only`, preventing unrelated staged changes from being published
+- **Skill file path restriction**: skill-content/skill-save endpoints now enforce `skills/` path segment requirement instead of accepting any file under phren root
+
+### Fixed
+- **Graceful shutdown**: MCP server now handles SIGTERM/SIGINT — drains write queue and closes FTS5 database before exit, preventing index corruption
+- **rebuildIndex recovery**: if index rebuild fails, server restores previous DB handle instead of staying permanently degraded
+- **Write queue overload**: returns structured MCP error response instead of throwing raw exception when queue is full
+- **appendAuditLog locking**: replaced ad-hoc lock loop with `withFileLock()` (includes PID liveness checks)
+- **24h stale session cleanup**: no longer deletes active sessions — only cleans up sessions that have ended
+- **session_start wrong project**: prefers last ended session's project over another client's active session
+- **Windows file lock bypass**: stale lock detection on Windows now checks PID via `tasklist` instead of unconditionally treating lock owner as dead
+- **Hook error log rotation**: wrapped append+rotate in `withFileLock` to prevent concurrent write loss
+- **filterAgentHooks**: no longer deletes entire config file when hooks become empty — preserves other top-level fields
+- **Uninstall Codex path**: uses resolved phrenPath consistently instead of falling back to default for Codex cleanup
+- **npm uninstall timeout**: added 30s timeout to `spawnSync` calls to prevent indefinite hangs
+- **DB/FTS error visibility**: `queryRows` now logs errors via structured logger before returning null
+- **buildGraph reindex**: accepts existing DB handle instead of rebuilding the full index on every dashboard request
+- **TF-IDF cache collision**: cache key now includes corpus size and token count to reduce collision across different corpora
+- **Rebuild race condition**: falls back to stale cache during index rebuild instead of returning empty results
+- **Tool registry path**: `getRegisteredTools()` now scans `tools/` subdirectory after source reorganization
+
+### Changed
+- **Source reorganized into subdirectories**: 96 files moved from flat `mcp/src/` into 15 logical subdirectories (cli/, tools/, shared/, shell/, init/, ui/, content/, governance/, link/, finding/, core/, skill/, task/, data/, session/)
+- **Redundant file prefixes dropped**: `cli/cli-actions.ts` → `cli/actions.ts`, `tools/mcp-search.ts` → `tools/search.ts`, etc. across all subdirectories
+- **Complete structured logging migration**: all `process.stderr.write("[phren]...")` diagnostic calls replaced with `logger.debug()` across ~130 files
+- **Logger performance**: `findPhrenPath()` result cached after first resolution instead of re-resolving on every log call
+- **ESLint cleanup**: removed 44 unused variable/import warnings; added underscore-prefix ignore pattern
+
+### Removed
+- **Internal decision records** (`docs/decisions/`): 14 ADR files — phren's own knowledge layer handles this
+- **Internal spec docs** (`docs/internal/`): 5 spec files
+- **Stale docs**: benchmarks, UX spec, platform matrix, versioning, error reporting, reference tiers
+- **Deprecated `shellSingleQuote`**: replaced with `shellEscape` directly
+- **Empty `mcp/e2e/review-ui.spec.ts`**: placeholder test file removed
+
 ## [0.0.30] - 2026-03-21
 
 ### Changed
