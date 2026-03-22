@@ -296,7 +296,9 @@ export function supersedeFinding(
       { supersededBy: ref }
     );
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(findingsPath, normalized);
+    const tmpPath = findingsPath + ".tmp." + process.pid;
+    fs.writeFileSync(tmpPath, normalized);
+    fs.renameSync(tmpPath, findingsPath);
     return phrenOk({ finding: matched.data.text, superseded_by: ref, status: "superseded" });
   });
 }
@@ -324,7 +326,9 @@ export function retractFinding(
       today
     );
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(findingsPath, normalized);
+    const tmpPath = findingsPath + ".tmp." + process.pid;
+    fs.writeFileSync(tmpPath, normalized);
+    fs.renameSync(tmpPath, findingsPath);
     return phrenOk({ finding: matched.data.text, reason: reasonText, status: "retracted" });
   });
 }
@@ -393,7 +397,9 @@ export function resolveFindingContradiction(
     }
 
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-    fs.writeFileSync(findingsPath, normalized);
+    const tmpPath = findingsPath + ".tmp." + process.pid;
+    fs.writeFileSync(tmpPath, normalized);
+    fs.renameSync(tmpPath, findingsPath);
     return phrenOk({
       resolution,
       finding_a: { text: matchedA.data.text, status: statusA },

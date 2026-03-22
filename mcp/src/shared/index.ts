@@ -373,7 +373,7 @@ function loadHashMap(phrenPath: string): { version?: number; hashes: Record<stri
   return { hashes: {} };
 }
 
-function saveHashMap(phrenPath: string, hashes: Record<string, string>): void {
+function saveHashMap(phrenPath: string, hashes: Record<string, string>, knownPaths?: Set<string>): void {
   const runtimeDir = path.join(phrenPath, ".runtime");
   try {
     fs.mkdirSync(runtimeDir, { recursive: true });
@@ -390,9 +390,11 @@ function saveHashMap(phrenPath: string, hashes: Record<string, string>): void {
         logger.debug("saveHashMap readExisting", errorMessage(err));
       }
       const merged = { ...existing, ...hashes };
-      // Remove entries for paths that no longer exist on disk
+      // Remove entries for paths that no longer exist. When knownPaths is provided
+      // (build passes supply the full file list), use set membership instead of
+      // hitting the filesystem — avoids N sync stat calls inside the lock.
       for (const filePath of Object.keys(merged)) {
-        if (!fs.existsSync(filePath)) {
+        if (knownPaths ? !knownPaths.has(filePath) : !fs.existsSync(filePath)) {
           delete merged[filePath];
         }
       }
@@ -882,7 +884,8 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
 
 async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
-  beginUserFragmentBuildCache(phrenPath, getProjectDirs(phrenPath, profile).map(dir => path.basename(dir)));
+  const projectDirs = getProjectDirs(phrenPath, profile);
+  beginUserFragmentBuildCache(phrenPath, projectDirs.map(dir => path.basename(dir)));
   try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
@@ -1069,7 +1072,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             }
           }
 
-          saveHashMap(phrenPath, currentHashes);
+          saveHashMap(phrenPath, currentHashes, new Set(Object.keys(currentHashes)));
           touchSentinel(phrenPath);
           invalidateDfCache();
 
@@ -1170,19 +1173,19 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   mergeManualLinks(db, phrenPath);
 
   // ── Finalize: persist hashes, save cache, log ─────────────────────────────
-  saveHashMap(phrenPath, newHashes);
+  saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)));
   touchSentinel(phrenPath);
   invalidateDfCache();
 
   const buildMs = Date.now() - t0;
-  debugLog(`Built FTS index: ${fileCount} files from ${getProjectDirs(phrenPath, profile).length} projects in ${buildMs}ms`);
-  if ((process.env.PHREN_DEBUG)) console.error(`Indexed ${fileCount} files from ${getProjectDirs(phrenPath, profile).length} projects`);
+  debugLog(`Built FTS index: ${fileCount} files from ${projectDirs.length} projects in ${buildMs}ms`);
+  if ((process.env.PHREN_DEBUG)) console.error(`Indexed ${fileCount} files from ${projectDirs.length} projects`);
   appendIndexEvent(phrenPath, {
     event: "build_index",
     cache: "miss",
     hash: hash.slice(0, 12),
     files: fileCount,
-    projects: getProjectDirs(phrenPath, profile).length,
+    projects: projectDirs.length,
     elapsedMs: buildMs,
     profile: profile || "",
   });
