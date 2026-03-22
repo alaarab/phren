@@ -98,6 +98,14 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: result.error });
       }
 
+      // Verify skill path doesn't escape phren via symlink
+      try {
+        const realPath = fs.realpathSync(result.path);
+        const phrenReal = fs.realpathSync(phrenPath);
+        if (!realPath.startsWith(phrenReal + path.sep) && !realPath.startsWith(path.dirname(phrenReal) + path.sep)) {
+          return mcpResponse({ ok: false, error: `Skill path resolves outside phren store.` });
+        }
+      } catch { /* path doesn't exist or can't resolve — let readFileSync handle it */ }
       const content = fs.readFileSync(result.path, "utf8");
       const { frontmatter, body } = parseSkillFrontmatter(content);
       const { valid, errors } = validateSkillFrontmatter(content, result.path);

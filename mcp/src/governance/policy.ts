@@ -73,6 +73,32 @@ export interface RuntimeHealth {
   };
 }
 
+export type SyncStatus = NonNullable<RuntimeHealth["lastSync"]>;
+
+export interface BuildSyncStatusOpts {
+  now: string;
+  pushStatus: SyncStatus["lastPushStatus"];
+  pushDetail?: string;
+  pullAt?: string;
+  pullStatus?: SyncStatus["lastPullStatus"];
+  pullDetail?: string;
+  successfulPullAt?: string;
+  unsyncedCommits?: number;
+}
+
+export function buildSyncStatus(opts: BuildSyncStatusOpts): SyncStatus {
+  return {
+    ...(opts.pullAt !== undefined ? { lastPullAt: opts.pullAt } : {}),
+    ...(opts.pullStatus !== undefined ? { lastPullStatus: opts.pullStatus } : {}),
+    ...(opts.pullDetail !== undefined ? { lastPullDetail: opts.pullDetail } : {}),
+    ...(opts.successfulPullAt !== undefined ? { lastSuccessfulPullAt: opts.successfulPullAt } : {}),
+    lastPushAt: opts.now,
+    lastPushStatus: opts.pushStatus,
+    ...(opts.pushDetail !== undefined ? { lastPushDetail: opts.pushDetail } : {}),
+    ...(opts.unsyncedCommits !== undefined ? { unsyncedCommits: opts.unsyncedCommits } : {}),
+  };
+}
+
 export type RetentionPolicyPatch = Partial<Omit<RetentionPolicy, "decay">> & {
   decay?: Partial<RetentionPolicy["decay"]>;
 };

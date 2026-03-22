@@ -13,14 +13,14 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 |------|---------|
 | `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 51 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
-| `mcp/src/shared-content.ts` | Content operations: finding CRUD, trust filtering, consolidation, canonical locks |
-| `mcp/src/shared-governance.ts` | Governance: policy/access/workflow config, review queue, audit log |
-| `mcp/src/shared-index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
-| `mcp/src/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
+| `mcp/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
+| `mcp/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
+| `mcp/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
+| `mcp/src/cli/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init.ts` | `npx @phren/cli init`: configures MCP + hooks for all detected agents |
-| `mcp/src/link.ts` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
-| `mcp/src/data-access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
+| `mcp/src/init/init.ts` | `npx @phren/cli init`: configures MCP + hooks for all detected agents |
+| `mcp/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
+| `mcp/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `mcp/src/status.ts` | `phren status`: health, project, stats overview |
 | `skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |

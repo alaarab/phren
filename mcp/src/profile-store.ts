@@ -16,6 +16,7 @@ import { errorMessage, isValidProjectName } from "./utils.js";
 import { TASK_FILE_ALIASES } from "./data/tasks.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
+import type { RetentionPolicyPatch } from "./governance/policy.js";
 
 export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
@@ -23,18 +24,7 @@ export interface ProfilePolicyDefaults {
   proactivityFindings?: "high" | "medium" | "low";
   proactivityTask?: "high" | "medium" | "low";
   taskMode?: "off" | "manual" | "suggest" | "auto";
-  retentionPolicy?: {
-    ttlDays?: number;
-    retentionDays?: number;
-    autoAcceptThreshold?: number;
-    minInjectConfidence?: number;
-    decay?: {
-      d30?: number;
-      d60?: number;
-      d90?: number;
-      d120?: number;
-    };
-  };
+  retentionPolicy?: RetentionPolicyPatch;
   workflowPolicy?: {
     lowConfidenceThreshold?: number;
     riskySections?: Array<"Review" | "Stale" | "Conflicts">;

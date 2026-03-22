@@ -297,6 +297,8 @@ export async function handleUpdate(args: string[]) {
   console.log(result.message);
   if (!result.ok) {
     process.exitCode = 1;
+  } else {
+    console.log("Run 'npx phren init' to refresh hooks and config.");
   }
 }
 

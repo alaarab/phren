@@ -1283,7 +1283,7 @@ async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Pr
 }
 
 // Serialize concurrent in-process buildIndex calls to prevent SQLite corruption
-let buildLock: Promise<SqlJsDatabase> = Promise.resolve(null as unknown as SqlJsDatabase);
+let buildLock: Promise<SqlJsDatabase | null> = Promise.resolve(null);
 
 // Staleness debounce: if the index was rebuilt within this window, return the
 // cached DB immediately without re-running the expensive glob + hash pipeline.
@@ -1326,7 +1326,7 @@ export async function buildIndex(phrenPath: string, profile?: string): Promise<S
 
   const result = buildLock.then(() => _buildIndexGuarded(phrenPath, profile));
   // Update the lock chain; swallow rejections so the chain doesn't stall
-  buildLock = result.catch(() => null as unknown as SqlJsDatabase);
+  buildLock = result.catch(() => null);
   const db = await result;
   _lastBuiltDb = db;
   _lastBuildTimestamp = Date.now();

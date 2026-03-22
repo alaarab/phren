@@ -30,6 +30,7 @@ import {
 import { getPendingBootstrapTarget } from "./init-detect.js";
 import { bootstrapProject } from "./init-bootstrap.js";
 import type { InitOptions, SkillsScope } from "./init-types.js";
+import type { ProjectOwnershipMode } from "./project-config.js";
 
 export async function runExistingInstallUpdate(
   phrenPath: string,
@@ -125,7 +126,7 @@ export async function runExistingInstallUpdate(
 
   const pendingBootstrap = getPendingBootstrapTarget(phrenPath, opts);
   if (pendingBootstrap && shouldBootstrapCurrentProject) {
-    bootstrapProject(phrenPath, pendingBootstrap.path, opts.profile, bootstrapOwnership as any, "Added current project");
+    bootstrapProject(phrenPath, pendingBootstrap.path, opts.profile, bootstrapOwnership as ProjectOwnershipMode, "Added current project");
   }
 
   for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts)) {

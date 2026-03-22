@@ -5,6 +5,11 @@ const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 const DEFAULT_EXTRACT_MODEL = "llama3.2";
 const MAX_EMBED_INPUT_CHARS = 6000;
 
+const CLOUD_EMBEDDING_TIMEOUT_MS = 15_000;
+const OLLAMA_HEALTH_TIMEOUT_MS = 2_000;
+const OLLAMA_EMBEDDING_TIMEOUT_MS = 10_000;
+const OLLAMA_GENERATE_TIMEOUT_MS = 60_000;
+
 export function prepareEmbeddingInput(text: string): string {
   return text
     .replace(/<!--[\s\S]*?-->/g, " ")
@@ -47,7 +52,7 @@ async function embedTextCloud(input: string, baseUrl: string, model: string, api
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 15000);
+    const id = setTimeout(() => controller.abort(), CLOUD_EMBEDDING_TIMEOUT_MS);
     const res = await fetch(`${baseUrl}/embeddings`, {
       method: "POST",
       headers,
@@ -88,7 +93,7 @@ export async function checkOllamaAvailable(url?: string): Promise<boolean> {
   if (!baseUrl) return false;
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2000);
+    const id = setTimeout(() => controller.abort(), OLLAMA_HEALTH_TIMEOUT_MS);
     const res = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
     clearTimeout(id);
     return res.ok;
@@ -105,7 +110,7 @@ export async function checkModelAvailable(model?: string, url?: string): Promise
   const modelName = model ?? getEmbeddingModel();
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2000);
+    const id = setTimeout(() => controller.abort(), OLLAMA_HEALTH_TIMEOUT_MS);
     const res = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
     clearTimeout(id);
     if (!res.ok) return false;
@@ -131,7 +136,7 @@ export async function embedText(text: string, model?: string, url?: string): Pro
   if (!baseUrl) return null;
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 10000);
+    const id = setTimeout(() => controller.abort(), OLLAMA_EMBEDDING_TIMEOUT_MS);
     const res = await fetch(`${baseUrl}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -157,7 +162,7 @@ export async function generateText(prompt: string, model?: string, url?: string)
   const modelName = model ?? getExtractModel();
   try {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 60000);
+    const id = setTimeout(() => controller.abort(), OLLAMA_GENERATE_TIMEOUT_MS);
     const res = await fetch(`${baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -175,6 +180,20 @@ export async function generateText(prompt: string, model?: string, url?: string)
     debugLog(`generateText error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
+}
+
+export type OllamaStatus = "ready" | "no_model" | "not_running" | "disabled";
+
+/**
+ * Probe Ollama availability and model readiness in one call.
+ * Returns a status enum so callers can branch on it without repeating the check logic.
+ */
+export async function checkOllamaStatus(): Promise<OllamaStatus> {
+  if (!getOllamaUrl()) return "disabled";
+  const ollamaUp = await checkOllamaAvailable();
+  if (!ollamaUp) return "not_running";
+  const modelReady = await checkModelAvailable();
+  return modelReady ? "ready" : "no_model";
 }
 
 export { cosineSimilarity } from "../embedding.js";

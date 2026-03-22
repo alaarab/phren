@@ -190,7 +190,7 @@ export const STOP_WORDS = new Set([
 export function extractKeywordEntries(text: string): string[] {
   const words = text
     .toLowerCase()
-    .replace(/[^\w\s-]/g, " ")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
     .split(/\s+/)
     .filter(w => w.length > 1 && !STOP_WORDS.has(w));
 
@@ -278,13 +278,15 @@ export function queueFilePath(phrenPath: string, project: string): string {
   return result;
 }
 
+const MAX_FTS_QUERY_LENGTH = 500;
+
 // Sanitize user input before passing it to an FTS5 MATCH expression.
 // Strips FTS5-specific syntax that could cause injection or parse errors.
 export function sanitizeFts5Query(raw: string): string {
   if (!raw) return "";
-  if (raw.length > 500) raw = raw.slice(0, 500);
+  if (raw.length > MAX_FTS_QUERY_LENGTH) raw = raw.slice(0, MAX_FTS_QUERY_LENGTH);
   // Whitelist approach: only allow alphanumeric, spaces, hyphens, apostrophes, asterisks
-  let q = raw.replace(/[^a-zA-Z0-9 \-"*]/g, " ");
+  let q = raw.replace(/[^\p{L}\p{N} \-"*]/gu, " ");
   // Strip all double quotes — buildFtsClauses wraps terms in quotes itself,
   // so user-supplied quotes only risk producing unbalanced FTS5 syntax.
   q = q.replace(/"/g, "");
