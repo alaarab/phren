@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.29
 
-## MCP Tools (66)
+## MCP Tools (61)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -62,13 +62,8 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `get_tasks(project?, id?, item?)` : read tasks, or fetch a single item by ID or text
 - `add_task(project, item: string | string[])` : add one or more tasks to queue
 - `complete_task(project, item: string | string[])` : move task(s) to done by text match
-- `update_task(project, item, updates)` : update text, priority, context, section, or linked GitHub issue
-- `link_task_issue(project, item, issue_number?, issue_url?, unlink?)` : link or unlink an existing GitHub issue on a task item
-- `promote_task_to_issue(project, item, repo?, title?, body?, mark_done?)` : create a GitHub issue from a task item and link it back
+- `update_task(project, item?, updates)` : update text, priority, context, section, GitHub metadata, pin, promote, or work_next. Item is optional when work_next is true.
 - `remove_task(project, item: string | string[])` : remove one or more tasks by matching text
-- `pin_task(project, item)` : pin a task so it stays visible across sessions
-- `work_next_task(project?)` : pick the next highest-priority task to work on
-- `promote_task(project, item)` : promote a task to a higher priority section
 - `tidy_done_tasks(project?)` : archive completed tasks to keep the list clean
 
 **Finding capture:**
@@ -80,7 +75,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `edit_finding(project, old_text, new_text)` : edit a finding in place while preserving inline metadata
 - `remove_finding(project, finding: string | string[])` : remove one or more findings by match
 - `push_changes(message?)` : commit and push phren changes
-- `auto_extract_findings(context)` : extract findings from conversation context automatically
+- `auto_extract_findings(context)` : extract findings from conversation context automatically (Ollama → remote LLM fallback)
 
 **Memory quality:**
 - `pin_memory(project, memory)` : write canonical/pinned memory entries
@@ -119,15 +114,8 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `remove_custom_hook(event, command?)` : remove custom hooks by event/command match
 
 **Configuration:**
-- `get_config()` : read current governance and policy configuration
-- `set_proactivity(level)` : set agent proactivity level
-- `set_task_mode(mode)` : set task management mode
-- `set_finding_sensitivity(level)` : set finding capture sensitivity
-- `set_retention_policy(settings)` : configure retention and decay policy
-- `set_workflow_policy(settings)` : configure workflow approval gates
-- `set_index_policy(settings)` : configure indexer include/exclude globs
-- `get_topic_config(project)` : read topic-config.json for a project (topics, domain, pinned)
-- `set_topic_config(project, topics, domain?)` : write topic-config.json for a project
+- `get_config(domain?, project?)` : read current governance and policy configuration (supports domains: proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, all)
+- `set_config(domain, settings, project?)` : update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)
 
 Maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 

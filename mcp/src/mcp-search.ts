@@ -28,6 +28,7 @@ import {
   extractSnippet,
   queryDocBySourceKey,
   normalizeMemoryId,
+  getFragmentGraphBoost,
 } from "./shared-index.js";
 import { runCustomHooks } from "./hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "./shared-governance.js";
@@ -427,6 +428,32 @@ export function register(server: McpServer, ctx: McpContext): void {
           rows = trustResult.rows;
         } catch (err: unknown) {
           debugLog(`search_knowledge trustFilter: ${errorMessage(err)}`);
+        }
+
+        // ── Fragment graph boost ──────────────────────────────────────────
+        // Boost results linked to fragments that match the search query terms.
+        // Fragments with higher cross-project reference counts produce a stronger
+        // boost (up to 1.6x), surfacing findings connected to widely-referenced
+        // concepts/libraries. This is opt-in: when the graph is empty or no
+        // fragments match the query, the boost map is empty and this is a no-op.
+        let graphBoostMap: Map<string, number> | undefined;
+        try {
+          graphBoostMap = getFragmentGraphBoost(db, query);
+        } catch (err: unknown) {
+          logDebug("search_knowledge graphBoost", errorMessage(err));
+        }
+        if (graphBoostMap && graphBoostMap.size > 0) {
+          // Assign position-based scores (higher = better), apply graph boost multiplier,
+          // then re-sort so that graph-boosted docs can float up in the ranking.
+          const boosted = rows.map((row, idx) => {
+            const docKey = `${row.project}/${row.filename}`;
+            const boost = graphBoostMap!.get(docKey) ?? 1.0;
+            // Position score: rows are ranked best-first, so invert index
+            const positionScore = (rows.length - idx) * boost;
+            return { row, positionScore, idx };
+          });
+          boosted.sort((a, b) => b.positionScore - a.positionScore);
+          rows = boosted.map(b => b.row);
         }
 
         rows = rows

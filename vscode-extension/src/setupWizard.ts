@@ -29,9 +29,9 @@ export function showSetupWizard(
       const proactivity = asString(message.proactivity);
 
       try {
-        if (sensitivity) await client.setFindingSensitivity(sensitivity);
-        if (taskMode) await client.setTaskMode(taskMode);
-        if (proactivity) await client.setProactivity(proactivity);
+        if (sensitivity) await client.setConfig("findingSensitivity", { level: sensitivity });
+        if (taskMode) await client.setConfig("taskMode", { mode: taskMode });
+        if (proactivity) await client.setConfig("proactivity", { level: proactivity });
 
         vscode.window.showInformationMessage("Phren settings applied successfully.");
         panel.dispose();

@@ -75,12 +75,14 @@ describe("mcp-tasks GitHub issue tools", () => {
     tmp.cleanup();
   });
 
-  it("links an existing GitHub issue to a task", async () => {
-    const res = parseResult(await server.call("link_task_issue", {
+  it("links an existing GitHub issue to a task via update_task", async () => {
+    const res = parseResult(await server.call("update_task", {
       project,
       item: "bid:deadbeef",
-      issue_number: 14,
-      issue_url: "https://github.com/alaarab/phren/issues/14",
+      updates: {
+        github_issue: 14,
+        github_url: "https://github.com/alaarab/phren/issues/14",
+      },
     }));
     expect(res.ok).toBe(true);
     expect(res.data.githubIssue).toBe(14);
@@ -90,35 +92,5 @@ describe("mcp-tasks GitHub issue tools", () => {
     if (!task.ok) return;
     expect(task.data.items.Queue[0].githubIssue).toBe(14);
     expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
-  });
-
-  it("promotes a task into a GitHub issue and links it back", async () => {
-    const res = parseResult(await server.call("promote_task_to_issue", {
-      project,
-      item: "bid:deadbeef",
-    }));
-    expect(res.ok).toBe(true);
-    expect(res.data.githubIssue).toBe(14);
-    expect(res.data.githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
-
-    const task = readTasks(tmp.path, project);
-    expect(task.ok).toBe(true);
-    if (!task.ok) return;
-    expect(task.data.items.Queue[0].githubIssue).toBe(14);
-  });
-
-  it("can mark the item done after promotion", async () => {
-    const res = parseResult(await server.call("promote_task_to_issue", {
-      project,
-      item: "bid:deadbeef",
-      mark_done: true,
-    }));
-    expect(res.ok).toBe(true);
-
-    const task = readTasks(tmp.path, project);
-    expect(task.ok).toBe(true);
-    if (!task.ok) return;
-    expect(task.data.items.Queue).toHaveLength(0);
-    expect(task.data.items.Done[0].githubIssue).toBe(14);
   });
 });

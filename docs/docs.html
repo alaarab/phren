@@ -1157,7 +1157,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">All 67 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">All 66 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
 
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
@@ -1166,8 +1166,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">get_project_summary</span><span class="ref-card-desc">Project summary + file list</span></summary><div class="ref-card-details"><div class="ref-card-params">(name)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">list_projects</span><span class="ref-card-desc">All projects in active profile</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_findings</span><span class="ref-card-desc">Read recent findings without a search query</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, limit?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">get_consolidation_status</span><span class="ref-card-desc">Check if findings need consolidation</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">health_check</span><span class="ref-card-desc">Run doctor checks</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">health_check</span><span class="ref-card-desc">Run doctor checks and return health status including consolidation status</span></summary><div class="ref-card-details"><div class="ref-card-params">(include_consolidation?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">list_hook_errors</span><span class="ref-card-desc">Recent hook errors</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_review_queue</span><span class="ref-card-desc">Items waiting for review</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">doctor_fix</span><span class="ref-card-desc">Run doctor self-heal and apply fixes</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>

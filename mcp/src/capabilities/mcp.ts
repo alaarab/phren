@@ -17,8 +17,8 @@ export const mcpManifest: CapabilityManifest = {
     "task.remove": { implemented: true, handler: "index.ts:remove_task" },
     "task.update": { implemented: true, handler: "index.ts:update_task" },
     "task.list": { implemented: true, handler: "index.ts:get_tasks" },
-    "task.pin": { implemented: true, handler: "index.ts:pin_task" },
-    "task.github_link": { implemented: true, handler: "index.ts:link_task_issue, promote_task_to_issue" },
+    "task.pin": { implemented: true, handler: "index.ts:update_task (pin)" },
+    "task.github_link": { implemented: true, handler: "index.ts:update_task (github_issue/github_url)" },
 
     // Hook management
     "hook.list": { implemented: true, handler: "index.ts:list_hooks" },
@@ -39,11 +39,8 @@ export const mcpManifest: CapabilityManifest = {
     "graph.link_findings": { implemented: true, handler: "index.ts:link_findings" },
 
     // Config
-    "config.proactivity": { implemented: true, handler: "index.ts:get_config, set_proactivity" },
-    "config.task_mode": { implemented: true, handler: "index.ts:get_config, set_task_mode" },
-    "config.retention": { implemented: true, handler: "index.ts:get_config, set_retention_policy" },
-    "config.workflow": { implemented: true, handler: "index.ts:get_config, set_workflow_policy, set_finding_sensitivity" },
-    "config.index": { implemented: true, handler: "index.ts:get_config, set_index_policy" },
+    "config.get": { implemented: true, handler: "index.ts:get_config (supports all domains including topic)" },
+    "config.set": { implemented: true, handler: "index.ts:set_config (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "index.ts:health_check" },

@@ -28,10 +28,7 @@ import {
 } from "./data-access.js";
 import { applyGravity } from "./data-tasks.js";
 import {
-  buildTaskIssueBody,
-  createGithubIssueForTask,
   parseGithubIssueUrl,
-  resolveProjectGithubRepo,
 } from "./tasks-github.js";
 import { clearTaskCheckpoint } from "./session-checkpoints.js";
 import { incrementSessionTasksCompleted } from "./mcp-session.js";

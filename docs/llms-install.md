@@ -39,7 +39,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (67)
+## MCP Tools (66)
 
 ### Search and Browse
 
@@ -145,8 +145,7 @@ Skill system behavior:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_consolidation_status` | `project?` | Check if findings need consolidation. |
-| `health_check` | (none) | Run doctor checks and return results. |
+| `health_check` | `include_consolidation?` | Run doctor checks and return health status including consolidation status for all projects. |
 | `list_hook_errors` | `limit?` | Show recent hook errors and failures. |
 | `get_review_queue` | `project?` | Read items waiting for review. The review queue is read-only. |
 | `manage_review_item` | `project`, `line`, `action`, `new_text?` | Manage a review queue item: approve (removes from queue), reject (removes from queue and FINDINGS.md), or edit (updates text in both; `new_text` required for edit). |

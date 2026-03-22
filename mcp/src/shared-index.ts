@@ -1381,3 +1381,54 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
   }
   return bestMatch?.project || null;
 }
+
+/**
+ * Fragment graph boost for search_knowledge:
+ * Given a search query, find matching fragments in global_entities and return
+ * a Map of doc_key -> boost multiplier. Fragments with more cross-project
+ * references produce a stronger boost (1.0 + 0.15 * distinct_project_count,
+ * capped at 1.6). This makes the fragment graph actively useful for ranking
+ * rather than passive metadata.
+ *
+ * Only applied when there are matching fragments (no-op when graph is empty).
+ */
+export function getFragmentGraphBoost(
+  db: SqlJsDatabase,
+  query: string,
+): Map<string, number> {
+  const boostMap = new Map<string, number>();
+  try {
+    // Split query into terms, keep only meaningful ones (length > 2)
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    if (terms.length === 0) return boostMap;
+
+    ensureGlobalEntitiesTable(db);
+
+    // For each query term, find fragments whose name contains the term.
+    // Count how many distinct projects reference each fragment to determine boost strength.
+    for (const term of terms) {
+      const escapedTerm = term.replace(/%/g, "\\%").replace(/_/g, "\\_");
+      const rows = db.exec(
+        `SELECT entity, doc_key, COUNT(DISTINCT project) as project_count
+         FROM global_entities
+         WHERE entity LIKE ? ESCAPE '\\'
+         GROUP BY entity, doc_key`,
+        [`%${escapedTerm}%`]
+      );
+      if (!rows?.length || !rows[0]?.values?.length) continue;
+      for (const row of rows[0].values) {
+        const docKey = String(row[1]);
+        const projectCount = Number(row[2]);
+        // Scale boost by cross-project reference count: more projects = stronger signal.
+        // Base 1.0 (no boost) + 0.15 per distinct project, capped at 1.6
+        const boost = Math.min(1.0 + 0.15 * projectCount, 1.6);
+        // Keep the highest boost if a doc matches multiple fragments
+        const existing = boostMap.get(docKey) ?? 1.0;
+        if (boost > existing) boostMap.set(docKey, boost);
+      }
+    }
+  } catch (err: unknown) {
+    logDebug("getFragmentGraphBoost", errorMessage(err));
+  }
+  return boostMap;
+}

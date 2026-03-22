@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (67 across 12 modules):
+MCP Tools (66 across 12 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -82,8 +82,7 @@ MCP Tools (67 across 12 modules):
     remove_custom_hook(event, command?) - remove custom hooks by event/command match
 
   Health and review:
-    get_consolidation_status(project?) - check if findings need consolidation
-    health_check() - run doctor checks and return results
+    health_check(include_consolidation?) - run doctor checks and return health status including consolidation status
     list_hook_errors(limit?) - show recent hook errors and failures
     get_review_queue(project?) - read items waiting for review (review queue is read-only)
     doctor_fix(check_data?) - run doctor self-heal checks and apply fixes automatically
