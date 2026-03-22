@@ -202,6 +202,22 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`phren-mcp running (${phrenPath})`);
+
+  // Graceful shutdown: drain write queue and close DB before exit
+  async function shutdown(signal: string): Promise<void> {
+    structuredLog("info", "shutdown", `Received ${signal}, draining write queue...`);
+    try {
+      await writeQueue;
+    } catch {
+      // Write queue errors already logged
+    }
+    try { db?.close(); } catch (err: unknown) {
+      logWarn("shutdown", `dbClose: ${errorMessage(err)}`);
+    }
+    process.exit(0);
+  }
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
 if (!handledTopLevelCommand) {
