@@ -30,6 +30,7 @@ import {
   collectSkillsForUI,
   getHooksData,
   isAllowedFilePath,
+  isAllowedSkillPath,
   readSyncSnapshot,
   recentAccepted,
   recentUsage,
@@ -425,7 +426,15 @@ export function createWebUiHttpServer(
           }
 
           runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
-          runGit(["commit", "-m", message]);
+          // Use --only to commit exactly the files we just staged,
+          // avoiding committing unrelated previously-staged changes.
+          const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
+          if (!stagedFiles) {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: true, message: "Nothing to sync — no matching files to commit." }));
+            return;
+          }
+          runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);
 
           let pushed = false;
           try {
@@ -636,7 +645,7 @@ export function createWebUiHttpServer(
     if (req.method === "GET" && pathname.startsWith("/api/skill-content")) {
       const qs = url.includes("?") ? querystring.parse(url.slice(url.indexOf("?") + 1)) : {};
       const filePath = String(qs.path || "");
-      if (!filePath || !isAllowedFilePath(filePath, phrenPath)) {
+      if (!filePath || !isAllowedSkillPath(filePath, phrenPath)) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
         return;
@@ -664,7 +673,7 @@ export function createWebUiHttpServer(
         if (!requireCsrf(res, parsed, csrfTokens, true)) return;
         const filePath = String(parsed.path || "");
         const content = String(parsed.content || "");
-        if (!filePath || !isAllowedFilePath(filePath, phrenPath)) {
+        if (!filePath || !isAllowedSkillPath(filePath, phrenPath)) {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(JSON.stringify({ ok: false, error: "Invalid path" }));
           return;
