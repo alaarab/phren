@@ -24,7 +24,7 @@ function makeProject(phrenDir: string, name: string, files: Record<string, strin
 async function importGovern(phrenDir: string) {
   process.env.PHREN_PATH = phrenDir;
   vi.resetModules();
-  return await import("./cli-govern.js");
+  return await import("./cli/cli-govern.js");
 }
 
 beforeEach(() => {

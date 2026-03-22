@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { register } from "../mcp-tasks.js";
-import type { McpContext } from "../mcp-types.js";
-import { TASKS_FILENAME } from "../data-access.js";
+import { register } from "../tools/mcp-tasks.js";
+import type { McpContext } from "../tools/mcp-types.js";
+import { TASKS_FILENAME } from "../data/data-access.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 

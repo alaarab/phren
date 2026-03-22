@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { register } from "../mcp-tasks.js";
-import { readTasks } from "../data-access.js";
-import type { McpContext } from "../mcp-types.js";
+import { register } from "../tools/mcp-tasks.js";
+import { readTasks } from "../data/data-access.js";
+import type { McpContext } from "../tools/mcp-types.js";
 
 vi.mock("../tasks-github.js", () => ({
   buildTaskIssueBody: vi.fn(() => "generated body"),

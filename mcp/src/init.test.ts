@@ -23,9 +23,9 @@ import {
   setHooksEnabledPreference,
   setMcpEnabledPreference,
   warmSemanticSearch,
-} from "./init.js";
-import { applyStarterTemplateUpdates, getHookEntrypointCheck } from "./init-setup.js";
-import { VERSION } from "./init-shared.js";
+} from "./init/init.js";
+import { applyStarterTemplateUpdates, getHookEntrypointCheck } from "./init/init-setup.js";
+import { VERSION } from "./init/init-shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
 describe.sequential("mcp mode configuration", () => {
@@ -807,11 +807,11 @@ describe("warmSemanticSearch", () => {
   });
 
   it("warms embeddings during init and reports warm/cold coverage", async () => {
-    const ollama = await import("./shared-ollama.js");
-    const index = await import("./shared-index.js");
-    const embeddingCache = await import("./shared-embedding-cache.js");
+    const ollama = await import("./shared/shared-ollama.js");
+    const index = await import("./shared/shared-index.js");
+    const embeddingCache = await import("./shared/shared-embedding-cache.js");
     const startup = await import("./startup-embedding.js");
-    const vectorIndex = await import("./shared-vector-index.js");
+    const vectorIndex = await import("./shared/shared-vector-index.js");
 
     vi.spyOn(ollama, "getOllamaUrl").mockReturnValue("http://localhost:11434");
     vi.spyOn(ollama, "getEmbeddingModel").mockReturnValue("nomic-embed-text");

@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SqlJsDatabase } from "../shared-index.js";
-import type { McpContext } from "../mcp-types.js";
+import type { SqlJsDatabase } from "../shared/shared-index.js";
+import type { McpContext } from "../tools/mcp-types.js";
 
 vi.mock("../shared-search-fallback.js", async () => {
-  const actual = await vi.importActual<typeof import("../shared-search-fallback.js")>("../shared-search-fallback.js");
+  const actual = await vi.importActual<typeof import("../shared/shared-search-fallback.js")>("../shared-search-fallback.js");
   return {
     ...actual,
     vectorFallback: vi.fn(),
   };
 });
 
-import { register } from "../mcp-search.js";
-import { vectorFallback } from "../shared-search-fallback.js";
+import { register } from "../tools/mcp-search.js";
+import { vectorFallback } from "../shared/shared-search-fallback.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;

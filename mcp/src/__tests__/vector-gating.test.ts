@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { DbRow, SqlJsDatabase } from "../shared-index.js";
+import type { DbRow, SqlJsDatabase } from "../shared/shared-index.js";
 
 vi.mock("../shared-search-fallback.js", () => ({
   vectorFallback: vi.fn().mockResolvedValue([]),
@@ -10,8 +10,8 @@ vi.mock("../shared-ollama.js", () => ({
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));
 
-import { searchDocumentsAsync, shouldRunVectorExpansion } from "../shared-retrieval.js";
-import { vectorFallback } from "../shared-search-fallback.js";
+import { searchDocumentsAsync, shouldRunVectorExpansion } from "../shared/shared-retrieval.js";
+import { vectorFallback } from "../shared/shared-search-fallback.js";
 
 function makeDb(ftsRows: DbRow[]): SqlJsDatabase {
   return {

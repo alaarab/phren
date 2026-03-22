@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   scanForSecrets,
   addFindingToFile,
-} from "../shared-content.js";
+} from "../shared/shared-content.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";

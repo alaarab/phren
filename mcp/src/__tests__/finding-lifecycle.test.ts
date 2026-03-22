@@ -9,7 +9,7 @@ import {
   resolveFindingContradiction,
   stripLifecycleComments,
   supersedeFinding,
-} from "../finding-lifecycle.js";
+} from "../finding/finding-lifecycle.js";
 
 const PROJECT = "demo";
 

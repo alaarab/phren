@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { buildGraph } from "./memory-ui-data.js";
+import { buildGraph } from "./ui/memory-ui-data.js";
 import { makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
 
 describe("buildGraph fragment refs", () => {

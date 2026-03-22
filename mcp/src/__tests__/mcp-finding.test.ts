@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, resultMsg } from "../test-helpers.js";
-import { addFindingToFile, addFindingsToFile } from "../shared-content.js";
-import { removeFinding, readFindings } from "../data-access.js";
-import { register } from "../mcp-finding.js";
-import type { McpContext } from "../mcp-types.js";
+import { addFindingToFile, addFindingsToFile } from "../shared/shared-content.js";
+import { removeFinding, readFindings } from "../data/data-access.js";
+import { register } from "../tools/mcp-finding.js";
+import type { McpContext } from "../tools/mcp-types.js";
 
 const PROJECT = "myapp";
 

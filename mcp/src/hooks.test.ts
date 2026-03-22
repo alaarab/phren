@@ -3,7 +3,7 @@ import { commandExists, detectInstalledTools, buildLifecycleCommands, buildShare
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { PhrenError, type PhrenErrorCode } from "./shared.js";
-import { selectSnippets, approximateTokens } from "./shared-retrieval.js";
+import { selectSnippets, approximateTokens } from "./shared/shared-retrieval.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";

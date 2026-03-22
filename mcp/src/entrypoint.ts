@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import { parseMcpMode, runInit } from "./init.js";
+import { parseMcpMode, runInit } from "./init/init.js";
 import { errorMessage } from "./utils.js";
 import { defaultPhrenPath, findPhrenPath } from "./shared.js";
-import { addProjectFromPath } from "./core-project.js";
+import { addProjectFromPath } from "./core/core-project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   getProjectOwnershipDefault,
@@ -359,7 +359,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "uninstall") {
-    const { runUninstall } = await import("./init.js");
+    const { runUninstall } = await import("./init/init.js");
     const skipConfirm = argv.includes("--yes") || argv.includes("-y");
     await runUninstall({ yes: skipConfirm });
     return finish();
@@ -372,8 +372,8 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "verify") {
-    const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init.js");
-    const { getWorkflowPolicy } = await import("./shared-governance.js");
+    const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init/init.js");
+    const { getWorkflowPolicy } = await import("./shared/shared-governance.js");
     const phrenPath = findPhrenPath() || defaultPhrenPath();
     const result = runPostInitVerify(phrenPath);
     console.log(`phren verify: ${result.ok ? "ok" : "issues found"}`);
@@ -393,7 +393,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "mcp-mode") {
-    const { runMcpMode } = await import("./init.js");
+    const { runMcpMode } = await import("./init/init.js");
     try {
       await runMcpMode(argv[1]);
       return finish();
@@ -404,7 +404,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "hooks-mode") {
-    const { runHooksMode } = await import("./init.js");
+    const { runHooksMode } = await import("./init/init.js");
     try {
       await runHooksMode(argv[1]);
       return finish();
@@ -424,13 +424,13 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (!argvCommand && process.stdin.isTTY && process.stdout.isTTY) {
-    const { runCliCommand } = await import("./cli.js");
+    const { runCliCommand } = await import("./cli/cli.js");
     await runCliCommand("shell", []);
     return finish();
   }
 
   if (argvCommand && CLI_COMMANDS.includes(argvCommand)) {
-    const { runCliCommand } = await import("./cli.js");
+    const { runCliCommand } = await import("./cli/cli.js");
     try {
       const { trackCliCommand } = await import("./telemetry.js");
       trackCliCommand(defaultPhrenPath(), argvCommand);

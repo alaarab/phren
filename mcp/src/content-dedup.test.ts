@@ -8,7 +8,7 @@ import {
   scanForSecrets,
   resolveCoref,
   detectConflicts,
-} from "./content-dedup.js";
+} from "./content/content-dedup.js";
 
 // ── stripMetadata ───────────────────────────────────────────────────────────
 

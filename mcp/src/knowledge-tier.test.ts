@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   buildIndex,
   queryRows,
-} from "./shared-index.js";
+} from "./shared/shared-index.js";
 import {
   countActiveFindings,
   autoArchiveToReference,
   addFindingToFile,
-} from "./shared-content.js";
+} from "./shared/shared-content.js";
 import { reclassifyLegacyTopicDocs, writeProjectTopics } from "./project-topics.js";
 import { makeTempDir, grantAdmin } from "./test-helpers.js";
 import * as path from "path";
