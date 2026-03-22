@@ -491,22 +491,14 @@ Delete a skill file.
 | `name` | string | yes | Skill name to remove. |
 | `project` | string | no | Project scope. Omit to remove from global skills. |
 
-### `enable_skill`
+### `toggle_skill`
 
-Enable a skill without deleting its file.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `name` | string | yes | Skill name to enable. |
-| `project` | string | yes | Skill scope: `global` or a project name. |
-
-### `disable_skill`
-
-Disable a skill without deleting its file.
+Enable or disable a skill without deleting its file.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `name` | string | yes | Skill name to disable. |
+| `name` | string | yes | Skill name to toggle. |
+| `enabled` | boolean | yes | `true` to enable, `false` to disable. |
 | `project` | string | yes | Skill scope: `global` or a project name. |
 
 Skill resolution behavior:
@@ -596,6 +588,17 @@ Read review queue items for one project or all active-profile projects. The revi
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Optional project filter. |
+
+### `manage_review_item`
+
+Manage a review queue item: approve (removes from queue, finding stays in FINDINGS.md), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `line` | string | yes | The raw queue line text (as returned by `get_review_queue`). Max 10,000 chars. |
+| `action` | enum | yes | Action to perform: `approve`, `reject`, or `edit`. |
+| `new_text` | string | no | The new finding text. Required when action is `edit`. Max 10,000 chars. |
 
 ### `doctor_fix`
 

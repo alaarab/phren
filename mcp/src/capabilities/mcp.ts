@@ -55,7 +55,7 @@ export const mcpManifest: CapabilityManifest = {
     // Skill management
     "skill.list": { implemented: true, handler: "index.ts:list_skills" },
     "skill.read": { implemented: true, handler: "index.ts:read_skill" },
-    "skill.enable": { implemented: true, handler: "index.ts:enable_skill, disable_skill" },
+    "skill.enable": { implemented: true, handler: "index.ts:toggle_skill" },
     "skill.write": { implemented: true, handler: "index.ts:write_skill" },
 
     // Project management
