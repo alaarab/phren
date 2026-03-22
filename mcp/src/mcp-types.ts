@@ -10,13 +10,7 @@ export interface McpContext {
   withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T | { content: { type: "text"; text: string }[] }>;
 }
 
-export type ToolTier = "core" | "advanced";
-
-export interface RegisterOptions {
-  tier?: Set<ToolTier>;
-}
-
-export type RegisterFn = (server: McpServer, ctx: McpContext, options?: RegisterOptions) => void;
+export type RegisterFn = (server: McpServer, ctx: McpContext) => void;
 
 /**
  * Standardized MCP tool response payload, based on PhrenResult conventions.
