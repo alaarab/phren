@@ -14,7 +14,7 @@ import { getMachineName, persistMachineName } from "./machine-identity.js";
 import {
   readInstallPreferences,
   writeInstallPreferences,
-} from "./preferences.js";
+} from "./init/preferences.js";
 import {
   ensureGovernanceFiles,
   repairPreexistingInstall,
@@ -26,10 +26,10 @@ import {
   ensureLocalGitRepo,
   updateMachinesYaml,
   detectProjectDir,
-} from "./setup.js";
-import { getWorkflowPolicy } from "./governance.js";
+} from "./init/setup.js";
+import { getWorkflowPolicy } from "./shared/governance.js";
 import { addProjectToProfile } from "./profile-store.js";
-import { STARTER_DIR, VERSION, log, confirmPrompt } from "./shared.js";
+import { STARTER_DIR, VERSION, log, confirmPrompt } from "./init/shared.js";
 import { configureMcpTargets } from "./init-mcp.js";
 import { configureHooksIfEnabled } from "./init-hooks.js";
 import {
@@ -39,9 +39,9 @@ import {
 } from "./init-env.js";
 import { warmSemanticSearch } from "./init-semantic.js";
 import { bootstrapProject } from "./init-bootstrap.js";
-import { logDebug } from "./logger.js";
+import { logger } from "./logger.js";
 import type { InitOptions, SkillsScope } from "./init-types.js";
-import type { InitProjectDomain } from "./setup.js";
+import type { InitProjectDomain } from "./init/setup.js";
 
 function copyDir(src: string, dest: string) {
   fs.mkdirSync(dest, { recursive: true });
@@ -228,7 +228,7 @@ export async function runFreshInstall(
   const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || !opts.yes;
   if (!walkthroughCoveredOllama) {
     try {
-      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./ollama.js");
+      const { checkOllamaAvailable, checkModelAvailable, getOllamaUrl } = await import("./shared/ollama.js");
       if (getOllamaUrl()) {
         const ollamaUp = await checkOllamaAvailable();
         if (ollamaUp) {
@@ -246,7 +246,7 @@ export async function runFreshInstall(
         }
       }
     } catch (err: unknown) {
-      logDebug("init ollamaInstallHint", errorMessage(err));
+      logger.debug("init ollamaInstallHint", errorMessage(err));
     }
   }
 
