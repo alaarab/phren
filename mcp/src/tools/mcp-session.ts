@@ -260,6 +260,10 @@ function cleanupStaleSessions(phrenPath: string): number {
   let cleaned = 0;
   for (const { fullPath, data: state } of results) {
     try {
+      // Only clean up sessions that have ended (have endedAt). Active sessions
+      // (no endedAt) should never be removed regardless of age.
+      if (state && !state.endedAt) continue;
+
       // prefer startedAt from the JSON content over mtime (reliable on noatime mounts)
       const ageMs = state?.startedAt
         ? Date.now() - new Date(state.startedAt).getTime()
@@ -504,16 +508,15 @@ export function register(server: McpServer, ctx: McpContext): void {
       return mcpResponse({ ok: false, error: `Invalid agentScope: "${agentScope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars).` });
     }
 
-    // Find most recent prior session for context
+    // Find most recent prior session for context.
+    // When no explicit project is provided, prefer the last ENDED session's
+    // project (completed context) over an active session from a different client.
+    const priorEnded = findMostRecentSummaryWithProject(phrenPath);
     const priorResult = findMostRecentSession(phrenPath);
     const prior = priorResult?.state ?? null;
-    // Also check ended sessions for summaries and project context.
-    // findMostRecentSession skips ended sessions, so we need a separate lookup
-    // to restore project context after a normal session_end.
-    const priorEnded = prior ? null : findMostRecentSummaryWithProject(phrenPath);
-    const priorSummary = prior?.summary ?? priorEnded?.summary ?? null;
-    const priorProject = prior?.project ?? priorEnded?.project;
-    const priorEndedAt = prior?.endedAt ?? priorEnded?.endedAt;
+    const priorSummary = priorEnded?.summary ?? prior?.summary ?? null;
+    const priorProject = priorEnded?.project ?? prior?.project;
+    const priorEndedAt = priorEnded?.endedAt ?? prior?.endedAt;
 
     // Create new session with unique ID in its own file
     const sessionId = crypto.randomUUID();

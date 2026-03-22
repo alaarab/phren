@@ -46,11 +46,14 @@ function getNpmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
+const UNINSTALL_TIMEOUT_MS = 30_000;
+
 function runSyncCommand(command: string, args: string[]): SyncCommandResult {
   try {
     const result = spawnSync(command, args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      timeout: UNINSTALL_TIMEOUT_MS,
     });
     return {
       ok: result.status === 0,
@@ -179,7 +182,14 @@ function filterAgentHooks(filePath: string, commandField: string): boolean {
       }
     }
     if (Object.keys(hooks).length === 0) {
-      fs.unlinkSync(filePath);
+      // Hooks are empty but the config may contain other top-level keys (e.g. version).
+      // Only delete the file if the entire config is effectively empty.
+      const otherKeys = Object.keys(raw).filter((k) => k !== "hooks");
+      if (otherKeys.length === 0) {
+        fs.unlinkSync(filePath);
+      } else {
+        atomicWriteText(filePath, JSON.stringify(raw, null, 2));
+      }
     } else {
       atomicWriteText(filePath, JSON.stringify(raw, null, 2));
     }
@@ -353,7 +363,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${codexToml}: ${errorMessage(err)}`); }
 
-  const codexCandidates = codexJsonCandidates((process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+  const codexCandidates = codexJsonCandidates(phrenPath || DEFAULT_PHREN_PATH);
   for (const mcpFile of codexCandidates) {
     try {
       if (removeMcpServerAtPath(mcpFile)) {
@@ -363,7 +373,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
   }
 
   // Remove phren entries from Copilot hooks file (filter, don't bulk-delete)
-  const copilotHooksFile = hookConfigPath("copilot", (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+  const copilotHooksFile = hookConfigPath("copilot", phrenPath || DEFAULT_PHREN_PATH);
   try {
     if (filterAgentHooks(copilotHooksFile, "bash")) {
       log(`  Removed phren entries from Copilot hooks (${copilotHooksFile})`);
@@ -371,7 +381,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${copilotHooksFile}: ${errorMessage(err)}`); }
 
   // Remove phren entries from Cursor hooks file (may contain non-phren entries)
-  const cursorHooksFile = hookConfigPath("cursor", (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH);
+  const cursorHooksFile = hookConfigPath("cursor", phrenPath || DEFAULT_PHREN_PATH);
   try {
     if (fs.existsSync(cursorHooksFile)) {
       const raw = JSON.parse(fs.readFileSync(cursorHooksFile, "utf8"));
@@ -390,8 +400,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${cursorHooksFile}: ${errorMessage(err)}`); }
 
   // Remove phren entries from Codex hooks file (filter, don't bulk-delete)
-  const uninstallPhrenPath = (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
-  const codexHooksFile = hookConfigPath("codex", uninstallPhrenPath);
+  const codexHooksFile = hookConfigPath("codex", phrenPath || DEFAULT_PHREN_PATH);
   try {
     if (filterAgentHooks(codexHooksFile, "command")) {
       log(`  Removed phren entries from Codex hooks (${codexHooksFile})`);
