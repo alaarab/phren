@@ -1,7 +1,5 @@
 import {
-  type HookContext,
   buildHookContext,
-  checkHookGuard,
   handleGuardSkip,
   debugLog,
   appendAuditLog,

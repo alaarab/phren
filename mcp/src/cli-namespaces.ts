@@ -728,7 +728,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
     }
-    const { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } = await import("./data-access.js");
+    const { readFindings, readTasks, resolveTaskFilePath } = await import("./data-access.js");
     const exported: Record<string, unknown> = { project: name, exportedAt: new Date().toISOString(), version: 1 };
     const summaryPath = path.join(projectDir, "summary.md");
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
