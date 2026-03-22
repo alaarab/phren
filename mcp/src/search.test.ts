@@ -45,8 +45,11 @@ describe("buildRelaxedFtsQuery", () => {
     expect(query).toContain("\"semantic\"");
   });
 
-  it("returns empty string when there are not enough clauses to relax", () => {
-    expect(buildRelaxedFtsQuery("auth cache")).toBe("");
+  it("returns OR query for short 2-word inputs instead of empty string", () => {
+    const result = buildRelaxedFtsQuery("auth cache");
+    expect(result).toContain("OR");
+    expect(result).toContain("auth");
+    expect(result).toContain("cache");
   });
 });
 
