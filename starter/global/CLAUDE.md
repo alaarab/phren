@@ -19,9 +19,10 @@ These skills are available as a full set via phren, or individually from the Cla
 | Skill | What it does |
 |-------|-------------|
 | `/phren-sync` | Pull phren to a new machine or push config changes back to the repo |
-| `/phren-init` | Scaffold a new project with summary, CLAUDE.md, task |
+| `/phren-init` | Scaffold a new project with summary, CLAUDE.md, tasks |
 | `/phren-discover` | Research what's missing in a project and surface gaps and opportunities |
 | `/phren-consolidate` | Find patterns across all project FINDINGS.md files |
+| `/phren-profiles` | Manages machine-to-profile mapping |
 
 ### Your own skills
 
@@ -48,7 +49,7 @@ In shared mode, skills and project config live in `~/.phren` (or wherever `PHREN
 If you're using `phren init --mode project-local`, the root is `<repo>/.phren` instead. Project-local mode does not use profiles, machine mappings, or global hooks.
 
 - `~/.phren/global/`: skills and config that apply everywhere
-- `~/.phren/<project>/`: per-project CLAUDE.md, skills, task, findings
+- `~/.phren/<project>/`: per-project CLAUDE.md, skills, tasks, findings
 - `~/.phren/profiles/`: YAML files mapping project sets to machine roles
 - `~/.phren/machines.yaml`: maps machine hostnames to profiles
 
