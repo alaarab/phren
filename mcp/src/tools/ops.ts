@@ -65,62 +65,6 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  server.registerTool(
-    "get_consolidation_status",
-    {
-      title: "◆ phren · consolidation status",
-      description:
-        "Check whether a project's FINDINGS.md needs consolidation. " +
-        "Returns entry count since last consolidation, threshold, and recommendation.",
-      inputSchema: z.object({
-        project: z.string().optional().describe("Project name. If omitted, checks all projects."),
-      }),
-    },
-    async ({ project }) => {
-      const projectDirs = project
-        ? (() => {
-            if (!isValidProjectName(project)) return [];
-            const dir = path.join(phrenPath, project);
-            return fs.existsSync(dir) ? [dir] : [];
-          })()
-        : getProjectDirs(phrenPath, profile);
-
-      if (project && projectDirs.length === 0) {
-        return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
-      }
-
-      const results: Array<{
-        project: string;
-        entriesSince: number;
-        threshold: number;
-        daysSince: number | null;
-        lastConsolidated: string | null;
-        recommended: boolean;
-      }> = [];
-
-      for (const dir of projectDirs) {
-        const status = getProjectConsolidationStatus(dir);
-        if (!status) continue;
-        results.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
-      }
-
-      if (results.length === 0) {
-        return mcpResponse({ ok: true, message: "No FINDINGS.md files found.", data: { results: [] } });
-      }
-
-      const lines = results.map(r =>
-        `${r.project}: ${r.entriesSince} entries since${r.lastConsolidated ? ` ${r.lastConsolidated}` : " (never consolidated)"}` +
-        `${r.recommended ? " — consolidation recommended" : ""}`
-      );
-
-      return mcpResponse({
-        ok: true,
-        message: lines.join("\n"),
-        data: { results },
-      });
-    }
-  );
-
   // ── health_check ───────────────────────────────────────────────────────────
 
   server.registerTool(
@@ -128,10 +72,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · health",
       description:
-        "Return phren health status: version, FTS index status, hook registration, and profile/machine info.",
-      inputSchema: z.object({}),
+        "Return phren health status: version, FTS index status, hook registration, profile/machine info, and consolidation status for all projects.",
+      inputSchema: z.object({
+        include_consolidation: z.boolean().optional()
+          .describe("Include consolidation status for all projects (default true)."),
+      }),
     },
-    async () => {
+    async ({ include_consolidation }) => {
       const activeProfile = (() => {
         try {
           return resolveRuntimeProfile(phrenPath);
@@ -147,7 +94,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
         version = pkg.version || "unknown";
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck version: ${errorMessage(err)}`);
+        logger.debug("healthCheck version", errorMessage(err));
       }
 
       // FTS index (lives in /tmpphren-fts-*/, not .runtime/)
@@ -155,7 +102,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       try {
         indexStatus = findFtsCacheForPath(phrenPath, activeProfile);
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck ftsCacheCheck: ${errorMessage(err)}`);
+        logger.debug("healthCheck ftsCacheCheck", errorMessage(err));
       }
 
       // Hook registration
@@ -164,7 +111,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { getHooksEnabledPreference } = await import("../init/preferences.js");
         hooksEnabled = getHooksEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck hooksEnabled: ${errorMessage(err)}`);
+        logger.debug("healthCheck hooksEnabled", errorMessage(err));
       }
 
       let mcpEnabled = false;
@@ -172,7 +119,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const { getMcpEnabledPreference } = await import("../init/preferences.js");
         mcpEnabled = getMcpEnabledPreference(phrenPath);
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck mcpEnabled: ${errorMessage(err)}`);
+        logger.debug("healthCheck mcpEnabled", errorMessage(err));
       }
 
       // Profile/machine info
@@ -180,7 +127,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           return getMachineName();
         } catch (err: unknown) {
-          logger.debug("ops", `healthCheck machineName: ${errorMessage(err)}`);
+          logger.debug("healthCheck machineName", errorMessage(err));
         }
         return undefined;
       })();
@@ -195,7 +142,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const workflowPolicy = getWorkflowPolicy(phrenPath);
         taskMode = workflowPolicy.taskMode;
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck taskMode: ${errorMessage(err)}`);
+        logger.debug("healthCheck taskMode", errorMessage(err));
       }
       let syncIntent: string | undefined;
       try {
@@ -204,7 +151,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         proactivity = prefs.proactivity || "high";
         syncIntent = prefs.syncIntent;
       } catch (err: unknown) {
-        logger.debug("ops", `healthCheck proactivity: ${errorMessage(err)}`);
+        logger.debug("healthCheck proactivity", errorMessage(err));
       }
 
       // Determine sync status from intent + git remote state
@@ -240,6 +187,39 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
       }
 
+      // Consolidation status (opt-out via include_consolidation: false)
+      type ConsolidationEntry = {
+        project: string;
+        entriesSince: number;
+        threshold: number;
+        daysSince: number | null;
+        lastConsolidated: string | null;
+        recommended: boolean;
+      };
+      let consolidation: ConsolidationEntry[] | null = null;
+
+      if (include_consolidation !== false) {
+        try {
+          const projectDirsForConsol = getProjectDirs(phrenPath, activeProfile);
+          const consolResults: ConsolidationEntry[] = [];
+          for (const dir of projectDirsForConsol) {
+            const status = getProjectConsolidationStatus(dir);
+            if (!status) continue;
+            consolResults.push({ ...status, threshold: CONSOLIDATION_ENTRY_THRESHOLD });
+          }
+          consolidation = consolResults;
+        } catch (err: unknown) {
+          logger.debug("healthCheck consolidation", errorMessage(err));
+          consolidation = null;
+        }
+      }
+
+      const consolSummary = consolidation && consolidation.length > 0
+        ? consolidation.filter(r => r.recommended).length > 0
+          ? `Consolidation: ${consolidation.filter(r => r.recommended).length} project(s) need consolidation`
+          : `Consolidation: all projects OK`
+        : null;
+
       const lines = [
         `Phren v${version}`,
         `Profile: ${activeProfile || "(default)"}`,
@@ -251,6 +231,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         `Proactivity: ${proactivity}`,
         `Task mode: ${taskMode}`,
         `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
+        consolSummary,
         `Path: ${phrenPath}`,
       ].filter(Boolean);
 
@@ -269,6 +250,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           taskMode,
           syncStatus,
           syncDetail,
+          consolidation,
           phrenPath,
         },
       });
@@ -347,7 +329,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (!filterPatterns) return lines; // hook-errors.log: every line is an error
           return lines.filter(line => ERROR_PATTERNS.some(p => p.test(line)));
         } catch (err: unknown) {
-          logger.debug("ops", `readErrorLines: ${errorMessage(err)}`);
+          logger.debug("readErrorLines", errorMessage(err));
           return [];
         }
       }
@@ -418,80 +400,41 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
   );
 
-  // ── approve_queue_item ──────────────────────────────────────────────────
+  // ── manage_review_item ──────────────────────────────────────────────────
 
   server.registerTool(
-    "approve_queue_item",
+    "manage_review_item",
     {
-      title: "◆ phren · approve queue item",
+      title: "◆ phren · manage review item",
       description:
-        "Approve a review queue item — removes it from the review queue (the finding stays in FINDINGS.md).",
+        "Manage a review queue item: approve (removes from queue, finding stays), reject (removes from queue AND FINDINGS.md), or edit (updates text in both).",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
+        action: z.enum(["approve", "reject", "edit"]).describe("Action to perform on the queue item."),
+        new_text: z.string().max(10000).optional().describe("Required when action is 'edit'."),
       }),
     },
-    async ({ project, line }) => {
+    async ({ project, line, action, new_text }) => {
       if (!isValidProjectName(project)) {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
       }
+      if (action === "edit" && !new_text) {
+        return mcpResponse({ ok: false, error: "new_text is required when action is 'edit'." });
+      }
       return withWriteQueue(async () => {
-        const result = approveQueueItem(phrenPath, project, line);
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+        let result;
+        switch (action) {
+          case "approve":
+            result = approveQueueItem(phrenPath, project, line);
+            break;
+          case "reject":
+            result = rejectQueueItem(phrenPath, project, line);
+            break;
+          case "edit":
+            result = editQueueItem(phrenPath, project, line, new_text!);
+            break;
         }
-        return mcpResponse({ ok: true, message: result.data });
-      });
-    }
-  );
-
-  // ── reject_queue_item ───────────────────────────────────────────────────
-
-  server.registerTool(
-    "reject_queue_item",
-    {
-      title: "◆ phren · reject queue item",
-      description:
-        "Reject a review queue item — removes it from the review queue AND removes the corresponding finding from FINDINGS.md.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
-      }),
-    },
-    async ({ project, line }) => {
-      if (!isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      return withWriteQueue(async () => {
-        const result = rejectQueueItem(phrenPath, project, line);
-        if (!result.ok) {
-          return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-        }
-        return mcpResponse({ ok: true, message: result.data });
-      });
-    }
-  );
-
-  // ── edit_queue_item ─────────────────────────────────────────────────────
-
-  server.registerTool(
-    "edit_queue_item",
-    {
-      title: "◆ phren · edit queue item",
-      description:
-        "Edit a review queue item's text in both the review queue and FINDINGS.md.",
-      inputSchema: z.object({
-        project: z.string().describe("Project name."),
-        line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
-        new_text: z.string().max(10000).describe("The new finding text."),
-      }),
-    },
-    async ({ project, line, new_text }) => {
-      if (!isValidProjectName(project)) {
-        return mcpResponse({ ok: false, error: `Invalid project name: "${project}".` });
-      }
-      return withWriteQueue(async () => {
-        const result = editQueueItem(phrenPath, project, line, new_text);
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
         }
