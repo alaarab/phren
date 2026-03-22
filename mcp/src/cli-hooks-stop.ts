@@ -346,6 +346,7 @@ export async function handleHookStop() {
       },
     });
     appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(gitRepo.detail)}`);
+    process.stderr.write(`phren: git repo error — ${gitRepo.detail}. Run 'phren doctor --fix' for details.\n`);
     return;
   }
 
@@ -367,6 +368,7 @@ export async function handleHookStop() {
       },
     });
     appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(status.error || "git status failed")}`);
+    process.stderr.write(`phren: git status failed — your changes may not be saved. Run 'phren doctor --fix'.\n`);
     return;
   }
 
@@ -443,6 +445,7 @@ export async function handleHookStop() {
       },
     });
     appendAuditLog(phrenPath, "hook_stop", `status=error detail=${JSON.stringify(add.error || commit.error || "git add/commit failed")}`);
+    process.stderr.write(`phren: git commit failed — ${add.error || commit.error || "unknown error"}. Changes not saved.\n`);
     return;
   }
 
@@ -466,6 +469,9 @@ export async function handleHookStop() {
       },
     });
     appendAuditLog(phrenPath, "hook_stop", "status=saved-local");
+    if (unsyncedCommits > 3) {
+      process.stderr.write(`phren: ${unsyncedCommits} unsynced commits — no git remote configured.\n`);
+    }
     return;
   }
   const unsyncedCommits = await countUnsyncedCommits(phrenPath);
@@ -554,19 +560,29 @@ export async function handleBackgroundSync() {
     }
 
     const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
+    const failDetail = recovered.detail || push.error || "background sync push failed";
     updateRuntimeHealth(phrenPathLocal, {
-      lastAutoSave: { at: now, status: "saved-local", detail: recovered.detail || push.error || "background sync push failed" },
+      lastAutoSave: { at: now, status: "saved-local", detail: failDetail },
       lastSync: {
         lastPullAt: now,
         lastPullStatus: recovered.pullStatus,
         lastPullDetail: recovered.pullDetail,
         lastPushAt: now,
         lastPushStatus: "saved-local",
-        lastPushDetail: recovered.detail || push.error || "background sync push failed",
+        lastPushDetail: failDetail,
         unsyncedCommits,
       },
     });
-    appendAuditLog(phrenPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(recovered.detail || push.error || "background sync push failed")}`);
+    appendAuditLog(phrenPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(failDetail)}`);
+
+    // Append to sync-warnings.jsonl so health_check and session_start can surface recent failures
+    try {
+      const warningsPath = runtimeFile(phrenPathLocal, "sync-warnings.jsonl");
+      const entry = JSON.stringify({ at: now, error: failDetail, unsyncedCommits }) + "\n";
+      fs.appendFileSync(warningsPath, entry);
+    } catch (err: unknown) {
+      debugLog(`background-sync: failed to write sync warning: ${errorMessage(err)}`);
+    }
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }
