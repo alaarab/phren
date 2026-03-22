@@ -46,7 +46,7 @@ async function waitForAnyKeypress(): Promise<void> {
   });
 }
 
-function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
+export function resolveStartupIntroPlan(phrenPath: string, version = VERSION): StartupIntroPlan {
   const state = loadShellState(phrenPath);
   const mode = state.introMode === "always" || state.introMode === "off" ? state.introMode : "once-per-version";
 
@@ -139,7 +139,7 @@ async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPla
   }
 }
 
-function startLiveStatePoller({
+export function startLiveStatePoller({
   phrenPath,
   shell,
   repaint,

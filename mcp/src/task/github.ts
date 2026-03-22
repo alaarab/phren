@@ -25,7 +25,8 @@ export function parseGithubIssueUrl(url: string): GithubIssueRef | null {
   };
 }
 
-function extractGithubRepoFromText(content: string): string | undefined {
+/** @internal Exported for tests. */
+export function extractGithubRepoFromText(content: string): string | undefined {
   const match = content.match(GITHUB_REPO_URL);
   return match?.[1];
 }

@@ -69,7 +69,7 @@ const WEB_UI_READY_ATTEMPTS = 12;
 const WEB_UI_READY_DELAY_MS = 75;
 const WEB_UI_PORT_RETRY_ATTEMPTS = 3;
 
-function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+export function getWebUiBrowserCommand(url: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
   if (platform === "darwin") return { command: "open", args: [url] };
   if (platform === "win32") return { command: process.env.ComSpec || "cmd.exe", args: ["/c", "start", "", url] };
   return { command: "xdg-open", args: [url] };
@@ -92,7 +92,7 @@ async function launchWebUiBrowser(url: string): Promise<void> {
   });
 }
 
-async function waitForWebUiReady(
+export async function waitForWebUiReady(
   url: string,
   attempts: number = WEB_UI_READY_ATTEMPTS,
   delayMs: number = WEB_UI_READY_DELAY_MS,
