@@ -39,11 +39,8 @@ export const cliManifest: CapabilityManifest = {
     "graph.link_findings": { implemented: true, handler: "cli-graph.ts:handleGraphLink" },
 
     // Config
-    "config.proactivity": { implemented: true, handler: "cli-config.ts:handleProactivity" },
-    "config.task_mode": { implemented: true, handler: "cli-config.ts:handleConfigTaskMode" },
-    "config.retention": { implemented: true, handler: "cli-config.ts:handleRetentionPolicy" },
-    "config.workflow": { implemented: true, handler: "cli-config.ts:handleWorkflowPolicy" },
-    "config.index": { implemented: true, handler: "cli-config.ts:handleIndexPolicy" },
+    "config.get": { implemented: true, handler: "cli-config.ts:handleConfigGet (per-domain)" },
+    "config.set": { implemented: true, handler: "cli-config.ts:handleConfigSet (proactivity, taskMode, findingSensitivity, retention, workflow, index)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "cli-actions.ts:handleDoctor" },

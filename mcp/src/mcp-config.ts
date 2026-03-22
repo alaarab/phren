@@ -261,7 +261,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "instead of global .config/.",
       inputSchema: z.object({
         domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "index", "topic"]),
-        settings: z.record(z.unknown()).describe(
+        settings: z.record(z.string(), z.unknown()).describe(
           "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
           "minInjectConfidence?, decay? } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
@@ -477,7 +477,7 @@ export function register(server: McpServer, ctx: McpContext): void {
                 nextConfig.workflowPolicy = {
                   ...existingWorkflow,
                   ...(lowConfidenceThreshold !== undefined ? { lowConfidenceThreshold } : {}),
-                  ...(riskySections !== undefined ? { riskySections } : {}),
+                  ...(riskySections !== undefined ? { riskySections: riskySections as ("Review" | "Stale" | "Conflicts")[] } : {}),
                 };
               }
               if (taskMode !== undefined) nextConfig.taskMode = taskMode as (typeof VALID_TASK_MODES)[number];

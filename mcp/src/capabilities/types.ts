@@ -34,11 +34,8 @@ export const ACTION_KEYS = [
   "graph.link_findings",
 
   // Config
-  "config.proactivity",
-  "config.task_mode",
-  "config.retention",
-  "config.workflow",
-  "config.index",
+  "config.get",
+  "config.set",
 
   // Health / Sync / Session
   "health.check",

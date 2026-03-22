@@ -39,11 +39,8 @@ export const webUiManifest: CapabilityManifest = {
     "graph.link_findings": { implemented: false, reason: "No link findings action in web UI" },
 
     // Config
-    "config.proactivity": { implemented: false, reason: "Config is CLI-only" },
-    "config.task_mode": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy)" },
-    "config.retention": { implemented: false, reason: "Config is CLI-only" },
-    "config.workflow": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy)" },
-    "config.index": { implemented: false, reason: "Config is CLI-only" },
+    "config.get": { implemented: true, handler: "memory-ui-server.ts:/api/settings (read)" },
+    "config.set": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy, task mode)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "memory-ui-server.ts:/api/runtime-health" },

@@ -117,12 +117,12 @@ Remove a task from a project's `tasks.md` by matching text or task ID.
 
 ### `update_task`
 
-Update a task item's text, priority, context, section, or linked GitHub issue.
+Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). When work_next is true, item is not needed.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `item` | string | yes | Partial text to match against existing task items. |
+| `item` | string | no | Partial text to match against existing task items. Required unless `updates.work_next` is true. |
 | `updates` | object | yes | Fields to update (all optional inside the object). |
 
 The `updates` object accepts:
@@ -137,58 +137,10 @@ The `updates` object accepts:
 | `github_issue` | number or string | GitHub issue number (for example `14` or `#14`). |
 | `github_url` | string | GitHub issue URL to associate with the item. |
 | `unlink_github` | boolean | Remove any linked issue metadata from the item. |
-
-### `link_task_issue`
-
-Link or unlink an existing GitHub issue on a task item.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Task item text, ID, or stable `bid:` hash. |
-| `issue_number` | number or string | no | Existing GitHub issue number (for example `14` or `#14`). |
-| `issue_url` | string | no | Existing GitHub issue URL. |
-| `unlink` | boolean | no | If true, remove any linked issue metadata from the task item. |
-
-### `promote_task_to_issue`
-
-Create a GitHub issue from a task item and link it back into the task.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Task item text, ID, or stable `bid:` hash. |
-| `repo` | string | no | Target GitHub repo in `owner/name` form. If omitted, phren tries to infer it from the project's `CLAUDE.md` or `summary.md`. |
-| `title` | string | no | Optional GitHub issue title. Defaults to the task item text. |
-| `body` | string | no | Optional GitHub issue body. Defaults to a body built from the task item plus any `Context:` line. |
-| `mark_done` | boolean | no | If true, mark the task item Done after creating and linking the issue. |
-
-### `pin_task`
-
-Pin a task so it floats to the top of its section.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Partial task text or task ID to pin. |
-
-### `work_next_task`
-
-Move the highest-priority Queue item to Active so it becomes the next task to execute.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-
-### `promote_task`
-
-Promote a speculative task to committed by clearing the speculative flag. Optionally move it to Active.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Task selector by partial text, positional ID, or stable `bid:` ID. |
-| `move_to_active` | boolean | no | If true, move the promoted task to Active. Defaults to false. |
+| `pin` | boolean | Pin the task so it floats to the top of its section. |
+| `promote` | boolean | Clear the speculative flag on this task (confirm the user wants it). |
+| `move_to_active` | boolean | Used with `promote`: also move the task to the Active section. |
+| `work_next` | boolean | Pick the highest-priority Queue item and move it to Active. Ignores `item` param. |
 
 ### `tidy_done_tasks`
 
@@ -623,69 +575,32 @@ Extract candidate findings from session/transcript context for bulk capture work
 
 ### `get_config`
 
-Read current governance and policy configuration (retention, workflow, access, index policies).
+Read current governance and policy configuration. Supports all config domains including topic.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, or `all` (default). |
+| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `all` (default). |
+| `project` | string | no | Project name. When provided, returns merged view with project overrides and `_source` annotations. Required for `topic` domain. |
 
-### `set_proactivity`
+### `set_config`
 
-Set agent proactivity level.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `level` | enum | yes | Proactivity level: `high`, `medium`, or `low`. |
-| `scope` | enum | no | Which scope to set: `base` (default), `findings`, or `tasks`. |
-
-### `set_task_mode`
-
-Set task management mode.
+Update configuration for a specific domain. Unified setter for all config domains.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `mode` | enum | yes | Task mode: `off`, `manual`, `suggest`, or `auto`. |
+| `domain` | enum | yes | Config domain: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `index`, or `topic`. |
+| `settings` | object | yes | Domain-specific settings (see below). |
+| `project` | string | no | Project name. When provided, writes to project's `phren.project.yaml` instead of global `.config/`. Required for `topic` domain. |
 
-### `set_finding_sensitivity`
+**Domain-specific settings:**
 
-Set finding capture sensitivity.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `level` | enum | yes | Sensitivity level: `minimal`, `conservative`, `balanced`, or `aggressive`. |
-
-### `set_retention_policy`
-
-Configure retention and decay policy.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `ttlDays` | number | no | Days before a finding is considered for expiry (min 1). |
-| `retentionDays` | number | no | Hard retention limit in days (min 1). |
-| `autoAcceptThreshold` | number | no | Score threshold (0-1) for auto-accepting extracted memories. |
-| `minInjectConfidence` | number | no | Minimum confidence (0-1) to inject into context. |
-| `decay` | object | no | Decay multipliers: `{ d30?, d60?, d90?, d120? }` (each 0-1). |
-
-### `set_workflow_policy`
-
-Configure workflow approval gates.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `lowConfidenceThreshold` | number | no | Confidence below which findings are flagged (0-1). |
-| `riskySections` | string[] | no | Sections considered risky: `Review`, `Stale`, `Conflicts`. |
-| `taskMode` | enum | no | Task automation mode: `off`, `manual`, `suggest`, `auto`. |
-| `findingSensitivity` | enum | no | Capture level: `minimal`, `conservative`, `balanced`, `aggressive`. |
-
-### `set_index_policy`
-
-Configure indexer include/exclude globs.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `includeGlobs` | string[] | no | Glob patterns to include in the index. |
-| `excludeGlobs` | string[] | no | Glob patterns to exclude from the index. |
-| `includeHidden` | boolean | no | Whether to index hidden files. |
+- **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings"|"tasks" }`
+- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`
+- **findingSensitivity**: `{ level: "minimal"|"conservative"|"balanced"|"aggressive" }`
+- **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? } }`
+- **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
+- **index**: `{ includeGlobs?, excludeGlobs?, includeHidden? }`
+- **topic**: `{ topics: [{ slug, label, description?, keywords? }], domain? }`
 
 ---
 
