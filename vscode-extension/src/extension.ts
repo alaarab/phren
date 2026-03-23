@@ -73,14 +73,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         if (result.ok) {
           await vscode.commands.executeCommand("setContext", "phren.backendInstalled", true);
-          await vscode.window.showInformationMessage(
+          const installChoice = await vscode.window.showInformationMessage(
             "Phren installed successfully. Reload to activate.",
             "Reload Window",
-          ).then(async (choice) => {
-            if (choice === "Reload Window") {
-              await vscode.commands.executeCommand("workbench.action.reloadWindow");
-            }
-          });
+          );
+          if (installChoice === "Reload Window") {
+            await vscode.commands.executeCommand("workbench.action.reloadWindow");
+          }
         } else {
           await vscode.window.showErrorMessage(
             `Phren install failed: ${summarizeCommandError(result)}. Try running 'npm install -g @phren/cli' in your terminal.`,
@@ -106,14 +105,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         if (result.ok) {
           await vscode.commands.executeCommand("setContext", "phren.storeInitialized", true);
-          await vscode.window.showInformationMessage(
+          const initChoice = await vscode.window.showInformationMessage(
             "Phren initialized. Reload to activate.",
             "Reload Window",
-          ).then(async (choice) => {
-            if (choice === "Reload Window") {
-              await vscode.commands.executeCommand("workbench.action.reloadWindow");
-            }
-          });
+          );
+          if (initChoice === "Reload Window") {
+            await vscode.commands.executeCommand("workbench.action.reloadWindow");
+          }
         } else {
           await vscode.window.showErrorMessage(`Phren init failed: ${summarizeCommandError(result)}`);
         }
@@ -373,7 +371,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const addTaskDisposable = vscode.commands.registerCommand("phren.addTask", async () => {
     let project = statusBar.getActiveProjectName();
     if (!project) {
-      const projectsRaw = await phrenClient.listProjects();
+      let projectsRaw: unknown;
+      try {
+        projectsRaw = await phrenClient.listProjects();
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to list projects: ${toErrorMessage(error)}`);
+        return;
+      }
       const projectsData = asRecord(asRecord(projectsRaw)?.data);
       const projects = asArraySafe(projectsData?.projects);
       const projectNames: string[] = [];
@@ -412,7 +416,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const pinMemoryDisposable = vscode.commands.registerCommand("phren.pinMemory", async () => {
     let project = statusBar.getActiveProjectName();
     if (!project) {
-      const projectsRaw = await phrenClient.listProjects();
+      let projectsRaw: unknown;
+      try {
+        projectsRaw = await phrenClient.listProjects();
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to list projects: ${toErrorMessage(error)}`);
+        return;
+      }
       const projectsData = asRecord(asRecord(projectsRaw)?.data);
       const projects = asArraySafe(projectsData?.projects);
       const projectNames: string[] = [];
@@ -1206,12 +1216,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const current = readDeviceContext(runtimeConfig.storePath);
       const profiles = listProfileConfigs(runtimeConfig.storePath);
       if (profiles.length === 0) {
-        await vscode.window.showInformationMessage("No profiles found in the Phren store.", "Open machines.yaml")
-          .then(async (choice) => {
-            if (choice === "Open machines.yaml") {
-              await vscode.commands.executeCommand("phren.openMachinesConfig");
-            }
-          });
+        const profileChoice = await vscode.window.showInformationMessage("No profiles found in the Phren store.", "Open machines.yaml");
+        if (profileChoice === "Open machines.yaml") {
+          await vscode.commands.executeCommand("phren.openMachinesConfig");
+        }
         return;
       }
 
@@ -1461,14 +1469,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       }
       if (e.affectsConfiguration("phren.llmModel") && isExpensive && (semanticDedup || semanticConflict)) {
-        await vscode.window.showWarningMessage(
+        const modelChoice = await vscode.window.showWarningMessage(
           `Phren: "${llmModel}" is expensive for offline batch operations. Haiku is recommended and costs ~10x less.`,
           "Switch to Haiku",
-        ).then(async (choice) => {
-          if (choice === "Switch to Haiku") {
-            await updated.update("llmModel", "claude-haiku-4-5-20251001", vscode.ConfigurationTarget.Global);
-          }
-        });
+        );
+        if (modelChoice === "Switch to Haiku") {
+          await updated.update("llmModel", "claude-haiku-4-5-20251001", vscode.ConfigurationTarget.Global);
+        }
       }
       if (e.affectsConfiguration("phren.findingSensitivity")) {
         const sensitivity = updated.get<string>("findingSensitivity", "balanced");

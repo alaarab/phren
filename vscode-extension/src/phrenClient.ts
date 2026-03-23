@@ -68,42 +68,92 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class PhrenClient {
   private readonly options: PhrenClientOptions;
-  private readonly process: ChildProcessWithoutNullStreams;
+  private process: ChildProcessWithoutNullStreams;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly timeoutMs: number;
+
+  private static readonly MAX_RECONNECT_RETRIES = 3;
+  private static readonly RECONNECT_DELAY_MS = 2000;
 
   private buffer = Buffer.alloc(0);
   private nextId = 1;
   private disposed = false;
   private initialized = false;
   private initializePromise?: Promise<void>;
+  private reconnectRetries = 0;
+  private reconnecting = false;
+  private reconnectPromise?: Promise<void>;
 
   constructor(options: PhrenClientOptions) {
     this.options = options;
     this.timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-    this.process = spawn(options.nodePath ?? process.execPath, [options.mcpServerPath, options.storePath], {
+    this.process = this.spawnProcess();
+  }
+
+  private spawnProcess(): ChildProcessWithoutNullStreams {
+    const child = spawn(this.options.nodePath ?? process.execPath, [this.options.mcpServerPath, this.options.storePath], {
       stdio: "pipe",
     });
 
-    this.process.stdout.on("data", (chunk: Buffer | string) => {
+    child.stdout.on("data", (chunk: Buffer | string) => {
       this.handleStdoutData(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"));
     });
 
-    this.process.stderr.on("data", (chunk: Buffer | string) => {
+    child.stderr.on("data", (chunk: Buffer | string) => {
       const message = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
       console.error(`[phren-mcp] ${message.trim()}`);
     });
 
-    this.process.on("exit", (code, signal) => {
+    child.on("exit", (code, signal) => {
       if (this.disposed) {
         return;
       }
-      this.rejectPending(new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`));
+      const exitError = new Error(`phren MCP process exited (code=${code ?? "null"}, signal=${signal ?? "null"})`);
+      this.rejectPending(exitError);
+      this.scheduleReconnect();
     });
 
-    this.process.on("error", (error: Error) => {
+    child.on("error", (error: Error) => {
       this.rejectPending(error);
+    });
+
+    return child;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnecting) {
+      return;
+    }
+    if (this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
+      console.error(`[phren-mcp] All ${PhrenClient.MAX_RECONNECT_RETRIES} reconnect retries exhausted.`);
+      return;
+    }
+    this.reconnecting = true;
+    this.reconnectRetries++;
+    const attempt = this.reconnectRetries;
+    console.error(`[phren-mcp] Scheduling reconnect attempt ${attempt}/${PhrenClient.MAX_RECONNECT_RETRIES} in ${PhrenClient.RECONNECT_DELAY_MS}ms...`);
+
+    this.reconnectPromise = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        if (this.disposed) {
+          resolve();
+          return;
+        }
+        try {
+          this.buffer = Buffer.alloc(0);
+          this.initialized = false;
+          this.initializePromise = undefined;
+          this.process = this.spawnProcess();
+          this.reconnecting = false;
+          console.error(`[phren-mcp] Reconnect attempt ${attempt} spawned successfully.`);
+          resolve();
+        } catch (error) {
+          this.reconnecting = false;
+          console.error(`[phren-mcp] Reconnect attempt ${attempt} failed to spawn: ${String(error)}`);
+          resolve();
+        }
+      }, PhrenClient.RECONNECT_DELAY_MS);
     });
   }
 
@@ -319,6 +369,12 @@ export class PhrenClient {
   }
 
   private async callTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+    if (this.reconnecting && this.reconnectPromise) {
+      await this.reconnectPromise;
+    }
+    if (!this.disposed && !this.reconnecting && this.reconnectRetries >= PhrenClient.MAX_RECONNECT_RETRIES) {
+      throw new Error("Phren MCP process exited and all reconnect attempts failed.");
+    }
     await this.ensureInitialized();
     const result = await this.sendRequest<McpToolCallResult>("tools/call", {
       name: toolName,

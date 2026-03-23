@@ -25,29 +25,11 @@ function acquireFileLock(lockPath: string): void {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
-          // Verify lock owner PID is dead before removing stale lock
-          let ownerDead = true;
-          try {
-            const lockContent = fs.readFileSync(lockPath, "utf8");
-            const lockPid = Number.parseInt(lockContent.split("\n")[0], 10);
-            if (Number.isFinite(lockPid) && lockPid > 0) {
-              if (process.platform !== 'win32') {
-                try { process.kill(lockPid, 0); ownerDead = false; }
-                catch { ownerDead = true; }
-              } else {
-                try {
-                  const result = require('child_process').spawnSync('tasklist', ['/FI', `PID eq ${lockPid}`, '/NH'], { encoding: 'utf8', timeout: 2000 });
-                  if (result.stdout && result.stdout.includes(String(lockPid))) ownerDead = false;
-                } catch { ownerDead = true; }
-              }
-            }
-          } catch {
-            ownerDead = true; // Can't read lock file, treat as dead
-          }
-          if (ownerDead) {
-            fs.unlinkSync(lockPath);
-            continue;
-          }
+          // Lock file is older than stale threshold — delete unconditionally.
+          // This handles zombie processes, crashed hooks, and any case where
+          // the owning process failed to clean up.
+          fs.unlinkSync(lockPath);
+          continue;
         }
       } catch (statErr: unknown) {
         logger.debug("acquireFileLock", `staleStat: ${statErr instanceof Error ? statErr.message : String(statErr)}`);
