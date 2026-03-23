@@ -1192,7 +1192,7 @@ describe("init edge cases", () => {
     try {
       const result = getPendingBootstrapTarget(phrenPath, {});
       expect(result).not.toBeNull();
-      expect(result!.path).toBe(projectDir);
+      expect(fs.realpathSync(result!.path)).toBe(fs.realpathSync(projectDir));
       expect(result!.mode).toBe("detected");
     } finally {
       process.chdir(origCwd);
