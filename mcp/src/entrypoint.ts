@@ -354,6 +354,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
       applyStarterUpdate: initArgs.includes("--apply-starter-update"),
       dryRun: initArgs.includes("--dry-run"),
       yes: initArgs.includes("--yes") || initArgs.includes("-y"),
+      express: initArgs.includes("--express"),
       _walkthroughCloneUrl: cloneUrl,
     });
     return finish();
