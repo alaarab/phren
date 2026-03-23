@@ -1285,11 +1285,12 @@ function configureHooksIfEnabled(phrenPath: string, hooksEnabled: boolean, verb:
   }
 
   // Install phren CLI wrapper at ~/.local/bin/phren so the bare command works
-  try {
-    if (installPhrenCliWrapper(phrenPath)) {
-      log(`  ${verb} CLI wrapper: ~/.local/bin/phren`);
-    }
-  } catch (err: unknown) { debugLog(`installPhrenCliWrapper failed: ${errorMessage(err)}`); }
+  const wrapperInstalled = installPhrenCliWrapper(phrenPath);
+  if (wrapperInstalled) {
+    log(`  ${verb} CLI wrapper: ~/.local/bin/phren`);
+  } else {
+    log(`  Note: phren CLI wrapper not installed (existing non-managed binary, or no entry script found)`);
+  }
 }
 
 export async function runInit(opts: InitOptions = {}) {
