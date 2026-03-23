@@ -265,6 +265,7 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
   let date = "unknown";
   let index = 1;
   let inArchiveBlock = false;
+  let headingTag: string | undefined;
   const includeArchived = opts.includeArchived ?? false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -288,6 +289,39 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
       date = extractedDate;
       continue;
     }
+
+    // Support heading-based findings: ## topic / ### title / paragraph
+    const h2TagMatch = line.match(/^##\s+([a-z_-]+)\s*$/i);
+    if (h2TagMatch && !line.match(/^##\s+\d{4}/)) {
+      // Track topic heading (but not date headings like ## 2026-03-22)
+      headingTag = h2TagMatch[1].toLowerCase();
+      continue;
+    }
+    const h3Match = line.match(/^###\s+(.+)$/);
+    if (h3Match && headingTag) {
+      let body = "";
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        if (next.startsWith("#") || next.startsWith("- ")) break;
+        body = next;
+        break;
+      }
+      const title = h3Match[1].trim();
+      const syntheticText = body ? `[${headingTag}] ${title} — ${body}` : `[${headingTag}] ${title}`;
+      items.push({
+        id: `L${index}`,
+        date,
+        text: syntheticText,
+        source: "unknown",
+        status: "active" as FindingLifecycleStatus,
+        archived: inArchiveBlock,
+        tier: inArchiveBlock ? "archived" : "current",
+      });
+      index++;
+      continue;
+    }
+
     if (!line.startsWith("- ")) continue;
 
     const next = lines[i + 1] || "";

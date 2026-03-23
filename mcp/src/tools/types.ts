@@ -1,4 +1,3 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SqlJsDatabase } from "../shared/index.js";
 
 export interface McpContext {
@@ -9,8 +8,6 @@ export interface McpContext {
   updateFileInIndex: (filePath: string) => void;
   withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T | { content: { type: "text"; text: string }[] }>;
 }
-
-type RegisterFn = (server: McpServer, ctx: McpContext) => void;
 
 /**
  * Standardized MCP tool response payload, based on PhrenResult conventions.

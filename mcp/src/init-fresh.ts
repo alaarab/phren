@@ -12,14 +12,12 @@ import {
 import { isValidProjectName, errorMessage } from "./utils.js";
 import { getMachineName, persistMachineName } from "./machine-identity.js";
 import {
-  readInstallPreferences,
   writeInstallPreferences,
 } from "./init/preferences.js";
 import {
   ensureGovernanceFiles,
   repairPreexistingInstall,
   runPostInitVerify,
-  applyStarterTemplateUpdates,
   listTemplates,
   applyTemplate,
   ensureProjectScaffold,

@@ -16,7 +16,6 @@ import {
 } from "./init/config.js";
 import {
   writeInstallPreferences,
-  readInstallPreferences,
 } from "./init/preferences.js";
 import {
   ensureGovernanceFiles,
@@ -27,7 +26,6 @@ import {
 } from "./init/setup.js";
 import {
   getProjectOwnershipDefault,
-  type ProjectOwnershipMode,
 } from "./project-config.js";
 import { VERSION, log } from "./init/shared.js";
 import { applyOnboardingPreferences } from "./init-env.js";
