@@ -24,7 +24,7 @@ function maybeWarn(raw: unknown): void {
 export async function showProjectConfigPanel(client: PhrenClient, project: string): Promise<void> {
   let configData: Record<string, unknown> | undefined;
   try {
-    const raw = await client.getConfig(project);
+    const raw = await client.getConfig(undefined, project);
     configData = asRecord(asRecord(raw)?.data);
   } catch (error) {
     await vscode.window.showErrorMessage(`Failed to load config for "${project}": ${error instanceof Error ? error.message : String(error)}`);

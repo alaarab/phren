@@ -11,8 +11,7 @@ import {
   getHooksEnabledPreference,
   setHooksEnabledPreference,
 } from "./preferences.js";
-import { DEFAULT_PHREN_PATH, log } from "./shared.js";
-import { parseMcpMode } from "./init.js";
+import { DEFAULT_PHREN_PATH, log, parseMcpMode } from "./shared.js";
 
 export async function runHooksMode(modeArg?: string) {
   const phrenPath = findPhrenPath() || (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;

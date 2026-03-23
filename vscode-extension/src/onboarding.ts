@@ -227,7 +227,7 @@ export async function handleWalkthroughChecks(
   outputChannel: vscode.OutputChannel,
 ): Promise<boolean> {
   const backendInstalled = !!runtimeConfig.mcpServerPath;
-  const storeInitialized = pathExists(GLOBAL_PHREN_STORE_PATH) && hasPhrenMcpEntry(outputChannel);
+  const storeInitialized = pathExists(runtimeConfig.storePath) && hasPhrenMcpEntry(outputChannel);
   await vscode.commands.executeCommand("setContext", "phren.backendInstalled", backendInstalled);
   await vscode.commands.executeCommand("setContext", "phren.storeInitialized", storeInitialized);
 

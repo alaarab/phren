@@ -17,7 +17,7 @@ import {
   type InferredInitScaffold,
   inferInitScaffoldFromRepo,
 } from "./setup.js";
-import type { McpMode } from "./init.js";
+import type { McpMode } from "./shared.js";
 
 type WorkflowRiskSection = "Review" | "Stale" | "Conflicts";
 type StorageLocationChoice = "global" | "project" | "custom";
