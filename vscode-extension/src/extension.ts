@@ -1691,29 +1691,8 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
 
   let setupSucceeded = false;
   try {
-    // Step 1: Global install (optional — npx fallback works without it)
-    const globallyInstalled = await isGlobalPhrenInstalled();
-    if (!globallyInstalled) {
-      const installChoice = await vscode.window.showInformationMessage(
-        "Install Phren globally for the 'phren' CLI command? (Optional — the extension works without it.)",
-        "Install Phren",
-        "Skip",
-      );
-      if (installChoice === "Install Phren") {
-        const result = await runCommandWithProgress(
-          "Installing Phren globally...",
-          getNpmCommand(),
-          ["install", "-g", PHREN_PACKAGE_NAME],
-        );
-        if (result.ok) {
-          await vscode.window.showInformationMessage("Phren global install complete.");
-        } else {
-          await vscode.window.showErrorMessage(`Phren install failed: ${summarizeCommandError(result)}`);
-        }
-      }
-    }
-
-    // Step 2: Initialize phren store — run automatically if missing or incomplete
+    // Initialize phren store — run automatically if missing or incomplete
+    // No global install needed: init installs a CLI wrapper at ~/.local/bin/phren
     // A partial ~/.phren (e.g. from a failed clone) is not sufficient;
     // we check for the store AND MCP config before considering setup done.
     const needsInit = !pathExists(GLOBAL_PHREN_STORE_PATH) || !hasPhrenMcpEntry();
