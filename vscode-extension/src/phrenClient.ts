@@ -411,6 +411,7 @@ export class PhrenClient {
         });
         this.sendNotification("notifications/initialized", {});
         this.initialized = true;
+        this.reconnectRetries = 0;
         return;
       } catch (error) {
         lastError = error;

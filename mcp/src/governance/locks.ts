@@ -25,10 +25,28 @@ function acquireFileLock(lockPath: string): void {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > staleThreshold) {
-          // Lock file is older than stale threshold — delete unconditionally.
-          // This handles zombie processes, crashed hooks, and any case where
-          // the owning process failed to clean up.
-          fs.unlinkSync(lockPath);
+          // Lock mtime exceeds stale threshold — but only delete if the
+          // owning process is dead.  Legitimate long operations (e.g. index
+          // rebuilds) can hold locks beyond the threshold.
+          let ownerAlive = false;
+          try {
+            const content = fs.readFileSync(lockPath, "utf-8");
+            const pid = Number.parseInt(content.split("\n")[0], 10);
+            if (pid > 0 && Number.isFinite(pid)) {
+              try {
+                process.kill(pid, 0); // signal 0: liveness check, no actual signal sent
+                ownerAlive = true;
+              } catch {
+                // process.kill throws if PID doesn't exist → owner is dead
+              }
+            }
+            // pid <= 0 or NaN → treat as stale (unparseable / corrupt lock)
+          } catch {
+            // Can't read lock file (deleted between stat and read) → retry
+          }
+          if (!ownerAlive) {
+            try { fs.unlinkSync(lockPath); } catch { /* already gone */ }
+          }
           continue;
         }
       } catch (statErr: unknown) {
