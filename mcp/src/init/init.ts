@@ -171,6 +171,8 @@ export interface InitOptions {
   applyStarterUpdate?: boolean;
   dryRun?: boolean;
   yes?: boolean;
+  /** Skip walkthrough entirely with recommended defaults (express mode) */
+  express?: boolean;
   // Built-in template names are directory-based under starter/templates/.
   // Keep string-compatible so custom package templates continue to work.
   template?: "python-project" | "monorepo" | "library" | "frontend" | string;
@@ -280,8 +282,10 @@ export async function runInit(opts: InitOptions = {}) {
   let hasExistingInstall = hasInstallMarkers(phrenPath);
 
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
-  if (!hasExistingInstall && !dryRun && !opts.yes && process.stdin.isTTY && process.stdout.isTTY) {
-    const answers = await runWalkthrough(phrenPath);
+  // --express bypasses the TTY check since it skips all interactive prompts
+  const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+  if (!hasExistingInstall && !dryRun && !opts.yes && (isTTY || opts.express)) {
+    const answers = await runWalkthrough(phrenPath, { express: opts.express });
     opts._walkthroughStorageChoice = answers.storageChoice;
     opts._walkthroughStoragePath = answers.storagePath;
     opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;

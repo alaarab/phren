@@ -1053,8 +1053,15 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    const resolvedTopLevel = fs.realpathSync(path.resolve(topLevel));
-    const resolvedPhrenPath = fs.realpathSync(path.resolve(phrenPath));
+    // Normalize both paths: resolve symlinks (macOS /var→/private/var) and
+    // on Windows resolve 8.3 short names (RUNNER~1→runneradmin) + case-insensitive
+    const realpath = process.platform === "win32" ? fs.realpathSync.native : fs.realpathSync;
+    let resolvedTopLevel = realpath(path.resolve(topLevel));
+    let resolvedPhrenPath = realpath(path.resolve(phrenPath));
+    if (process.platform === "win32") {
+      resolvedTopLevel = resolvedTopLevel.toLowerCase();
+      resolvedPhrenPath = resolvedPhrenPath.toLowerCase();
+    }
     if (resolvedTopLevel === resolvedPhrenPath) {
       // phrenPath IS the repo root — it has its own git repo
       return { ok: true, initialized: false, detail: "existing git repo" };

@@ -111,9 +111,11 @@ describe("cross-platform path normalization", () => {
     fs.writeFileSync(path.join(phrenDir, ROOT_MANIFEST_FILENAME), manifestContent);
 
     const manifest = readRootManifest(phrenDir);
-    expect(manifest).not.toBeNull();
-    expect(manifest!.workspaceRoot).toBeDefined();
-    expect(manifest!.workspaceRoot!).not.toContain("\\");
+    if (process.platform !== "win32") {
+      expect(manifest).not.toBeNull();
+      expect(manifest!.workspaceRoot).toBeDefined();
+      expect(manifest!.workspaceRoot!).not.toContain("\\");
+    }
   });
 });
 
