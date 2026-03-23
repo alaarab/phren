@@ -1053,8 +1053,8 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    const resolvedTopLevel = path.resolve(topLevel);
-    const resolvedPhrenPath = path.resolve(phrenPath);
+    const resolvedTopLevel = fs.realpathSync(path.resolve(topLevel));
+    const resolvedPhrenPath = fs.realpathSync(path.resolve(phrenPath));
     if (resolvedTopLevel === resolvedPhrenPath) {
       // phrenPath IS the repo root — it has its own git repo
       return { ok: true, initialized: false, detail: "existing git repo" };
