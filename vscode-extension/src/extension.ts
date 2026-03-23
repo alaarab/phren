@@ -1068,6 +1068,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           }
         }
 
+        // Clean up onboarding marker so re-install triggers onboarding again
+        const onboardingMarker = path.join(os.homedir(), ".phren", ".onboarding-complete");
+        try { if (fs.existsSync(onboardingMarker)) fs.unlinkSync(onboardingMarker); } catch { /* best effort */ }
+        try { await config.update(ONBOARDING_COMPLETE_SETTING, undefined, vscode.ConfigurationTarget.Global); } catch { /* best effort */ }
+
         treeDataProvider.refresh();
         if (warnings.length > 0) {
           for (const warning of warnings) {
@@ -1671,8 +1676,14 @@ async function promptForCloneUrl(): Promise<{ url?: string; cancelled: boolean }
 }
 
 async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Promise<void> {
+  const markerFile = path.join(os.homedir(), ".phren", ".onboarding-complete");
   const completed = config.get<boolean>(ONBOARDING_COMPLETE_SETTING, false);
   if (completed) {
+    return;
+  }
+  // Fallback: marker file catches the case where VS Code setting failed to persist
+  // but only if the store still looks valid (not a stale marker from a removed install)
+  if (fs.existsSync(markerFile) && pathExists(GLOBAL_PHREN_STORE_PATH) && hasPhrenMcpEntry()) {
     return;
   }
 
@@ -1794,6 +1805,13 @@ async function runOnboardingIfNeeded(config: vscode.WorkspaceConfiguration): Pro
         outputChannel.appendLine("Phren onboarding complete (phren.onboardingComplete=true).");
       } catch (error) {
         outputChannel.appendLine(`Failed to persist onboarding flag: ${toErrorMessage(error)}`);
+      }
+      // Fallback marker file in case VS Code setting fails to persist
+      try {
+        fs.mkdirSync(path.dirname(markerFile), { recursive: true });
+        fs.writeFileSync(markerFile, new Date().toISOString(), "utf8");
+      } catch (markerErr) {
+        outputChannel.appendLine(`Failed to write onboarding marker file: ${toErrorMessage(markerErr)}`);
       }
     } else {
       outputChannel.appendLine("Phren onboarding incomplete — will retry on next activation.");
