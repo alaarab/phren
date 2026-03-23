@@ -495,21 +495,6 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
 
-      // Confirmation prompt before writing config
-      if (!opts.yes) {
-        const settingsPath = hookConfigPath("claude");
-        const modifications: string[] = [];
-        modifications.push(`  ${settingsPath}  (update MCP server + hooks)`);
-        log(`\nWill modify:`);
-        for (const mod of modifications) log(mod);
-
-        const confirmed = await confirmPrompt("\nProceed?");
-        if (!confirmed) {
-          log("Aborted.");
-          return;
-        }
-      }
-
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
       configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Updated");
       configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated");
@@ -706,19 +691,6 @@ export async function runInit(opts: InitOptions = {}) {
   const repairedAssets = collectRepairedAssetLabels(repaired);
   if (repairedAssets.length > 0) {
     log(`  Recreated missing generated assets: ${repairedAssets.join(", ")}`);
-  }
-
-  // Confirmation prompt before writing agent config (skip if walkthrough already covered this)
-  if (!opts.yes && !ranWalkthrough) {
-    const settingsPath = hookConfigPath("claude");
-    log(`\nWill modify:`);
-    log(`  ${settingsPath}  (add MCP server + hooks)`);
-
-    const confirmed = await confirmPrompt("\nProceed?");
-    if (!confirmed) {
-      log("Aborted.");
-      return;
-    }
   }
 
   // Configure MCP for all detected AI coding tools and hooks
