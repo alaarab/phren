@@ -77,8 +77,16 @@ function normalizeManifest(raw: unknown): PhrenRootManifest | null {
   const syncMode = raw.syncMode;
   if (version !== 1 || !isInstallMode(installMode) || !isSyncMode(syncMode)) return null;
 
-  const workspaceRoot = typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()
-    ? path.resolve(expandHomePath(raw.workspaceRoot))
+  let workspaceRootRaw = typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()
+    ? raw.workspaceRoot.trim()
+    : undefined;
+  // Cross-platform path normalization: convert Windows backslashes to forward slashes
+  // when reading on a non-Windows platform (e.g. manifest created on Windows, read on Linux).
+  if (workspaceRootRaw && process.platform !== "win32") {
+    workspaceRootRaw = workspaceRootRaw.replace(/\\/g, "/");
+  }
+  const workspaceRoot = workspaceRootRaw
+    ? path.resolve(expandHomePath(workspaceRootRaw))
     : undefined;
   const primaryProject = typeof raw.primaryProject === "string" && raw.primaryProject.trim()
     ? raw.primaryProject.trim()

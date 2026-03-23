@@ -284,6 +284,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   private dateFilter: DateFilter | undefined;
 
   private cache = new Map<string, unknown>();
+  private cacheGeneration = 0;
 
   constructor(
     private readonly client: PhrenClient,
@@ -293,6 +294,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   setDateFilter(filter: DateFilter | undefined): void {
     this.dateFilter = filter;
     this.cache.clear();
+    this.cacheGeneration++;
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -306,6 +308,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   refresh(): void {
     this.cache.clear();
+    this.cacheGeneration++;
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -1309,6 +1312,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (this.lastHealthOk === ok) return;
     this.lastHealthOk = ok;
     this.cache.clear();
+    this.cacheGeneration++;
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
@@ -1316,7 +1320,12 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (this.cache.has(key)) {
       return this.cache.get(key) as T;
     }
+    const generationAtStart = this.cacheGeneration;
     const result = await fetcher();
+    // Discard stale results if a refresh occurred while the fetch was in flight
+    if (this.cacheGeneration !== generationAtStart) {
+      return result;
+    }
     this.cache.set(key, result);
     return result;
   }

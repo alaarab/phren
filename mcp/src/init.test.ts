@@ -23,8 +23,10 @@ import {
   setHooksEnabledPreference,
   setMcpEnabledPreference,
   warmSemanticSearch,
+  getPendingBootstrapTarget,
 } from "./init/init.js";
-import { applyStarterTemplateUpdates, getHookEntrypointCheck } from "./init/setup.js";
+import { configureHooksIfEnabled } from "./init/init-configure.js";
+import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck } from "./init/setup.js";
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
@@ -1067,5 +1069,160 @@ describe("project templates", () => {
       resetVSCodeProbeCache();
       cleanup();
     }
+  });
+});
+
+describe("init edge cases", () => {
+  let tmpRoot: string;
+  let homeDir: string;
+  let phrenPath: string;
+  const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
+  let tmpCleanup: () => void;
+
+  beforeEach(() => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-init-edge-"));
+    homeDir = path.join(tmpRoot, "home");
+    phrenPath = path.join(tmpRoot, "phren");
+    fs.mkdirSync(homeDir, { recursive: true });
+    fs.mkdirSync(phrenPath, { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    resetVSCodeProbeCache();
+  });
+
+  afterEach(() => {
+    process.env.HOME = origHome;
+    process.env.USERPROFILE = origUserProfile;
+    tmpCleanup();
+  });
+
+  it("applyTemplate returns false for a nonexistent template name", () => {
+    const projectDir = path.join(phrenPath, "test-project");
+    const result = applyTemplate(projectDir, "nonexistent-template-xyz", "test-project");
+    expect(result).toBe(false);
+    // The project directory should not have been created
+    expect(fs.existsSync(projectDir)).toBe(false);
+  });
+
+  it("configureHooksIfEnabled logs disabled message when hooks are off", () => {
+    const chunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
+    try {
+      configureHooksIfEnabled(phrenPath, false, "Configured");
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const output = chunks.join("");
+    expect(output).toContain("Hooks are disabled by preference");
+    expect(output).toContain("hooks-mode on");
+  });
+
+  it("configureHooksIfEnabled logs wrapper note when installPhrenCliWrapper returns false", () => {
+    // With a tmpdir phrenPath that has no entry script, wrapper install will return false
+    const chunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
+    try {
+      configureHooksIfEnabled(phrenPath, false, "Configured");
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const output = chunks.join("");
+    expect(output).toContain("phren CLI wrapper not installed");
+  });
+
+  it("getPendingBootstrapTarget returns null when no project is detected", () => {
+    const origCwd = process.cwd();
+    // Use a directory that has no .git or CLAUDE.md markers
+    const emptyDir = path.join(tmpRoot, "empty-dir");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    process.chdir(emptyDir);
+    try {
+      const result = getPendingBootstrapTarget(phrenPath, {});
+      expect(result).toBeNull();
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it("getPendingBootstrapTarget returns null when project is already tracked", () => {
+    const origCwd = process.cwd();
+    const projectDir = path.join(tmpRoot, "tracked-project");
+    fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+    // Create the project directory inside phrenPath so isProjectTracked returns true
+    const projectName = "tracked-project";
+    fs.mkdirSync(path.join(phrenPath, projectName), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, projectName, "CLAUDE.md"), "# tracked\n");
+    // Need profiles for isProjectTracked
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(phrenPath, "profiles", "default.yaml"),
+      `name: default\nprojects:\n  - ${projectName}\n`
+    );
+    fs.writeFileSync(
+      path.join(phrenPath, "machines.yaml"),
+      `${os.hostname()}: default\n`
+    );
+    process.chdir(projectDir);
+    try {
+      const result = getPendingBootstrapTarget(phrenPath, {});
+      expect(result).toBeNull();
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it("getPendingBootstrapTarget returns detected path for an untracked repo", () => {
+    const origCwd = process.cwd();
+    const projectDir = path.join(tmpRoot, "untracked-repo");
+    fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+    // Ensure profiles exist but don't include this project
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(phrenPath, "profiles", "default.yaml"),
+      "name: default\nprojects:\n  - global\n"
+    );
+    fs.writeFileSync(
+      path.join(phrenPath, "machines.yaml"),
+      `${os.hostname()}: default\n`
+    );
+    process.chdir(projectDir);
+    try {
+      const result = getPendingBootstrapTarget(phrenPath, {});
+      expect(result).not.toBeNull();
+      expect(result!.path).toBe(projectDir);
+      expect(result!.mode).toBe("detected");
+    } finally {
+      process.chdir(origCwd);
+    }
+  });
+
+  it("runInit with invalid template logs available templates", async () => {
+    const origPhren = process.env.PHREN_PATH;
+    const freshPath = path.join(tmpRoot, "fresh-phren");
+    process.env.PHREN_PATH = freshPath;
+    const chunks: string[] = [];
+    const origWrite = process.stdout.write;
+    process.stdout.write = ((chunk: any) => { chunks.push(String(chunk)); return true; }) as any;
+    try {
+      await runInit({
+        yes: true,
+        template: "nonexistent-bad-template",
+        _walkthroughProject: "test-proj",
+      });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const output = chunks.join("");
+    expect(output).toContain("not found");
+    // Should list available templates
+    const templates = listTemplates();
+    if (templates.length > 0) {
+      expect(output).toContain(templates[0]);
+    }
+    if (origPhren) process.env.PHREN_PATH = origPhren;
+    else delete process.env.PHREN_PATH;
   });
 });

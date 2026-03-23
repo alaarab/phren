@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Pre-commit hook: lint staged TypeScript files only.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or run: npm run install-hooks
+
+set -euo pipefail
+
+# Get staged .ts files (excluding deletions and test files)
+STAGED_TS=$(git diff --cached --name-only --diff-filter=d -- '*.ts' | grep -v '\.test\.ts$' || true)
+
+if [ -z "$STAGED_TS" ]; then
+  exit 0
+fi
+
+echo "[pre-commit] Linting staged TypeScript files..."
+# Run eslint on the staged files that exist in the lint target directories
+LINT_FILES=""
+for f in $STAGED_TS; do
+  case "$f" in
+    mcp/src/*) LINT_FILES="$LINT_FILES $f" ;;
+  esac
+done
+
+if [ -n "$LINT_FILES" ]; then
+  npx eslint $LINT_FILES --ignore-pattern '*.test.ts'
+fi
