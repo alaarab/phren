@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.33
+0.0.35
 
 ## MCP Tools (51)
 
@@ -272,6 +272,13 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 
 ## Environment Variables
 
+**Core:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHREN_PATH` | `~/.phren` | Override the phren directory location. |
+| `PHREN_PROFILE` | *(none)* | Active profile name. Filters which projects are indexed. When empty, all projects are indexed (or machine mapping from `machines.yaml` is used). |
+| `PHREN_DEBUG` | `0` | Set to `1` to enable debug logging to `~/.phren/.runtime/debug.log`. |
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PHREN_FEATURE_GIT_CONTEXT_FILTER` | disabled | Set to `'true'` to enable git-context file relevance filtering in search ranking. When enabled, docs matching currently-changed files or branch name get a boost. |
@@ -293,11 +300,23 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 | `PHREN_EMBEDDING_PROVIDER` | — | Set to `api` to enable OpenAI API embedding fallback in `search_knowledge` (requires `OPENAI_API_KEY`). |
 | `PHREN_FEATURE_HYBRID_SEARCH` | enabled | Set to `0` to disable TF-IDF cosine fallback in `search_knowledge`. |
 
+**Search federation:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHREN_FEDERATION_PATHS` | *(none)* | Colon-separated list of additional phren store paths to search. Enables cross-store federated search in `search_knowledge` (read-only; no mutations to remote stores). |
+
 **Feature flags:**
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PHREN_FEATURE_AUTO_EXTRACT` | enabled | Set to `0` to disable automatic memory extraction from project context on each prompt. |
 | `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE` | disabled | Set to `1` to inject a compact memory index instead of full snippets; use `get_memory_detail` to expand. |
+
+**Proactivity:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHREN_PROACTIVITY` | `high` | Shared override for proactivity level (`high`, `medium`, `low`). Controls how aggressively phren auto-captures findings and tasks. |
+| `PHREN_PROACTIVITY_FINDINGS` | *(falls back to `PHREN_PROACTIVITY`)* | Per-domain override for finding auto-extraction proactivity. When `low`, auto-extraction is disabled. |
+| `PHREN_PROACTIVITY_TASKS` | *(falls back to `PHREN_PROACTIVITY`)* | Per-domain override for task auto-capture proactivity. |
 
 **Hook context injection:**
 | Variable | Default | Description |
@@ -339,6 +358,7 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PHREN_HOOK_TIMEOUT_MS` | `14000` | Timeout (ms) for hook subprocess execution. Also controls `PHREN_HOOK_TIMEOUT_S` in shell. |
+| `PHREN_INDEX_DEBOUNCE_MS` | `5000` | Staleness debounce (ms) for FTS5 index rebuilds. If the index was rebuilt within this window, the cached DB is returned immediately. Max: 60000. |
 | `PHREN_SLOW_FS_WARN_MS` | `3000` | Log a warning when filesystem operations (index build, etc.) exceed this threshold (ms). |
 | `PHREN_FILE_LOCK_MAX_WAIT_MS` | `5000` | Max time (ms) to wait for a file lock before aborting. |
 | `PHREN_FILE_LOCK_POLL_MS` | `100` | Polling interval (ms) when waiting for a file lock. |
@@ -348,6 +368,16 @@ Use `runtimeFile(phrenPath, name)` and `sessionMarker(phrenPath, name)` helpers 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PHREN_ACTOR` | `$USER` | Override the actor name used in governance audit log entries. |
+
+**Internal / hook-set variables (set automatically by hooks and scripts, not typically set by users):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PHREN_HOOK_TOOL` | *(none)* | Set by session wrappers to identify the calling tool (`claude`, `copilot`, `cursor`, `codex`). Used to check per-tool hook preferences and tag finding provenance. |
+| `PHREN_TOOL` | *(none)* | Override the tool name recorded in finding provenance metadata. Takes priority over `PHREN_HOOK_TOOL` for provenance tagging. |
+| `PHREN_MODEL` | *(none)* | Override the model name recorded in finding provenance metadata. Checked before `OPENAI_MODEL`, `CLAUDE_MODEL`, `PHREN_LLM_MODEL`. |
+| `PHREN_FINDING_SOURCE` | *(auto-detected)* | Override the finding provenance source. Valid values: `human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`. When unset, source is inferred from other env vars. |
+| `PHREN_SCOPE` | *(none)* | Override the active memory scope for session resolution. Takes priority over session-derived scope. |
+| `PHREN_AUTO_EXTRACT` | *(none)* | Set to `1` by extraction scripts to tag finding provenance as `extract` source. |
 
 ## Finding Quality Rules
 

@@ -278,8 +278,61 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     let taggedCount = 0;
     let untaggedAdded = 0;
 
-    for (const line of lines) {
-      // Support legacy tagged findings like [decision], [pitfall], etc.
+    // Support heading-based findings: ## topic / ### title / paragraph
+    let currentHeadingTag: string | undefined;
+    let _currentHeadingTitle: string | undefined;
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      const line = lines[lineIdx];
+
+      // Track heading context for heading-based findings
+      const h2Match = line.match(/^##\s+([a-z_-]+)\s*$/i);
+      if (h2Match) {
+        currentHeadingTag = h2Match[1].toLowerCase();
+        _currentHeadingTitle = undefined;
+        continue;
+      }
+      const h3Match = line.match(/^###\s+(.+)$/);
+      if (h3Match && currentHeadingTag) {
+        // Read the next non-empty line as the body
+        let body = "";
+        for (let j = lineIdx + 1; j < lines.length; j++) {
+          const next = lines[j].trim();
+          if (!next) continue;
+          if (next.startsWith("#")) break;
+          body = next;
+          break;
+        }
+        const title = h3Match[1].trim();
+        const text = body ? `${title} — ${body}` : title;
+        if (text.length >= 10) {
+          if (taggedCount >= MAX_TAGGED) continue;
+          const topic = classifyTopicForText(`[${currentHeadingTag}] ${text}`, projectTopics);
+          const scoreKey = entryScoreKey(project, "FINDINGS.md", `[${currentHeadingTag}] ${text}`);
+          const nodeId = stableId("finding", scoreKey);
+          taggedCount++;
+          nodes.push({
+            id: nodeId,
+            label: text.length > 55 ? `${text.slice(0, 52)}...` : text,
+            fullLabel: text,
+            group: `topic:${topic.slug}`,
+            refCount: taggedCount,
+            project,
+            tagged: true,
+            scoreKey,
+            scoreKeys: [scoreKey],
+            refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
+            topicSlug: topic.slug,
+            topicLabel: topic.label,
+          });
+          links.push({ source: project, target: nodeId });
+          for (const other of exactProjectMentions(text, projectSet, project)) {
+            links.push({ source: project, target: other });
+          }
+        }
+        continue;
+      }
+
+      // Standard bullet-based findings: - [tag] text
       const tagMatch = line.match(/^-\s+\[([a-z_-]+)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
       if (tagMatch) {
         if (taggedCount >= MAX_TAGGED) continue;

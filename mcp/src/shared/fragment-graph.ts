@@ -242,7 +242,7 @@ function parseUserDefinedFragments(phrenPath: string, project: string): string[]
 }
 
 /** Clear the user fragment cache (call between index builds). */
-function clearUserFragmentCache(): void {
+function _clearUserFragmentCache(): void {
   _userFragmentCache.clear();
   _buildUserFragmentCache.clear();
   _activeBuildCacheKeyPrefix = null;

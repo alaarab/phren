@@ -504,7 +504,6 @@ async function handleSearchKnowledge(
 }
 
 async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string }) {
-  const { phrenPath } = ctx;
   const db = ctx.db();
   const docs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [name]);
 
