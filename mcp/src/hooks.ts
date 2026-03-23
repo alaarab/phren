@@ -247,13 +247,16 @@ export function installPhrenCliWrapper(phrenPath: string): boolean {
     try {
       const existing = fs.readFileSync(wrapperPath, "utf8");
       if (!existing.includes("PHREN_CLI_WRAPPER")) return false;
-    } catch { /* unreadable — skip */ }
+    } catch {
+      // File exists but unreadable — don't overwrite, could be a real binary
+      return false;
+    }
   }
 
   const content = `#!/bin/sh
 # PHREN_CLI_WRAPPER — managed by phren init; safe to delete
 set -u
-PHREN_PATH="\${PHREN_PATH:-${shellEscape(phrenPath)}}"
+PHREN_PATH="\${PHREN_PATH:-${phrenPath}}"
 export PHREN_PATH
 exec node ${shellEscape(entry)} "$@"
 `;

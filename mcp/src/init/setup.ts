@@ -16,6 +16,7 @@ import {
   runtimeHealthFile,
   isRecord,
 } from "../shared.js";
+import { homePath } from "../phren-paths.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "../profile-store.js";
 import { getMachineName } from "../machine-identity.js";
 import { execFileSync } from "child_process";
@@ -1459,6 +1460,22 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
   });
 
   checks.push(getHookEntrypointCheck());
+
+  // Check that the CLI wrapper at ~/.local/bin/phren exists and is executable (soft check — not mandatory)
+  const cliWrapperPath = homePath(".local", "bin", "phren");
+  let cliWrapperOk = false;
+  try {
+    const stat = fs.statSync(cliWrapperPath);
+    cliWrapperOk = stat.isFile();
+    if (cliWrapperOk) fs.accessSync(cliWrapperPath, fs.constants.X_OK);
+  } catch { cliWrapperOk = false; }
+  checks.push({
+    name: "cli-wrapper",
+    ok: true, // always pass — wrapper is optional (global install or npx work too)
+    detail: cliWrapperOk
+      ? `CLI wrapper exists: ${cliWrapperPath}`
+      : `CLI wrapper not found (optional — use 'npm i -g @phren/cli' or 'npx @phren/cli' instead)`,
+  });
 
   const ok = checks.every((c) => c.ok);
   return { ok, checks };

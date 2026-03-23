@@ -15,7 +15,7 @@ export interface ResolvedRuntimeConfig {
   storePath: string;
 }
 
-const PACKAGE_NAMES = ["@phren/cli", "phren", "@phren/cli", "phren"];
+const PACKAGE_NAMES = ["@phren/cli", "phren"];
 const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("mcp", "dist", "index.js");
 
 export function resolveRuntimeConfig(config: ConfigSource): ResolvedRuntimeConfig {
@@ -152,22 +152,33 @@ function safeRealpath(targetPath: string): string {
 }
 
 function extractPhrenPathFromMcpConfig(configFile: string): string | undefined {
+  let raw: string;
   try {
-    const raw = fs.readFileSync(configFile, "utf8");
-    const parsed = JSON.parse(raw);
-    // Claude Code uses mcpServers.phren, VS Code MCP uses servers.phren
-    const phrenEntry = parsed?.mcpServers?.phren ?? parsed?.servers?.phren;
-    const args: unknown[] = phrenEntry?.args;
-    if (Array.isArray(args)) {
-      // args[0] is the path to index.js
-      const candidate = typeof args[0] === "string" ? args[0] : undefined;
-      if (candidate) {
-        return candidate;
-      }
-    }
+    raw = fs.readFileSync(configFile, "utf8");
   } catch {
-    // File doesn't exist or isn't valid JSON — skip
+    // File doesn't exist — skip
+    return undefined;
   }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    console.warn(`[phren] Failed to parse MCP config ${configFile}: ${e instanceof Error ? e.message : e}`);
+    return undefined;
+  }
+
+  // Claude Code uses mcpServers.phren, VS Code MCP uses servers.phren
+  const phrenEntry = (parsed?.mcpServers as Record<string, unknown>)?.phren ?? (parsed?.servers as Record<string, unknown>)?.phren;
+  const args: unknown[] = (phrenEntry as Record<string, unknown>)?.args as unknown[];
+  if (Array.isArray(args)) {
+    // args[0] is the path to index.js — normalize ~/... and relative paths
+    const candidate = typeof args[0] === "string" ? normalizeConfiguredPath(args[0]) : undefined;
+    if (candidate) {
+      return candidate;
+    }
+  }
+
   return undefined;
 }
 
