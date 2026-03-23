@@ -463,6 +463,35 @@ export async function handleHookStop() {
     }
     return;
   }
+  // Check if HEAD has an upstream tracking branch before attempting sync.
+  // Detached HEAD or branches without upstream would cause silent push failures.
+  const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], phrenPath);
+  if (!upstream.ok || !upstream.output) {
+    const unsyncedCommits = await countUnsyncedCommits(phrenPath);
+    const noUpstreamDetail = "commit created; no upstream tracking branch";
+    finalizeTaskSession({
+      phrenPath,
+      sessionId: taskSessionId,
+      status: "no-upstream",
+      detail: noUpstreamDetail,
+    });
+    updateRuntimeHealth(phrenPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "no-upstream", detail: noUpstreamDetail },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "no-upstream",
+        lastPushDetail: noUpstreamDetail,
+        unsyncedCommits,
+      },
+    });
+    appendAuditLog(phrenPath, "hook_stop", "status=no-upstream");
+    if (unsyncedCommits > 3) {
+      process.stderr.write(`phren: ${unsyncedCommits} unsynced commits — no upstream tracking branch.\n`);
+    }
+    return;
+  }
+
   const unsyncedCommits = await countUnsyncedCommits(phrenPath);
   const scheduled = scheduleBackgroundSync(phrenPath);
   const syncDetail = scheduled

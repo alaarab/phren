@@ -340,7 +340,7 @@ export function handleTaskPromptLifecycle(args: {
 export function finalizeTaskSession(args: {
   phrenPath: string;
   sessionId?: string;
-  status: "clean" | "saved-local" | "saved-pushed" | "error";
+  status: "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error";
   detail: string;
 }): void {
   if (!args.sessionId || getTaskMode(args.phrenPath) !== "auto") return;
@@ -348,7 +348,7 @@ export function finalizeTaskSession(args: {
   if (!state || state.mode !== "auto") return;
 
   const match = state.stableId ? `bid:${state.stableId}` : state.item;
-  if (args.status === "saved-local" || args.status === "saved-pushed") {
+  if (args.status === "saved-local" || args.status === "saved-pushed" || args.status === "no-upstream") {
     const completed = completeTask(args.phrenPath, state.project, match);
     if (!completed.ok) {
       debugLog(`task lifecycle complete ${state.project}: ${completed.error}`);

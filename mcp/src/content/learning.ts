@@ -393,7 +393,7 @@ export function addFindingToFile(
         return phrenOk(`Skipped duplicate finding for "${project}": already exists with similar wording.`);
       }
       const newContent = `# ${project} Findings\n\n## ${today}\n\n${preparedForNewFile.finding.bullet}\n${preparedForNewFile.finding.citationComment}\n`;
-      const tmpPath = learningsPath + ".tmp." + process.pid;
+      const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpPath, newContent);
       fs.renameSync(tmpPath, learningsPath);
       return phrenOk({
@@ -563,7 +563,7 @@ export function addFindingsToFile(
         added.push(learning);
       }
       if (added.length > 0) {
-        const tmpPath = learningsPath + ".tmp." + process.pid;
+        const tmpPath = learningsPath + `.tmp-${crypto.randomUUID()}`;
         fs.writeFileSync(tmpPath, content.endsWith("\n") ? content : `${content}\n`);
         fs.renameSync(tmpPath, learningsPath);
       }

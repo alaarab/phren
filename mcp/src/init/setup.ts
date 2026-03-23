@@ -1046,14 +1046,24 @@ export function ensureProjectScaffold(
 }
 
 export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
+  // Check if phrenPath already has its own git repo (not just being inside a parent)
   try {
-    execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
-      stdio: ["ignore", "ignore", "ignore"],
+    const topLevel = execFileSync("git", ["-C", phrenPath, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
-    });
-    return { ok: true, initialized: false, detail: "existing git repo" };
+    }).trim();
+    const resolvedTopLevel = path.resolve(topLevel);
+    const resolvedPhrenPath = path.resolve(phrenPath);
+    if (resolvedTopLevel === resolvedPhrenPath) {
+      // phrenPath IS the repo root — it has its own git repo
+      return { ok: true, initialized: false, detail: "existing git repo" };
+    }
+    // phrenPath is inside a parent repo — skip nested init
+    logger.warn("init", `Skipping git init: ${resolvedPhrenPath} is inside existing repo ${resolvedTopLevel}`);
+    return { ok: true, initialized: false, detail: `skipped: inside existing repo ${resolvedTopLevel}` };
   } catch {
-    // Fall through to initialization below.
+    // Not inside any git repo — fall through to initialization below.
   }
 
   try {

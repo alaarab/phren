@@ -70,8 +70,13 @@ interface SqlJsStatic {
 // ── Async embedding queue ───────────────────────────────────────────────────
 const _embQueue = new Map<string, { phrenPath: string; content: string }>();
 let _embTimer: ReturnType<typeof setTimeout> | null = null;
+const MAX_EMB_QUEUE = 500;
 
 function scheduleEmbedding(phrenPath: string, docPath: string, content: string): void {
+  if (_embQueue.size >= MAX_EMB_QUEUE) {
+    const oldest = _embQueue.keys().next().value;
+    if (oldest !== undefined) _embQueue.delete(oldest);
+  }
   _embQueue.set(docPath, { phrenPath, content });
   if (_embTimer) clearTimeout(_embTimer);
   _embTimer = setTimeout(() => { _embTimer = null; void _drainEmbQueue(); }, 500);
@@ -105,10 +110,12 @@ async function _drainEmbQueue(): Promise<void> {
         if (vec) cache.set(docPath, getEmbeddingModel(), vec);
       } catch (err: unknown) {
         logger.debug("embeddingQueue embedText", errorMessage(err));
+        _embQueue.clear();
       }
     }
     try { await cache.flush(); } catch (err: unknown) {
       logger.debug("embeddingQueue cacheFlush", errorMessage(err));
+      _embQueue.clear();
     }
   }
 }

@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { execFileSync } from "child_process";
 import { makeTempDir } from "../test-helpers.js";
 import {
   bootstrapFromExisting,
   detectProjectDir,
+  ensureLocalGitRepo,
   ensureProjectScaffold,
   ensureGitignoreEntry,
   inferInitScaffoldFromRepo,
@@ -241,5 +243,61 @@ describe.sequential("web-ui onboarding repair", () => {
     expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
+  });
+});
+
+describe("ensureLocalGitRepo nested detection", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("nested-git-test-");
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("initializes a git repo when parent is not inside a git repo", () => {
+    const phrenDir = path.join(tmp.path, "standalone-phren");
+    fs.mkdirSync(phrenDir, { recursive: true });
+    const result = ensureLocalGitRepo(phrenDir);
+    expect(result.ok).toBe(true);
+    expect(result.initialized).toBe(true);
+    expect(result.detail).toContain("initialized");
+  });
+
+  it("skips git init when phrenPath is inside an existing parent repo", () => {
+    // Create a real git repo at the parent level
+    const parentRepo = path.join(tmp.path, "parent-repo");
+    fs.mkdirSync(parentRepo, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main", parentRepo], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+
+    // phrenDir is a subdirectory of the parent repo
+    const phrenDir = path.join(parentRepo, ".phren");
+    fs.mkdirSync(phrenDir, { recursive: true });
+
+    const result = ensureLocalGitRepo(phrenDir);
+    expect(result.ok).toBe(true);
+    expect(result.initialized).toBe(false);
+    expect(result.detail).toContain("skipped");
+    expect(result.detail).toContain("existing repo");
+
+    // Verify no .git was created inside phrenDir
+    expect(fs.existsSync(path.join(phrenDir, ".git"))).toBe(false);
+  });
+
+  it("returns existing repo status when phrenPath already has its own git repo", () => {
+    const phrenDir = path.join(tmp.path, "already-git");
+    fs.mkdirSync(phrenDir, { recursive: true });
+    execFileSync("git", ["init", "--initial-branch=main", phrenDir], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+
+    const result = ensureLocalGitRepo(phrenDir);
+    expect(result.ok).toBe(true);
+    expect(result.initialized).toBe(false);
+    expect(result.detail).toBe("existing git repo");
   });
 });

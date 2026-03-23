@@ -54,7 +54,12 @@ export function atomicWriteText(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, content);
-  fs.renameSync(tmpPath, filePath);
+  try {
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch {}
+    throw err;
+  }
 }
 
 function isInstallMode(value: unknown): value is InstallMode {
