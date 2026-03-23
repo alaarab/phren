@@ -206,8 +206,13 @@ export interface WalkthroughResult {
   inferredScaffold?: InferredInitScaffold;
 }
 
+export interface WalkthroughOptions {
+  /** When true, skip the express prompt and use recommended defaults immediately */
+  express?: boolean;
+}
+
 // Interactive walkthrough for first-time init
-export async function runWalkthrough(phrenPath: string): Promise<WalkthroughResult> {
+export async function runWalkthrough(phrenPath: string, options?: WalkthroughOptions): Promise<WalkthroughResult> {
   const prompts = await createWalkthroughPrompts();
   const style = await createWalkthroughStyle();
   const divider = style.header("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -232,6 +237,47 @@ export async function runWalkthrough(phrenPath: string): Promise<WalkthroughResu
   printSection("Welcome");
   log("Let's set up persistent memory for your AI agents.");
   log("Every option can be changed later.\n");
+
+  // Express mode: skip the entire walkthrough with recommended defaults
+  const useExpress = options?.express === true
+    || (options?.express !== false && await prompts.confirm(
+      "Use recommended settings? (global storage, MCP on, hooks on, auto tasks)",
+      true
+    ));
+
+  if (useExpress) {
+    const expressResult: WalkthroughResult = {
+      storageChoice: "global",
+      storagePath: path.resolve(homePath(".phren")),
+      machine: getMachineName(),
+      profile: "personal",
+      mcp: "on" as McpMode,
+      hooks: "on" as McpMode,
+      projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
+      findingsProactivity: "high" as ProactivityLevel,
+      taskProactivity: "high" as ProactivityLevel,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto" as const,
+      bootstrapCurrentProject: false,
+      ollamaEnabled: false,
+      autoCaptureEnabled: false,
+      semanticDedupEnabled: false,
+      semanticConflictEnabled: false,
+      findingSensitivity: "balanced" as const,
+      domain: "software" as InitProjectDomain,
+    };
+    printSummary([
+      `Storage: global (${expressResult.storagePath})`,
+      `Machine: ${expressResult.machine}`,
+      "MCP: enabled",
+      "Hooks: enabled",
+      "Project ownership: phren-managed",
+      "Task mode: auto",
+      "Domain: software",
+    ]);
+    return expressResult;
+  }
 
   printSection("Storage Location");
   log("Where should phren store data?");
