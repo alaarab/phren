@@ -6,6 +6,18 @@ import * as crypto from "crypto";
 import { PhrenClient } from "./phrenClient";
 
 /**
+ * Validate a project name from webview messages.
+ * Rejects path traversal characters, dots, slashes, and other unsafe patterns.
+ * Mirrors the server-side isValidProjectName() from mcp/src/utils.ts.
+ */
+function isValidProjectName(name: string): boolean {
+  if (!name || name.length === 0) return false;
+  if (name.length > 100) return false;
+  if (name.includes("\0") || name.includes("/") || name.includes("\\") || name.includes("..")) return false;
+  return /^[a-z0-9][a-z0-9_-]*$/.test(name);
+}
+
+/**
  * Load the web-ui graph script from the MCP dist.
  * This gives us the Sigma.js v3 renderer with ForceAtlas2 layout, drag, glow, etc.
  *
@@ -176,6 +188,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const oldText = asString(message.oldText);
       const newText = asString(message.newText);
       if (!projectName || !oldText || !newText) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.editFinding(projectName, oldText, newText);
@@ -190,6 +203,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const projectName = asString(message.projectName);
       const text = asString(message.text);
       if (!projectName || !text) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.removeFinding(projectName, text);
@@ -207,6 +221,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const section = asString(message.section);
       const priority = asString(message.priority);
       if (!projectName || !item || !nextText) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.updateTask(projectName, item, {
@@ -225,6 +240,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const projectName = asString(message.projectName);
       const item = asString(message.item);
       if (!projectName || !item) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.completeTask(projectName, item);
@@ -240,6 +256,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const item = asString(message.item);
       const section = asString(message.section);
       if (!projectName || !item || !section) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.updateTask(projectName, item, { section });
@@ -254,6 +271,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const projectName = asString(message.projectName);
       const item = asString(message.item);
       if (!projectName || !item) return;
+      if (!isValidProjectName(projectName)) return;
 
       try {
         await client.removeTask(projectName, item);

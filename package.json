@@ -51,6 +51,7 @@
     "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
     "bench:retrieval:synthetic": "tsx scripts/bench-retrieval-synthetic.ts",
     "preuninstall": "node scripts/preuninstall.mjs",
+    "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {

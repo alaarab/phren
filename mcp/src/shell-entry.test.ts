@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as path from "path";
 import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell/entry.js";
+import { shellStartupFrames, stripAnsi } from "./shell/render.js";
 import { makeTempDir, writeFile } from "./test-helpers.js";
 
 describe("startLiveStatePoller", () => {
@@ -180,6 +181,138 @@ describe("resolveStartupIntroPlan", () => {
       expect(plan.mode).toBe("off");
     } finally {
       tmp.cleanup();
+    }
+  });
+
+  it("always mode produces full variant without holdForKeypress", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "always",
+        introSeenVersion: "9.9.9",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.mode).toBe("always");
+      expect(plan.variant).toBe("full");
+      expect(plan.holdForKeypress).toBe(false);
+      expect(plan.dwellMs).toBe(700);
+      expect(plan.markSeen).toBe(true);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("treats unknown introMode as once-per-version", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "bogus",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.mode).toBe("once-per-version");
+      expect(plan.variant).toBe("full");
+      expect(plan.holdForKeypress).toBe(true);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("off mode returns zero dwellMs and no markSeen", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "off",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "9.9.9");
+      expect(plan.dwellMs).toBe(0);
+      expect(plan.markSeen).toBe(false);
+      expect(plan.holdForKeypress).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("new version after a previously-seen version triggers full intro with hold", () => {
+    const tmp = makeTempDir("shell-intro-plan-");
+    try {
+      writeFile(path.join(tmp.path, ".runtime", "shell-state.json"), JSON.stringify({
+        version: 2,
+        view: "Projects",
+        introMode: "once-per-version",
+        introSeenVersion: "1.0.0",
+      }, null, 2));
+      const plan = resolveStartupIntroPlan(tmp.path, "2.0.0");
+      expect(plan.variant).toBe("full");
+      expect(plan.holdForKeypress).toBe(true);
+      expect(plan.markSeen).toBe(true);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+});
+
+describe("shellStartupFrames", () => {
+  let origColumns: number | undefined;
+
+  beforeEach(() => {
+    origColumns = process.stdout.columns;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process.stdout, "columns", { value: origColumns, writable: true, configurable: true });
+  });
+
+  it("returns a single merged frame for wide terminals (>= 72 cols)", () => {
+    Object.defineProperty(process.stdout, "columns", { value: 120, writable: true, configurable: true });
+    const frames = shellStartupFrames("0.0.1");
+    expect(frames.length).toBe(1);
+    expect(frames[0]).toContain("phren");
+  });
+
+  it("returns a single stacked frame for medium terminals (56-71 cols)", () => {
+    Object.defineProperty(process.stdout, "columns", { value: 60, writable: true, configurable: true });
+    const frames = shellStartupFrames("0.0.1");
+    expect(frames.length).toBe(1);
+    const plain = stripAnsi(frames[0]);
+    expect(plain).toContain("phren");
+  });
+
+  it("returns multiple progressive frames for narrow terminals (< 56 cols)", () => {
+    Object.defineProperty(process.stdout, "columns", { value: 40, writable: true, configurable: true });
+    const frames = shellStartupFrames("0.0.1");
+    expect(frames.length).toBe(3);
+    const texts = frames.map(f => stripAnsi(f));
+    expect(texts[0]).toContain("p");
+    expect(texts[1]).toContain("phr");
+    expect(texts[2]).toContain("phren");
+  });
+
+  it("falls back to 80 columns when process.stdout.columns is 0", () => {
+    Object.defineProperty(process.stdout, "columns", { value: 0, writable: true, configurable: true });
+    const frames = shellStartupFrames("0.0.1");
+    // 0 || 80 = 80, which is >= 72, so wide layout
+    expect(frames.length).toBe(1);
+  });
+
+  it("includes the version string in the output", () => {
+    Object.defineProperty(process.stdout, "columns", { value: 120, writable: true, configurable: true });
+    const frames = shellStartupFrames("42.0.0");
+    const plain = stripAnsi(frames.join("\n"));
+    expect(plain).toContain("v42.0.0");
+  });
+
+  it("includes tagline in all terminal widths", () => {
+    for (const cols of [40, 60, 120]) {
+      Object.defineProperty(process.stdout, "columns", { value: cols, writable: true, configurable: true });
+      const frames = shellStartupFrames("1.0.0");
+      const plain = stripAnsi(frames.join("\n"));
+      expect(plain).toContain("local memory for working agents");
     }
   });
 });
