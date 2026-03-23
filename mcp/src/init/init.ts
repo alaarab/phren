@@ -284,8 +284,10 @@ export async function runInit(opts: InitOptions = {}) {
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
   // --express bypasses the TTY check since it skips all interactive prompts
   const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+  let ranWalkthrough = false;
   if (!hasExistingInstall && !dryRun && !opts.yes && (isTTY || opts.express)) {
     const answers = await runWalkthrough(phrenPath, { express: opts.express });
+    ranWalkthrough = true;
     opts._walkthroughStorageChoice = answers.storageChoice;
     opts._walkthroughStoragePath = answers.storagePath;
     opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;
@@ -706,8 +708,8 @@ export async function runInit(opts: InitOptions = {}) {
     log(`  Recreated missing generated assets: ${repairedAssets.join(", ")}`);
   }
 
-  // Confirmation prompt before writing agent config
-  if (!opts.yes) {
+  // Confirmation prompt before writing agent config (skip if walkthrough already covered this)
+  if (!opts.yes && !ranWalkthrough) {
     const settingsPath = hookConfigPath("claude");
     log(`\nWill modify:`);
     log(`  ${settingsPath}  (add MCP server + hooks)`);
