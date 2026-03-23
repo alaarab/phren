@@ -111,7 +111,7 @@ import {
   type InferredInitScaffold,
 } from "./setup.js";
 
-import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./shared.js";
+import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt, type McpMode } from "./shared.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -121,7 +121,7 @@ import { type ProactivityLevel } from "../proactivity.js";
 import { getWorkflowPolicy } from "../shared/governance.js";
 import { addProjectToProfile } from "../profile-store.js";
 
-export type McpMode = "on" | "off";
+export { type McpMode, parseMcpMode } from "./shared.js";
 type StorageLocationChoice = "global" | "project" | "custom";
 type SkillsScope = "global" | "project";
 
@@ -152,13 +152,6 @@ export function isVersionNewer(current: string, previous?: string): boolean {
   if (c.pre && !p.pre) return false;
   if (!c.pre && p.pre) return true;
   return c.pre > p.pre;
-}
-
-export function parseMcpMode(raw?: string): McpMode | undefined {
-  if (!raw) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === "on" || normalized === "off") return normalized;
-  return undefined;
 }
 
 export interface InitOptions {

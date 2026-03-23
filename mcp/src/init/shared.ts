@@ -67,6 +67,15 @@ export function nearestWritableTarget(filePath: string): boolean {
   }
 }
 
+export type McpMode = "on" | "off";
+
+export function parseMcpMode(raw?: string): McpMode | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "on" || normalized === "off") return normalized;
+  return undefined;
+}
+
 export async function confirmPrompt(message: string): Promise<boolean> {
   if (process.env.CI === "true" || !process.stdin.isTTY) return true;
 
