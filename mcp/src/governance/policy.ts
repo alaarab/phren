@@ -54,7 +54,7 @@ export interface RuntimeHealth {
   lastStopAt?: string;
   lastAutoSave?: {
     at: string;
-    status: "clean" | "saved-local" | "saved-pushed" | "error";
+    status: "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error";
     detail?: string;
   };
   lastGovernance?: {
@@ -68,7 +68,7 @@ export interface RuntimeHealth {
     lastPullDetail?: string;
     lastSuccessfulPullAt?: string;
     lastPushAt?: string;
-    lastPushStatus?: "saved-local" | "saved-pushed" | "error";
+    lastPushStatus?: "saved-local" | "saved-pushed" | "no-upstream" | "error";
     lastPushDetail?: string;
     unsyncedCommits?: number;
   };
@@ -253,10 +253,10 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
   if (typeof data.lastSessionStartAt === "string") normalized.lastSessionStartAt = data.lastSessionStartAt;
   if (typeof data.lastPromptAt === "string") normalized.lastPromptAt = data.lastPromptAt;
   if (typeof data.lastStopAt === "string") normalized.lastStopAt = data.lastStopAt;
-  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && ["clean", "saved-local", "saved-pushed", "error"].includes(String(data.lastAutoSave.status))) {
+  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && ["clean", "saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastAutoSave.status))) {
     normalized.lastAutoSave = {
       at: data.lastAutoSave.at,
-      status: data.lastAutoSave.status as "clean" | "saved-local" | "saved-pushed" | "error",
+      status: data.lastAutoSave.status as "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error",
       detail: typeof data.lastAutoSave.detail === "string" ? data.lastAutoSave.detail : undefined,
     };
   }
@@ -274,7 +274,7 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (typeof data.lastSync.lastPullDetail === "string") normalized.lastSync.lastPullDetail = data.lastSync.lastPullDetail;
     if (typeof data.lastSync.lastSuccessfulPullAt === "string") normalized.lastSync.lastSuccessfulPullAt = data.lastSync.lastSuccessfulPullAt;
     if (typeof data.lastSync.lastPushAt === "string") normalized.lastSync.lastPushAt = data.lastSync.lastPushAt;
-    if (["saved-local", "saved-pushed", "error"].includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as "saved-local" | "saved-pushed" | "error";
+    if (["saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as "saved-local" | "saved-pushed" | "no-upstream" | "error";
     if (typeof data.lastSync.lastPushDetail === "string") normalized.lastSync.lastPushDetail = data.lastSync.lastPushDetail;
     if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
   }

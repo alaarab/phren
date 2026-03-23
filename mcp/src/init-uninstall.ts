@@ -195,8 +195,16 @@ function filterAgentHooks(filePath: string, commandField: string): boolean {
     }
     return true;
   } catch (err: unknown) {
-    debugLog(`filterAgentHooks: failed for ${filePath}: ${errorMessage(err)}`);
-    return false;
+    // JSON parse or other failure — back up the corrupted file so uninstall can proceed
+    const bakPath = filePath + ".bak";
+    try {
+      fs.renameSync(filePath, bakPath);
+      log(`  Warning: corrupted hook config backed up to ${bakPath} (${errorMessage(err)})`);
+    } catch (bakErr: unknown) {
+      debugLog(`filterAgentHooks: backup failed for ${filePath}: ${errorMessage(bakErr)}`);
+      log(`  Warning: could not process hook config ${filePath}: ${errorMessage(err)}`);
+    }
+    return true;
   }
 }
 
