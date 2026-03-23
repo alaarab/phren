@@ -2,7 +2,6 @@
  * Update logic for existing phren installs.
  */
 import {
-  debugLog,
   hookConfigPath,
   writeRootManifest,
 } from "./shared.js";

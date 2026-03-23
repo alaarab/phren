@@ -5,13 +5,6 @@ import { errorMessage } from "../utils.js";
 
 const MAX_LOG_LINES = 1000;
 
-interface AuditLogEntry {
-  at: string;
-  event: string;
-  details: string;
-  raw: string;
-}
-
 interface RetrievalLogEntry {
   file: string;
   section: string;

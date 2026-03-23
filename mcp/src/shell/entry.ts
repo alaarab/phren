@@ -87,7 +87,7 @@ async function playStartupIntro(phrenPath: string, plan = resolveStartupIntroPla
   const animator = createPhrenAnimator({ facing: "right" });
   animator.start();
 
-  const cols = process.stdout.columns || 80;
+  const _cols = process.stdout.columns || 80;
   const tagline = style.dim("local memory for working agents");
   const versionBadge = badge(`v${VERSION}`, style.boldBlue);
   const logoLines = [

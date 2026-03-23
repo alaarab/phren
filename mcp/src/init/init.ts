@@ -129,7 +129,6 @@ import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt } from "./
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
-  parseProjectOwnershipMode,
   getProjectOwnershipDefault,
 } from "../project-config.js";
 import { type ProactivityLevel } from "../proactivity.js";
@@ -289,7 +288,7 @@ function normalizedBootstrapProjectName(projectPath: string): string {
   return path.basename(projectPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
-function getPendingBootstrapTarget(phrenPath: string, opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
+function getPendingBootstrapTarget(phrenPath: string, _opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {
   const cwdProject = detectProjectDir(process.cwd(), phrenPath);
   if (!cwdProject) return null;
   const projectName = normalizedBootstrapProjectName(cwdProject);

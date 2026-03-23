@@ -4,7 +4,7 @@ import * as crypto from "crypto";
 import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
-import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
+import { isValidProjectName, safeProjectPath } from "../utils.js";
 import { getMachineName } from "../machine-identity.js";
 import {
   type FindingCitation,

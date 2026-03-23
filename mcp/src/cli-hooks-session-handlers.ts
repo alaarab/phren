@@ -7,7 +7,6 @@ import {
   handleGuardSkip,
   debugLog,
   sessionMarker,
-  getPhrenPath,
   getProjectDirs,
   findProjectNameCaseInsensitive,
   updateRuntimeHealth,
@@ -27,7 +26,6 @@ import {
 } from "./cli/hooks-context.js";
 import {
   qualityMarkers,
-  runtimeFile,
 } from "./shared.js";
 import { readInstallPreferences } from "./init/preferences.js";
 import { logger } from "./logger.js";
