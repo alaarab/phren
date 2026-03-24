@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { runtimeDir, PhrenResult, phrenOk, phrenErr, PhrenError } from "../shared.js";
+import { runtimeDir, PhrenResult, phrenOk, phrenErr, PhrenError, atomicWriteText } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { addFindingToFile } from "../shared/content.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
@@ -138,4 +138,107 @@ export function compactFindingJournals(phrenPath: string, project?: string): Fin
   }
 
   return result;
+}
+
+// ── Team store journal (append-only markdown, committed to git) ──────────────
+
+const TEAM_JOURNAL_DIR = "journal";
+
+/**
+ * Append a finding to a team store's journal.
+ * Each actor gets one file per day — no merge conflicts possible.
+ * These are markdown files committed to git (not runtime JSONL).
+ */
+export function appendTeamJournal(
+  storePath: string,
+  project: string,
+  finding: string,
+  actor?: string,
+): PhrenResult<string> {
+  const resolvedActor = actor || process.env.PHREN_ACTOR || process.env.USER || "unknown";
+  const date = new Date().toISOString().slice(0, 10);
+  const journalDir = path.join(storePath, project, TEAM_JOURNAL_DIR);
+  const journalFile = `${date}-${resolvedActor}.md`;
+  const journalPath = path.join(journalDir, journalFile);
+
+  try {
+    fs.mkdirSync(journalDir, { recursive: true });
+    const entry = `- ${finding}\n`;
+    if (fs.existsSync(journalPath)) {
+      fs.appendFileSync(journalPath, entry);
+    } else {
+      fs.writeFileSync(journalPath, `## ${date} (${resolvedActor})\n\n${entry}`);
+    }
+    return phrenOk(journalFile);
+  } catch (err: unknown) {
+    return phrenErr(`Team journal append failed: ${errorMessage(err)}`, PhrenError.PERMISSION_DENIED);
+  }
+}
+
+/**
+ * Read all team journal entries for a project, newest first.
+ */
+export function readTeamJournalEntries(
+  storePath: string,
+  project: string,
+): Array<{ file: string; date: string; actor: string; entries: string[] }> {
+  const journalDir = path.join(storePath, project, TEAM_JOURNAL_DIR);
+  if (!fs.existsSync(journalDir)) return [];
+
+  return fs.readdirSync(journalDir)
+    .filter((f) => f.endsWith(".md"))
+    .sort()
+    .reverse()
+    .map((file) => {
+      const match = file.match(/^(\d{4}-\d{2}-\d{2})-(.+)\.md$/);
+      const date = match?.[1] ?? "unknown";
+      const actor = match?.[2] ?? "unknown";
+      const content = fs.readFileSync(path.join(journalDir, file), "utf8");
+      const entries = content.split("\n")
+        .filter((line) => line.startsWith("- "))
+        .map((line) => line.slice(2).trim());
+      return { file, date, actor, entries };
+    });
+}
+
+/**
+ * Materialize FINDINGS.md from team journal entries.
+ * Groups by date, includes actor attribution.
+ */
+export function materializeTeamFindings(
+  storePath: string,
+  project: string,
+): PhrenResult<{ entryCount: number }> {
+  const journalEntries = readTeamJournalEntries(storePath, project);
+  if (journalEntries.length === 0) {
+    return phrenErr("No journal entries found", PhrenError.FILE_NOT_FOUND);
+  }
+
+  // Group by date, chronological order
+  const byDate = new Map<string, Array<{ actor: string; entries: string[] }>>();
+  for (const entry of [...journalEntries].reverse()) {
+    if (!byDate.has(entry.date)) byDate.set(entry.date, []);
+    byDate.get(entry.date)!.push({ actor: entry.actor, entries: entry.entries });
+  }
+
+  const lines: string[] = [`# ${project} findings\n`];
+  let count = 0;
+  for (const [date, actors] of byDate) {
+    lines.push(`## ${date}`);
+    for (const { actor, entries } of actors) {
+      for (const entry of entries) {
+        lines.push(`- ${entry} <!-- author:${actor} -->`);
+        count++;
+      }
+    }
+    lines.push("");
+  }
+
+  const findingsPath = path.join(storePath, project, "FINDINGS.md");
+  try {
+    atomicWriteText(findingsPath, lines.join("\n"));
+    return phrenOk({ entryCount: count });
+  } catch (err: unknown) {
+    return phrenErr(`Materialize failed: ${errorMessage(err)}`, PhrenError.PERMISSION_DENIED);
+  }
 }
