@@ -146,12 +146,10 @@ describe("checkSemanticDedup", () => {
     const projDir = path.join(phren, "proj");
     fs.mkdirSync(projDir, { recursive: true });
     fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
-    // a and b: Jaccard ~0.4 (4 shared tokens: always/restart/server/environment out of 10 union)
-    // jaccardTokenize(a) = {always,restart,server,after,changing,environment,configuration} = 7
-    // jaccardTokenize(b) = {always,restart,server,when,modifying,environment,variables} = 7
-    // intersection=4, union=10, Jaccard=0.4 → in [0.3,0.55) range → triggers semanticDedup
+    // a and b: Jaccard ~0.36 — in [0.30, 0.40) range so semantic dedup triggers
+    // shared: {restart, server, environment, configuration} = 4; union = 11; Jaccard ≈ 0.36
     const a = "always restart server after changing environment configuration";
-    const b = "always restart server when modifying environment variables";
+    const b = "restart application server when environment configuration changes detected";
     fs.writeFileSync(
       path.join(projDir, "FINDINGS.md"),
       `# proj Findings\n\n## 2026-01-01\n\n- ${b}\n`

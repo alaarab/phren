@@ -401,11 +401,14 @@ export function isDuplicateFinding(existingContent: string, newLearning: string,
     }
 
     // Second pass: Jaccard similarity (strip metadata before comparing)
+    // Threshold lowered from 0.55 to 0.40 to catch agent paraphrases —
+    // swarm agents often report the same insight with different wording,
+    // and 0.55 let too many through.
     const newTokens = jaccardTokenize(stripMetadata(newLearning));
     const existingTokens = jaccardTokenize(stripMetadata(bullet));
     if (newTokens.size < 3 || existingTokens.size < 3) continue; // too few tokens for reliable Jaccard
     const jaccard = jaccardSimilarity(newTokens, existingTokens);
-    if (jaccard > 0.55) {
+    if (jaccard > 0.40) {
       debugLog(`duplicate-detection: Jaccard ${Math.round(jaccard * 100)}% with existing: "${bullet.slice(0, 80)}"`);
       return true;
     }
@@ -549,7 +552,7 @@ export async function checkSemanticDedup(
     const tokB = jaccardTokenize(b);
     if (tokA.size < 3 || tokB.size < 3) continue;
     const jaccard = jaccardSimilarity(tokA, tokB);
-    if (jaccard >= 0.55) continue; // already caught by sync isDuplicateFinding
+    if (jaccard >= 0.40) continue; // already caught by sync isDuplicateFinding
     if (jaccard >= 0.3) {
       const isDup = await semanticDedup(a, b, phrenPath, signal);
       if (isDup) return true;
