@@ -3,6 +3,16 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.42] - 2026-03-24
+
+### Added
+- **Team store writes** — `add_finding` and `add_task` accept store-qualified names (`team/arc`) and route writes to the correct store
+- **Append-only journal** for team stores — writes go to `journal/YYYY-MM-DD-actor.md`, no merge conflicts
+- **`phren promote`** command — copy a finding from personal to team store
+- **`phren store activity`** — cross-store timeline of recent team findings
+- **Multi-store `list_projects`** — aggregates projects across all readable stores
+- **`get_project_summary`** accepts store-qualified names with filesystem fallback
+
 ## [0.0.41] - 2026-03-24
 
 ### Added
