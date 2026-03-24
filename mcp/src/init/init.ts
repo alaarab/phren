@@ -11,7 +11,6 @@ import {
   atomicWriteText,
   debugLog,
   expandHomePath,
-  hookConfigPath,
   writeRootManifest,
   type InstallMode,
 } from "../shared.js";
@@ -111,7 +110,7 @@ import {
   type InferredInitScaffold,
 } from "./setup.js";
 
-import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, confirmPrompt, type McpMode } from "./shared.js";
+import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, type McpMode } from "./shared.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -284,10 +283,8 @@ export async function runInit(opts: InitOptions = {}) {
   // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
   // --express bypasses the TTY check since it skips all interactive prompts
   const isTTY = process.stdin.isTTY && process.stdout.isTTY;
-  let ranWalkthrough = false;
   if (!hasExistingInstall && !dryRun && !opts.yes && (isTTY || opts.express)) {
     const answers = await runWalkthrough(phrenPath, { express: opts.express });
-    ranWalkthrough = true;
     opts._walkthroughStorageChoice = answers.storageChoice;
     opts._walkthroughStoragePath = answers.storagePath;
     opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;
