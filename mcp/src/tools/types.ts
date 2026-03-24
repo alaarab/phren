@@ -1,4 +1,6 @@
 import type { SqlJsDatabase } from "../shared/index.js";
+import { parseStoreQualified } from "../store-routing.js";
+import { resolveAllStores } from "../store-registry.js";
 
 export interface McpContext {
   phrenPath: string;
@@ -7,6 +9,33 @@ export interface McpContext {
   rebuildIndex: () => Promise<void>;
   updateFileInIndex: (filePath: string) => void;
   withWriteQueue: <T>(fn: () => Promise<T>) => Promise<T | { content: { type: "text"; text: string }[] }>;
+}
+
+/**
+ * Resolve the effective phrenPath and bare project name for a project input.
+ * Handles store-qualified names ("store/project") by routing to the correct store.
+ * Returns the primary store path for bare names.
+ */
+export function resolveStoreForProject(
+  ctx: McpContext,
+  projectInput: string,
+): { phrenPath: string; project: string; storeRole: string } {
+  const { storeName, projectName } = parseStoreQualified(projectInput);
+
+  if (!storeName) {
+    return { phrenPath: ctx.phrenPath, project: projectName, storeRole: "primary" };
+  }
+
+  const stores = resolveAllStores(ctx.phrenPath);
+  const store = stores.find((s) => s.name === storeName);
+  if (!store) {
+    throw new Error(`Store "${storeName}" not found`);
+  }
+  if (store.role === "readonly") {
+    throw new Error(`Store "${storeName}" is read-only`);
+  }
+
+  return { phrenPath: store.path, project: projectName, storeRole: store.role };
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -244,9 +244,19 @@ export function register(server: McpServer, ctx: McpContext): void {
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },
-    async ({ project, item, scope }) => {
+    async ({ project: projectInput, item, scope }) => {
+      // Resolve store-qualified project names (e.g., "team/arc")
+      let targetPhrenPath: string;
+      let project: string;
+      try {
+        const resolved = resolveStoreForProject(ctx, projectInput);
+        targetPhrenPath = resolved.phrenPath;
+        project = resolved.project;
+      } catch (err: unknown) {
+        return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const addTaskDenied = permissionDeniedError(phrenPath, "add_task", project);
+      const addTaskDenied = permissionDeniedError(targetPhrenPath, "add_task", project);
       if (addTaskDenied) return mcpResponse({ ok: false, error: addTaskDenied });
 
       const normalizedScope = normalizeMemoryScope(scope ?? "shared");
@@ -254,18 +264,18 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       if (Array.isArray(item)) {
         return withWriteQueue(async () => {
-          const result = addTasksBatch(phrenPath, project, item, { scope: normalizedScope });
+          const result = addTasksBatch(targetPhrenPath, project, item, { scope: normalizedScope });
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           const { added, errors } = result.data;
-          if (added.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          if (added.length > 0) refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
           return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${item.length} tasks to ${project}`, data: { project, added, errors } });
         });
       }
 
       return withWriteQueue(async () => {
-        const result = addTaskStore(phrenPath, project, item, { scope: normalizedScope });
+        const result = addTaskStore(targetPhrenPath, project, item, { scope: normalizedScope });
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
+        refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
         return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item, scope: normalizedScope } });
       });
     }
