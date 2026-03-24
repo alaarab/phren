@@ -613,45 +613,54 @@ export async function searchKnowledgeRows(
 export interface FederatedDocRow extends DocRow {
   /** The phren store path this result came from (undefined = local store). */
   federationSource?: string;
+  /** Human-readable store name from the registry. */
+  storeName?: string;
+  /** Immutable store ID from the registry. */
+  storeId?: string;
 }
 
 /**
- * Parse PHREN_FEDERATION_PATHS env var and return valid, distinct paths.
- * Paths are colon-separated. The local phrenPath is excluded to avoid duplicate results.
- */
-function parseFederationPaths(localPhrenPath: string): string[] {
-  const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
-  if (!raw.trim()) return [];
-  return raw
-    .split(":")
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0 && p !== localPhrenPath && fs.existsSync(p));
-}
-
-/**
- * Search additional phren stores defined in PHREN_FEDERATION_PATHS.
+ * Search additional phren stores defined in the store registry (or PHREN_FEDERATION_PATHS).
  * Returns an array of results tagged with their source store. Read-only — no mutations.
  */
 export async function searchFederatedStores(
   localPhrenPath: string,
   options: Omit<SearchKnowledgeRowsOptions, "phrenPath">,
 ): Promise<FederatedDocRow[]> {
-  const federationPaths = parseFederationPaths(localPhrenPath);
-  if (federationPaths.length === 0) return [];
+  let nonPrimaryStores: Array<{ path: string; name: string; id: string }>;
+  try {
+    const { getNonPrimaryStores } = await import("../store-registry.js");
+    nonPrimaryStores = getNonPrimaryStores(localPhrenPath).map((s) => ({
+      path: s.path, name: s.name, id: s.id,
+    }));
+  } catch {
+    // Fallback: parse PHREN_FEDERATION_PATHS directly (pre-registry compat)
+    const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
+    nonPrimaryStores = raw.split(":").map((p) => p.trim())
+      .filter((p) => p.length > 0 && p !== localPhrenPath && fs.existsSync(p))
+      .map((p) => ({ path: p, name: path.basename(p), id: "" }));
+  }
+
+  if (nonPrimaryStores.length === 0) return [];
 
   const allRows: FederatedDocRow[] = [];
 
-  for (const storePath of federationPaths) {
+  for (const store of nonPrimaryStores) {
     try {
-      const federatedDb = await buildIndex(storePath);
-      const result = await searchKnowledgeRows(federatedDb, { ...options, phrenPath: storePath });
+      const federatedDb = await buildIndex(store.path);
+      const result = await searchKnowledgeRows(federatedDb, { ...options, phrenPath: store.path });
       if (result.rows && result.rows.length > 0) {
         for (const row of result.rows) {
-          allRows.push({ ...row, federationSource: storePath });
+          allRows.push({
+            ...row,
+            federationSource: store.path,
+            storeName: store.name,
+            storeId: store.id || undefined,
+          });
         }
       }
     } catch (err: unknown) {
-      logger.debug(`federatedSearch storePath=${storePath}`, errorMessage(err));
+      logger.debug(`federatedSearch store=${store.name}`, errorMessage(err));
       // Federation errors are non-fatal — continue with other stores
     }
   }

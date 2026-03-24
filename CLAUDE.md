@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 51 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 52 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
 | `mcp/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
@@ -117,6 +117,9 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `get_config(domain?, project?)` : read current governance and policy configuration (supports domains: proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, all)
 - `set_config(domain, settings, project?)` : update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)
 
+**Store management:**
+- `store_list()` : list registered stores and their sync status
+
 Maintenance tools are CLI-only (see `phren config` and `phren maintain`).
 
 ## CLI Commands
@@ -199,6 +202,11 @@ phren config index [get|set ...]      Indexer include/exclude globs
 phren config synonyms [list|add|remove] ...  Manage learned synonyms
 phren config project-ownership [mode] Default ownership for new projects
 phren config telemetry [on|off]       Opt-in usage telemetry
+
+phren store list                      List registered stores
+phren store add <name> --remote <url> Add a team store
+phren store remove <name>             Remove a store (local only)
+phren store sync                      Pull all stores
 phren config machines                 Registered machines
 phren config profiles                 Profiles and projects
 
