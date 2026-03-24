@@ -506,8 +506,29 @@ async function handleSearchKnowledge(
 }
 
 async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string }) {
+  // Support store-qualified names (e.g., "team/arc")
+  const { parseStoreQualified } = await import("../store-routing.js");
+  const { storeName, projectName } = parseStoreQualified(name);
+  const lookupName = projectName;
+
   const db = ctx.db();
-  const docs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [name]);
+  let docs = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [lookupName]);
+
+  // If not in primary index and store-qualified, try reading from the store's filesystem
+  if (!docs && storeName) {
+    const store = resolveAllStores(ctx.phrenPath).find((s) => s.name === storeName);
+    if (store && fs.existsSync(path.join(store.path, lookupName))) {
+      const projDir = path.join(store.path, lookupName);
+      const fsDocs: Array<{ filename: string; type: string; content: string; path: string }> = [];
+      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], ["FINDINGS.md", "findings"], ["tasks.md", "task"]] as const) {
+        const filePath = path.join(projDir, file);
+        if (fs.existsSync(filePath)) {
+          fsDocs.push({ filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
+        }
+      }
+      if (fsDocs.length > 0) docs = fsDocs as any;
+    }
+  }
 
   if (!docs) {
     const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
@@ -546,16 +567,41 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
 async function handleListProjects(ctx: McpContext, { page, page_size }: { page?: number; page_size?: number }) {
   const { phrenPath, profile } = ctx;
   const db = ctx.db();
-  const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
-  if (!projectRows) return mcpResponse({ ok: true, message: "No projects indexed.", data: { projects: [], total: 0 } });
 
-  const projects = projectRows.map(row => decodeStringRow(row, 1, "list_projects.projects")[0]);
+  // Gather projects from primary store index
+  const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
+  const primaryProjects = projectRows
+    ? projectRows.map(row => decodeStringRow(row, 1, "list_projects.projects")[0])
+    : [];
+
+  // Gather projects from non-primary stores
+  const { getNonPrimaryStores } = await import("../store-registry.js");
+  const { getProjectDirs } = await import("../phren-paths.js");
+  const nonPrimaryStores = getNonPrimaryStores(phrenPath);
+  const storeProjects: Array<{ name: string; store: string }> = [];
+  for (const store of nonPrimaryStores) {
+    if (!fs.existsSync(store.path)) continue;
+    const dirs = getProjectDirs(store.path);
+    for (const dir of dirs) {
+      const projName = path.basename(dir);
+      storeProjects.push({ name: projName, store: store.name });
+    }
+  }
+
+  // Combine: primary projects (no store prefix) + non-primary (with store prefix)
+  const allProjects = [
+    ...primaryProjects.map((p) => ({ name: p, store: undefined as string | undefined })),
+    ...storeProjects,
+  ];
+
+  if (allProjects.length === 0) return mcpResponse({ ok: true, message: "No projects indexed.", data: { projects: [], total: 0 } });
+
   const pageSize = page_size ?? 20;
   const pageNum = page ?? 1;
   const start = Math.max(0, (pageNum - 1) * pageSize);
   const end = start + pageSize;
-  const pageProjects = projects.slice(start, end);
-  const totalPages = Math.max(1, Math.ceil(projects.length / pageSize));
+  const pageProjects = allProjects.slice(start, end);
+  const totalPages = Math.max(1, Math.ceil(allProjects.length / pageSize));
   if (pageNum > totalPages) {
     return mcpResponse({ ok: false, error: `Page ${pageNum} out of range. Total pages: ${totalPages}.` });
   }
@@ -563,27 +609,43 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
   const badgeTypes = ["claude", "findings", "summary", "task"] as const;
   const badgeLabels: Record<string, string> = { claude: "CLAUDE.md", findings: "FINDINGS", summary: "summary", task: "task" };
 
-  const projectList = pageProjects.map((proj) => {
-    const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [proj]) ?? [];
-    const types = rows.map(row => row.type);
-    const summaryRow = rows.find(row => row.type === "summary");
-    const claudeRow = rows.find(row => row.type === "claude");
-    const source = summaryRow?.content ?? claudeRow?.content;
-    let brief = "";
-    if (source) {
-      const firstLine = source.split("\n").find(l => l.trim() && !l.startsWith("#"));
-      brief = firstLine?.trim() || "";
+  const projectList = pageProjects.map((entry) => {
+    // Primary store projects: query the DB for badge info
+    if (!entry.store) {
+      const rows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ?", [entry.name]) ?? [];
+      const types = rows.map(row => row.type);
+      const summaryRow = rows.find(row => row.type === "summary");
+      const claudeRow = rows.find(row => row.type === "claude");
+      const source = summaryRow?.content ?? claudeRow?.content;
+      let brief = "";
+      if (source) {
+        const firstLine = source.split("\n").find(l => l.trim() && !l.startsWith("#"));
+        brief = firstLine?.trim() || "";
+      }
+      const badges = badgeTypes.filter(t => types.includes(t)).map(t => badgeLabels[t]);
+      return { name: entry.name, store: undefined as string | undefined, brief, badges, fileCount: rows.length };
     }
-    const badges = badgeTypes.filter(t => types.includes(t)).map(t => badgeLabels[t]);
-    return { name: proj, brief, badges, fileCount: rows.length };
+
+    // Non-primary store projects: basic info (no DB query, just check file existence)
+    const store = nonPrimaryStores.find((s) => s.name === entry.store);
+    const projDir = store ? path.join(store.path, entry.name) : "";
+    const badges: string[] = [];
+    if (projDir) {
+      if (fs.existsSync(path.join(projDir, "CLAUDE.md"))) badges.push("CLAUDE.md");
+      if (fs.existsSync(path.join(projDir, "FINDINGS.md"))) badges.push("FINDINGS");
+      if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
+      if (fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
+    }
+    return { name: entry.name, store: entry.store, brief: "", badges, fileCount: badges.length };
   });
 
-  const lines: string[] = [`# Phren Projects (${projects.length})`];
+  const lines: string[] = [`# Phren Projects (${allProjects.length})`];
   if (profile) lines.push(`Profile: ${profile}`);
   lines.push(`Page: ${pageNum}/${totalPages} (page_size=${pageSize})`);
   lines.push(`Path: ${phrenPath}\n`);
   for (const p of projectList) {
-    lines.push(`## ${p.name}`);
+    const storeTag = p.store ? ` (${p.store})` : "";
+    lines.push(`## ${p.name}${storeTag}`);
     if (p.brief) lines.push(p.brief);
     lines.push(`[${p.badges.join(" | ")}] - ${p.fileCount} file(s)\n`);
   }
@@ -591,7 +653,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
   return mcpResponse({
     ok: true,
     message: lines.join("\n"),
-    data: { projects: projectList, total: projects.length, page: pageNum, totalPages, pageSize },
+    data: { projects: projectList, total: allProjects.length, page: pageNum, totalPages, pageSize },
   });
 }
 

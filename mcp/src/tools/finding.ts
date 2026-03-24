@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -124,7 +124,7 @@ function withLifecycleMutation<T>(
 
 async function handleAddFinding(
   ctx: McpContext,
-  { project, finding, citation, sessionId, source, findingType, scope }: {
+  params: {
     project: string;
     finding: string | string[];
     citation?: { file?: string; line?: number; repo?: string; commit?: string; supersedes?: string; task_item?: string };
@@ -134,10 +134,42 @@ async function handleAddFinding(
     scope?: string;
   },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  const { finding, citation, sessionId, source, findingType, scope } = params;
+
+  // Resolve store-qualified project names (e.g., "team/arc" → store path + "arc")
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, params.project);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
   const addFindingDenied = permissionDeniedError(phrenPath, "add_finding", project);
   if (addFindingDenied) return mcpResponse({ ok: false, error: addFindingDenied });
+
+  // Team stores: use append-only journal (no FINDINGS.md mutation, no merge conflicts)
+  {
+    const storeResolved = resolveStoreForProject(ctx, params.project);
+    if (storeResolved.storeRole === "team") {
+      const { appendTeamJournal } = await import("../finding/journal.js");
+      const findings = Array.isArray(finding) ? finding : [finding];
+      const added: string[] = [];
+      for (const f of findings) {
+        const taggedFinding = findingType ? `[${findingType}] ${f}` : f;
+        const result = appendTeamJournal(phrenPath, project, taggedFinding);
+        if (result.ok) added.push(taggedFinding);
+      }
+      return mcpResponse({
+        ok: added.length > 0,
+        message: `Added ${added.length} finding(s) to ${params.project} journal`,
+        data: { project: params.project, added, journalMode: true },
+      });
+    }
+  }
 
   if (Array.isArray(finding)) {
     const findings = finding;

@@ -186,6 +186,7 @@ const CLI_COMMANDS = [
   "consolidation-status",
   "session-context",
   "store",
+  "promote",
 ];
 
 async function flushTopLevelOutput(): Promise<void> {
