@@ -3,6 +3,18 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.41] - 2026-03-24
+
+### Added
+- **Multi-store registry** (`stores.yaml`) — manage personal, team, and readonly phren stores
+- **CLI**: `phren store list/add/remove/sync` commands for store management
+- **MCP**: `store_list` tool (52 tools total)
+- **Federated search** now uses store registry with `storeName` and `storeId` result tags
+- **Per-store sync** in SessionStart and Stop hooks — non-primary stores pulled automatically
+- Store-qualified project IDs (`store/project`) with cross-store resolution
+- `.phren-team.yaml` bootstrap file support for team store repos
+- File-locked registry mutations, read-path validation, path traversal and git injection prevention
+
 ## [0.0.40] - 2026-03-24
 
 ### Removed
