@@ -54,6 +54,7 @@ import {
   handleProjectsNamespace,
   handleSkillsNamespace,
   handleSkillList,
+  handleStoreNamespace,
   handleTaskNamespace,
 } from "./namespaces.js";
 import {
@@ -180,6 +181,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleConsolidationStatus(args);
     case "session-context":
       return handleSessionContext();
+    case "store":
+      return handleStoreNamespace(args);
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
       process.exit(1);

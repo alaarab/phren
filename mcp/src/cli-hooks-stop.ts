@@ -517,6 +517,22 @@ export async function handleHookStop() {
 
   }); // end withFileLock(gitOpLockPath)
 
+  // Pull non-primary stores (best-effort, non-blocking)
+  try {
+    const { getNonPrimaryStores } = await import("./store-registry.js");
+    const otherStores = getNonPrimaryStores(phrenPath);
+    for (const store of otherStores) {
+      if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
+      try {
+        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+      } catch (err: unknown) {
+        debugLog(`hook-stop store-pull ${store.name}: ${errorMessage(err)}`);
+      }
+    }
+  } catch {
+    // store-registry not available or no stores — skip silently
+  }
+
   // Auto governance scheduling (non-blocking)
   scheduleWeeklyGovernance();
 }
