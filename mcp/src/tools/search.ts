@@ -2,8 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
+import * as path from "path";
 import { createHash } from "crypto";
 import { isValidProjectName, errorMessage } from "../utils.js";
+import { resolveAllStores } from "../store-registry.js";
 import { readFindings } from "../data/access.js";
 import {
   debugLog,
@@ -663,6 +665,44 @@ async function handleGetFindings(
   });
 }
 
+async function handleStoreList(ctx: McpContext) {
+  const { phrenPath } = ctx;
+  const stores = resolveAllStores(phrenPath);
+
+  const storeData = stores.map((store) => {
+    let health: Record<string, unknown> | null = null;
+    try {
+      const healthPath = path.join(store.path, ".runtime", "health.json");
+      if (fs.existsSync(healthPath)) {
+        health = JSON.parse(fs.readFileSync(healthPath, "utf8"))?.lastSync ?? null;
+      }
+    } catch { /* non-critical */ }
+
+    return {
+      id: store.id,
+      name: store.name,
+      path: store.path,
+      role: store.role,
+      sync: store.sync,
+      remote: store.remote ?? null,
+      exists: fs.existsSync(store.path),
+      projects: store.projects ?? null,
+      lastSync: health,
+    };
+  });
+
+  const lines = storeData.map((s) => {
+    const status = s.exists ? "ok" : "MISSING";
+    return `- ${s.name} (${s.role}) [${status}] ${s.remote ?? "(local)"}`;
+  });
+
+  return mcpResponse({
+    ok: true,
+    message: `${storeData.length} store(s):\n${lines.join("\n")}`,
+    data: { stores: storeData },
+  });
+}
+
 // ── Registration ─────────────────────────────────────────────────────────────
 
 export function register(server: McpServer, ctx: McpContext): void {
@@ -752,5 +792,17 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     (params) => handleGetFindings(ctx, params),
+  );
+
+  server.registerTool(
+    "store_list",
+    {
+      title: "◆ phren · stores",
+      description:
+        "List all registered phren stores and their sync status. " +
+        "Shows the primary store plus any team or readonly stores from the store registry.",
+      inputSchema: z.object({}),
+    },
+    () => handleStoreList(ctx),
   );
 }

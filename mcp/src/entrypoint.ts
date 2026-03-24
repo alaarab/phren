@@ -90,6 +90,12 @@ const HELP_TOPICS: Record<string, string> = {
   phren uninstall                         Remove phren config and hooks
   phren update [--refresh-starter]        Update to latest version
 `,
+  stores: `Stores:
+  phren store list                        List registered stores
+  phren store add <name> --remote <url>   Add a team store
+  phren store remove <name>               Remove a store (local only)
+  phren store sync                        Pull all stores
+`,
   env: `Environment variables:
   PHREN_PATH                  Override phren directory (default: ~/.phren)
   PHREN_PROFILE               Active profile name
@@ -179,6 +185,7 @@ const CLI_COMMANDS = [
   "review",
   "consolidation-status",
   "session-context",
+  "store",
 ];
 
 async function flushTopLevelOutput(): Promise<void> {

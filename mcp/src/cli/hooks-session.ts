@@ -675,6 +675,22 @@ export async function handleHookSessionStart() {
     `pull=${hasRemote ? (pull.ok ? "ok" : "fail") : "skipped-local"} doctor=${doctor.ok ? "ok" : "issues"} maintenance=${maintenanceScheduled ? "scheduled" : "skipped"}`
   );
 
+  // Pull non-primary stores from store registry (best-effort, non-blocking)
+  try {
+    const { getNonPrimaryStores } = await import("../store-registry.js");
+    const otherStores = getNonPrimaryStores(phrenPath);
+    for (const store of otherStores) {
+      if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
+      try {
+        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+      } catch (err: unknown) {
+        debugLog(`session-start store-pull ${store.name}: ${errorMessage(err)}`);
+      }
+    }
+  } catch {
+    // store-registry not available or no stores — skip silently
+  }
+
   // Sync intent warning: if the user intended sync but remote is missing or pull failed, warn once
   try {
     const syncPrefs = readInstallPreferences(phrenPath);
