@@ -25,7 +25,7 @@ This extension is for people already using Phren locally. If you keep project me
 
 ## Requirements
 
-- A working local Phren install (`npm install -g @phren/cli && phren init`).
+- Phren initialized (`npx @phren/cli init` — no global install needed).
 - Node.js available on your machine.
 
 ## Setup
@@ -34,7 +34,7 @@ Open VS Code settings and configure:
 
 | Setting | Description |
 |---------|-------------|
-| `phren.mcpServerPath` | Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect from a global install. |
+| `phren.mcpServerPath` | Absolute path to the Phren MCP server entrypoint (`index.js`). Leave blank to auto-detect. |
 | `phren.nodePath` | Path to the Node.js binary. Default: `node`. |
 | `phren.storePath` | Path to your Phren store. Leave blank to use `~/.phren`. |
 

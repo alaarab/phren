@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine(`Phren store path: ${runtimeConfig.storePath}`);
   outputChannel.appendLine(`Node path: ${runtimeConfig.nodePath}`);
   outputChannel.appendLine(
-    `MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; configure phren.mcpServerPath or install Phren globally)"}`,
+    `MCP server path: ${runtimeConfig.mcpServerPath ?? "(not found; run 'npx @phren/cli init' or configure phren.mcpServerPath)"}`,
   );
 
   // --- Register onboarding commands (available even without backend) ---

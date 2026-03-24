@@ -156,13 +156,21 @@ export function registerOnboardingCommands(
 ): vscode.Disposable[] {
   const installBackend = vscode.commands.registerCommand("phren.installBackend", async () => {
     try {
+      const cloneResult = await promptForCloneUrl();
+      if (cloneResult.cancelled) return;
+
+      const initArgs = [PHREN_PACKAGE_NAME, "init", "--yes"];
+      if (cloneResult.url) {
+        initArgs.push("--clone-url", cloneResult.url);
+      }
       const result = await runCommandWithProgress(
-        "Installing Phren globally...",
-        getNpmCommand(),
-        ["install", "-g", PHREN_PACKAGE_NAME],
+        cloneResult.url ? "Cloning existing Phren store..." : "Installing Phren...",
+        getNpxCommand(),
+        initArgs,
       );
       if (result.ok) {
         await vscode.commands.executeCommand("setContext", "phren.backendInstalled", true);
+        await vscode.commands.executeCommand("setContext", "phren.storeInitialized", true);
         const installChoice = await vscode.window.showInformationMessage(
           "Phren installed successfully. Reload to activate.",
           "Reload Window",
@@ -172,7 +180,7 @@ export function registerOnboardingCommands(
         }
       } else {
         await vscode.window.showErrorMessage(
-          `Phren install failed: ${summarizeCommandError(result)}. Try running 'npm install -g @phren/cli' in your terminal.`,
+          `Phren install failed: ${summarizeCommandError(result)}. Try running 'npx @phren/cli init' in your terminal.`,
         );
       }
     } catch (error) {
@@ -233,12 +241,12 @@ export async function handleWalkthroughChecks(
 
   if (!runtimeConfig.mcpServerPath) {
     const choice = await vscode.window.showErrorMessage(
-      "Phren backend not detected.",
-      "Install Phren",
+      "Phren not detected. Run init to set up.",
+      "Run Init",
       "Run Doctor",
       "Open Settings",
     );
-    if (choice === "Install Phren") {
+    if (choice === "Run Init") {
       await vscode.commands.executeCommand("phren.installBackend");
     } else if (choice === "Run Doctor") {
       await vscode.commands.executeCommand("phren.initStore");
@@ -257,12 +265,12 @@ export async function handleWalkthroughChecks(
   if (!pathExists(runtimeConfig.mcpServerPath)) {
     const basename = pathModule.basename(runtimeConfig.mcpServerPath);
     const choice = await vscode.window.showErrorMessage(
-      `Phren entrypoint not found: ${basename}. The CLI may need reinstalling.`,
-      "Reinstall Phren",
+      `Phren entrypoint not found: ${basename}. Try re-running init.`,
+      "Re-run Init",
       "Run Doctor",
       "Open Settings",
     );
-    if (choice === "Reinstall Phren") {
+    if (choice === "Re-run Init") {
       await vscode.commands.executeCommand("phren.installBackend");
     } else if (choice === "Run Doctor") {
       await vscode.commands.executeCommand("phren.initStore");
