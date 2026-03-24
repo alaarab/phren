@@ -29,7 +29,6 @@ import {
   clampInt,
   errorMessage,
   loadSynonymMap,
-  learnSynonym,
   STOP_WORDS,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
@@ -108,74 +107,9 @@ import { approximateTokens } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
 
-function synonymTermKnown(term: string, map: Record<string, string[]>): boolean {
-  if (Object.prototype.hasOwnProperty.call(map, term)) return true;
-  for (const values of Object.values(map)) {
-    if (values.includes(term)) return true;
-  }
-  return false;
-}
-
-function termAppearsInText(term: string, text: string): boolean {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
-  const pattern = new RegExp(`\\b${escaped}\\b`, "i");
-  return pattern.test(text);
-}
-
-function autoLearnQuerySynonyms(
-  phrenPath: string,
-  project: string | null,
-  keywordEntries: string[],
-  rows: Array<{ content: string }>,
-): void {
-  if (!project) return;
-
-  const synonymMap = loadSynonymMap(project, phrenPath);
-  const knownTerms = new Set<string>([
-    ...Object.keys(synonymMap),
-    ...Object.values(synonymMap).flat(),
-  ]);
-  const queryTerms = [...new Set(
-    keywordEntries
-      .map((item) => item.trim().toLowerCase())
-      .filter((item) => item.length > 2 && !STOP_WORDS.has(item))
-  )];
-  const unknownTerms = queryTerms.filter((term) => !synonymTermKnown(term, synonymMap));
-  if (unknownTerms.length === 0) return;
-
-  const corpus = rows
-    .slice(0, 8)
-    .map((row) => row.content.slice(0, 6000))
-    .join("\n")
-    .toLowerCase();
-  if (!corpus.trim()) return;
-
-  const learned: Array<{ term: string; related: string[] }> = [];
-  for (const unknown of unknownTerms.slice(0, 3)) {
-    const related = [...knownTerms]
-      .filter((candidate) =>
-        candidate.length > 2
-        && candidate !== unknown
-        && !STOP_WORDS.has(candidate)
-        && !queryTerms.includes(candidate)
-        && termAppearsInText(candidate, corpus)
-      )
-      .slice(0, 4);
-
-    if (related.length === 0) continue;
-    try {
-      learnSynonym(phrenPath, project, unknown, related);
-      learned.push({ term: unknown, related });
-    } catch (err: unknown) {
-      debugLog(`hook-prompt synonym-learn failed for "${unknown}": ${errorMessage(err)}`);
-    }
-  }
-
-  if (learned.length > 0) {
-    const details = learned.map((entry) => `${entry.term}->${entry.related.join(",")}`).join("; ");
-    debugLog(`hook-prompt learned synonyms project=${project} ${details}`);
-  }
-}
+// Auto-learn from prompts was removed — it learned conversational noise ("bro", "idk", typos)
+// as synonyms for high-frequency terms. Manual `phren config synonyms add` still works.
+// Future: finding-based co-occurrence mining (phren maintain command, not live hook).
 
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -291,7 +225,6 @@ export async function handleHookPrompt() {
     let rows = await searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, false, getPhrenPath());
     stage.searchMs = Date.now() - tSearch0;
     if (!rows || !rows.length) process.exit(0);
-    autoLearnQuerySynonyms(getPhrenPath(), detectedProject, keywordEntries, rows);
 
     const tTrust0 = Date.now();
     const policy = resolvedConfig.retentionPolicy;
