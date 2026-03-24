@@ -3,6 +3,17 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.40] - 2026-03-24
+
+### Removed
+- **Auto-learn synonyms from prompts** — the feature learned conversational noise ("bro", "idk", typos) as synonyms for high-frequency terms, degrading search quality. Manual `phren config synonyms add` still works. Existing garbage `learned-synonyms.json` files should be cleared (`echo '{}' > <project>/learned-synonyms.json`).
+
+### Fixed
+- **VS Code extension no longer requires global install** — `phren.installBackend` now runs `npx @phren/cli init` instead of `npm install -g`. Walkthrough merged install + init into a single "Set Up Phren" step. All messaging updated to drop "global install" language.
+
+### Added
+- Team stores architecture RFC (docs/architecture-team-stores.md)
+
 ## [0.0.33] - 2026-03-22
 
 ### Security
