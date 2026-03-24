@@ -41,8 +41,8 @@ import { permissionDeniedError } from "../governance/rbac.js";
 
 
 
-const JACCARD_MAYBE_LOW = 0.30;
-const JACCARD_MAYBE_HIGH = 0.55; // above this isDuplicateFinding already catches it
+const JACCARD_MAYBE_LOW = 0.25;
+const JACCARD_MAYBE_HIGH = 0.40; // above this isDuplicateFinding already catches it
 
 interface PotentialDuplicate {
   existing: string;
