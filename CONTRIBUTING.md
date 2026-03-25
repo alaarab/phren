@@ -23,11 +23,11 @@ The build compiles TypeScript from `mcp/src/` into `mcp/dist/` and marks the ent
 
 | Path | What it does |
 |------|-------------|
-| `mcp/src/index.ts` | CLI routing + MCP server bootstrap (72 public tools across 12 modules) |
+| `mcp/src/index.ts` | CLI routing + MCP server bootstrap (52 public tools across 12 modules) |
 | `mcp/src/shared.ts` | Shared path/runtime helpers and core exports |
 | `mcp/src/cli.ts` | CLI subcommands (search, doctor, shell, etc.) |
 | `mcp/src/utils.ts` | FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init.ts` | `npx phren init`: configures MCP + hooks |
+| `mcp/src/init.ts` | `phren init`: configures MCP + hooks |
 | `mcp/src/link.ts` | Profile sync, symlinks, hooks, context |
 | `mcp/src/data-access.ts` | Task CRUD, machine/profile listing, learning management |
 | `mcp/src/mcp-*.ts` | MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config) |

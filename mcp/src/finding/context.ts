@@ -203,7 +203,7 @@ export function resolveFindingSessionId(
     .filter((session) => session.project === project)
     .sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
   if (matchingProject.length > 0) return matchingProject[0].sessionId;
-
-  const sorted = active.sort((a, b) => sessionSortValue(b) - sessionSortValue(a));
-  return sorted[0]?.sessionId;
+  // Do not attribute findings to an unrelated active session from another project.
+  // Missing session provenance is safer than cross-project contamination.
+  return undefined;
 }

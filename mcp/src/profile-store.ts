@@ -78,7 +78,7 @@ export function resolveActiveProfile(phrenPath: string, requestedProfile?: strin
 
 export function listMachines(phrenPath: string): PhrenResult<Record<string, string>> {
   const machinesPath = path.join(phrenPath, "machines.yaml");
-  if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'npx phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
+  if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   try {
     const raw = fs.readFileSync(machinesPath, "utf8");
     const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
@@ -225,7 +225,7 @@ export function getActiveProfileDefaults(phrenPath: string, profile?: string): P
 
 export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
   const profilesDir = path.join(phrenPath, "profiles");
-  if (!fs.existsSync(profilesDir)) return phrenErr(`No profiles/ directory found. Run 'npx phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
+  if (!fs.existsSync(profilesDir)) return phrenErr(`No profiles/ directory found. Run 'phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   const files = fs.readdirSync(profilesDir).filter((file) => file.endsWith(".yaml")).sort();
   const profiles: ProfileInfo[] = [];
 

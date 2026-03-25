@@ -33,7 +33,7 @@ import {
 import { addFinding, removeFinding } from "../core/finding.js";
 import { supersedeFinding, retractFinding, resolveFindingContradiction } from "../finding/lifecycle.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, type CustomHookEntry } from "../hooks.js";
-import { runtimeFile, runtimeHealthFile } from "../shared.js";
+import { runtimeFile } from "../shared.js";
 import {
   resolveAllStores,
   addStoreToRegistry,
@@ -659,7 +659,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
 
   if (subcommand === "add") {
     console.error("`phren projects add` has been removed from the supported workflow.");
-    console.error("Use `cd ~/your-project && npx phren add` so enrollment stays path-based.");
+    console.error("Use `cd ~/your-project && phren add` so enrollment stays path-based.");
     process.exit(1);
   }
 
@@ -921,7 +921,7 @@ function handleProjectsList(profile: string) {
     .sort();
 
   if (!projects.length) {
-    console.log("No projects found. Run: cd ~/your-project && npx phren add");
+    console.log("No projects found. Run: cd ~/your-project && phren add");
     return;
   }
 
@@ -942,7 +942,7 @@ function handleProjectsList(profile: string) {
     console.log(`  ${name}${tagStr}`);
   }
   console.log(`\n${projects.length} project(s) total.`);
-  console.log("Add another project: cd ~/your-project && npx phren add");
+  console.log("Add another project: cd ~/your-project && phren add");
 }
 
 async function handleProjectsRemove(name: string, profile: string) {
@@ -1868,8 +1868,6 @@ export async function handlePromoteNamespace(args: string[]) {
   // Write to target store
   const targetProjectDir = path.join(targetStore.path, project);
   fs.mkdirSync(targetProjectDir, { recursive: true });
-  const targetFindingsPath = path.join(targetProjectDir, "FINDINGS.md");
-
   const { addFindingToFile } = await import("../shared/content.js");
   const result = addFindingToFile(targetStore.path, project, match.text);
   if (!result.ok) {

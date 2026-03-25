@@ -28,8 +28,6 @@ import {
   isFeatureEnabled,
   clampInt,
   errorMessage,
-  loadSynonymMap,
-  STOP_WORDS,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
 import { logger } from "../logger.js";

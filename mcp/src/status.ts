@@ -65,7 +65,7 @@ function hasCommandHook(value: unknown): boolean {
 export async function runStatus() {
   const phrenPath = findPhrenPath();
   if (!phrenPath) {
-    console.log(`${RED}phren not found${RESET}. Run ${CYAN}npx phren init${RESET} to set up.`);
+    console.log(`${RED}phren not found${RESET}. Run ${CYAN}npx @phren/cli init${RESET} to set up.`);
     process.exit(1);
   }
 

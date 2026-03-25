@@ -1275,9 +1275,14 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
  */
 export function detectProjectDir(dir: string, phrenPath: string): string | null {
   const home = os.homedir();
+  const tmpRoot = path.resolve(os.tmpdir());
   const resolvedPhrenPath = path.resolve(phrenPath);
   let current = path.resolve(dir);
   while (true) {
+    // Never treat the shared OS temp root itself as a project. Tools may drop
+    // global instruction files there, which would otherwise hijack detection
+    // for arbitrary temp subdirectories.
+    if (current === tmpRoot) return null;
     if (current === home || current === resolvedPhrenPath) return null;
     if (current.startsWith(resolvedPhrenPath + path.sep)) return null;
     const hasClaude = fs.existsSync(path.join(current, "CLAUDE.md")) ||

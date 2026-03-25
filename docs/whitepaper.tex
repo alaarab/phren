@@ -119,7 +119,7 @@ The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{
 \node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
 \node[store, right=0.9cm of fts] (md) {Data Layer\\[-2pt]{\scriptsize \textasciitilde/.phren/ or <repo>/.phren}};
 \node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
-\node[store, below=0.45cm of md]  (mcp) {MCP Tools (72)\\[-2pt]{\scriptsize 12 domain modules}};
+\node[store, below=0.45cm of md]  (mcp) {MCP Tools (52)\\[-2pt]{\scriptsize 12 domain modules}};
 \node[store, below=0.45cm of mcp] (ckpt) {Session \& Task Checkpoints\\[-2pt]{\scriptsize .runtime/sessions + .sessions/checkpoint-*}};
 \node[gov, right=0.9cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
 \node[gov, above=0.45cm of pol] (rbac) {Access Control\\[-2pt]{\scriptsize 4 roles, 6 actions}};
@@ -171,7 +171,7 @@ Lifecycle automation is now a four-event model with tool-level continuity suppor
 Claude uses native lifecycle hooks; Copilot/Cursor/Codex use generated wrappers + tool configs to enforce equivalent lifecycle semantics. The architectural point is unchanged: memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
 
 \subsection{MCP Module Surface}
-Phren MCP currently exposes \textbf{72 tools across 12 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, fragment graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
+Phren MCP currently exposes \textbf{52 tools across 12 modules}: search/browse, task management, finding capture and lifecycle, memory quality, data management, fragment graph, session management, operations/review, skills management, hooks management, and extraction. Newly expanded lifecycle surfaces include contradiction/supersession tools for findings and session history/continuity tooling.
 
 \subsection{Token Budget and Progressive Disclosure}
 \label{sec:context-opt}

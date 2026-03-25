@@ -235,7 +235,7 @@ export function findPhrenPathWithArg(arg?: string): string {
   }
   const existing = findPhrenPath();
   if (existing) return existing;
-  throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'npx phren init'.`);
+  throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'phren init'.`);
 }
 
 export function isProjectLocalMode(phrenPath: string): boolean {
@@ -541,7 +541,7 @@ let lazyPhrenPath: string | undefined;
 export function getPhrenPath(): string {
   if (!lazyPhrenPath) {
     const existing = findPhrenPath();
-    if (!existing) throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'npx phren init'.`);
+    if (!existing) throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'phren init'.`);
     lazyPhrenPath = existing;
   }
   return lazyPhrenPath;

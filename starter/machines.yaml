@@ -5,4 +5,4 @@
 #   work-laptop: work
 #   home-desktop: personal
 #
-# After adding a line, run: npx phren init
+# After adding a line, run: phren init

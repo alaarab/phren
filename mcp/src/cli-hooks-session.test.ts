@@ -24,7 +24,7 @@ describe("getUntrackedProjectNotice", () => {
 
     const notice = getUntrackedProjectNotice(phrenPath, path.join(repoDir, "src"));
     expect(notice).toContain("not tracked by phren yet");
-    expect(notice).toContain(`npx phren add \"${repoDir}\"`);
+    expect(notice).toContain(`phren add "${repoDir}"`);
     expect(notice).toContain(`path="${repoDir}"`);
     expect(notice).toContain("add_project");
   });

@@ -140,9 +140,8 @@ For a brand-new project scaffold inside Claude:
 
 Project setup note:
 - `phren add` is the canonical path for existing repos.
-- Platform-specific behavior is documented in `docs/platform-matrix.md`.
-- Best-effort vs fail-closed behavior is documented in `docs/error-reporting.md`.
-- Package/update behavior is documented in `docs/versioning.md`.
+- Shared vs project-local setup is covered in `docs/llms-install.md` and `docs/ide-setup.md`.
+- Governance behavior and review flows are documented in `docs/governance.md`.
 - The local task is still the primary planning surface. GitHub issue links are optional metadata on task items, and promotion is one-way by default to avoid issue spam.
 
 ## Does phren require MCP?
@@ -174,12 +173,12 @@ Claude Code, GitHub Copilot CLI, Cursor, VS Code Copilot, and OpenAI Codex.
 
 - Shared mode configures user-scoped integrations for Claude Code, VS Code, Copilot CLI, Cursor, and Codex.
 - Project-local mode configures VS Code workspace MCP only.
-- Claude gets full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`) plus MCP.
+- Claude gets full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`) plus MCP.
 - Copilot CLI, Cursor, and Codex get generated hook configs plus session wrappers, in addition to MCP config.
 
 ## Which platforms are supported?
 
-Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts and MCP config locations. The current support matrix and known differences live in `docs/platform-matrix.md`.
+Linux is the primary validation path. macOS and Windows are supported, with explicit config-path handling for their user-home layouts and MCP config locations. Current integration details live in `docs/ide-setup.md`.
 
 ## How are skills resolved when names or aliases collide?
 

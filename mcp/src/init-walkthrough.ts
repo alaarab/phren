@@ -376,7 +376,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  phren-managed: Phren may mirror CLAUDE.md / AGENTS.md into the repo");
   log("  detached: Phren keeps its own docs but does not write into the repo");
   log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
-  log("  Change later: npx phren config project-ownership <mode>");
+  log("  Change later: phren config project-ownership <mode>");
   const projectOwnershipDefault = await prompts.select<ProjectOwnershipMode>(
     "Default project ownership",
     [
@@ -392,7 +392,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("directly: search memory, manage tasks, save findings, etc.");
   log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
   log("  Alternative: hooks-only mode (read-only context injection, any agent)");
-  log("  Change later: npx phren mcp-mode on|off");
+  log("  Change later: phren mcp-mode on|off");
   const mcp: McpMode = (await prompts.confirm("Enable MCP?", true)) ? "on" : "off";
 
   printSection("Hooks");
@@ -401,7 +401,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  - UserPromptSubmit: searches phren and injects relevant context");
   log("  - Stop: commits and pushes any new findings after each response");
   log("  What they touch: ~/.claude/settings.json (hooks section only)");
-  log("  Change later: npx phren hooks-mode on|off");
+  log("  Change later: phren hooks-mode on|off");
   const hooks: McpMode = (await prompts.confirm("Enable hooks?", true)) ? "on" : "off";
 
   printSection("Semantic Search (Optional)");
@@ -451,7 +451,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   let findingsProactivity: ProactivityLevel = "high";
   if (autoCaptureEnabled) {
     log("  Findings capture level controls how eager phren is to save lessons automatically.");
-    log("  Change later: npx phren config proactivity.findings <high|medium|low>");
+    log("  Change later: phren config proactivity.findings <high|medium|low>");
     findingsProactivity = await prompts.select<ProactivityLevel>(
       "Findings capture level",
       [
@@ -471,7 +471,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  suggest: proposes tasks but waits for approval before writing");
   log("  manual: tasks are fully manual — you add them yourself");
   log("  off: never touch tasks automatically");
-  log("  Change later: npx phren config workflow set --taskMode=<mode>");
+  log("  Change later: phren config workflow set --taskMode=<mode>");
   const taskMode = await prompts.select<"off" | "manual" | "suggest" | "auto">(
     "Task mode",
     [
@@ -488,7 +488,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
     log("  high (recommended): captures tasks as they come up naturally");
     log("  medium: only when you explicitly mention a task");
     log("  low: minimal auto-capture");
-    log("  Change later: npx phren config proactivity.tasks <high|medium|low>");
+    log("  Change later: phren config proactivity.tasks <high|medium|low>");
     taskProactivity = await prompts.select<ProactivityLevel>(
       "Task proactivity",
       [
@@ -504,7 +504,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("Choose how strict review gates should be for risky or low-confidence writes.");
   log("  lowConfidenceThreshold: confidence cutoff used to mark writes as risky");
   log("  riskySections: sections always treated as risky");
-  log("  Change later: npx phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts");
+  log("  Change later: phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts");
   const thresholdAnswer = await prompts.input("Low-confidence threshold [0.0-1.0]", "0.7");
   const lowConfidenceThreshold = parseLowConfidenceThreshold(thresholdAnswer, 0.7);
   const riskySectionsAnswer = await prompts.input("Risky sections [Review,Stale,Conflicts]", "Stale,Conflicts");
@@ -562,7 +562,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
   log("  conservative — decisions and pitfalls only");
   log("  balanced     — non-obvious patterns, decisions, pitfalls, bugs (recommended)");
   log("  aggressive   — everything worth remembering, err on the side of capturing");
-  log("  Change later: npx phren config finding-sensitivity <level>");
+  log("  Change later: phren config finding-sensitivity <level>");
   const findingSensitivity = await prompts.select<"minimal" | "conservative" | "balanced" | "aggressive">(
     "Finding sensitivity",
     [
@@ -597,7 +597,7 @@ export async function runWalkthrough(phrenPath: string): Promise<{
     bootstrapCurrentProject = await prompts.confirm("Add this project to phren now?", true);
     if (!bootstrapCurrentProject) {
       bootstrapCurrentProject = false;
-      log(style.warning(`  Skipped. Later: cd ${detectedProject} && npx phren add`));
+      log(style.warning(`  Skipped. Later: cd ${detectedProject} && phren add`));
     } else {
       bootstrapOwnership = await prompts.select<ProjectOwnershipMode>(
         "Ownership for detected project",

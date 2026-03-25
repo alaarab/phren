@@ -19,6 +19,7 @@ import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import { atomicWriteJson, debugError, scanSessionFiles } from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
+import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
 
 interface SessionState {
   sessionId: string;
@@ -266,9 +267,11 @@ function cleanupStaleSessions(phrenPath: string): number {
       // (no endedAt) should never be removed regardless of age.
       if (state && !state.endedAt) continue;
 
-      // prefer startedAt from the JSON content over mtime (reliable on noatime mounts)
-      const ageMs = state?.startedAt
-        ? Date.now() - new Date(state.startedAt).getTime()
+      // For ended sessions, age out by end time rather than start time so
+      // long-running sessions do not disappear immediately after they finish.
+      const expirationAnchor = state?.endedAt || state?.startedAt;
+      const ageMs = expirationAnchor
+        ? Date.now() - new Date(expirationAnchor).getTime()
         : Date.now() - fs.statSync(fullPath).mtimeMs;
       if (ageMs > STALE_SESSION_MS) {
         fs.unlinkSync(fullPath);
@@ -708,7 +711,11 @@ export function register(server: McpServer, ctx: McpContext): void {
         })();
         if (activeTask) {
           const taskId = activeTask.stableId || activeTask.id;
-          const { gitStatus, editedFiles } = collectGitStatusSnapshot(process.cwd());
+          const projectConfig = readProjectConfig(phrenPath, endedState.project);
+          const snapshotRoot =
+            getProjectSourcePath(phrenPath, endedState.project, projectConfig) ||
+            path.join(phrenPath, endedState.project);
+          const { gitStatus, editedFiles } = collectGitStatusSnapshot(snapshotRoot);
           const resumptionHint = extractResumptionHint(
             effectiveSummary,
             activeTask.line,

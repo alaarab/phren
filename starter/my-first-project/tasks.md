@@ -22,4 +22,4 @@
 
 ## Done
 
-- [x] Run `npx phren init` to set up phren
+- [x] Run `phren init` to set up phren

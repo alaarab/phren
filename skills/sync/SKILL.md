@@ -102,7 +102,7 @@ If this fails (not a git repo, no remote), tell the user. Don't silently skip.
 Run init against the pulled phren repo so hooks, MCP registration, and machine/profile wiring are refreshed:
 
 ```bash
-PHREN_PATH="$PHREN_DIR" npx phren init -y
+PHREN_PATH="$PHREN_DIR" phren init -y
 ```
 
 If the user is in an untracked repo afterward, tell them to open a session there and let the agent ask, or run `phren add` from that directory.

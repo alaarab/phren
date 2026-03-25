@@ -126,4 +126,23 @@ describe("mcp-tasks GitHub issue tools", () => {
     expect(task.data.items.Queue[0].githubIssue).toBe(14);
     expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
   });
+
+  it("creates and links a GitHub issue via update_task", async () => {
+    const res = parseResult(await server.call("update_task", {
+      project,
+      item: "bid:deadbeef",
+      updates: {
+        create_issue: true,
+      },
+    }));
+    expect(res.ok).toBe(true);
+    expect(res.data.issue_number).toBe(14);
+    expect(res.data.issue_url).toBe("https://github.com/alaarab/phren/issues/14");
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+  });
 });

@@ -134,13 +134,13 @@ export function getUntrackedProjectNotice(phrenPath: string, cwd: string): strin
   return [
     "<phren-notice>",
     "This project directory is not tracked by phren yet.",
-    "Run `npx phren add` to track it now.",
-    `Suggested command: \`npx phren add \"${projectDir}\"\``,
+    "Run `phren add` to track it now.",
+    `Suggested command: \`phren add \"${projectDir}\"\``,
     "Ask the user whether they want to add it to phren now.",
-    "If they say no, tell them they can always run `npx phren add` later.",
+    "If they say no, tell them they can always run `phren add` later.",
     "If they say yes, also ask whether phren should manage repo instruction files or leave their existing repo-owned CLAUDE/AGENTS files alone.",
-    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="phren-managed"|"detached"|"repo-managed", or run \`npx phren add\` from that directory.`,
-    "After onboarding, run `npx phren doctor` if hooks or MCP tools are not responding.",
+    `Then use the \`add_project\` MCP tool with path="${projectDir}" and ownership="phren-managed"|"detached"|"repo-managed", or run \`phren add\` from that directory.`,
+    "After onboarding, run `phren doctor` if hooks or MCP tools are not responding.",
     "<phren-notice>",
     "",
   ].join("\n");
@@ -183,8 +183,8 @@ export function getSessionStartOnboardingNotice(
     return [
       "<phren-notice>",
       "Phren onboarding: no tracked projects are active for this workspace yet.",
-      "Start in a project repo and run `npx phren add` so SessionStart can inject project context.",
-      "Run `npx phren doctor` to verify hooks and MCP wiring after setup.",
+      "Start in a project repo and run `phren add` so SessionStart can inject project context.",
+      "Run `phren doctor` to verify hooks and MCP wiring after setup.",
       "<phren-notice>",
       "",
     ].join("\n");
@@ -197,7 +197,7 @@ export function getSessionStartOnboardingNotice(
     "<phren-notice>",
     `Phren onboarding: project "${activeProject}" is tracked but memory is still empty.`,
     "Capture one finding with `add_finding` and one task with `add_task` to seed future SessionStart context.",
-    "Run `npx phren doctor` if setup seems incomplete.",
+    "Run `phren doctor` if setup seems incomplete.",
     "<phren-notice>",
     "",
   ].join("\n");
