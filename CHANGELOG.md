@@ -3,6 +3,20 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.43] - 2026-03-25
+
+### Fixed
+- **Temp-root project detection**: init/onboarding no longer treats the shared OS temp root as a tracked project just because a stray `CLAUDE.md` exists under `os.tmpdir()`. Temp repos and first-run onboarding now behave correctly.
+- **Session expiry correctness**: stale session cleanup now expires ended sessions from `endedAt` instead of `startedAt`, so long-running sessions do not disappear immediately after they finish.
+- **Session provenance isolation**: finding/session attribution no longer falls back to an unrelated active session from another project.
+- **VS Code GitHub issue creation**: the extension's "Create GitHub Issue" flow now maps to a supported `update_task({ create_issue: true })` path and links the created issue back onto the task.
+- **Public release drift**: install/runtime copy, docs site content, starter templates, and packaged guidance were normalized around `@phren/cli`, 52 MCP tools, Node 20+, and the live lifecycle hook surface.
+
+### Changed
+- **Claude hook defaults**: `PostToolUse` is now enabled by default when Claude hooks are enabled, matching the documented lifecycle model.
+- **Task checkpoint snapshots**: session handoff snapshots now collect git status from the tracked project source path instead of the process cwd.
+- **Release parity**: bumped the core npm package to `0.0.43` and the VS Code extension package to `0.5.14` for this release cut.
+
 ## [0.0.42] - 2026-03-24
 
 ### Added
@@ -1074,7 +1088,11 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/phren/compare/v1.33.0...HEAD
+[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.43...HEAD
+[0.0.43]: https://github.com/alaarab/phren/compare/v0.0.42...v0.0.43
+[0.0.42]: https://github.com/alaarab/phren/compare/v0.0.41...v0.0.42
+[0.0.41]: https://github.com/alaarab/phren/compare/v0.0.40...v0.0.41
+[0.0.40]: https://github.com/alaarab/phren/compare/v1.32.3...v0.0.40
 [1.33.0]: https://github.com/alaarab/phren/compare/v1.32.2...v1.33.0
 [1.32.2]: https://github.com/alaarab/phren/compare/v1.32.1...v1.32.2
 [1.32.1]: https://github.com/alaarab/phren/compare/v1.32.0...v1.32.1
