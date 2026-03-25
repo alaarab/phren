@@ -97,7 +97,7 @@ export async function runExistingInstallUpdate(
   const previousVersion = prefs.installedVersion;
   if (isVersionNewer(VERSION, previousVersion)) {
     log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-    log(`  Run \`npx phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+    log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
   }
   if (opts.applyStarterUpdate) {
     const updated = applyStarterTemplateUpdates(phrenPath);
@@ -135,8 +135,8 @@ export async function runExistingInstallUpdate(
   log(`\n\x1b[95m◆\x1b[0m phren updated successfully`);
   log(`\nNext steps:`);
   log(`  1. Start a new Claude session in your project directory — phren injects context automatically`);
-  log(`  2. Run \`npx phren doctor\` to verify everything is wired correctly`);
-  log(`  3. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
+  log(`  2. Run \`phren doctor\` to verify everything is wired correctly`);
+  log(`  3. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
   log(`  4. After your first week, run phren-discover to surface gaps in your project knowledge`);
   log(`  5. After working across projects, run phren-consolidate to find cross-project patterns`);
   log(``);

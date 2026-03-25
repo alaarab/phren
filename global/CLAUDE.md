@@ -78,9 +78,9 @@ The phren MCP server is running. Use these tools proactively. Don't ask the user
 - **When you discover something about a codebase fragment:** call `search_fragments(name)` or `get_related_docs(fragment)` to see what's already known
 - **To explore the knowledge graph:** call `read_graph(project?)` to see fragments and their relationships
 - **To link a finding to a fragment:** call `link_findings(project, finding_text, fragment, relation?)` to persist a manual link
-- **At session start (if no lifecycle hooks):** call `session_start(project?)` to get prior session summary, recent findings, and active task
-- **At session end (if no lifecycle hooks):** call `session_end(summary?)` to save a summary for the next session
-- **To check session state:** call `session_context()` for current project, duration, and findings added so far
+- **At session start for real work:** call `session_start(project?, connectionId?)` to create resumable session history, checkpoints, and provenance. Lifecycle hooks inject context and save phren, but they do not create `session_history` entries by themselves.
+- **At session end for real work:** call `session_end(summary?, sessionId?|connectionId?)` to save a resumable summary and checkpoint handoff.
+- **To check session state during a long task:** call `session_context(sessionId?|connectionId?)`
 
 The goal: Claude should already know the context before the user has to explain it. Tasks stay in files, not buried in chat history.
 

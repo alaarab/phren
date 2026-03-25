@@ -17,6 +17,6 @@ export function configureHooksIfEnabled(phrenPath: string, hooksEnabled: boolean
       if (hooked.length) log(`  ${verb} hooks: ${hooked.join(", ")}`);
     } catch (err: unknown) { debugLog(`configureAllHooks failed: ${errorMessage(err)}`); }
   } else {
-    log(`  Hooks are disabled by preference (run: npx phren hooks-mode on)`);
+    log(`  Hooks are disabled by preference (run: phren hooks-mode on)`);
   }
 }

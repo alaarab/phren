@@ -280,7 +280,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     const phrenPath = defaultPhrenPath();
     const profile = (process.env.PHREN_PROFILE) || undefined;
     if (!fs.existsSync(phrenPath) || !fs.existsSync(path.join(phrenPath, ".config"))) {
-      console.log("phren is not set up yet. Run: npx phren init");
+      console.log("phren is not set up yet. Run: phren init");
       return finish(1);
     }
     const ownership = ownershipArg
@@ -397,7 +397,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
     if (!result.ok) {
       const note = getVerifyOutcomeNote(phrenPath, result.checks);
       if (note) console.log(`\nNote: ${note}`);
-      console.log(`\nRun \`npx phren init\` to fix setup issues.`);
+      console.log(`\nRun \`phren init\` to fix setup issues.`);
     }
     return finish(result.ok ? 0 : 1);
   }
@@ -425,7 +425,7 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (argvCommand === "link") {
-    console.error("`phren link` has been removed. Use `npx phren init` instead.");
+    console.error("`phren link` has been removed. Use `phren init` instead.");
     return finish(1);
   }
 

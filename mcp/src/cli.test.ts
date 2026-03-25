@@ -253,7 +253,7 @@ describe("CLI integration: projects add", () => {
     );
     expect(exitCode).toBe(1);
     expect(stderr).toContain("removed from the supported workflow");
-    expect(stderr).toContain("npx phren add");
+    expect(stderr).toContain("phren add");
     expect(fs.existsSync(path.join(phrenDir, "phren"))).toBe(false);
   });
 });

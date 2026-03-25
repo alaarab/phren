@@ -27,8 +27,8 @@ export async function runMcpMode(modeArg?: string) {
     const hooks = getHooksEnabledPreference(phrenPath);
     log(`MCP mode: ${current ? "on (recommended)" : "off (hooks-only fallback)"}`);
     log(`Hooks mode: ${hooks ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx phren mcp-mode on|off`);
-    log(`Hooks toggle: npx phren hooks-mode on|off`);
+    log(`Change mode: phren mcp-mode on|off`);
+    log(`Hooks toggle: phren hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);
