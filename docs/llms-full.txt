@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (51 across 12 modules):
+MCP Tools (52 across 12 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle

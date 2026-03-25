@@ -261,8 +261,8 @@ export async function runFreshInstall(
   log(`\nNext steps:`);
   let step = 1;
   log(`  ${step++}. Start a new Claude session in your project directory — phren injects context automatically`);
-  log(`  ${step++}. Run \`npx phren doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
+  log(`  ${step++}. Run \`phren doctor\` to verify everything is wired correctly`);
+  log(`  ${step++}. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {
@@ -287,10 +287,10 @@ export async function runFreshInstall(
     log(`     git push -u origin main`);
   }
 
-  log(`  ${step++}. Add more projects: cd ~/your-project && npx phren add`);
+  log(`  ${step++}. Add more projects: cd ~/your-project && phren add`);
 
   if (!mcpEnabled) {
-    log(`  ${step++}. Turn MCP on: npx phren mcp-mode on`);
+    log(`  ${step++}. Turn MCP on: phren mcp-mode on`);
   }
   log(`  ${step++}. After your first week, run phren-discover to surface gaps in your project knowledge`);
   log(`  ${step++}. After working across projects, run phren-consolidate to find cross-project patterns`);

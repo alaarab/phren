@@ -18,7 +18,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 | `mcp/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
 | `mcp/src/cli/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
 | `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init/init.ts` | `npx @phren/cli init`: configures MCP + hooks for all detected agents |
+| `mcp/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
 | `mcp/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
 | `mcp/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
 | `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
@@ -42,7 +42,7 @@ npm publish        # publish to npm (needs OTP)
 
 0.0.42
 
-## MCP Tools (51)
+## MCP Tools (52)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -95,9 +95,9 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 - `cross_project_fragments()` : find fragments shared across multiple projects
 
 **Session management:**
-- `session_start(project?)` : mark session start, returns prior summary + recent findings + active task
-- `session_end(summary?)` : mark session end, save summary for next session
-- `session_context()` : get current session state: project, duration, findings added so far
+- `session_start(project?, agentScope?, connectionId?)` : mark session start, return prior summary + recent findings + active tasks + checkpoint resume hints, and create a resumable `sessionId`
+- `session_end(summary?, sessionId?, connectionId?)` : mark session end, save summary for next session, and write checkpoint/impact outcomes
+- `session_context(sessionId?, connectionId?)` : get current session state by explicit identity
 - `session_history(limit?, sessionId?, project?)` : list past sessions or drill into a specific session to see its findings and tasks
 
 **Skills management:**
@@ -221,8 +221,11 @@ phren maintain extract [project]      Mine git/GitHub signals
 | Hook | What it does |
 |------|-------------|
 | `UserPromptSubmit` | Runs hook-prompt: extracts keywords, searches phren, injects context. Also checks consolidation threshold and injects phren-notice once per session. |
+| `PostToolUse` | Runs hook-tool: captures tool-level continuity hints and queues compact review candidates from interesting file/command activity. |
 | `Stop` | Auto-commits and pushes ~/.phren changes after every response |
 | `SessionStart` | git pull on ~/.phren at session start, runs hook-context for project context |
+
+Hooks handle retrieval and persistence, but they do not create `session_history` records. Agents still need to call `session_start` / `session_end` when resumable session history, checkpoints, or per-session provenance matter.
 
 ## Consolidation System
 

@@ -165,6 +165,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(Array.isArray(offCfg.hooks?.UserPromptSubmit)).toBe(true);
     expect(Array.isArray(offCfg.hooks?.Stop)).toBe(true);
     expect(Array.isArray(offCfg.hooks?.SessionStart)).toBe(true);
+    expect(Array.isArray(offCfg.hooks?.PostToolUse)).toBe(true);
 
     const onStatus = configureClaude(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
@@ -185,6 +186,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(offHooks).not.toContain("hook-prompt");
     expect(offHooks).not.toContain("hook-stop");
     expect(offHooks).not.toContain("hook-session-start");
+    expect(offHooks).not.toContain("hook-tool");
 
     configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: true });
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
@@ -192,6 +194,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(onHooks).toContain("hook-prompt");
     expect(onHooks).toContain("hook-stop");
     expect(onHooks).toContain("hook-session-start");
+    expect(onHooks).toContain("hook-tool");
   });
 
   it("toggles VS Code MCP config on and off", () => {
@@ -347,6 +350,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(Array.isArray(cfg.hooks?.UserPromptSubmit)).toBe(true);
     expect(Array.isArray(cfg.hooks?.Stop)).toBe(true);
     expect(Array.isArray(cfg.hooks?.SessionStart)).toBe(true);
+    expect(Array.isArray(cfg.hooks?.PostToolUse)).toBe(true);
   });
 
   it("preserves non-phren hooks when configuring (isPhrenCommand filtering)", () => {

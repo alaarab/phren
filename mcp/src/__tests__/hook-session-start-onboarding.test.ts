@@ -30,7 +30,7 @@ describe("hook session start onboarding notice", () => {
     const notice = getUntrackedProjectNotice(phrenPath, repoDir);
     expect(notice).toContain("Ask the user whether they want to add it to phren now.");
     expect(notice).toContain("ownership=\"phren-managed\"|\"detached\"|\"repo-managed\"");
-    expect(notice).toContain("run `npx phren add`");
+    expect(notice).toContain("run `phren add`");
   });
 
   it("returns null once the project is already tracked", () => {
@@ -78,7 +78,7 @@ describe("hook session start onboarding notice", () => {
 
     const notice = getSessionStartOnboardingNotice(phrenPath, outsideDir, null);
     expect(notice).toContain("no tracked projects are active");
-    expect(notice).toContain("npx phren add");
+    expect(notice).toContain("phren add");
   });
 
   it("returns a project-seeding notice when a tracked project has no findings/tasks yet", () => {

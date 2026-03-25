@@ -837,7 +837,7 @@
                 <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                 Requires
               </div>
-              <p>Node.js 18 or later. Check with <code>node --version</code>.</p>
+              <p>Node.js 20 or later. Check with <code>node --version</code>.</p>
             </div>
           </div>
         </div>
@@ -851,11 +851,11 @@
             <p>Run init to configure hooks and MCP for your agents:</p>
             <pre><code>phren init</code></pre>
             <p>Expected output:</p>
-            <pre><code>phren init v0.0.33
+            <pre><code>phren init v0.0.42
   Detected agents: Claude Code, Copilot
   Created ~/.phren/
   Registered MCP server in ~/.claude/settings.json
-  Registered hooks: SessionStart, UserPromptSubmit, Stop
+  Registered hooks: SessionStart, UserPromptSubmit, PostToolUse, Stop
   Wrote Copilot MCP config
   Initialized git repo in ~/.phren
   Done. Run 'phren verify' to check setup.</code></pre>
@@ -912,7 +912,7 @@ phren add ~/my-project</code></pre>
             <pre><code>phren verify
   Root: ~/.phren (shared mode)
   Profile: main (3 projects)
-  Hooks: Claude Code (SessionStart, UserPromptSubmit, Stop)
+  Hooks: Claude Code (SessionStart, UserPromptSubmit, PostToolUse, Stop)
   MCP: registered in ~/.claude/settings.json
   Git: clean, remote configured
   All checks passed.</code></pre>
@@ -935,6 +935,7 @@ phren add ~/my-project</code></pre>
         <ul>
           <li><code>SessionStart</code> &mdash; git pull on <code>~/.phren</code>, project context injection</li>
           <li><code>UserPromptSubmit</code> &mdash; search + inject relevant context on every prompt</li>
+          <li><code>PostToolUse</code> &mdash; queue review candidates and capture follow-up context after tool calls</li>
           <li><code>Stop</code> &mdash; auto-commit and push after every response</li>
         </ul>
 
@@ -1001,7 +1002,7 @@ phren init  # pulls from remote</code></pre>
         <h2 id="gs-agents">Agent Setup <a href="#gs-agents" class="anchor-link">#</a></h2>
         <p><code>phren init</code> auto-configures all detected agents:</p>
         <ul>
-          <li><strong>Claude Code</strong> &mdash; MCP server + hooks for SessionStart, UserPromptSubmit, Stop</li>
+          <li><strong>Claude Code</strong> &mdash; MCP server + hooks for SessionStart, UserPromptSubmit, PostToolUse, Stop</li>
           <li><strong>Copilot</strong> &mdash; MCP server config for chat mode</li>
           <li><strong>Cursor</strong> &mdash; MCP settings for agent/composer mode</li>
           <li><strong>Codex</strong> &mdash; MCP server registration</li>
@@ -1011,9 +1012,9 @@ phren init  # pulls from remote</code></pre>
         <h2 id="gs-troubleshooting">Troubleshooting <a href="#gs-troubleshooting" class="anchor-link">#</a></h2>
 
         <h3>Node.js Version Mismatch</h3>
-        <p>phren requires Node.js 18+. If you see syntax errors:</p>
-        <pre><code>node --version   # must be v18.0.0 or later
-nvm use 18       # if using nvm</code></pre>
+        <p>phren requires Node.js 20+. If you see syntax errors:</p>
+        <pre><code>node --version   # must be v20.0.0 or later
+nvm use 20       # if using nvm</code></pre>
 
         <h3>Permission Errors</h3>
         <p>If <code>npm install -g</code> fails with <code>EACCES</code>:</p>
@@ -1286,12 +1287,13 @@ phren config policy set memoryTTLDays=90 decayMultiplier=0.8
 phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
 
         <h2 id="cfg-hooks">Hook Configuration <a href="#cfg-hooks" class="anchor-link">#</a></h2>
-        <p>Three built-in hooks fire automatically for Claude Code:</p>
+        <p>Four built-in hooks fire automatically for Claude Code:</p>
         <table class="docs-table">
           <thead><tr><th>Hook</th><th>When</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>SessionStart</code></td><td>Session opens</td><td>git pull, project context injection</td></tr>
             <tr><td><code>UserPromptSubmit</code></td><td>Every prompt</td><td>FTS5 search, context injection, consolidation check</td></tr>
+            <tr><td><code>PostToolUse</code></td><td>After tool calls</td><td>Queues review candidates and captures tool-level continuity hints</td></tr>
             <tr><td><code>Stop</code></td><td>After response</td><td>Auto-commit and push ~/.phren changes</td></tr>
           </tbody>
         </table>
@@ -2020,11 +2022,11 @@ npm test</code></pre>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (51 public tools across 12 modules)</td></tr>
+            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (52 public tools across 12 modules)</td></tr>
             <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
             <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
             <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
-            <tr><td><code>mcp/src/init.ts</code></td><td><code>npx phren init</code>: configures MCP + hooks</td></tr>
+            <tr><td><code>mcp/src/init.ts</code></td><td><code>phren init</code>: configures MCP + hooks</td></tr>
             <tr><td><code>mcp/src/link.ts</code></td><td>Profile sync, symlinks, hooks, context</td></tr>
             <tr><td><code>mcp/src/data-access.ts</code></td><td>Task CRUD, machine/profile listing, learning management</td></tr>
             <tr><td><code>mcp/src/mcp-*.ts</code></td><td>MCP tool modules (search/tasks/finding/memory/data/graph/session/ops/skills/hooks/extract/config)</td></tr>
@@ -2391,7 +2393,7 @@ projects:
 :profile remove-project work old-project            # Remove a project</code></pre>
 
         <h2 id="machines">Machines <a href="#machines" class="anchor-link">#</a></h2>
-        <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren link</code> runs on a new machine, it prompts you to register and picks a profile.</p>
+        <p>The <code>machines.yaml</code> file maps hostnames to profiles. When <code>phren init</code> runs on a new machine, it reads the current hostname, applies the mapped profile, and refreshes local integration config.</p>
         <pre><code># ~/.phren/machines.yaml
 work-desktop: work
 home-laptop: personal
@@ -2403,10 +2405,10 @@ ci-server: minimal</code></pre>
           <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
           <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
         </ul>
-        <p>Findings, tasks, and skills sync automatically as you work. <code>phren link</code> configures git sparse checkout so each machine only downloads the projects in its profile.</p>
+        <p>Findings, tasks, and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
 
-        <h3 id="linking">Linking</h3>
-        <p><code>phren link</code> wires everything together on a machine. It identifies the machine, configures sparse checkout, symlinks knowledge files, patches MCP settings for all agents, registers hooks, writes context, and rebuilds memory pointers.</p>
+        <h3 id="linking">Machine Setup</h3>
+        <p><code>phren init</code> wires everything together on a machine. It detects the current install mode, configures MCP settings for supported agents, registers lifecycle hooks, applies machine/profile defaults, and refreshes generated assets.</p>
 
         <h2 id="consolidation">Consolidation <a href="#consolidation" class="anchor-link">#</a></h2>
         <p>As findings accumulate, phren detects when they need consolidation. Thresholds: 25 entries since last consolidation marker, or 60 days + 10 entries. Consolidation archives old entries, deduplicates, and promotes patterns that appear in 2+ projects to global scope.</p>
@@ -2442,18 +2444,17 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
         <ol>
           <li><strong>Create a shared git remote</strong> for <code>~/.phren</code></li>
           <li><strong>Define profiles</strong> per team role (e.g. <code>frontend.yaml</code>, <code>backend.yaml</code>)</li>
-          <li><strong>Register each machine</strong> with <code>phren link --register</code></li>
+          <li><strong>Register each machine</strong> in <code>machines.yaml</code>, then run <code>phren init</code></li>
           <li><strong>Set up RBAC</strong> so team leads are admins, developers are maintainers or contributors</li>
         </ol>
 
         <h3 id="two-person-team">Example: Two-Person Team</h3>
         <pre><code># Alice's laptop
-phren init
-phren link --register   # name: alice-mbp, profile: fullstack
+phren init              # machine: alice-mbp, profile: fullstack
 
 # Bob's desktop
 git clone &lt;phren-remote&gt; ~/.phren
-phren link --register   # name: bob-desktop, profile: fullstack
+phren init              # machine: bob-desktop, profile: fullstack
 
 # Both work independently; Stop hook syncs after each response
 # Weekly: run /phren-consolidate to merge insights</code></pre>

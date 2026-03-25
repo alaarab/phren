@@ -32,7 +32,7 @@ New to phren? Here's what each file does and when it matters.
 
 **FINDINGS.md** fills itself. As Claude discovers insights, patterns, and decisions during your sessions, it tells phren and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
-**tasks.md** is your task board file. It keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `npx phren shell`.
+**tasks.md** is your task board file. It keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `phren shell`.
 
 **global/CLAUDE.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 
@@ -40,14 +40,14 @@ New to phren? Here's what each file does and when it matters.
 
 ## Getting started
 
-If you got here via `npx phren init`, you're already set up. Restart Claude Code and you're good.
+If you got here via `npx @phren/cli init`, you're already set up. Restart Claude Code and you're good.
 
 If you cloned manually:
 
-1. Add the MCP server: `claude mcp add phren -- npx phren ~/.phren`
+1. Add the MCP server: `claude mcp add phren -- npx @phren/cli ~/.phren`
 2. Install skills: `/plugin marketplace add alaarab/phren` then `/plugin install phren@phren`
 3. Restart Claude Code
-4. Add a project: run `/phren-init my-project` or scaffold one with a template such as `npx phren init --template python-project`
+4. Add a project: run `/phren-init my-project` or scaffold one with a template such as `phren init --template python-project`
 5. Push to a private GitHub repo to sync across machines
 
 ## Day-to-day workflow
@@ -56,7 +56,7 @@ If you cloned manually:
 2. **Work normally**: Claude reads your project docs and builds on what phren remembers
 3. **Fragments accumulate**: tell phren what you learned, or he picks up insights automatically
 4. **Session ends**: phren commits and pushes what he collected
-5. **Review occasionally**: run `npx phren shell` to triage what phren queued, manage tasks, and check health
+5. **Review occasionally**: run `phren shell` to triage what phren queued, manage tasks, and check health
 
 ## Syncing across machines
 
@@ -71,4 +71,4 @@ Each profile in `profiles/` lists which projects that machine should see. After 
 
 ## Troubleshooting
 
-Run `npx phren doctor --fix` to check and repair your setup.
+Run `phren doctor --fix` to check and repair your setup.

@@ -5,7 +5,6 @@ import * as yaml from "js-yaml";
 import { expandHomePath, atomicWriteText } from "./phren-paths.js";
 import { withFileLock } from "./governance/locks.js";
 import { isRecord, PhrenError } from "./phren-core.js";
-import { errorMessage } from "./utils.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

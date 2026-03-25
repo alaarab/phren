@@ -39,7 +39,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (51)
+## MCP Tools (52)
 
 ### Search and Browse
 
@@ -164,12 +164,16 @@ Copilot CLI, Cursor, and Codex receive generated hook config files plus session 
 |------|-------|-------------|
 | `hook-session-start` | SessionStart | Pulls latest phren changes (`git pull --rebase`), runs doctor self-heal, schedules daily maintenance. |
 | `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches phren, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
+| `hook-tool` | PostToolUse | Watches Claude tool results and queues compact review candidates from interesting file/command activity. |
 | `hook-stop` | Stop | Auto-commits and pushes `~/.phren` changes after every agent response. |
 | `hook-context` | SessionStart | Detects the current project from cwd and injects its CLAUDE.md and summary. |
 
 Tool integration summary:
 - Claude: full lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PostToolUse`) + MCP
 - Copilot/Cursor/Codex: MCP + wrapper-driven lifecycle + generated per-tool hook config
+
+Important:
+- Lifecycle hooks do retrieval and persistence, but they do not create `session_history` records on their own. Agents still need to call `session_start` / `session_end` when resumable session history, checkpoints, or provenance matter.
 
 ## Modes
 

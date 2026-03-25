@@ -143,7 +143,7 @@ function maybeOfferStarterTemplateUpdate(phrenPath: string) {
     const prefs = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as { installedVersion?: string };
     if (isVersionNewer(current, prefs.installedVersion)) {
       log(`  Starter template update available: v${prefs.installedVersion} -> v${current}`);
-      log(`  Run \`npx phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+      log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
     }
   } catch (err: unknown) {
     debugLog(`checkStarterVersionUpdate: failed to read preferences: ${errorMessage(err)}`);

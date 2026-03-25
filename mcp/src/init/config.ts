@@ -262,7 +262,7 @@ export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean;
       }
     };
 
-    const toolHookEnabled = hooksEnabled && isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", false);
+    const toolHookEnabled = hooksEnabled && isFeatureEnabled("PHREN_FEATURE_TOOL_HOOK", true);
 
     if (hooksEnabled) {
       upsertPhrenHook("UserPromptSubmit", {

@@ -23,7 +23,7 @@ phren init            # add or fix any missing agent configurations
 | Codex | user MCP/TOML | not supported |
 | GitHub Copilot CLI | user MCP | not supported |
 
-Hooks (UserPromptSubmit, Stop, SessionStart, PostToolUse) are only supported by Claude Code. Other IDEs get full MCP tool access but no automatic context injection.
+Native hooks are only supported by Claude Code. Copilot CLI, Cursor, and Codex use generated wrappers and tool config to preserve equivalent lifecycle behavior around MCP tool use.
 
 ## Claude Code
 

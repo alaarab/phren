@@ -399,7 +399,7 @@ export async function runInit(opts: InitOptions = {}) {
       shouldBootstrapCurrentProject = await prompts.confirm("Add this project to phren now?", true);
       if (!shouldBootstrapCurrentProject) {
         shouldBootstrapCurrentProject = false;
-        log(style.warning(`  Skipped. Later: cd ${pendingBootstrap.path} && npx phren add`));
+        log(style.warning(`  Skipped. Later: cd ${pendingBootstrap.path} && phren add`));
       } else {
         bootstrapOwnership = await prompts.select<ProjectOwnershipMode>(
           "Ownership for detected project",
@@ -500,7 +500,7 @@ export async function runInit(opts: InitOptions = {}) {
       const previousVersion = prefs.installedVersion;
       if (isVersionNewer(VERSION, previousVersion)) {
         log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
-        log(`  Run \`npx phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
+        log(`  Run \`phren init --apply-starter-update\` to refresh global/CLAUDE.md and global skills.`);
       }
       if (opts.applyStarterUpdate) {
         const updated = applyStarterTemplateUpdates(phrenPath);
@@ -545,8 +545,8 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\n\x1b[95m◆\x1b[0m phren updated successfully`);
       log(`\nNext steps:`);
       log(`  1. Start a new Claude session in your project directory — phren injects context automatically`);
-      log(`  2. Run \`npx phren doctor\` to verify everything is wired correctly`);
-      log(`  3. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
+      log(`  2. Run \`phren doctor\` to verify everything is wired correctly`);
+      log(`  3. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
       log(`  4. After your first week, run phren-discover to surface gaps in your project knowledge`);
       log(`  5. After working across projects, run phren-consolidate to find cross-project patterns`);
       log(``);
@@ -747,8 +747,8 @@ export async function runInit(opts: InitOptions = {}) {
   log(`\nNext steps:`);
   let step = 1;
   log(`  ${step++}. Start a new Claude session in your project directory — phren injects context automatically`);
-  log(`  ${step++}. Run \`npx phren doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`npx phren config project-ownership\`, \`npx phren config workflow\`, \`npx phren config proactivity.findings\`, \`npx phren config proactivity.tasks\``);
+  log(`  ${step++}. Run \`phren doctor\` to verify everything is wired correctly`);
+  log(`  ${step++}. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
 
   const gh = opts._walkthroughGithub;
   if (gh) {
@@ -773,10 +773,10 @@ export async function runInit(opts: InitOptions = {}) {
     log(`     git push -u origin main`);
   }
 
-  log(`  ${step++}. Add more projects: cd ~/your-project && npx phren add`);
+  log(`  ${step++}. Add more projects: cd ~/your-project && phren add`);
 
   if (!mcpEnabled) {
-    log(`  ${step++}. Turn MCP on: npx phren mcp-mode on`);
+    log(`  ${step++}. Turn MCP on: phren mcp-mode on`);
   }
   log(`  ${step++}. After your first week, run phren-discover to surface gaps in your project knowledge`);
   log(`  ${step++}. After working across projects, run phren-consolidate to find cross-project patterns`);

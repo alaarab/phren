@@ -20,7 +20,7 @@ export async function runHooksMode(modeArg?: string) {
   if (!normalizedArg || normalizedArg === "status") {
     const current = getHooksEnabledPreference(phrenPath);
     log(`Hooks mode: ${current ? "on (active)" : "off (disabled)"}`);
-    log(`Change mode: npx phren hooks-mode on|off`);
+    log(`Change mode: phren hooks-mode on|off`);
     return;
   }
   const mode = parseMcpMode(normalizedArg);

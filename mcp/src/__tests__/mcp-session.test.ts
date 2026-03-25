@@ -78,6 +78,15 @@ describe("incrementSessionFindings", () => {
     expect(demoState.findingsAdded).toBe(5);
     expect(otherState.findingsAdded).toBe(1);
   });
+
+  it("does not fall back to an unrelated active session from another project", () => {
+    writeSession(tmp.path, { sessionId: "other-project", project: "other", startedAt: "2026-03-09T09:00:00.000Z", findingsAdded: 1 });
+
+    incrementSessionFindings(tmp.path, 3, undefined, "demo");
+
+    const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
+    expect(otherState.findingsAdded).toBe(1);
+  });
 });
 
 describe("incrementSessionTasksCompleted", () => {

@@ -28,7 +28,10 @@ import {
 } from "../data/access.js";
 import { applyGravity } from "../data/tasks.js";
 import {
+  buildTaskIssueBody,
+  createGithubIssueForTask,
   parseGithubIssueUrl,
+  resolveProjectGithubRepo,
 } from "../task/github.js";
 import { clearTaskCheckpoint } from "../session/checkpoints.js";
 import { incrementSessionTasksCompleted } from "./session.js";
@@ -407,6 +410,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
           github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
           unlink_github: z.boolean().optional().describe("If true, remove any linked GitHub issue metadata from the item."),
+          create_issue: z.boolean().optional().describe("If true, create a GitHub issue for this task and link it."),
           pin: z.boolean().optional().describe("If true, pin the task so it floats to the top of its section."),
           promote: z.boolean().optional().describe("If true, clear the speculative flag on this task (confirm the user wants it)."),
           move_to_active: z.boolean().optional().describe("Used with promote: also move the task to the Active section."),
@@ -422,6 +426,26 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Runtime validation: item is required unless work_next is true
       if (!updates.work_next && !item) {
         return mcpResponse({ ok: false, error: "item is required unless updates.work_next is true." });
+      }
+
+      if (updates.create_issue) {
+        const extraUpdates = [
+          updates.text,
+          updates.priority,
+          updates.context,
+          updates.section,
+          updates.github_issue,
+          updates.github_url,
+          updates.unlink_github,
+          updates.pin,
+          updates.promote,
+          updates.move_to_active,
+          updates.work_next,
+          updates.replace_context,
+        ].some((value) => value !== undefined);
+        if (extraUpdates) {
+          return mcpResponse({ ok: false, error: "create_issue must be used by itself." });
+        }
       }
 
       // Cross-validate github_issue and github_url
@@ -462,6 +486,43 @@ export function register(server: McpServer, ctx: McpContext): void {
             ok: true,
             message: `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
             data: { project, item: result.data },
+          });
+        }
+
+        if (updates.create_issue) {
+          const resolved = resolveTaskItem(phrenPath, project, item!);
+          if (!resolved.ok) return mcpResponse({ ok: false, error: resolved.error });
+          const repo = resolveProjectGithubRepo(phrenPath, project);
+          if (!repo) {
+            return mcpResponse({
+              ok: false,
+              error: "Could not infer a GitHub repo. Add a GitHub URL to CLAUDE.md or summary.md, or link an existing issue instead.",
+            });
+          }
+          const created = createGithubIssueForTask({
+            repo,
+            title: resolved.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
+            body: buildTaskIssueBody(project, resolved.data),
+          });
+          if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
+          const linked = linkTaskIssue(phrenPath, project, item!, {
+            github_issue: created.data.issueNumber,
+            github_url: created.data.url,
+          });
+          if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
+          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          return mcpResponse({
+            ok: true,
+            message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
+            data: {
+              project,
+              item,
+              issue_number: created.data.issueNumber ?? null,
+              issue_url: created.data.url,
+              githubIssue: linked.data.githubIssue ?? null,
+              githubUrl: linked.data.githubUrl || null,
+              stableId: linked.data.stableId || null,
+            },
           });
         }
 

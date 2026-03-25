@@ -28,6 +28,10 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
+function sessionFile(phrenPath: string, sessionId: string) {
+  return path.join(phrenPath, ".runtime", "sessions", `session-${sessionId}.json`);
+}
+
 function makeEmptyDb(): SqlJsDatabase {
   return {
     run: () => {},
@@ -152,6 +156,28 @@ describe("mcp-session tool contract", () => {
     expect(resumed.ok).toBe(true);
     expect(resumed.message).toContain("Continue where you left off?");
     expect(resumed.message).toContain("Implement snapshot pipeline");
+  });
+
+  it("does not immediately delete a recently ended long-running session during session_start cleanup", async () => {
+    const sessionsDir = path.join(tmp.path, ".runtime", "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      sessionFile(tmp.path, "ended-demo"),
+      JSON.stringify({
+        sessionId: "ended-demo",
+        project: "demo",
+        startedAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+        endedAt: new Date().toISOString(),
+        summary: "recently ended",
+        findingsAdded: 0,
+        tasksCompleted: 0,
+      }),
+      "utf8",
+    );
+
+    const started = parseResult(await server.call("session_start", { project: "demo" }));
+    expect(started.ok).toBe(true);
+    expect(fs.existsSync(sessionFile(tmp.path, "ended-demo"))).toBe(true);
   });
 
   it("removes checkpoint files when complete_task finishes the associated task", async () => {
