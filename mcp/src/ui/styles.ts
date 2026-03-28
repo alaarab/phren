@@ -658,5 +658,11 @@ export const REVIEW_UI_STYLES = `
   .review-sync-indicator.error {
     background: var(--danger);
   }
+  /* ── Review Card Highlight (keyboard shortcuts) ──── */
+  .review-card-highlight {
+    border: 2px solid var(--blue) !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08), var(--shadow) !important;
+    background: color-mix(in srgb, var(--surface) 98%, var(--blue)) !important;
+  }
 `;
 
