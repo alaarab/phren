@@ -1600,6 +1600,8 @@ function printStoreUsage() {
   console.log("  phren store remove <name>               Remove a store (local only)");
   console.log("  phren store sync                        Pull all stores");
   console.log("  phren store activity [--limit N]         Recent team findings");
+  console.log("  phren store subscribe <name> <project...>   Subscribe store to projects");
+  console.log("  phren store unsubscribe <name> <project...> Unsubscribe store from projects");
 }
 
 export async function handleStoreNamespace(args: string[]) {
@@ -1753,7 +1755,8 @@ export async function handleStoreNamespace(args: string[]) {
 
     for (const store of teamStores) {
       if (!fs.existsSync(store.path)) continue;
-      const projectDirs = getProjectDirs(store.path);
+      const { getStoreProjectDirs } = await import("../store-registry.js");
+      const projectDirs = getStoreProjectDirs(store);
       for (const dir of projectDirs) {
         const projectName = path.basename(dir);
         const journalEntries = readTeamJournalEntries(store.path, projectName);
@@ -1816,6 +1819,42 @@ export async function handleStoreNamespace(args: string[]) {
 
     if (hasErrors) {
       console.error("\nSome stores failed to sync. Run 'phren doctor' for details.");
+    }
+    return;
+  }
+
+  if (subcommand === "subscribe") {
+    const storeName = args[1];
+    const projects = args.slice(2);
+    if (!storeName || projects.length === 0) {
+      console.error("Usage: phren store subscribe <store-name> <project1> [project2...]");
+      process.exit(1);
+    }
+    try {
+      const { subscribeStoreProjects } = await import("../store-registry.js");
+      subscribeStoreProjects(phrenPath, storeName, projects);
+      console.log(`Added ${projects.length} project(s) to "${storeName}"`);
+    } catch (err: unknown) {
+      console.error(`Failed to subscribe: ${errorMessage(err)}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (subcommand === "unsubscribe") {
+    const storeName = args[1];
+    const projects = args.slice(2);
+    if (!storeName || projects.length === 0) {
+      console.error("Usage: phren store unsubscribe <store-name> <project1> [project2...]");
+      process.exit(1);
+    }
+    try {
+      const { unsubscribeStoreProjects } = await import("../store-registry.js");
+      unsubscribeStoreProjects(phrenPath, storeName, projects);
+      console.log(`Removed ${projects.length} project(s) from "${storeName}"`);
+    } catch (err: unknown) {
+      console.error(`Failed to unsubscribe: ${errorMessage(err)}`);
+      process.exit(1);
     }
     return;
   }
@@ -1905,7 +1944,8 @@ export async function handlePromoteNamespace(args: string[]) {
 function countStoreProjects(store: StoreEntry): number {
   if (!fs.existsSync(store.path)) return 0;
   try {
-    return getProjectDirs(store.path).length;
+    const storeRegistry = require("../store-registry.js");
+    return storeRegistry.getStoreProjectDirs(store).length;
   } catch {
     return 0;
   }

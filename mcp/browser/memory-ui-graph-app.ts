@@ -18,6 +18,7 @@ type RawNode = {
   group: string;
   refCount?: number;
   project?: string;
+  store?: string;
   tagged?: boolean;
   scoreKey?: string;
   scoreKeys?: string[];
@@ -190,6 +191,7 @@ const state = {
   selectedNodeId: null as string | null,
   hoveredNodeId: null as string | null,
   focusedProjectId: null as string | null,
+  cameraRatio: 1 as number,
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
   filterTypes: {
@@ -202,11 +204,13 @@ const state = {
   filterTopics: {} as Record<string, boolean>,
   filterHealth: "all",
   filterProject: "all",
+  filterStore: "all",
   searchQuery: "",
   nodeLimit: 2000,
   theme: "dark" as "dark" | "light",
   draggedNode: null as string | null,
   isDragging: false,
+  neighborPositions: new Map<string, { x: number; y: number }>(),
   mascotRafId: 0,
   mascotCanvas: null as HTMLCanvasElement | null,
   themeObserver: null as MutationObserver | null,
@@ -457,6 +461,8 @@ function nodeMatchesFilters(node: RuntimeNode): boolean {
   if (node.kind === "finding" && node.topicSlug && state.filterTopics[node.topicSlug] === false) return false;
   if (state.filterHealth !== "all" && node.health !== state.filterHealth) return false;
 
+  if (state.filterStore !== "all" && node.store && node.store !== state.filterStore) return false;
+
   if (state.filterProject !== "all") {
     const project = state.filterProject;
     const connectedProjects = new Set<string>();
@@ -493,6 +499,7 @@ function nodeRank(node: RuntimeNode): number {
   if (node.health === "decaying") rank -= 12;
   if (node.health === "stale") rank -= 25;
   if (state.filterProject !== "all" && node.project === state.filterProject) rank += 80;
+  if (state.filterStore !== "all" && node.store === state.filterStore) rank += 40;
   if (state.searchQuery && node.searchText.includes(state.searchQuery.toLowerCase())) rank += 120;
   return rank;
 }
@@ -533,7 +540,10 @@ function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
     connectedIds.add(link.source);
     connectedIds.add(link.target);
   });
-  const prunedNodes = limitedNodes.filter((node) => node.kind !== "project" || connectedIds.has(node.id) || node.id === state.filterProject);
+  // Keep nodes if: not a project, OR has visible connections, OR is the selected project, OR project type is filtered but has no connections
+  const prunedNodes = limitedNodes.filter((node) =>
+    node.kind !== "project" || connectedIds.has(node.id) || node.id === state.filterProject || state.filterTypes.project
+  );
   return { nodes: prunedNodes, links: visibleLinks };
 }
 
@@ -793,6 +803,35 @@ function refreshRenderer(resetCamera: boolean): void {
       zIndex: true,
       nodeReducer(nodeId, data) {
         const next: Record<string, unknown> = { ...data };
+        const node = state.nodeById.get(nodeId);
+        const kind = node?.kind ?? "finding";
+        const ratio = state.cameraRatio;
+
+        // Semantic zoom: fade nodes based on zoom level
+        // ratio ~1 = zoomed out, ratio < 0.3 = zoomed in
+        // Level 1 (zoomed out): projects only
+        // Level 2 (medium): + findings + tasks
+        // Level 3 (zoomed in): + entities + references
+        if (!state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
+          if (ratio > 0.65 && kind !== "project") {
+            const fade = kind === "finding" || kind === "task" ? 0.12 : 0.04;
+            next.color = hexToRgba(String(data.color), fade);
+            next.label = null;
+            next.zIndex = 1;
+            return next;
+          }
+          if (ratio > 0.35 && (kind === "entity" || kind === "reference")) {
+            next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.10 : 0.12);
+            next.label = null;
+            next.zIndex = 1;
+            return next;
+          }
+        }
+
+        // Entities/fragments always render smaller (ambient, not dominant)
+        if (kind === "entity") {
+          next.size = Math.min(data.size, 5);
+        }
 
         // Focus mode: project is focused — fade everything outside its network
         if (state.focusedProjectId) {
@@ -836,6 +875,21 @@ function refreshRenderer(resetCamera: boolean): void {
       },
       edgeReducer(edgeId, data) {
         const next: Record<string, unknown> = { ...data };
+        const ratio = state.cameraRatio;
+
+        // Semantic zoom for edges: at high zoom levels, only show project-to-project edges
+        if (!state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId && ratio > 0.65) {
+          const extremities = state.graph?.extremities(edgeId);
+          if (extremities) {
+            const srcKind = state.nodeById.get(extremities[0])?.kind;
+            const tgtKind = state.nodeById.get(extremities[1])?.kind;
+            if (srcKind !== "project" || tgtKind !== "project") {
+              next.color = hexToRgba("#888", 0.02);
+              next.size = 0.3;
+              return next;
+            }
+          }
+        }
 
         // Focus mode: only edges within the focused project's network stay visible
         if (state.focusedProjectId) {
@@ -907,22 +961,24 @@ function refreshRenderer(resetCamera: boolean): void {
     });
 
     state.renderer.on("clickStage", () => {
-      if (!state.selectedNodeId) return;
-      state.selectedNodeId = null;
-      state.hoveredNodeId = null;
-      hideTooltip();
-      state.renderer?.refresh();
-      notifyClear();
+      if (!state.selectedNodeId && !state.focusedProjectId) return;
+      clearSelection();
     });
 
     const onKeydown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !state.selectedNodeId) return;
-      state.selectedNodeId = null;
-      state.hoveredNodeId = null;
-      hideTooltip();
-      state.renderer?.refresh();
-      notifyClear();
+      if (event.key !== "Escape") return;
+      if (!state.selectedNodeId && !state.focusedProjectId) return;
+      clearSelection();
     };
+
+    // Track camera ratio for semantic zoom
+    state.renderer.getCamera().on("updated", () => {
+      const ratio = state.renderer?.getCamera().ratio ?? 1;
+      if (Math.abs(ratio - state.cameraRatio) > 0.02) {
+        state.cameraRatio = ratio;
+        state.renderer?.refresh();
+      }
+    });
     document.addEventListener("keydown", onKeydown);
     state.cleanupFns.push(() => document.removeEventListener("keydown", onKeydown));
 
@@ -932,6 +988,15 @@ function refreshRenderer(resetCamera: boolean): void {
       state.isDragging = false;
       state.renderer?.setSettings({ enableCameraPanning: false });
       if (state.container) state.container.style.cursor = "grabbing";
+      // Store original neighbor positions for smooth spring-back on release
+      state.neighborPositions.clear();
+      const neighbors = state.visibleAdjacency.get(payload.node);
+      if (neighbors && state.graph) {
+        neighbors.forEach((neighborId) => {
+          const nAttrs = state.graph!.getNodeAttributes(neighborId);
+          state.neighborPositions.set(neighborId, { x: nAttrs.x, y: nAttrs.y });
+        });
+      }
     });
 
     state.renderer.on("enterNode", () => {
@@ -947,12 +1012,49 @@ function refreshRenderer(resetCamera: boolean): void {
       state.isDragging = true;
       const graphCoords = state.renderer.viewportToGraph({ x: event.offsetX, y: event.offsetY });
       state.graph.mergeNodeAttributes(state.draggedNode, { x: graphCoords.x, y: graphCoords.y });
+      // Pull direct neighbors toward the drag position with gentle spring effect
+      const neighbors = state.visibleAdjacency.get(state.draggedNode);
+      if (neighbors) {
+        const dragPos = state.graph.getNodeAttributes(state.draggedNode);
+        neighbors.forEach((neighborId) => {
+          try {
+            const nAttrs = state.graph!.getNodeAttributes(neighborId);
+            const pullStrength = 0.15;
+            state.graph!.setNodeAttribute(neighborId, "x", nAttrs.x + (dragPos.x - nAttrs.x) * pullStrength);
+            state.graph!.setNodeAttribute(neighborId, "y", nAttrs.y + (dragPos.y - nAttrs.y) * pullStrength);
+          } catch { /* neighbor filtered out — skip */ }
+        });
+      }
     };
     const endDrag = () => {
       if (state.draggedNode) {
         state.renderer?.setSettings({ enableCameraPanning: true });
         if (state.container) state.container.style.cursor = "default";
+
+        // Spring neighbors back to original positions
+        if (state.neighborPositions.size > 0 && state.graph) {
+          const positions = new Map(state.neighborPositions);
+          let frame = 0;
+          const maxFrames = 12;
+          const springBack = () => {
+            if (frame >= maxFrames || !state.graph) return;
+            frame++;
+            positions.forEach((orig, neighborId) => {
+              try {
+                const current = state.graph!.getNodeAttributes(neighborId);
+                const nx = current.x + (orig.x - current.x) * 0.25;
+                const ny = current.y + (orig.y - current.y) * 0.25;
+                state.graph!.setNodeAttribute(neighborId, "x", nx);
+                state.graph!.setNodeAttribute(neighborId, "y", ny);
+              } catch { /* node may have been filtered out */ }
+            });
+            requestAnimationFrame(springBack);
+          };
+          requestAnimationFrame(springBack);
+        }
+
         state.draggedNode = null;
+        state.neighborPositions.clear();
         setTimeout(() => { state.isDragging = false; }, 0);
       }
     };
@@ -1005,6 +1107,12 @@ function buildFilterBar(): void {
     .map((node) => node.id)
     .sort((a, b) => a.localeCompare(b));
 
+  const storeNames = Array.from(new Set(
+    state.rawNodes
+      .map((node) => node.store)
+      .filter((store): store is string => Boolean(store))
+  )).sort((a, b) => a.localeCompare(b));
+
   const typeDefs = [
     { key: "project", label: "Projects", color: KIND_COLORS.project },
     { key: "finding", label: "Findings", color: TOPIC_COLORS.general },
@@ -1052,10 +1160,15 @@ function buildFilterBar(): void {
       <option value="all"${state.filterProject === "all" ? " selected" : ""}>All projects</option>
       ${projectNames.map((project) => `<option value="${esc(project)}"${state.filterProject === project ? " selected" : ""}>${esc(project)}</option>`).join("")}
     </select>`,
+    storeNames.length > 1 ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Store</div>' : "",
+    storeNames.length > 1 ? `<select data-store-filter style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:12px;margin-bottom:12px">
+      <option value="all"${state.filterStore === "all" ? " selected" : ""}>All stores</option>
+      ${storeNames.map((store) => `<option value="${esc(store)}"${state.filterStore === store ? " selected" : ""}>${esc(store)}</option>`).join("")}
+    </select>` : "",
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Type</div>',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px">${typeSection}</div>`,
     topicSection ? '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Topics</div>' : "",
-    topicSection ? `<div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:12px">${topicSection}</div>` : "",
+    topicSection ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px">${topicSection}</div>` : "",
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Health</div>',
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:12px">${healthSection}</div>`,
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:8px 0 6px">Node limit</div>',
@@ -1109,6 +1222,12 @@ function buildFilterBar(): void {
   projectSelect?.addEventListener("change", () => {
     state.filterProject = projectSelect.value || "all";
     applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
+  });
+
+  const storeSelect = filterEl.querySelector<HTMLSelectElement>("[data-store-filter]");
+  storeSelect?.addEventListener("change", () => {
+    state.filterStore = storeSelect.value || "all";
+    applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
   });
 
   const limitInput = filterEl.querySelector<HTMLInputElement>("[data-limit-input]");

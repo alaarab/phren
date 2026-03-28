@@ -8,7 +8,7 @@ import {
   memoryUsageLogFile,
   homePath,
 } from "../shared.js";
-import { getNonPrimaryStores } from "../store-registry.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { errorMessage } from "../utils.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { readCustomHooks } from "../hooks.js";
@@ -37,6 +37,7 @@ interface GraphNode {
   group: string;
   refCount: number;
   project: string;
+  store?: string;
   tagged: boolean;
   scoreKey?: string;
   priority?: string;
@@ -237,12 +238,18 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     .map((projectDir) => path.basename(projectDir))
     .filter((project) => project !== "global");
   for (const project of primaryProjects) storeProjects.push({ storePath: phrenPath, project });
+
+  // Map store paths to store names
+  const storePathToName = new Map<string, string>();
+  storePathToName.set(phrenPath, "primary");
+
   for (const store of getNonPrimaryStores(phrenPath)) {
     if (!fs.existsSync(store.path)) continue;
+    storePathToName.set(store.path, store.name);
     try {
-      const storeProjectDirs = getProjectDirs(store.path)
-        .map((projectDir) => path.basename(projectDir))
-        .filter((project) => project !== "global");
+      const storeProjectDirs = getStoreProjectDirs(store)
+        .map((projectDir: string) => path.basename(projectDir))
+        .filter((project: string) => project !== "global");
       for (const project of storeProjectDirs) storeProjects.push({ storePath: store.path, project });
     } catch { /* store not accessible — skip */ }
   }
@@ -266,6 +273,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     }
 
     const findingsPath = path.join(storePath, project, "FINDINGS.md");
+    const storeName = storePathToName.get(storePath) || "unknown";
     if (!fs.existsSync(findingsPath)) {
       if (!addedProjectNodeIds.has(project)) {
         addedProjectNodeIds.add(project);
@@ -276,6 +284,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           group: "project",
           refCount: 0,
           project,
+          store: storeName,
           tagged: false,
         });
       }
@@ -291,6 +300,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         group: "project",
         refCount: 1,
         project,
+        store: storeName,
         tagged: false,
       });
     }
@@ -343,6 +353,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
             group: `topic:${topic.slug}`,
             refCount: taggedCount,
             project,
+            store: storeName,
             tagged: true,
             scoreKey,
             scoreKeys: [scoreKey],
@@ -377,6 +388,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           group: `topic:${topic.slug}`,
           refCount: taggedCount,
           project,
+          store: storeName,
           tagged: true,
           scoreKey,
           scoreKeys: [scoreKey],
@@ -409,6 +421,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         group: `topic:${topic.slug}`,
         refCount: untaggedAdded,
         project,
+        store: storeName,
         tagged: false,
         scoreKey,
         scoreKeys: [scoreKey],
@@ -425,6 +438,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     for (const { storePath, project } of storeProjects) {
       const taskResult = readTasks(storePath, project);
       if (!taskResult.ok) continue;
+      const taskStoreName = storePathToName.get(storePath) || "unknown";
       const doc = taskResult.data;
       let taskCount = 0;
       const MAX_TASKS = 50;
@@ -441,6 +455,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
             fullLabel: item.line,
             group,
             project,
+            store: taskStoreName,
             tagged: false,
             scoreKey,
             scoreKeys: [scoreKey],
@@ -546,6 +561,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   // ── Reference docs ────────────────────────────────────────────────
   try {
     for (const { storePath, project } of storeProjects) {
+      const refStoreName = storePathToName.get(storePath) || "unknown";
       const refDir = path.join(storePath, project, "reference");
       if (!fs.existsSync(refDir) || !fs.statSync(refDir).isDirectory()) continue;
       const files = fs.readdirSync(refDir);
@@ -561,6 +577,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           fullLabel: file,
           group: "reference",
           project,
+          store: refStoreName,
           tagged: false,
           scoreKeys: [],
           refDocs: [{ doc: docRef, project }],
@@ -719,7 +736,7 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
     const teamStores = getNonPrimaryStores(phrenPath);
     for (const store of teamStores) {
       if (!fs.existsSync(store.path)) continue;
-      const teamProjects = getProjectDirs(store.path).map((d) => path.basename(d)).filter((p) => p !== "global");
+      const teamProjects = getStoreProjectDirs(store).map((d: string) => path.basename(d)).filter((p: string) => p !== "global");
       for (const project of teamProjects) {
         if (seen.has(project)) continue; // skip if same name exists in primary
         seen.add(project);

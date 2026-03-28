@@ -5,6 +5,7 @@ import * as yaml from "js-yaml";
 import { expandHomePath, atomicWriteText } from "./phren-paths.js";
 import { withFileLock } from "./governance/locks.js";
 import { isRecord, PhrenError } from "./phren-core.js";
+import { getProjectDirs } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,14 @@ export function findStoreByName(phrenPath: string, name: string): StoreEntry | u
   return resolveAllStores(phrenPath).find((s) => s.name === name);
 }
 
+/** Get project directories for a store, filtered by the store's subscription list (if set). */
+export function getStoreProjectDirs(store: StoreEntry): string[] {
+  const allDirs = getProjectDirs(store.path);
+  if (!store.projects || store.projects.length === 0) return allDirs;
+  const allowed = new Set(store.projects);
+  return allDirs.filter(dir => path.basename(dir) !== "global" && allowed.has(path.basename(dir)));
+}
+
 // ── Team bootstrap ───────────────────────────────────────────────────────────
 
 export function readTeamBootstrap(storePath: string): TeamBootstrap | null {
@@ -232,6 +241,40 @@ export function updateStoreProjects(phrenPath: string, storeName: string, projec
     if (!store) throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found`);
 
     store.projects = projects.length > 0 ? projects : undefined;
+    writeStoreRegistry(phrenPath, registry);
+  });
+}
+
+/** Add projects to a store's subscription list. Deduplicates. Uses file locking. */
+export function subscribeStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
+  withFileLock(storesFilePath(phrenPath), () => {
+    const registry = readStoreRegistry(phrenPath);
+    if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
+
+    const store = registry.stores.find((s) => s.name === storeName);
+    if (!store) throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found`);
+
+    const existing = new Set(store.projects || []);
+    for (const project of projects) {
+      existing.add(project);
+    }
+    store.projects = Array.from(existing).sort().length > 0 ? Array.from(existing).sort() : undefined;
+    writeStoreRegistry(phrenPath, registry);
+  });
+}
+
+/** Remove projects from a store's subscription list. Uses file locking. */
+export function unsubscribeStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
+  withFileLock(storesFilePath(phrenPath), () => {
+    const registry = readStoreRegistry(phrenPath);
+    if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
+
+    const store = registry.stores.find((s) => s.name === storeName);
+    if (!store) throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found`);
+
+    const toRemove = new Set(projects);
+    const remaining = (store.projects || []).filter((p) => !toRemove.has(p));
+    store.projects = remaining.length > 0 ? remaining : undefined;
     writeStoreRegistry(phrenPath, registry);
   });
 }
