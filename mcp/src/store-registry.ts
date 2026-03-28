@@ -314,8 +314,9 @@ function implicitPrimaryStore(phrenPath: string): StoreEntry {
 function parseFederationPathsEnv(localPhrenPath: string): string[] {
   const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
   if (!raw.trim()) return [];
+  // Use path.delimiter (';' on Windows, ':' on Unix) so Windows drive letters aren't split
   return raw
-    .split(":")
+    .split(path.delimiter)
     .map((p) => p.trim())
     .filter((p) => p.length > 0)
     .map((p) => path.resolve(expandHomePath(p)))

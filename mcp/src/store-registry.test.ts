@@ -77,16 +77,18 @@ describe("store-registry", () => {
     });
 
     it("parses a valid registry", () => {
+      // Use forward slashes in YAML paths to avoid Windows backslash escaping issues
+      const teamDir = path.join(tmp.path, "team");
       const yaml = `version: 1
 stores:
   - id: "abc12345"
     name: personal
-    path: "${phrenDir}"
+    path: "${phrenDir.replace(/\\/g, "/")}"
     role: primary
     sync: managed-git
   - id: "def67890"
     name: team-arc
-    path: "${path.join(tmp.path, "team")}"
+    path: "${teamDir.replace(/\\/g, "/")}"
     role: team
     sync: managed-git
     remote: "git@github.com:test/repo.git"
@@ -94,7 +96,7 @@ stores:
       - arc
       - arc-api
 `;
-      fs.mkdirSync(path.join(tmp.path, "team"), { recursive: true });
+      fs.mkdirSync(teamDir, { recursive: true });
       fs.writeFileSync(storesFilePath(phrenDir), yaml);
 
       const registry = readStoreRegistry(phrenDir);
