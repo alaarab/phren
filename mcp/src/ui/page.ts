@@ -7,6 +7,7 @@ import {
   renderProfileSwitcherScript,
   renderProjectReferenceEnhancementScript,
   renderTasksAndSettingsScript,
+  renderReviewQueueKeyboardScript,
   renderSearchScript,
   renderEventWiringScript,
   renderGraphHostScript,
@@ -337,6 +338,12 @@ ${REVIEW_UI_STYLES}
           <div id="settings-integrations" style="color:var(--muted)">Loading...</div>
         </div>
       </section>
+      <section class="settings-section settings-section-stores">
+        <div class="settings-section-header">Stores</div>
+        <div class="settings-section-body">
+          <div id="settings-stores" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -373,6 +380,9 @@ ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
 <script${nonceAttr}>
 ${renderTasksAndSettingsScript(authToken || "")}
+</script>
+<script${nonceAttr}>
+${renderReviewQueueKeyboardScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderSearchScript(authToken || "")}

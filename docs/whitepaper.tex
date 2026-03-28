@@ -251,6 +251,22 @@ Phren handles multi-agent use through four mechanisms. \textbf{Dual-root storage
 
 This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
 
+\subsection{Multi-Store Architecture}
+
+Real teams need memory to belong to different scopes: personal notes stay private, team knowledge is shared, and reference material (company standards, public docs) is read-only. Phren's multi-store model enables this without requiring every agent to manage a federation manually.
+
+\textbf{Store registry and roles.} A central \texttt{stores.yaml} file registers all accessible knowledge stores. Each store has an immutable UUID for provenance, a mutable display name, a file path (local or cloned from git), a role (\texttt{primary}, \texttt{team}, or \texttt{readonly}), and a sync mode (\texttt{managed-git} for read-write, \texttt{pull-only} for read-only). The primary store is the user's personal memory; team stores are shared via git (one per team or initiative); readonly stores are reference libraries maintained by others. This replaces manual federation paths: instead of \texttt{PHREN\_FEDERATION\_PATHS}, users join team stores with \texttt{phren store add --remote <url>}, and the registry becomes the single source of truth for multi-store behavior.
+
+\textbf{Write routing and project claims.} When an agent writes a finding or task, the system resolves which store should receive it. The registry allows each store to claim ownership of specific projects: if a project is claimed by an arc-team store, writes go there by default. Users can also explicitly route writes via store-qualified names (\texttt{arc-team/arc}). If a project is not claimed, writes default to the primary store. This avoids silent confusion: bare project names resolve unambiguously when only one store contains them; otherwise the agent must disambiguate.
+
+\textbf{Conflict-free multi-user writes via journals.} Team stores do not use monolithic \texttt{FINDINGS.md} files for writes. Instead, findings are appended to per-actor daily journal files (\texttt{2026-03-28-alice.md}, \texttt{2026-03-28-bob.md}). Git merges these files trivially: both actors' changes are included without rebase conflicts. A background consolidation step generates a materialized \texttt{FINDINGS.md} from the journal entries for read performance. This design scales multi-user collaboration without merge storms; each actor writes their own file, and there is no risk of two agents clobbering the same line.
+
+\textbf{Store subscriptions and project filtering.} Users can subscribe to only the projects they care about within a team store via \texttt{phren store subscribe <store> <projects...>}. When searching or listing projects, the system filters results to subscribed projects (and always includes all projects in the primary store). This reduces cognitive load for large team stores: engineers working on the arc-platform team see arc and arc-ui, not every company project.
+
+\textbf{Per-store sync and git provenance.} On session start, phren pulls all readable stores. During the stop hook, it commits and pushes changes per store: primary store uses a standard git workflow; team stores commit journal entries only (append-only, never rewrite existing lines); readonly stores pull only. Every finding carries provenance metadata (store ID, actor, machine, timestamp) in inline comments, enabling audit trails and conflict detection. A store ID is immutable and included in provenance even if the store is later renamed, preserving historical integrity.
+
+This model is not a fully distributed system — it assumes eventual consistency and does not solve Byzantine quorum problems. But for agent memory, eventual consistency is natural: findings are appended, not mutated after merge; conflicts are logged (contradictions tracked in metadata), not silently resolved; and humans retain the authority to review and approve high-stakes changes. The design trades off strong consistency for scalability, auditability, and simplicity.
+
 \subsection{Operator Surfaces}
 Phren ships three operator-facing review planes: \texttt{phren shell}, \texttt{phren web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive fragment-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
 
@@ -289,13 +305,14 @@ The systems differ less in whether they can retrieve a relevant memory and more 
 
 \raggedright
 \begin{itemize}
+  \item \textbf{Multi-store federation with conflict-free writes}: Phren enables personal, team, and readonly stores with journal-based writes that avoid merge conflicts. Neither Supermemory nor claude-mem offer this: they are single-store systems with shared-file mutation risk in multi-user scenarios. Copilot Memory is repository-scoped but does not expose team store models.
   \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
   \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
   \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
   \item \textbf{Human review surfaces}: \texttt{phren shell}, hardened \texttt{phren web-ui}, and the VS Code extension (tree view + graph + onboarding) let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
 \end{itemize}
 
-Any memory system can add a vector index. Governance, auditability, and review tooling require deliberate architectural choices that are harder to retrofit.
+Any memory system can add a vector index. Governance, auditability, multi-store models, and review tooling require deliberate architectural choices that are harder to retrofit.
 
 \pagebreak[2]
 \section{FTS5 vs Semantic Search}

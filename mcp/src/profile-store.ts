@@ -77,6 +77,10 @@ export function resolveActiveProfile(phrenPath: string, requestedProfile?: strin
   return phrenOk(profiles.data[0]?.name);
 }
 
+export function getDefaultMachineAlias(): string {
+  return getMachineName();
+}
+
 export function listMachines(phrenPath: string): PhrenResult<Record<string, string>> {
   const machinesPath = path.join(phrenPath, "machines.yaml");
   if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);

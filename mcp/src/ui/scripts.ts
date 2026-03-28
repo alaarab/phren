@@ -1223,8 +1223,59 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         } else if (integrationsEl && isProject) {
           integrationsEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">Integration settings are global — switch to Global scope to edit them.</div>';
         }
+
+        // Load stores if on global scope
+        if (!isProject) {
+          loadStores();
+        }
       }).catch(function(err) {
         setSettingsStatus('Failed to load settings: ' + String(err), 'err');
+      });
+    }
+
+    function loadStores() {
+      var storesEl = document.getElementById('settings-stores');
+      if (!storesEl) return;
+      var url = _tsAuthToken ? tsAuthUrl('/api/stores') : '/api/stores';
+      fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok || !Array.isArray(data.stores)) {
+          storesEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">No team stores configured.</div>';
+          return;
+        }
+        if (data.stores.length === 0) {
+          storesEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">No team stores configured.</div>';
+          return;
+        }
+        var html = '';
+        data.stores.forEach(function(store) {
+          html += '<div class="settings-control" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px">';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+          html += '<div>';
+          html += '<div style="font-weight:600;color:var(--ink)">' + esc(store.name) + '</div>';
+          html += '<div style="font-size:var(--text-sm);color:var(--muted)">Role: ' + esc(store.role) + '</div>';
+          html += '</div>';
+          html += '</div>';
+          html += '<div style="font-size:var(--text-xs);color:var(--muted);margin-bottom:10px;font-family:var(--mono);word-break:break-all">' + esc(store.path) + '</div>';
+          html += '<div style="font-size:var(--text-sm);color:var(--ink);margin-bottom:6px;font-weight:500">Projects</div>';
+          if (Array.isArray(store.availableProjects) && store.availableProjects.length > 0) {
+            var subscribed = Array.isArray(store.subscribedProjects) ? store.subscribedProjects : [];
+            html += '<div style="display:flex;flex-direction:column;gap:6px">';
+            store.availableProjects.forEach(function(proj) {
+              var isSubscribed = subscribed.indexOf(proj) !== -1;
+              html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--text-sm)">';
+              html += '<input type="checkbox" class="store-project-checkbox" data-store="' + esc(store.name) + '" data-project="' + esc(proj) + '" ' + (isSubscribed ? 'checked' : '') + ' style="cursor:pointer;width:16px;height:16px">';
+              html += '<span>' + esc(proj) + '</span>';
+              html += '</label>';
+            });
+            html += '</div>';
+          } else {
+            html += '<div style="color:var(--muted);font-size:var(--text-sm)">No projects available</div>';
+          }
+          html += '</div>';
+        });
+        storesEl.innerHTML = html;
+      }).catch(function(err) {
+        storesEl.innerHTML = '<div style="color:var(--error);font-size:var(--text-sm)">Failed to load stores: ' + esc(String(err)) + '</div>';
       });
     }
 
@@ -1237,6 +1288,43 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
       if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
     };
+
+    // Handle store project checkbox changes
+    document.addEventListener('change', function(e) {
+      var target = e.target;
+      if (target && target.classList && target.classList.contains('store-project-checkbox')) {
+        var storeName = target.getAttribute('data-store');
+        var projectName = target.getAttribute('data-project');
+        var isChecked = target.checked;
+        if (storeName && projectName) {
+          handleStoreProjectToggle(storeName, projectName, isChecked);
+        }
+      }
+    });
+
+    function handleStoreProjectToggle(storeName, projectName, isSubscribing) {
+      var endpoint = isSubscribing ? '/api/stores/subscribe' : '/api/stores/unsubscribe';
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var payload = { store: storeName, projects: [projectName] };
+        var body = new URLSearchParams();
+        body.set('store', storeName);
+        body.set('projects', JSON.stringify([projectName]));
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl(endpoint) : endpoint;
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus((isSubscribing ? 'Subscribe' : 'Unsubscribe') + ' failed: ' + (data.error || ''), 'err');
+          loadStores();
+          return;
+        }
+        setSettingsStatus((isSubscribing ? 'Subscribed to' : 'Unsubscribed from') + ' ' + projectName, 'ok');
+        loadStores();
+      }).catch(function(err) {
+        setSettingsStatus('Request failed: ' + String(err), 'err');
+      });
+    }
 
     // Event delegation for dynamically generated tasks/settings UI
     document.addEventListener('click', function(e) {
@@ -2130,4 +2218,89 @@ export function renderGraphHostScript(): string {
     }, 100);
   }
 })();`;
+}
+
+export function renderReviewQueueKeyboardScript(_authToken: string): string {
+  return `(function() {
+    var _reviewHighlightIndex = -1;
+    var _currentTab = '';
+    var esc = window._phrenEsc;
+    var authUrl = window._phrenAuthUrl;
+    var authBody = window._phrenAuthBody;
+    var fetchCsrfToken = window._phrenFetchCsrfToken;
+
+    function updateReviewHighlight() {
+      var cards = document.querySelectorAll('#review-cards-list [data-review-card]');
+      cards.forEach(function(card, i) {
+        if (i === _reviewHighlightIndex) {
+          card.classList.add('review-card-highlight');
+          card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          card.classList.remove('review-card-highlight');
+        }
+      });
+    }
+
+    function getApproveButton(card) {
+      return card ? card.querySelector('[data-review-type="approve"]') : null;
+    }
+
+    function getRejectButton(card) {
+      return card ? card.querySelector('[data-review-type="reject"]') : null;
+    }
+
+    function triggerCardAction(card, action) {
+      if (!card) return;
+      if (action === 'approve') {
+        var approveBtn = getApproveButton(card);
+        if (approveBtn) approveBtn.click();
+      } else if (action === 'reject') {
+        var rejectBtn = getRejectButton(card);
+        if (rejectBtn) rejectBtn.click();
+      }
+    }
+
+    var baseWindowSwitchTab = window.switchTab;
+    if (typeof baseWindowSwitchTab === 'function') {
+      window.switchTab = function(tab) {
+        baseWindowSwitchTab(tab);
+        _currentTab = tab;
+        if (tab === 'review') {
+          _reviewHighlightIndex = -1;
+          setTimeout(function() { updateReviewHighlight(); }, 100);
+        }
+      };
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (_currentTab !== 'review') return;
+      var cards = document.querySelectorAll('#review-cards-list [data-review-card]');
+      if (cards.length === 0) return;
+
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        _reviewHighlightIndex = Math.min(_reviewHighlightIndex + 1, cards.length - 1);
+        updateReviewHighlight();
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        _reviewHighlightIndex = Math.max(_reviewHighlightIndex - 1, -1);
+        updateReviewHighlight();
+      } else if (e.key === 'a') {
+        e.preventDefault();
+        if (_reviewHighlightIndex >= 0) {
+          triggerCardAction(cards[_reviewHighlightIndex], 'approve');
+        }
+      } else if (e.key === 'd') {
+        e.preventDefault();
+        if (_reviewHighlightIndex >= 0) {
+          triggerCardAction(cards[_reviewHighlightIndex], 'reject');
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (_reviewHighlightIndex >= 0) {
+          cards[_reviewHighlightIndex].click();
+        }
+      }
+    });
+  })();`;
 }

@@ -51,6 +51,7 @@ import {
   handleDetectSkills,
   handleFindingNamespace,
   handleHooksNamespace,
+  handleProfileNamespace,
   handleProjectsNamespace,
   handleSkillsNamespace,
   handleSkillList,
@@ -188,6 +189,8 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleTruths(args[0]);
     case "store":
       return handleStoreNamespace(args);
+    case "profile":
+      return handleProfileNamespace(args);
     case "team":
       return handleTeamNamespace(args);
     case "promote":
