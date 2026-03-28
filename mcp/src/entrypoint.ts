@@ -96,6 +96,12 @@ const HELP_TOPICS: Record<string, string> = {
   phren store remove <name>               Remove a store (local only)
   phren store sync                        Pull all stores
 `,
+  team: `Team:
+  phren team init <name> [--remote <url>]     Create a new team store
+  phren team join <git-url> [--name <name>]   Join an existing team store
+  phren team add-project <store> <project>    Add a project to a team store
+  phren team list                             List team stores
+`,
   env: `Environment variables:
   PHREN_PATH                  Override phren directory (default: ~/.phren)
   PHREN_PROFILE               Active profile name
@@ -185,7 +191,9 @@ const CLI_COMMANDS = [
   "review",
   "consolidation-status",
   "session-context",
+  "truths",
   "store",
+  "team",
   "promote",
 ];
 

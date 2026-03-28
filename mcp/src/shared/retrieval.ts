@@ -783,12 +783,18 @@ export function rankResults(
       return false;
     });
 
+    // Always-inject: truths for detected project are prepended regardless of search
+    // relevance. Dedup against rows already in the result set.
     const canonicalRows = queryDocRows(
       db,
-      "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND type = 'canonical' LIMIT 1",
+      "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND type = 'canonical'",
       [detectedProject]
     );
-    if (canonicalRows) ranked = [...canonicalRows, ...ranked];
+    if (canonicalRows) {
+      const existingPaths = new Set(ranked.map((r) => r.path));
+      const newCanonicals = canonicalRows.filter((r) => !existingPaths.has(r.path));
+      if (newCanonicals.length > 0) ranked = [...newCanonicals, ...ranked];
+    }
   }
 
   const entityBoost = query ? getFragmentBoostDocs(db, query) : new Set<string>();

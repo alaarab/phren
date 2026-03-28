@@ -11,7 +11,7 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 52 tools |
+| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 53 tools |
 | `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `mcp/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
 | `mcp/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
@@ -40,9 +40,9 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.43
+0.0.44
 
-## MCP Tools (52)
+## MCP Tools (53)
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -79,6 +79,7 @@ All tools return structured JSON: `{ ok, message, data?, error? }`.
 
 **Memory quality:**
 - `pin_memory(project, memory)` : write canonical/pinned memory entries
+- `get_truths(project)` : read all pinned truths for a project
 - `memory_feedback(key, feedback)` : record helpful/reprompt/regression outcomes
 
 **Data management:**

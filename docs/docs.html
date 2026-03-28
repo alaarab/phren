@@ -851,7 +851,7 @@
             <p>Run init to configure hooks and MCP for your agents:</p>
             <pre><code>phren init</code></pre>
             <p>Expected output:</p>
-            <pre><code>phren init v0.0.43
+            <pre><code>phren init v0.0.44
   Detected agents: Claude Code, Copilot
   Created ~/.phren/
   Registered MCP server in ~/.claude/settings.json
@@ -1521,7 +1521,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">All 52 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">All 53 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
 
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
@@ -2022,7 +2022,7 @@ npm test</code></pre>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (52 public tools across 12 modules)</td></tr>
+            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (53 public tools across 12 modules)</td></tr>
             <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
             <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
             <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>

@@ -70,6 +70,30 @@ export async function handlePinCanonical(project: string, memory: string) {
   console.log(result.ok ? result.data : result.error);
 }
 
+export async function handleTruths(project: string) {
+  if (!project) {
+    console.error("Usage: phren truths <project>");
+    process.exit(1);
+  }
+  const phrenPath = getPhrenPath();
+  const truthsPath = path.join(phrenPath, project, "truths.md");
+  if (!fs.existsSync(truthsPath)) {
+    console.log(`No truths pinned for "${project}" yet.`);
+    console.log(`\nPin one: phren pin ${project} "your truth here"`);
+    return;
+  }
+  const content = fs.readFileSync(truthsPath, "utf8");
+  const truths = content.split("\n").filter((line: string) => line.startsWith("- "));
+  if (truths.length === 0) {
+    console.log(`No truths pinned for "${project}" yet.`);
+    return;
+  }
+  console.log(`${truths.length} truth(s) for "${project}":\n`);
+  for (const truth of truths) {
+    console.log(`  ${truth}`);
+  }
+}
+
 export async function handleDoctor(args: string[]) {
   const profile = resolveRuntimeProfile(getPhrenPath());
   const fix = args.includes("--fix");

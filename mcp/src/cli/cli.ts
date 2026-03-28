@@ -58,6 +58,7 @@ import {
   handleStoreNamespace,
   handleTaskNamespace,
 } from "./namespaces.js";
+import { handleTeamNamespace } from "./team.js";
 import {
   handleTaskView,
   handleSessionsView,
@@ -70,6 +71,7 @@ import {
   handleDoctor,
   handleFragmentSearch,
   handleMemoryUi,
+  handleTruths,
   handlePinCanonical,
   handleQualityFeedback,
   handleRelatedDocs,
@@ -182,8 +184,12 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleConsolidationStatus(args);
     case "session-context":
       return handleSessionContext();
+    case "truths":
+      return handleTruths(args[0]);
     case "store":
       return handleStoreNamespace(args);
+    case "team":
+      return handleTeamNamespace(args);
     case "promote":
       return handlePromoteNamespace(args);
     default:

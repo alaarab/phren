@@ -16,7 +16,7 @@ tectonic docs/whitepaper.tex --outdir docs
 
 - `docs/architecture.md`: Data flow diagrams for hooks, MCP server, FTS5 index, and memory governance.
 - `docs/architecture-team-stores.md`: Team-store and multi-store architecture notes.
-- `docs/llms-install.md`: Installation guide, all 52 MCP tools, hooks, and memory governance pipeline.
+- `docs/llms-install.md`: Installation guide, all 53 MCP tools, hooks, and memory governance pipeline.
 - `docs/environment.md`: Full reference for all environment variables with types and defaults.
 - `docs/governance.md`: Governance model, review flows, and access controls.
 - `docs/ide-setup.md`: IDE and editor integration setup notes.
