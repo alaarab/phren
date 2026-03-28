@@ -9,7 +9,7 @@ import {
   computePhrenLiveStateToken,
   getProjectDirs,
 } from "../shared.js";
-import { getNonPrimaryStores } from "../store-registry.js";
+import { getNonPrimaryStores, subscribeStoreProjects, unsubscribeStoreProjects } from "../store-registry.js";
 import {
   editFinding,
   readReviewQueue,
@@ -421,6 +421,28 @@ function handleGetProjects(res: Res, ctx: RouteCtx): void {
 
 function handleGetChangeToken(res: Res, ctx: RouteCtx): void {
   jsonOk(res, { token: computePhrenLiveStateToken(ctx.phrenPath) });
+}
+
+function handleGetStores(res: Res, ctx: RouteCtx): void {
+  try {
+    const stores = getNonPrimaryStores(ctx.phrenPath);
+    const storeData = stores.map((store) => {
+      const availableProjects = getProjectDirs(store.path)
+        .map((dir) => path.basename(dir))
+        .filter((p) => p !== "global");
+      const subscribedProjects = store.projects || [];
+      return {
+        name: store.name,
+        role: store.role,
+        path: store.path,
+        availableProjects,
+        subscribedProjects,
+      };
+    });
+    jsonOk(res, { ok: true, stores: storeData });
+  } catch (err: unknown) {
+    jsonErr(res, errorMessage(err), 500);
+  }
 }
 
 function handleGetRuntimeHealth(res: Res, ctx: RouteCtx): void {
@@ -877,12 +899,107 @@ function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: Rout
   });
 }
 
+function handleGetProfiles(res: Res, ctx: RouteCtx): void {
+  try {
+    const { listProfiles } = require("../profile-store.js");
+    const profileResult = listProfiles(ctx.phrenPath);
+    if (!profileResult.ok) {
+      return jsonOk(res, { ok: false, error: profileResult.error, profiles: [] });
+    }
+    const profiles = profileResult.data || [];
+    jsonOk(res, { ok: true, profiles, activeProfile: ctx.profile || undefined });
+  } catch (err: unknown) {
+    jsonOk(res, { ok: false, error: errorMessage(err), profiles: [] });
+  }
+}
+
+function handlePostProfile(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const profileName = String(parsed.profile || "").trim();
+    if (!profileName) return jsonErr(res, "Profile name required", 400);
+    try {
+      const { setMachineProfile, getDefaultMachineAlias } = require("../profile-store.js");
+      const machineAlias = getDefaultMachineAlias();
+      const result = setMachineProfile(ctx.phrenPath, machineAlias, profileName);
+      if (!result.ok) return jsonErr(res, result.error || "Failed to switch profile", 500);
+      jsonOk(res, { ok: true, message: `Switched to profile: ${profileName}`, profile: profileName });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err), 500);
+    }
+  });
+}
+
+function handlePostStoreSubscribe(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const storeName = String(parsed.store || "");
+    const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+    if (!storeName) return jsonErr(res, "Missing store name", 400);
+    try {
+      subscribeStoreProjects(ctx.phrenPath, storeName, projects);
+      jsonOk(res, { ok: true });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err), 500);
+    }
+  });
+}
+
+function handlePostStoreUnsubscribe(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const storeName = String(parsed.store || "");
+    const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+    if (!storeName) return jsonErr(res, "Missing store name", 400);
+    try {
+      unsubscribeStoreProjects(ctx.phrenPath, storeName, projects);
+      jsonOk(res, { ok: true });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err), 500);
+    }
+  });
+}
+
 function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx: RouteCtx): void {
   withPostBody(req, res, url, ctx, (parsed) => {
+    const globalUpdate = String(parsed.globalUpdate || "") === "true";
     const project = String(parsed.project || "");
     const field = String(parsed.field || "");
     const value = String(parsed.value || "");
     const clearField = String(parsed.clear || "") === "true";
+    const NUMERIC_RETENTION_FIELDS = ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"];
+    const NUMERIC_WORKFLOW_FIELDS = ["lowConfidenceThreshold"];
+
+    // Handle global retention/workflow policy updates
+    if (globalUpdate) {
+      try {
+        if (NUMERIC_RETENTION_FIELDS.includes(field)) {
+          const { updateRetentionPolicy } = require("../governance/policy.js");
+          let updateData: Record<string, unknown> = {};
+          if (!clearField) {
+            const num = parseFloat(value);
+            if (!Number.isFinite(num) || num < 0) throw new Error("Invalid numeric value for " + field);
+            updateData[field] = num;
+          }
+          const result = updateRetentionPolicy(ctx.phrenPath, updateData);
+          if (!result.ok) return jsonErr(res, result.error || "Failed to update retention policy", 500);
+          return jsonOk(res, { ok: true, retentionPolicy: result.data });
+        } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
+          const { updateWorkflowPolicy } = require("../governance/policy.js");
+          let updateData: Record<string, unknown> = {};
+          if (!clearField) {
+            const num = parseFloat(value);
+            if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error("Invalid value for " + field + " (must be 0-1)");
+            updateData[field] = num;
+          }
+          const result = updateWorkflowPolicy(ctx.phrenPath, updateData);
+          if (!result.ok) return jsonErr(res, result.error || "Failed to update workflow policy", 500);
+          return jsonOk(res, { ok: true, workflowPolicy: result.data });
+        } else {
+          return jsonErr(res, "Unknown config field: " + field, 400);
+        }
+      } catch (err) {
+        return jsonErr(res, errorMessage(err));
+      }
+    }
+
     if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
     const registeredProjects = getProjectDirs(ctx.phrenPath, ctx.profile).map((d) => path.basename(d)).filter((p) => p !== "global");
     const registrationWarning = registeredProjects.includes(project) ? undefined : `Project '${project}' is not registered in the active profile. Config was saved but it will have no effect until the project is added with 'phren add'.`;
@@ -891,8 +1008,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
       proactivity: ["high", "medium", "low"], proactivityFindings: ["high", "medium", "low"],
       proactivityTask: ["high", "medium", "low"], taskMode: ["off", "manual", "suggest", "auto"],
     };
-    const NUMERIC_RETENTION_FIELDS = ["ttlDays", "retentionDays", "autoAcceptThreshold", "minInjectConfidence"];
-    const NUMERIC_WORKFLOW_FIELDS = ["lowConfidenceThreshold"];
     try {
       updateProjectConfigOverrides(ctx.phrenPath, project, (current) => {
         const next = { ...current };
@@ -995,6 +1110,7 @@ export function createWebUiHttpServer(
       switch (pathname) {
         case "/api/projects": return handleGetProjects(res, ctx);
         case "/api/change-token": return handleGetChangeToken(res, ctx);
+        case "/api/stores": return handleGetStores(res, ctx);
         case "/api/runtime-health": return handleGetRuntimeHealth(res, ctx);
         case "/api/review-queue": return handleGetReviewQueue(res, ctx);
         case "/api/review-activity": return handleGetReviewActivity(res, ctx);
@@ -1008,6 +1124,7 @@ export function createWebUiHttpServer(
         case "/api/settings": return handleGetSettings(res, url, ctx);
         case "/api/config": return handleGetConfig(res, url, ctx);
         case "/api/csrf-token": return handleGetCsrfToken(res, ctx);
+        case "/api/profiles": return handleGetProfiles(res, ctx);
         case "/api/search": return await handleGetSearch(res, url, ctx);
       }
       // Prefix-matched GET routes
@@ -1027,6 +1144,9 @@ export function createWebUiHttpServer(
         case "/api/skill-save": return handlePostSkillSave(req, res, url, ctx);
         case "/api/skill-toggle": return handlePostSkillToggle(req, res, url, ctx);
         case "/api/hook-toggle": return handlePostHookToggle(req, res, url, ctx);
+        case "/api/profile": return handlePostProfile(req, res, url, ctx);
+        case "/api/stores/subscribe": return handlePostStoreSubscribe(req, res, url, ctx);
+        case "/api/stores/unsubscribe": return handlePostStoreUnsubscribe(req, res, url, ctx);
         case "/api/project-topics/save": return handlePostTopicsSave(req, res, url, ctx);
         case "/api/project-topics/reclassify": return handlePostTopicsReclassify(req, res, url, ctx);
         case "/api/project-topics/pin": return handlePostTopicsPin(req, res, url, ctx);

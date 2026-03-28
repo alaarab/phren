@@ -4,6 +4,7 @@ import { PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, 
 import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
+  renderProfileSwitcherScript,
   renderProjectReferenceEnhancementScript,
   renderTasksAndSettingsScript,
   renderSearchScript,
@@ -288,6 +289,18 @@ ${REVIEW_UI_STYLES}
           <div id="settings-scope-note" style="font-size:var(--text-sm);color:var(--muted)">Showing global settings. Select a project to view and edit per-project overrides.</div>
         </div>
       </section>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--blue) 45%, var(--border))">
+        <div class="settings-section-header">Profile</div>
+        <div class="settings-section-body">
+          <div style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px">
+            <label for="profile-select" style="display:block;margin-bottom:6px;color:var(--ink)">Active Profile:</label>
+            <select id="profile-select" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm);font-family:var(--font);width:100%;max-width:200px">
+              <option>Loading profiles...</option>
+            </select>
+          </div>
+          <div id="profile-status" style="font-size:var(--text-sm);color:var(--muted)"></div>
+        </div>
+      </section>
       <section id="settings-project-info-section" class="settings-section" style="display:none;border-top:3px solid color-mix(in srgb, var(--accent) 45%, var(--border))">
         <div class="settings-section-header">Project Info</div>
         <div class="settings-section-body">
@@ -351,6 +364,9 @@ ${renderSharedWebUiHelpers(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}
+</script>
+<script${nonceAttr}>
+${renderProfileSwitcherScript(h(authToken || ""))}
 </script>
 <script${nonceAttr}>
 ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
