@@ -152,7 +152,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "tasks":
       return handleTaskView(getProfile());
     case "sessions":
-      return handleSessionsView(args);
+      return await handleSessionsView(args);
     case "task":
       return handleTaskNamespace(args);
     case "finding":

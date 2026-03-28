@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as crypto from "crypto";
@@ -109,7 +109,12 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const results: { sourceDoc: string; snippet: string }[] = [];
       for (const doc of relatedDocs) {
-        const docRow = queryDocBySourceKey(db, ctx.phrenPath, doc);
+        const docProject = doc.split("/")[0];
+        let docPhrenPath = ctx.phrenPath;
+        try {
+          docPhrenPath = resolveStoreForProject(ctx, docProject).phrenPath;
+        } catch { /* fall back to primary */ }
+        const docRow = queryDocBySourceKey(db, docPhrenPath, doc);
         const snippet = docRow?.content ? docRow.content.slice(0, 200) : "";
         results.push({ sourceDoc: doc, snippet });
       }
@@ -305,7 +310,10 @@ export function register(server: McpServer, ctx: McpContext): void {
           logger.debug("graph", `link_findings globalFragments: ${errorMessage(err)}`);
         }
 
-        // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation)
+        // 4b. Persist manual link so it survives index rebuilds (mandatory — failure aborts the operation).
+        // Note: manual-links.json is intentionally written to the primary phrenPath's runtime directory.
+        // During index rebuild, it's read and merged into the unified index (which includes team store docs),
+        // so team store projects' manual links persist and are queryable cross-store. Writes are always to primary.
         const manualLinksPath = runtimeFile(ctx.phrenPath, "manual-links.json");
         try {
           withFileLock(manualLinksPath, () => {

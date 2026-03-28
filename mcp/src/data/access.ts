@@ -739,12 +739,37 @@ export function readReviewQueueAcrossProjects(phrenPath: string, profile?: strin
   };
 
   const items: ProjectQueueItem[] = [];
+  const seen = new Set(projects);
+
   for (const project of projects) {
     const result = readReviewQueue(phrenPath, project);
     if (!result.ok) continue;
     for (const item of result.data) {
       items.push({ project, ...item });
     }
+  }
+
+  // Include projects from team stores
+  try {
+    const storeRegistry = require("../store-registry.js");
+    const { getNonPrimaryStores } = storeRegistry;
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (!fs.existsSync(store.path)) continue;
+      const storeDirs = getProjectDirs(store.path)
+        .map((d) => path.basename(d))
+        .filter((p) => p !== "global");
+      for (const storeProject of storeDirs) {
+        if (seen.has(storeProject)) continue;
+        seen.add(storeProject);
+        const result = readReviewQueue(store.path, storeProject);
+        if (!result.ok) continue;
+        for (const item of result.data) {
+          items.push({ project: storeProject, ...item });
+        }
+      }
+    }
+  } catch {
+    // store-registry not available or error loading, continue with primary only
   }
 
   items.sort((a, b) => {
