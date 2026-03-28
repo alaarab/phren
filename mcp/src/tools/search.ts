@@ -597,9 +597,14 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     }
   }
 
-  // Combine: primary projects (no store prefix) + non-primary (with store prefix)
+  // Filter primary projects: exclude any that are claimed by a non-primary store
+  // (they'll appear under their store instead), and hide native: auto-indexed entries
+  const storeClaimedNames = new Set(storeProjects.map((sp) => sp.name));
+  const filteredPrimary = primaryProjects.filter((p) => !storeClaimedNames.has(p) && !p.startsWith("native:"));
+
+  // Combine: primary-only projects + non-primary store projects
   const allProjects = [
-    ...primaryProjects.map((p) => ({ name: p, store: undefined as string | undefined })),
+    ...filteredPrimary.map((p) => ({ name: p, store: undefined as string | undefined })),
     ...storeProjects,
   ];
 
