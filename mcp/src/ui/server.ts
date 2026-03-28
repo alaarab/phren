@@ -9,6 +9,7 @@ import {
   computePhrenLiveStateToken,
   getProjectDirs,
 } from "../shared.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 import {
   editFinding,
   readReviewQueue,
@@ -402,6 +403,18 @@ function handleGetHome(res: Res, ctx: RouteCtx): void {
   res.end(html);
 }
 
+/** Returns the store base path that contains the given project (primary or team store). */
+function resolveProjectBasePath(phrenPath: string, project: string): string {
+  const primaryDir = path.join(phrenPath, project);
+  if (fs.existsSync(primaryDir)) return phrenPath;
+  try {
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (fs.existsSync(path.join(store.path, project))) return store.path;
+    }
+  } catch { /* fall through */ }
+  return phrenPath;
+}
+
 function handleGetProjects(res: Res, ctx: RouteCtx): void {
   jsonOk(res, collectProjectsForUI(ctx.phrenPath, ctx.profile));
 }
@@ -429,7 +442,8 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
   if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
   const allowedFiles = ["FINDINGS.md", TASKS_FILENAME, "CLAUDE.md", "summary.md"];
   if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
-  const filePath = safeProjectPath(ctx.phrenPath, project, file);
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  const filePath = safeProjectPath(basePath, project, file);
   if (!filePath) return jsonErr(res, "Invalid project or file path", 400);
   if (!fs.existsSync(filePath)) return jsonErr(res, `File not found: ${file}`);
   jsonOk(res, { ok: true, content: fs.readFileSync(filePath, "utf8") });
@@ -438,18 +452,22 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
 function handleGetProjectTopics(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(parseQs(url).project || "");
   if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
-  jsonOk(res, { ok: true, ...getProjectTopicsResponse(ctx.phrenPath, project) });
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  jsonOk(res, { ok: true, ...getProjectTopicsResponse(basePath, project) });
 }
 
 function handleGetProjectReferenceList(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(parseQs(url).project || "");
   if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project", 400);
-  jsonOk(res, { ok: true, ...listProjectReferenceDocs(ctx.phrenPath, project) });
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  jsonOk(res, { ok: true, ...listProjectReferenceDocs(basePath, project) });
 }
 
 function handleGetProjectReferenceContent(res: Res, url: string, ctx: RouteCtx): void {
   const qs = parseQs(url);
-  const contentResult = readReferenceContent(ctx.phrenPath, String(qs.project || ""), String(qs.file || ""));
+  const project = String(qs.project || "");
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  const contentResult = readReferenceContent(basePath, project, String(qs.file || ""));
   res.writeHead(contentResult.ok ? 200 : 400, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(contentResult.ok ? { ok: true, content: contentResult.content } : { ok: false, error: contentResult.error }));
 }

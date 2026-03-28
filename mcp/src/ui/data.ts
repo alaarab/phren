@@ -8,6 +8,7 @@ import {
   memoryUsageLogFile,
   homePath,
 } from "../shared.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 import { errorMessage } from "../utils.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { readCustomHooks } from "../hooks.js";
@@ -65,6 +66,8 @@ interface GraphLink {
 
 interface ProjectInfo {
   name: string;
+  storePath: string;
+  store?: string;
   findingCount: number;
   taskCount: number;
   hasClaudeMd: boolean;
@@ -597,6 +600,70 @@ export function recentAccepted(phrenPath: string): string[] {
   return lines.slice(-40).reverse();
 }
 
+function buildProjectInfo(basePath: string, project: string, store?: string): ProjectInfo {
+  const dir = path.join(basePath, project);
+  const findingsPath = path.join(dir, "FINDINGS.md");
+  const taskPath = resolveTaskFilePath(basePath, project);
+  const claudeMdPath = path.join(dir, "CLAUDE.md");
+  const summaryPath = path.join(dir, "summary.md");
+  const refPath = path.join(dir, "reference");
+
+  let findingCount = 0;
+  if (fs.existsSync(findingsPath)) {
+    const content = fs.readFileSync(findingsPath, "utf8");
+    findingCount = (content.match(/^- /gm) || []).length;
+  }
+
+  const sparkline: number[] = new Array(8).fill(0);
+  if (fs.existsSync(findingsPath)) {
+    const now = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const sparkContent = fs.readFileSync(findingsPath, "utf8");
+    const dateRe = /(?:created[_:]?\s*"?|created_at[":]+\s*)(\d{4}-\d{2}-\d{2})/g;
+    let match: RegExpExecArray | null;
+    while ((match = dateRe.exec(sparkContent)) !== null) {
+      const age = now - new Date(match[1]).getTime();
+      const weekIdx = Math.floor(age / weekMs);
+      if (weekIdx >= 0 && weekIdx < 8) sparkline[7 - weekIdx]++;
+    }
+  }
+
+  let taskCount = 0;
+  if (taskPath && fs.existsSync(taskPath)) {
+    const content = fs.readFileSync(taskPath, "utf8");
+    const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
+    if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
+  }
+
+  let summaryText = "";
+  if (fs.existsSync(summaryPath)) {
+    summaryText = fs.readFileSync(summaryPath, "utf8").trim();
+    if (summaryText.length > 300) summaryText = `${summaryText.slice(0, 300)}...`;
+  }
+
+  let githubUrl: string | undefined;
+  if (fs.existsSync(claudeMdPath)) {
+    githubUrl = extractGithubUrl(fs.readFileSync(claudeMdPath, "utf8"));
+  }
+  if (!githubUrl && fs.existsSync(summaryPath)) {
+    githubUrl = extractGithubUrl(fs.readFileSync(summaryPath, "utf8"));
+  }
+
+  return {
+    name: project,
+    storePath: basePath,
+    store,
+    findingCount,
+    taskCount,
+    hasClaudeMd: fs.existsSync(claudeMdPath),
+    hasSummary: fs.existsSync(summaryPath),
+    hasReference: fs.existsSync(refPath) && fs.statSync(refPath).isDirectory(),
+    summaryText,
+    githubUrl,
+    sparkline,
+  };
+}
+
 export function collectProjectsForUI(phrenPath: string, profile?: string): ProjectInfo[] {
   const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
 
@@ -616,68 +683,28 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
   }
 
   const results: ProjectInfo[] = [];
+  const seen = new Set<string>();
+
   for (const project of projects) {
     if (allowedProjects && !allowedProjects.has(project.toLowerCase())) continue;
+    seen.add(project);
+    results.push(buildProjectInfo(phrenPath, project));
+  }
 
-    const dir = path.join(phrenPath, project);
-    const findingsPath = path.join(dir, "FINDINGS.md");
-    const taskPath = resolveTaskFilePath(phrenPath, project);
-    const claudeMdPath = path.join(dir, "CLAUDE.md");
-    const summaryPath = path.join(dir, "summary.md");
-    const refPath = path.join(dir, "reference");
-
-    let findingCount = 0;
-    if (fs.existsSync(findingsPath)) {
-      const content = fs.readFileSync(findingsPath, "utf8");
-      findingCount = (content.match(/^- /gm) || []).length;
-    }
-
-    const sparkline: number[] = new Array(8).fill(0);
-    if (fs.existsSync(findingsPath)) {
-      const now = Date.now();
-      const weekMs = 7 * 24 * 60 * 60 * 1000;
-      const sparkContent = fs.readFileSync(findingsPath, "utf8");
-      const dateRe = /(?:created[_:]?\s*"?|created_at[":]+\s*)(\d{4}-\d{2}-\d{2})/g;
-      let match: RegExpExecArray | null;
-      while ((match = dateRe.exec(sparkContent)) !== null) {
-        const age = now - new Date(match[1]).getTime();
-        const weekIdx = Math.floor(age / weekMs);
-        if (weekIdx >= 0 && weekIdx < 8) sparkline[7 - weekIdx]++;
+  // Include projects from non-primary stores
+  try {
+    const teamStores = getNonPrimaryStores(phrenPath);
+    for (const store of teamStores) {
+      if (!fs.existsSync(store.path)) continue;
+      const teamProjects = getProjectDirs(store.path).map((d) => path.basename(d)).filter((p) => p !== "global");
+      for (const project of teamProjects) {
+        if (seen.has(project)) continue; // skip if same name exists in primary
+        seen.add(project);
+        results.push(buildProjectInfo(store.path, project, store.name));
       }
     }
-
-    let taskCount = 0;
-    if (taskPath && fs.existsSync(taskPath)) {
-      const content = fs.readFileSync(taskPath, "utf8");
-      const queueMatch = content.match(/## Queue[\s\S]*?(?=## |$)/);
-      if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
-    }
-
-    let summaryText = "";
-    if (fs.existsSync(summaryPath)) {
-      summaryText = fs.readFileSync(summaryPath, "utf8").trim();
-      if (summaryText.length > 300) summaryText = `${summaryText.slice(0, 300)}...`;
-    }
-
-    let githubUrl: string | undefined;
-    if (fs.existsSync(claudeMdPath)) {
-      githubUrl = extractGithubUrl(fs.readFileSync(claudeMdPath, "utf8"));
-    }
-    if (!githubUrl && fs.existsSync(summaryPath)) {
-      githubUrl = extractGithubUrl(fs.readFileSync(summaryPath, "utf8"));
-    }
-
-    results.push({
-      name: project,
-      findingCount,
-      taskCount,
-      hasClaudeMd: fs.existsSync(claudeMdPath),
-      hasSummary: fs.existsSync(summaryPath),
-      hasReference: fs.existsSync(refPath) && fs.statSync(refPath).isDirectory(),
-      summaryText,
-      githubUrl,
-      sparkline,
-    });
+  } catch (err: unknown) {
+    logger.debug("memory-ui", `collectProjectsForUI team stores: ${errorMessage(err)}`);
   }
 
   return results.sort((a, b) => (b.findingCount + b.taskCount) - (a.findingCount + a.taskCount));
