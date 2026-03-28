@@ -13,6 +13,7 @@ Key features:
 - Web UI security by default: loopback-only, auth token, CSRF, CSP
 - Telemetry is opt-in and local-only (`.runtime/telemetry.json`)
 - Interactive terminal shell with seven views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Health)
+- Team stores for shared knowledge across collaborators (`phren team init`, `phren team join`)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
 
 Docs: https://alaarab.github.io/phren/

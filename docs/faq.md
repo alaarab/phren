@@ -247,3 +247,37 @@ Opens the interactive shell. Single-key navigation:
 | `q` | Quit |
 
 Press `?` for the full keybinding reference inside the shell.
+
+## How do I share phren with my team?
+
+Create a team store — a shared git repo that holds findings, tasks, and skills visible to everyone who joins it:
+
+```bash
+phren team init my-team --remote git@github.com:org/phren-team.git
+phren team add-project my-team my-project
+```
+
+Teammates join with:
+
+```bash
+phren team join git@github.com:org/phren-team.git
+```
+
+Team stores sync via git just like your personal store. Findings saved to a team store show up in every member's context injection.
+
+## What's the difference between profiles and stores?
+
+**Profiles** filter which projects you see on a given machine. If you have 20 projects but only work on 5 on your laptop, a profile limits the active set. Profiles are local to your machine.
+
+**Stores** are where the data lives. Your personal store is `~/.phren`. A team store is a separate git repo (e.g. `~/.phren/.stores/my-team/`) that multiple people push to. You can have a personal store and multiple team stores at the same time. Profiles and stores are orthogonal — profiles control visibility, stores control ownership and sharing.
+
+## Can I have multiple team stores?
+
+Yes. Each team store is a separate git repo. You might have one for your backend team and another for a cross-functional project. Register as many as you need:
+
+```bash
+phren team init backend-team --remote git@github.com:org/backend-phren.git
+phren team init platform-team --remote git@github.com:org/platform-phren.git
+```
+
+Run `phren team list` to see all registered stores and their sync status.

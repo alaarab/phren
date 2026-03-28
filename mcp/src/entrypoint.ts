@@ -26,9 +26,12 @@ const HELP_TEXT = `phren - persistent knowledge for your agents
   phren tasks               Cross-project task view
   phren graph               Fragment knowledge graph
 
+  phren store list              List registered stores
+  phren team init <name>        Create a team store
+
   phren help <topic>        Detailed help for a topic
 
-Topics: projects, skills, hooks, config, maintain, setup, env, all
+Topics: projects, skills, hooks, config, maintain, setup, stores, team, env, all
 `;
 
 const HELP_TOPICS: Record<string, string> = {

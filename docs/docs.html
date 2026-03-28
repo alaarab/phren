@@ -766,6 +766,7 @@
             <a href="#consolidation" class="sidebar-link sub">Consolidation</a>
             <a href="#rbac" class="sidebar-link sub">RBAC Roles</a>
             <a href="#team-workflows" class="sidebar-link sub">Team Workflows</a>
+            <a href="#team-stores" class="sidebar-link sub">Team Stores</a>
             <a href="#project-ownership" class="sidebar-link sub">Project Ownership</a>
           </div>
         </div>
@@ -851,7 +852,7 @@
             <p>Run init to configure hooks and MCP for your agents:</p>
             <pre><code>phren init</code></pre>
             <p>Expected output:</p>
-            <pre><code>phren init v0.0.45
+            <pre><code>phren init v0.0.46
   Detected agents: Claude Code, Copilot
   Created ~/.phren/
   Registered MCP server in ~/.claude/settings.json
@@ -1488,6 +1489,48 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Manage learned synonyms for search expansion.</div>
         </div>
 
+        <h2 id="cli-teams">Teams &amp; Stores <a href="#cli-teams" class="anchor-link">#</a></h2>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren team init &lt;name&gt; [--remote &lt;url&gt;]</div>
+          <div class="ref-card-desc">Create a new team store and register it locally.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren team join &lt;git-url&gt; [--name &lt;name&gt;]</div>
+          <div class="ref-card-desc">Join an existing team store by cloning its repo.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren team add-project &lt;store&gt; &lt;project&gt;</div>
+          <div class="ref-card-desc">Claim a project for a team store. Writes route there automatically.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren team list</div>
+          <div class="ref-card-desc">List team stores and their sync status.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren store list</div>
+          <div class="ref-card-desc">List all registered stores (personal, team, readonly).</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren store add &lt;name&gt; --remote &lt;url&gt;</div>
+          <div class="ref-card-desc">Add a store by cloning a remote git repo.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren store remove &lt;name&gt;</div>
+          <div class="ref-card-desc">Remove a store from the local registry.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren store sync</div>
+          <div class="ref-card-desc">Pull all stores to get the latest changes.</div>
+        </div>
+
         <h2 id="cli-maintenance">Maintenance <a href="#cli-maintenance" class="anchor-link">#</a></h2>
 
         <div class="callout callout-warning" style="margin-bottom:16px">
@@ -1603,6 +1646,10 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <details class="ref-card"><summary><span class="ref-card-name">get_config</span><span class="ref-card-desc">Read current governance config (all domains including topic)</span></summary><div class="ref-card-details"><div class="ref-card-params">(domain?, project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">set_config</span><span class="ref-card-desc">Update config for any domain</span></summary><div class="ref-card-details"><div class="ref-card-params">(domain, settings, project?)</div></div></details>
+
+        <h2 id="mcp-stores">Store Management <span class="cat-badge cat-data">1 tool</span> <a href="#mcp-stores" class="anchor-link">#</a></h2>
+
+        <details class="ref-card"><summary><span class="ref-card-name">store_list</span><span class="ref-card-desc">List registered stores and their sync status</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
 
         <h2 id="mcp-return">Return Format <a href="#mcp-return" class="anchor-link">#</a></h2>
         <pre><code>{
@@ -2458,6 +2505,79 @@ phren init              # machine: bob-desktop, profile: fullstack
 
 # Both work independently; Stop hook syncs after each response
 # Weekly: run /phren-consolidate to merge insights</code></pre>
+
+        <h2 id="team-stores">Team Stores <a href="#team-stores" class="anchor-link">#</a></h2>
+        <p>A <strong>team store</strong> is a shared git repository structured like a phren store. Each team member clones it locally, and phren routes reads and writes automatically based on project claims in the store registry.</p>
+
+        <div class="callout callout-info" style="margin-bottom:16px">
+          <div class="callout-title">Personal stays personal</div>
+          <p>Your primary store (<code>~/.phren</code>) remains private. Team stores are separate repositories that sit alongside it. Findings only reach a team store when a project is explicitly claimed by that store.</p>
+        </div>
+
+        <h3>How It Works</h3>
+        <p>Phren maintains a <strong>store registry</strong> at <code>~/.phren/stores.yaml</code> that lists every store the user has access to. Each store has a role:</p>
+        <table class="docs-table">
+          <thead><tr><th>Role</th><th>Read</th><th>Write</th><th>Git Sync</th><th>Use Case</th></tr></thead>
+          <tbody>
+            <tr><td><code>primary</code></td><td>Yes</td><td>Yes</td><td>Full</td><td>Your personal store (default write target)</td></tr>
+            <tr><td><code>team</code></td><td>Yes</td><td>Yes</td><td>Full</td><td>Shared team store</td></tr>
+            <tr><td><code>readonly</code></td><td>Yes</td><td>No</td><td>Pull only</td><td>Reference store (company-wide knowledge)</td></tr>
+          </tbody>
+        </table>
+
+        <h3>CLI Commands</h3>
+        <div class="ref-card">
+          <div class="ref-card-name">phren team init &lt;name&gt; [--remote &lt;url&gt;]</div>
+          <div class="ref-card-desc">Create a new team store. Generates a store with a <code>.phren-team.yaml</code> bootstrap file and registers it locally.</div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-card-name">phren team join &lt;git-url&gt; [--name &lt;name&gt;]</div>
+          <div class="ref-card-desc">Join an existing team store. Clones the repo, reads <code>.phren-team.yaml</code>, and adds it to your store registry.</div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-card-name">phren team add-project &lt;store&gt; &lt;project&gt;</div>
+          <div class="ref-card-desc">Claim a project for a team store. Writes to that store route through the team repo automatically.</div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-card-name">phren team list</div>
+          <div class="ref-card-desc">List all team stores and their sync status.</div>
+        </div>
+
+        <h3>Write Routing</h3>
+        <p>When you add a finding or task, phren resolves which store receives the write:</p>
+        <ol>
+          <li>If store-qualified (e.g. <code>arc-team/arc</code>) — use the explicit store</li>
+          <li>If a team store claims the project in its registry — route to that store</li>
+          <li>Otherwise — default to the primary (personal) store</li>
+        </ol>
+        <pre><code># Finding goes to arc-team store (project claimed)
+phren add-finding arc "Always validate JWT expiry"
+
+# Explicit store target
+phren add-finding arc-team/arc "Always validate JWT expiry"
+
+# Unclaimed project → personal store
+phren add-finding my-side-project "Use pnpm for this one"</code></pre>
+
+        <h3>Git Sync</h3>
+        <p>Sync happens automatically at session boundaries:</p>
+        <ul>
+          <li><strong>Session start:</strong> <code>git pull</code> on all stores (team, readonly, primary)</li>
+          <li><strong>Stop hook:</strong> for each writable store, <code>git add</code> + <code>commit</code> + <code>push</code></li>
+        </ul>
+        <p>Team stores use an <strong>append-only journal</strong> format (<code>journal/YYYY-MM-DD-actor.md</code>) to avoid merge conflicts. Each team member writes to their own file, so concurrent pushes merge cleanly.</p>
+
+        <h3>Example: Setting Up a Team</h3>
+        <pre><code># Alice creates the team store
+phren team init arc-team --remote git@github.com:qualus/phren-arc.git
+phren team add-project arc-team arc
+phren team add-project arc-team arc-api
+
+# Bob joins
+phren team join git@github.com:qualus/phren-arc.git
+
+# Both now share findings for arc and arc-api
+# Personal findings for other projects stay in ~/.phren</code></pre>
 
         <h3 id="project-ownership">Project Ownership</h3>
         <table class="docs-table">

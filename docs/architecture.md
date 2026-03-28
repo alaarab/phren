@@ -258,3 +258,43 @@ Retrieval is optimized for bounded context usage:
 - task APIs support summary/pagination/single-item fetch patterns
 
 This keeps memory growth and prompt context growth decoupled.
+
+## Store Architecture
+
+Phren supports multiple knowledge stores with three roles:
+
+| Role | Read | Write | Git Sync | Use Case |
+|------|------|-------|----------|----------|
+| `primary` | yes | yes | full | Personal store (`~/.phren`) — default write target |
+| `team` | yes | yes | full | Shared team store — journal-based writes avoid merge conflicts |
+| `readonly` | yes | no | pull only | Reference store — company-wide knowledge |
+
+### Store Registry
+
+All stores are registered in `~/.phren/stores.yaml`. Each store has an immutable UUID for provenance tracking and a mutable display name. The registry is the single source of truth for project-to-store routing.
+
+### Multi-Store Data Flow
+
+```
+Session Start
+  ├─ git pull ALL stores (primary + team + readonly)
+  ├─ Build per-store FTS5 indexes
+  └─ Merge search results with store provenance tags
+
+During Session
+  ├─ Reads: search across all readable stores
+  ├─ Writes: routed by registry project claims
+  │   ├─ store-qualified ("arc-team/arc") → explicit store
+  │   ├─ registry claim match → claimed store
+  │   └─ no match → primary store
+  └─ Team writes use append-only journal (one file per actor/day)
+
+Stop Hook
+  ├─ primary: git add -A, commit, push
+  ├─ team: git add journal/, commit, pull --rebase, push
+  └─ readonly: git pull only
+```
+
+### Write Routing
+
+Projects are claimed by stores in the registry. Bare project names resolve unambiguously when only one store contains the project; otherwise `store/project` syntax disambiguates. The `phren promote` command moves findings from personal to team stores explicitly — no silent routing.

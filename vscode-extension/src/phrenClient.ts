@@ -182,7 +182,11 @@ export class PhrenClient {
   }
 
   async listProjects(): Promise<unknown> {
-    return this.callTool("list_projects", {});
+    return this.callTool("list_projects", { page_size: 50 });
+  }
+
+  async storeList(): Promise<unknown> {
+    return this.callTool("store_list", {});
   }
 
   async getProjectSummary(project: string): Promise<unknown> {
