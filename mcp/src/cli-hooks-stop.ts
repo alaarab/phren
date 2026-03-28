@@ -524,8 +524,8 @@ export async function handleHookStop() {
     for (const store of otherStores) {
       if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
 
-      if (store.role === "team") {
-        // Team stores: stage team-safe files, commit, and push
+      if (store.role === "team" && store.sync !== "pull-only") {
+        // Team stores with managed-git sync: stage team-safe files, commit, and push
         try {
           const storeStatus = await runBestEffortGit(["status", "--porcelain"], store.path);
           if (storeStatus.ok && storeStatus.output) {

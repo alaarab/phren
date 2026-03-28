@@ -12,6 +12,46 @@ import {
   homeDir,
   readRootManifest,
 } from "../shared.js";
+/**
+ * Cached store project dirs to avoid repeated dynamic imports in sync code paths.
+ * Populated by `refreshStoreProjectDirs()`, consumed by `getAllStoreProjectDirs()`.
+ */
+let _cachedStoreProjectDirs: string[] | null = null;
+let _cachedStorePhrenPath: string | null = null;
+
+/**
+ * Gather project directories from the primary store AND all non-primary stores.
+ * This enables the FTS5 index to include team store projects alongside personal ones.
+ * Uses a sync cache populated by the async buildIndex path.
+ */
+function getAllStoreProjectDirs(phrenPath: string, profile?: string): string[] {
+  const dirs = [...getProjectDirs(phrenPath, profile)];
+  if (_cachedStoreProjectDirs && _cachedStorePhrenPath === phrenPath) {
+    dirs.push(..._cachedStoreProjectDirs);
+  }
+  return dirs;
+}
+
+/**
+ * Refresh the store project dirs cache. Called from async contexts (buildIndex, etc.)
+ * before sync code paths that need getAllStoreProjectDirs.
+ */
+async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Promise<void> {
+  try {
+    const { getNonPrimaryStores } = await import("../store-registry.js");
+    const otherStores = getNonPrimaryStores(phrenPath);
+    const dirs: string[] = [];
+    for (const store of otherStores) {
+      if (!fs.existsSync(store.path)) continue;
+      dirs.push(...getProjectDirs(store.path, profile));
+    }
+    _cachedStoreProjectDirs = dirs;
+    _cachedStorePhrenPath = phrenPath;
+  } catch {
+    _cachedStoreProjectDirs = [];
+    _cachedStorePhrenPath = phrenPath;
+  }
+}
 import { getIndexPolicy, withFileLock } from "./governance.js";
 import { stripTaskDoneSection } from "./content.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
@@ -247,7 +287,7 @@ function touchSentinel(phrenPath: string): void {
 function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: string[]): string {
   const policy = getIndexPolicy(phrenPath);
   const hash = crypto.createHash("sha1");
-  const topicConfigEntries = getProjectDirs(phrenPath, profile)
+  const topicConfigEntries = getAllStoreProjectDirs(phrenPath, profile)
     .map((dir) => path.join(dir, "topic-config.json"))
     .filter((configPath) => fs.existsSync(configPath));
 
@@ -269,9 +309,9 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       }
     }
   } else {
-    const projectDirs = getProjectDirs(phrenPath, profile);
+    const allProjectDirs = getAllStoreProjectDirs(phrenPath, profile);
     const files: string[] = [];
-    for (const dir of projectDirs) {
+    for (const dir of allProjectDirs) {
       const projectName = path.basename(dir);
       const config = readProjectConfig(phrenPath, projectName);
       const ownership = getProjectOwnershipMode(phrenPath, projectName, config);
@@ -458,7 +498,7 @@ function getRepoManagedInstructionEntries(phrenPath: string, project: string): F
 }
 
 function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[]; entries: FileEntry[] } {
-  const projectDirs = getProjectDirs(phrenPath, profile);
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   const indexPolicy = getIndexPolicy(phrenPath);
   const entries: FileEntry[] = [];
   const allAbsolutePaths: string[] = [];
@@ -892,7 +932,8 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
 
 async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
-  const projectDirs = getProjectDirs(phrenPath, profile);
+  await refreshStoreProjectDirs(phrenPath, profile);
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   beginUserFragmentBuildCache(phrenPath, projectDirs.map(dir => path.basename(dir)));
   try {
 
@@ -1399,12 +1440,16 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
   if (manifest?.installMode === "project-local") {
     return manifest.primaryProject || null;
   }
-  const projectDirs = getProjectDirs(phrenPath, profile);
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   const resolvedCwd = path.resolve(cwd);
   let bestMatch: { project: string; length: number } | null = null;
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
-    const sourcePath = getProjectSourcePath(phrenPath, projectName);
+    // Try the project's own store path first (handles team store projects),
+    // then fall back to primary phrenPath
+    const storePhrenPath = path.dirname(dir);
+    const sourcePath = getProjectSourcePath(storePhrenPath, projectName)
+      || getProjectSourcePath(phrenPath, projectName);
     if (!sourcePath) continue;
     const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep);
     if (!matches) continue;
