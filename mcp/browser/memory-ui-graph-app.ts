@@ -768,13 +768,50 @@ function positionForNode(nodeId: string): { x: number; y: number } | null {
 
 function hideTooltip(): void {
   if (!state.tooltip) return;
-  state.tooltip.classList.remove("visible");
-  state.tooltip.textContent = "";
+  state.tooltip.style.opacity = "0";
+  state.tooltip.innerHTML = "";
 }
 
-function showTooltip(_nodeId: string, _event: { x: number; y: number }): void {
-  // Disabled: sigma already renders node labels on canvas via drawCustomLabel.
-  // Showing the tooltip too caused duplicate label text on hover.
+function showTooltip(nodeId: string, event: { x: number; y: number }): void {
+  if (!state.tooltip) return;
+
+  const node = state.nodeById.get(nodeId);
+  if (!node) return;
+
+  let preview = "";
+
+  if (node.kind === "finding") {
+    // Show first 100 chars of the finding
+    const text = node.fullLabel || node.label || "";
+    const truncated = text.length > 100 ? text.slice(0, 97) + "..." : text;
+    preview = truncated;
+  } else if (node.kind === "task") {
+    // Show task line + section + priority
+    const line = node.fullLabel || node.label || "";
+    const section = node.section ? `[${node.section}]` : "";
+    const priority = node.priority ? `${node.priority}◆` : "";
+    preview = `${line}\n${[section, priority].filter(Boolean).join(" ")}`;
+  } else if (node.kind === "entity") {
+    // Show type + ref count + connected projects
+    const refCount = node.refCount || 0;
+    const projects = node.connectedProjects?.length || 0;
+    preview = `${node.label}\n${refCount} refs • ${projects} projects`;
+  } else if (node.kind === "project") {
+    // Show finding count + task count
+    const findingCount = node.findingCount || 0;
+    const taskCount = node.taskCount || 0;
+    preview = `${node.label}\n${findingCount} findings • ${taskCount} tasks`;
+  } else {
+    // Default: just show the label
+    preview = node.label || node.id;
+  }
+
+  if (preview) {
+    state.tooltip.textContent = preview;
+    state.tooltip.style.left = event.x + 12 + "px";
+    state.tooltip.style.top = event.y + 12 + "px";
+    state.tooltip.style.opacity = "1";
+  }
 }
 
 function notifySelection(nodeId: string): void {
@@ -1324,6 +1361,26 @@ function mount(payload: GraphPayload): void {
   if (!state.container) {
     console.error("[phrenGraph] #graph-canvas not found");
     return;
+  }
+
+  // Style tooltip
+  if (state.tooltip) {
+    state.tooltip.style.position = "absolute";
+    state.tooltip.style.pointerEvents = "none";
+    state.tooltip.style.zIndex = "1000";
+    state.tooltip.style.maxWidth = "300px";
+    state.tooltip.style.padding = "8px 12px";
+    state.tooltip.style.borderRadius = "6px";
+    state.tooltip.style.fontSize = "13px";
+    state.tooltip.style.backgroundColor = "rgba(0, 0, 0, 0.85)";
+    state.tooltip.style.color = "#fff";
+    state.tooltip.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.3)";
+    state.tooltip.style.opacity = "0";
+    state.tooltip.style.transition = "opacity 150ms ease-in-out";
+    state.tooltip.style.whiteSpace = "pre-wrap";
+    state.tooltip.style.wordBreak = "break-word";
+    state.tooltip.style.lineHeight = "1.4";
+    state.tooltip.classList.add("graph-tooltip");
   }
 
   state.payload = payload || {};
