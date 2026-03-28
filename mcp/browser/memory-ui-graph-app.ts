@@ -189,6 +189,7 @@ const state = {
   tooltip: null as HTMLElement | null,
   selectedNodeId: null as string | null,
   hoveredNodeId: null as string | null,
+  focusedProjectId: null as string | null,
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
   filterTypes: {
@@ -418,6 +419,21 @@ function connectionCounts(nodeId: string): NodeDetail["connections"] {
     else if (neighbor.kind === "reference") counts.references++;
   });
   return counts;
+}
+
+/** Check if a node is in a project's direct network (1-hop neighbors). */
+function isInProjectNetwork(nodeId: string, projectId: string): boolean {
+  if (nodeId === projectId) return true;
+  const neighbors = state.visibleAdjacency.get(projectId);
+  if (neighbors?.has(nodeId)) return true;
+  // Also include nodes that share an edge with any direct neighbor (cross-project links)
+  const nodeNeighbors = state.visibleAdjacency.get(nodeId);
+  if (nodeNeighbors) {
+    for (const nn of nodeNeighbors) {
+      if (neighbors?.has(nn)) return true;
+    }
+  }
+  return false;
 }
 
 function nodeDetail(nodeId: string): NodeDetail | null {
@@ -777,6 +793,25 @@ function refreshRenderer(resetCamera: boolean): void {
       zIndex: true,
       nodeReducer(nodeId, data) {
         const next: Record<string, unknown> = { ...data };
+
+        // Focus mode: project is focused — fade everything outside its network
+        if (state.focusedProjectId) {
+          if (nodeId === state.focusedProjectId) {
+            next.highlighted = true;
+            next.forceLabel = true;
+            next.zIndex = 20;
+          } else if (isInProjectNetwork(nodeId, state.focusedProjectId)) {
+            next.zIndex = 10;
+            next.forceLabel = data.size >= 10;
+          } else {
+            next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.08 : 0.10);
+            next.label = null;
+            next.zIndex = 1;
+          }
+          return next;
+        }
+
+        // Normal selection/hover
         const focus = state.hoveredNodeId || state.selectedNodeId;
         if (nodeId === state.selectedNodeId) {
           next.size = Math.max(data.size * 1.18, data.size + 2);
@@ -801,6 +836,24 @@ function refreshRenderer(resetCamera: boolean): void {
       },
       edgeReducer(edgeId, data) {
         const next: Record<string, unknown> = { ...data };
+
+        // Focus mode: only edges within the focused project's network stay visible
+        if (state.focusedProjectId) {
+          const extremities = state.graph?.extremities(edgeId);
+          if (!extremities) return next;
+          const srcIn = isInProjectNetwork(extremities[0], state.focusedProjectId);
+          const tgtIn = isInProjectNetwork(extremities[1], state.focusedProjectId);
+          if (srcIn && tgtIn) {
+            next.color = hexToRgba(String(data.color || "#888"), state.theme === "dark" ? 0.6 : 0.5);
+            next.size = Math.max(1.5, data.size);
+          } else {
+            next.color = hexToRgba("#888", state.theme === "dark" ? 0.03 : 0.04);
+            next.size = 0.5;
+          }
+          return next;
+        }
+
+        // Normal selection/hover
         const focus = state.hoveredNodeId || state.selectedNodeId;
         if (!focus) return next;
         const extremities = state.graph?.extremities(edgeId);
@@ -1135,8 +1188,9 @@ function mount(payload: GraphPayload): void {
 }
 
 function clearSelection(): void {
-  if (!state.selectedNodeId) return;
+  if (!state.selectedNodeId && !state.focusedProjectId) return;
   state.selectedNodeId = null;
+  state.focusedProjectId = null;
   state.hoveredNodeId = null;
   hideTooltip();
   state.renderer?.refresh();
@@ -1145,6 +1199,36 @@ function clearSelection(): void {
 
 function selectNode(nodeId: string): boolean {
   if (!state.graph?.hasNode(nodeId)) return false;
+
+  // Project click → toggle focus mode
+  const node = state.nodeById.get(nodeId);
+  if (node?.kind === "project") {
+    if (state.focusedProjectId === nodeId) {
+      // Already focused on this project — unfocus
+      clearSelection();
+      return true;
+    }
+    state.focusedProjectId = nodeId;
+    state.selectedNodeId = null;
+    state.hoveredNodeId = null;
+    state.renderer?.refresh();
+    const display = state.renderer?.getNodeDisplayData(nodeId);
+    if (display && state.renderer) {
+      state.renderer.getCamera().animate({
+        x: display.x,
+        y: display.y,
+        ratio: Math.max(state.renderer.getCamera().ratio * 0.8, 0.12),
+      }, { duration: 280 });
+    }
+    notifySelection(nodeId);
+    if (mascot.initialized && nodeId !== mascot.currentNodeId) {
+      mascotMoveTo(nodeId);
+    }
+    return true;
+  }
+
+  // Non-project click → normal selection (clear focus mode)
+  state.focusedProjectId = null;
   state.selectedNodeId = nodeId;
   state.hoveredNodeId = nodeId;
   state.renderer?.refresh();
@@ -1157,7 +1241,6 @@ function selectNode(nodeId: string): boolean {
     }, { duration: 220 });
   }
   notifySelection(nodeId);
-  // Send phren mascot to the selected node
   if (mascot.initialized && nodeId !== mascot.currentNodeId) {
     mascotMoveTo(nodeId);
   }

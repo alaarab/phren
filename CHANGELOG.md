@@ -3,6 +3,19 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.52] - 2026-03-28
+
+### Added
+- **Focus mode** — click a project node in the fragment graph to isolate its subgraph. Everything outside fades to ~10% opacity. Click again to unfocus, or press Escape. Works in both web UI and VS Code extension.
+- **Complete team store routing** — all CLI commands, shell TUI views, session tools, governance checks, and data layer functions now resolve team store projects correctly.
+
+### Fixed
+- **Shell TUI** — readTasks/readFindings/readReviewQueue now resolve team store paths for project data.
+- **CLI** — truths, consolidation status, export, archive, findings list, hooks validation all resolve team stores.
+- **Session tools** — session_start/end read project findings/tasks from correct store. getSessionArtifacts iterates all stores.
+- **Data layer** — readReviewQueueAcrossProjects, listProjectCards, checkConsolidationNeeded include team store projects.
+- **Graph** — get_related_docs resolves store per doc project name.
+
 ## [0.0.51] - 2026-03-28
 
 ### Fixed
