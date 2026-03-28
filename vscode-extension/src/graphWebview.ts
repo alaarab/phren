@@ -485,6 +485,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
 async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string }[]> {
   const raw = await client.listProjects();
   const data = responseData(raw);
+  const seen = new Set<string>();
   const parsed: { name: string; brief?: string }[] = [];
   for (const entry of asArray(data?.projects)) {
     const record = asRecord(entry);
@@ -494,7 +495,10 @@ async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief
     if (name.includes(":") || name.includes("/") || name.includes("\\")) continue;
     if (name === "global" || name === "scripts" || name === "templates" || name === "profiles") continue;
     // Filter known stale/non-profile projects (should be fixed at MCP level long-term)
-    if (name === "dendron" || name === "phren-framework" || name === "max4liveplugins" || name === "pcn-reports") continue;
+    if (name === "dendron" || name === "phren-framework") continue;
+    // Deduplicate: same project name can appear across multiple stores — take first occurrence
+    if (seen.has(name)) continue;
+    seen.add(name);
     parsed.push({ name, brief: asString(record?.brief) });
   }
   return parsed;
