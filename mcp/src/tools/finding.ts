@@ -664,7 +664,7 @@ async function handlePushChanges(
           try {
             runStoreGit(["push"], { timeout: 15000 });
             teamResults.push({ store: store.name, pushed: true });
-          } catch (pushErr: unknown) {
+          } catch {
             try {
               runStoreGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
               runStoreGit(["push"], { timeout: 15000 });
