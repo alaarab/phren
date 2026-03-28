@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -46,9 +46,19 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().describe("Project name to export."),
       }),
     },
-    async ({ project }) => {
+    async ({ project: projectInput }) => {
+      // Resolve store-qualified project names (e.g. "qualus-shared/arc")
+      let resolvedPhrenPath: string;
+      let project: string;
+      try {
+        const resolved = resolveStoreForProject(ctx, projectInput);
+        resolvedPhrenPath = resolved.phrenPath;
+        project = resolved.project;
+      } catch (err: unknown) {
+        return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const projectDir = safeProjectPath(phrenPath, project);
+      const projectDir = safeProjectPath(resolvedPhrenPath, project);
       if (!projectDir || !fs.existsSync(projectDir) || !fs.statSync(projectDir).isDirectory()) {
         return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
       }
@@ -58,16 +68,15 @@ export function register(server: McpServer, ctx: McpContext): void {
       const summaryPath = safeProjectPath(projectDir, "summary.md");
       if (summaryPath && fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
 
-      const learningsResult = readFindings(phrenPath, project);
+      const learningsResult = readFindings(resolvedPhrenPath, project);
       if (learningsResult.ok) exported.learnings = learningsResult.data;
       const findingsPath = safeProjectPath(projectDir, "FINDINGS.md");
       if (findingsPath && fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
-      const taskResult = readTasks(phrenPath, project);
+      const taskResult = readTasks(resolvedPhrenPath, project);
       if (taskResult.ok) {
         exported.task = taskResult.data.items;
-        // Also export the raw task file string for lossless round-trip (preserves priority/pinned/stable IDs)
-        const taskRawPath = resolveTaskFilePath(phrenPath, project);
+        const taskRawPath = resolveTaskFilePath(resolvedPhrenPath, project);
         if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
       }
 

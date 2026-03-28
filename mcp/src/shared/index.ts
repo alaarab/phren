@@ -43,7 +43,7 @@ async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Pro
     const dirs: string[] = [];
     for (const store of otherStores) {
       if (!fs.existsSync(store.path)) continue;
-      dirs.push(...getProjectDirs(store.path, profile));
+      dirs.push(...getProjectDirs(store.path));
     }
     _cachedStoreProjectDirs = dirs;
     _cachedStorePhrenPath = phrenPath;
@@ -776,6 +776,11 @@ function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): b
     path.join(phrenPath, ".config"),
     path.join(phrenPath, ".runtime"),
   ];
+  // Also check team store root directories so changes there invalidate the cache
+  if (_cachedStoreProjectDirs && _cachedStorePhrenPath === phrenPath) {
+    const storeRoots = new Set(_cachedStoreProjectDirs.map(d => path.dirname(d)));
+    for (const root of storeRoots) dirsToCheck.push(root);
+  }
   for (const dir of dirsToCheck) {
     try {
       const stat = fs.statSync(dir);

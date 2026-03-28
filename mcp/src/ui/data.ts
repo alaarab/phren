@@ -231,46 +231,69 @@ export function getHooksData(phrenPath: string, profile?: string) {
 }
 
 export async function buildGraph(phrenPath: string, profile?: string, focusProject?: string, existingDb?: SqlJsDatabase | null): Promise<{ nodes: GraphNode[]; links: GraphLink[]; total: number; scores: Record<string, EntryScore>; topics: GraphTopicMeta[] }> {
-  const projects = getProjectDirs(phrenPath, profile).map((projectDir) => path.basename(projectDir)).filter((project) => project !== "global");
+  // Collect projects from primary store and all readable non-primary stores
+  const storeProjects: Array<{ storePath: string; project: string }> = [];
+  const primaryProjects = getProjectDirs(phrenPath, profile)
+    .map((projectDir) => path.basename(projectDir))
+    .filter((project) => project !== "global");
+  for (const project of primaryProjects) storeProjects.push({ storePath: phrenPath, project });
+  for (const store of getNonPrimaryStores(phrenPath)) {
+    if (!fs.existsSync(store.path)) continue;
+    try {
+      const storeProjectDirs = getProjectDirs(store.path)
+        .map((projectDir) => path.basename(projectDir))
+        .filter((project) => project !== "global");
+      for (const project of storeProjectDirs) storeProjects.push({ storePath: store.path, project });
+    } catch { /* store not accessible — skip */ }
+  }
+  const projects = storeProjects.map((sp) => sp.project);
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];
   const projectSet = new Set(projects);
 
   // Collect all unique topics across projects for the UI
   const topicMetaMap = new Map<string, GraphTopicMeta>();
+  // Track which project nodes have already been pushed (same name may appear in multiple stores)
+  const addedProjectNodeIds = new Set<string>();
 
-  for (const project of projects) {
+  for (const { storePath, project } of storeProjects) {
     // Load dynamic topics for this project
-    const { topics: projectTopics } = readProjectTopics(phrenPath, project);
+    const { topics: projectTopics } = readProjectTopics(storePath, project);
     for (const topic of projectTopics) {
       if (!topicMetaMap.has(topic.slug)) {
         topicMetaMap.set(topic.slug, { slug: topic.slug, label: topic.label });
       }
     }
 
-    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
+    const findingsPath = path.join(storePath, project, "FINDINGS.md");
     if (!fs.existsSync(findingsPath)) {
+      if (!addedProjectNodeIds.has(project)) {
+        addedProjectNodeIds.add(project);
+        nodes.push({
+          id: project,
+          label: project,
+          fullLabel: project,
+          group: "project",
+          refCount: 0,
+          project,
+          tagged: false,
+        });
+      }
+      continue;
+    }
+
+    if (!addedProjectNodeIds.has(project)) {
+      addedProjectNodeIds.add(project);
       nodes.push({
         id: project,
         label: project,
         fullLabel: project,
         group: "project",
-        refCount: 0,
+        refCount: 1,
         project,
         tagged: false,
       });
-      continue;
     }
-
-    nodes.push({
-      id: project,
-      label: project,
-      fullLabel: project,
-      group: "project",
-      refCount: 1,
-      project,
-      tagged: false,
-    });
 
     const content = fs.readFileSync(findingsPath, "utf8");
     const lines = content.split("\n");
@@ -399,8 +422,8 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
 
   // ── Tasks ──────────────────────────────────────────────────────────
   try {
-    for (const project of projects) {
-      const taskResult = readTasks(phrenPath, project);
+    for (const { storePath, project } of storeProjects) {
+      const taskResult = readTasks(storePath, project);
       if (!taskResult.ok) continue;
       const doc = taskResult.data;
       let taskCount = 0;
@@ -522,8 +545,8 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
 
   // ── Reference docs ────────────────────────────────────────────────
   try {
-    for (const project of projects) {
-      const refDir = path.join(phrenPath, project, "reference");
+    for (const { storePath, project } of storeProjects) {
+      const refDir = path.join(storePath, project, "reference");
       if (!fs.existsSync(refDir) || !fs.statSync(refDir).isDirectory()) continue;
       const files = fs.readdirSync(refDir);
       const MAX_REFS = 20;

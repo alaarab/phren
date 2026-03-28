@@ -624,7 +624,8 @@ function handleGetCsrfToken(res: Res, ctx: RouteCtx): void {
 function handleGetFindings(res: Res, pathname: string, ctx: RouteCtx): void {
   const project = decodeURIComponent(pathname.slice("/api/findings/".length));
   if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
-  const result = readFindings(ctx.phrenPath, project);
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  const result = readFindings(basePath, project);
   jsonOk(res, result.ok ? { ok: true, data: { project, findings: result.data } } : { ok: false, error: result.error });
 }
 

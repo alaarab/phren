@@ -781,10 +781,14 @@ export function appendReviewQueue(
     while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
 
     const existing = new Set(lines.map((line) => line.trim()));
+    // Dedup by entry text only (strip leading date prefix) so the same finding isn't added every day.
+    const existingTexts = new Set(
+      lines.map((line) => line.trim().replace(/^-\s*\[\d{4}-\d{2}-\d{2}\]\s*/, "").trim())
+    );
     const toInsert: string[] = [];
     for (const entry of normalized) {
       const line = `- [${today}] ${entry}`;
-      if (!existing.has(line)) toInsert.push(line);
+      if (!existing.has(line) && !existingTexts.has(entry.trim())) toInsert.push(line);
     }
     if (!toInsert.length) return phrenOk(0);
 

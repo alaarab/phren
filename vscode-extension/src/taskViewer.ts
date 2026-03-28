@@ -127,13 +127,13 @@ function renderTaskHtml(task: TaskData): string {
   ${task.issueUrl ? `<a href="${esc(task.issueUrl)}" style="font-size:12px;color:var(--vscode-textLink-foreground)">#${task.issueNumber ?? "issue"}</a>` : ""}
   <div class="status">${task.checked ? "&#9745; Complete" : "&#9744; Incomplete"}</div>
   <div class="toolbar">
-    <button id="btnEdit" class="btn-primary" onclick="startEdit()">Edit</button>
-    <button id="btnSave" class="btn-primary hidden" onclick="save()">Save</button>
-    <button id="btnCancel" class="btn-secondary hidden" onclick="cancelEdit()">Cancel</button>
-    ${task.section !== "Done" ? '<button class="btn-secondary" onclick="complete()">Mark Done</button>' : ""}
-    <button class="btn-secondary" onclick="linkIssue()">${task.issueUrl ? "Update Issue Link" : "Link Issue"}</button>
-    <button class="btn-secondary" onclick="createIssue()">Create Issue</button>
-    <button class="btn-secondary" onclick="removeTask()">Delete</button>
+    <button id="btnEdit" class="btn-primary">Edit</button>
+    <button id="btnSave" class="btn-primary hidden">Save</button>
+    <button id="btnCancel" class="btn-secondary hidden">Cancel</button>
+    ${task.section !== "Done" ? '<button id="btnComplete" class="btn-secondary">Mark Done</button>' : ""}
+    <button id="btnLinkIssue" class="btn-secondary">${task.issueUrl ? "Update Issue Link" : "Link Issue"}</button>
+    <button id="btnCreateIssue" class="btn-secondary">Create Issue</button>
+    <button id="btnDelete" class="btn-secondary">Delete</button>
   </div>
   <div id="viewMode" class="content-view">${esc(task.line)}</div>
   <textarea id="editMode" class="hidden">${esc(task.line)}</textarea>
@@ -154,24 +154,27 @@ function renderTaskHtml(task: TaskData): string {
       document.getElementById("btnSave").classList.add("hidden");
       document.getElementById("btnCancel").classList.add("hidden");
     }
-    function save() {
+    document.getElementById("btnEdit").addEventListener("click", startEdit);
+    document.getElementById("btnSave").addEventListener("click", function() {
       const text = document.getElementById("editMode").value;
       vscode.postMessage({ type: "save", text: text });
       document.getElementById("viewMode").textContent = text;
       cancelEdit();
-    }
-    function complete() {
+    });
+    document.getElementById("btnCancel").addEventListener("click", cancelEdit);
+    const btnComplete = document.getElementById("btnComplete");
+    if (btnComplete) btnComplete.addEventListener("click", function() {
       vscode.postMessage({ type: "complete" });
-    }
-    function removeTask() {
-      vscode.postMessage({ type: "delete" });
-    }
-    function linkIssue() {
+    });
+    document.getElementById("btnLinkIssue").addEventListener("click", function() {
       vscode.postMessage({ type: "linkIssue" });
-    }
-    function createIssue() {
+    });
+    document.getElementById("btnCreateIssue").addEventListener("click", function() {
       vscode.postMessage({ type: "createIssue" });
-    }
+    });
+    document.getElementById("btnDelete").addEventListener("click", function() {
+      vscode.postMessage({ type: "delete" });
+    });
   </script>
 </body>
 </html>`;

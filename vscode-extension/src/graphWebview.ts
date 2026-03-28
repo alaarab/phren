@@ -809,6 +809,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     .graph-shell { height: calc(100vh - 120px); position: relative; overflow: hidden; }
     .graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
     #graph-canvas { width: 100%; height: 100%; display: block; }
+    #ambient-canvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:2; }
     #graph-tooltip {
       display: none;
       position: absolute;
@@ -988,6 +989,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
   <main class="graph-shell">
     <section class="graph-container">
       <div id="graph-canvas"></div>
+      <canvas id="ambient-canvas" aria-hidden="true"></canvas>
       <div id="graph-tooltip"></div>
       <div class="graph-controls">
         <button id="btn-zoom-in" title="Zoom in">+</button>
@@ -1387,6 +1389,98 @@ ${graphScript}
       hidePopover(true);
     });
   }
+
+  // Ambient particle animation overlay
+  (function() {
+    var canvas = document.getElementById('ambient-canvas');
+    if (!canvas || typeof canvas.getContext !== 'function') return;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    var W = 0, H = 0;
+    function resize() {
+      var rect = canvas.parentElement ? canvas.parentElement.getBoundingClientRect() : { width: 900, height: 600 };
+      W = rect.width || canvas.offsetWidth;
+      H = rect.height || canvas.offsetHeight;
+      canvas.width = W;
+      canvas.height = H;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Parse accent color from CSS variable, fallback to phren purple-blue
+    var accentR = 100, accentG = 140, accentB = 255;
+    try {
+      var raw = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+      if (raw.startsWith('#') && raw.length >= 7) {
+        accentR = parseInt(raw.slice(1, 3), 16);
+        accentG = parseInt(raw.slice(3, 5), 16);
+        accentB = parseInt(raw.slice(5, 7), 16);
+      }
+    } catch (_e) {}
+
+    var COUNT = 26;
+    var particles = [];
+
+    function spawn(fromBottom) {
+      return {
+        x: Math.random() * W,
+        y: fromBottom ? H + Math.random() * 30 : Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.28,
+        vy: -(0.18 + Math.random() * 0.42),
+        r: 0.6 + Math.random() * 1.4,
+        alpha: fromBottom ? 0 : Math.random() * 0.18,
+        maxAlpha: 0.07 + Math.random() * 0.13,
+        phase: Math.random() * Math.PI * 2,
+        growing: true
+      };
+    }
+
+    for (var i = 0; i < COUNT; i++) particles.push(spawn(false));
+
+    var lastTs = 0;
+    function tick(ts) {
+      var dt = lastTs ? Math.min((ts - lastTs) / 16, 4) : 1;
+      lastTs = ts;
+
+      if (!document.hidden && W > 0 && H > 0) {
+        ctx.clearRect(0, 0, W, H);
+
+        for (var j = 0; j < particles.length; j++) {
+          var p = particles[j];
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.phase += 0.018 * dt;
+
+          if (p.growing) {
+            p.alpha = Math.min(p.alpha + 0.0025 * dt, p.maxAlpha);
+            if (p.alpha >= p.maxAlpha) p.growing = false;
+          }
+
+          // fade out as particle approaches top 15% of canvas
+          if (p.y < H * 0.15) {
+            p.alpha = Math.max(p.alpha - 0.006 * dt, 0);
+          }
+
+          if (p.y < -10 || p.alpha <= 0) {
+            particles[j] = spawn(true);
+            continue;
+          }
+
+          var pulse = 0.72 + 0.28 * Math.sin(p.phase);
+          var a = Math.max(0, Math.min(1, p.alpha * pulse));
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(' + accentR + ',' + accentG + ',' + accentB + ',' + a + ')';
+          ctx.fill();
+        }
+      }
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  })();
+
 })();
   </script>
 </body>

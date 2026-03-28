@@ -35,6 +35,12 @@ interface TaskPromptLifecycleResult {
 const ACTION_PREFIX_RE = /^(?:please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+|i want to\s+|let(?:'|’)s\s+|lets\s+|help me\s+)/i;
 const EXPLICIT_TASK_PREFIX_RE = /^(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:task|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:task|todo(?:\s+list)?|task(?:\s+list)?))\s*(?::|-|,)?\s*/i;
 const NON_ACTIONABLE_RE = /\b(brainstorm|idea|ideas|maybe|what if|should we|could we|would it make sense|question|explain|why is|how does)\b/i;
+// Conversational noise: only matches when the ENTIRE prompt is a short ack/reaction (under 40 chars).
+// This avoids rejecting "sure, go ahead and fix the build" or "great, now update the docs".
+const CONVERSATIONAL_NOISE_RE = /^(ok|okay|yeah|yep|nah|nope|hi|hey|ss|bro|lol|lmao|got it|sounds good|perfect|great|sure|thanks|thank you|ty|np|no problem|alright|cool|nice|damn|wtf|omg|fok)[\s!.?,]*$/i;
+// Raw system/SQL error fragment signals — patterns that only appear in error output, never real task requests.
+// Intentionally does NOT include "line \d+" or "incorrect syntax" alone (too broad — they appear in dev prompts).
+const RAW_MESSAGE_SIGNALS_RE = /\b(msg \d+, level \d+|cannot insert the value null|insufficient result space|uniqueidentifier value to char|pgevision-prod|task-notification|tool-use-id|toolu_0[a-z0-9])\b/i;
 const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
 const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
 const GITHUB_URL_RE = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+(?:[?#][^\s]*)?/g;
@@ -115,6 +121,9 @@ function isActionablePrompt(prompt: string, intent: string): boolean {
   const normalized = prompt.trim();
   if (!normalized) return false;
   if (NON_ACTIONABLE_RE.test(normalized)) return false;
+  // Always reject conversational noise and raw system/SQL fragments regardless of intent.
+  if (CONVERSATIONAL_NOISE_RE.test(normalized)) return false;
+  if (RAW_MESSAGE_SIGNALS_RE.test(normalized)) return false;
   if (intent === "general") return ACTIONABLE_RE.test(normalized);
   return true;
 }
