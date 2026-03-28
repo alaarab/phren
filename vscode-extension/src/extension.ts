@@ -23,6 +23,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
   context.subscriptions.push(hooksOutputChannel);
   outputChannel.appendLine("Phren extension activating...");
+
+  // Set context keys optimistically to prevent "not set up" / "no projects"
+  // flash while async initialization runs. Real values override below.
+  await vscode.commands.executeCommand("setContext", "phren.backendInstalled", true);
+  await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", true);
+
   const config = vscode.workspace.getConfiguration("phren");
   await runOnboardingIfNeeded(config, outputChannel);
   const runtimeConfig = resolveRuntimeConfig(vscode.workspace.getConfiguration("phren"));
