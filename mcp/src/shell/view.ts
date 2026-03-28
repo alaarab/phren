@@ -622,7 +622,8 @@ export interface SkillEntry {
 }
 
 export function getProjectSkills(phrenPath: string, project: string): SkillEntry[] {
-  return getScopedSkills(phrenPath, "", project).map((skill) => ({
+  const storePath = resolveProjectStorePath(phrenPath, project);
+  return getScopedSkills(storePath, "", project).map((skill) => ({
     name: skill.name,
     path: skill.path,
     enabled: skill.enabled,
@@ -725,10 +726,11 @@ const LIFECYCLE_HOOKS: Array<{ event: string; description: string }> = [
 export function getHookEntries(phrenPath: string, project?: string | null): HookEntry[] {
   const prefs = readInstallPreferences(phrenPath);
   const hooksEnabled = prefs.hooksEnabled !== false;
-  const projectConfig = project ? readProjectConfig(phrenPath, project) : undefined;
+  const storePath = project ? resolveProjectStorePath(phrenPath, project) : phrenPath;
+  const projectConfig = project ? readProjectConfig(storePath, project) : undefined;
   return LIFECYCLE_HOOKS.map((h) => ({
     ...h,
-    enabled: hooksEnabled && isProjectHookEnabled(phrenPath, project, h.event as typeof PROJECT_HOOK_EVENTS[number], projectConfig),
+    enabled: hooksEnabled && isProjectHookEnabled(storePath, project, h.event as typeof PROJECT_HOOK_EVENTS[number], projectConfig),
   }));
 }
 

@@ -42,6 +42,7 @@ import {
   normalizeFindingText,
 } from "../content/metadata.js";
 import { withSafeLock, ensureProject } from "../shared/data-utils.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 export type { TaskSection, TaskItem, TaskDoc } from "./tasks.js";
 export {
   readTasks,
@@ -751,13 +752,11 @@ export function readReviewQueueAcrossProjects(phrenPath: string, profile?: strin
 
   // Include projects from team stores
   try {
-    const storeRegistry = require("../store-registry.js");
-    const { getNonPrimaryStores } = storeRegistry;
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
-      const storeDirs = getProjectDirs(store.path)
-        .map((d) => path.basename(d))
-        .filter((p) => p !== "global");
+      const storeDirs = getStoreProjectDirs(store)
+        .map((d: string) => path.basename(d))
+        .filter((p: string) => p !== "global");
       for (const storeProject of storeDirs) {
         if (seen.has(storeProject)) continue;
         seen.add(storeProject);

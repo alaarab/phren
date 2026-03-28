@@ -68,6 +68,17 @@ phren team join git@github.com:org/phren-team.git
 
 Each team store syncs independently. Run `phren team list` to see all registered stores.
 
+### Filtering Team Store Projects
+
+Subscribe to only the projects you care about:
+
+```bash
+phren store subscribe qualus-shared arc intranet ogrid
+phren store unsubscribe qualus-shared dendron powergrid-api
+```
+
+Unsubscribed projects still exist in the store but won't appear in search, UI, or context injection.
+
 ---
 
 MIT License. Made by [Ala Arab](https://github.com/alaarab).

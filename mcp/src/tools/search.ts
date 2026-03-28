@@ -4,6 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";
+import { execFileSync } from "child_process";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { resolveAllStores } from "../store-registry.js";
 import { readFindings } from "../data/access.js";
@@ -584,13 +585,12 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     : [];
 
   // Gather projects from non-primary stores
-  const { getNonPrimaryStores } = await import("../store-registry.js");
-  const { getProjectDirs } = await import("../phren-paths.js");
+  const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
   const nonPrimaryStores = getNonPrimaryStores(phrenPath);
   const storeProjects: Array<{ name: string; store: string }> = [];
   for (const store of nonPrimaryStores) {
     if (!fs.existsSync(store.path)) continue;
-    const dirs = getProjectDirs(store.path);
+    const dirs = getStoreProjectDirs(store);
     for (const dir of dirs) {
       const projName = path.basename(dir);
       storeProjects.push({ name: projName, store: store.name });
@@ -747,12 +747,14 @@ async function handleStoreList(ctx: McpContext) {
   const stores = resolveAllStores(phrenPath);
 
   const storeData = stores.map((store) => {
-    let health: Record<string, unknown> | null = null;
+    // Get last sync time from git log
+    let lastSync: string | null = null;
     try {
-      const healthPath = path.join(store.path, ".runtime", "health.json");
-      if (fs.existsSync(healthPath)) {
-        health = JSON.parse(fs.readFileSync(healthPath, "utf8"))?.lastSync ?? null;
-      }
+      const result = execFileSync(
+        "git", ["log", "-1", "--format=%ci"],
+        { cwd: store.path, encoding: "utf8", timeout: 3000 }
+      ).trim();
+      lastSync = result || null;
     } catch { /* non-critical */ }
 
     return {
@@ -764,7 +766,7 @@ async function handleStoreList(ctx: McpContext) {
       remote: store.remote ?? null,
       exists: fs.existsSync(store.path),
       projects: store.projects ?? null,
-      lastSync: health,
+      lastSync,
     };
   });
 
