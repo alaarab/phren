@@ -40,7 +40,7 @@ npm publish        # publish to npm (needs OTP)
 
 ## Current Version
 
-0.0.45
+0.0.46
 
 ## MCP Tools (53)
 
@@ -208,6 +208,13 @@ phren store list                      List registered stores
 phren store add <name> --remote <url> Add a team store
 phren store remove <name>             Remove a store (local only)
 phren store sync                      Pull all stores
+
+phren team init <name> [--remote <url>]     Create a new team store
+phren team join <git-url> [--name <name>]   Join an existing team store
+phren team add-project <store> <project>    Add a project to a team store
+phren team list                             List team stores
+
+phren truths <project>                Show pinned truths for a project
 phren config machines                 Registered machines
 phren config profiles                 Profiles and projects
 

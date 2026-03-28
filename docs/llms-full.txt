@@ -198,6 +198,18 @@ CLI Commands:
     phren update [--refresh-starter]      - update package
     phren uninstall                       - remove phren config and hooks
 
+  Team stores:
+    phren team init <name> [--remote <url>] [--description <text>] - create a new team store
+    phren team join <git-url> [--name <name>]   - join an existing team store
+    phren team add-project <store> <project>    - add a project to a team store
+    phren team list                             - list team stores and sync status
+
+  Store management:
+    phren store list                      - list registered stores
+    phren store add <name> --remote <url> - add a team store
+    phren store remove <name>             - remove a store (local only)
+    phren store sync                      - pull all stores
+
   Modes:
     phren mcp-mode on|off|status          - toggle MCP integration
     phren hooks-mode on|off|status        - toggle hook execution

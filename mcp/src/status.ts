@@ -285,6 +285,29 @@ export async function runStatus() {
     console.log(`  ${DIM}          Not configured: ${missingAgents.join(", ")} — run phren init to add${RESET}`);
   }
 
+  // Stores
+  try {
+    const { resolveAllStores } = await import("./store-registry.js");
+    const stores = resolveAllStores(phrenPath);
+    if (stores.length > 0) {
+      const primaryCount = stores.filter((s) => s.role === "primary").length;
+      const teamCount = stores.filter((s) => s.role === "team").length;
+      const readonlyCount = stores.filter((s) => s.role === "readonly").length;
+      const roleParts: string[] = [];
+      if (primaryCount > 0) roleParts.push(`${primaryCount} primary`);
+      if (teamCount > 0) roleParts.push(`${teamCount} team`);
+      if (readonlyCount > 0) roleParts.push(`${readonlyCount} readonly`);
+      console.log(`\n  ${BOLD}Stores${RESET} ${DIM}(${stores.length} stores: ${roleParts.join(", ")})${RESET}`);
+      for (const store of stores) {
+        const exists = fs.existsSync(store.path);
+        const existsLabel = exists ? `${GREEN}yes${RESET}` : `${RED}no${RESET}`;
+        console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${store.remote ? ` remote=${DIM}${store.remote}${RESET}` : ""}`);
+      }
+    }
+  } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG)) logger.debug("status", `statusStores: ${errorMessage(err)}`);
+  }
+
   // Stats
   const projectDirs = getProjectDirs(phrenPath, profile);
   let totalFindings = 0;
