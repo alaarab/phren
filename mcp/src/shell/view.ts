@@ -15,6 +15,7 @@ import {
   resolveTaskFilePath,
   ShellState,
 } from "../data/access.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 import {
   style,
   badge,
@@ -58,6 +59,17 @@ export interface ViewContext {
   currentCursor: () => number;
   currentScroll: () => number;
   setScroll: (n: number) => void;
+}
+
+/** Resolve which store (primary or team) contains a project */
+function resolveProjectStorePath(phrenPath: string, project: string): string {
+  if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
+  try {
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (fs.existsSync(path.join(store.path, project))) return store.path;
+    }
+  } catch { /* fall through */ }
+  return phrenPath;
 }
 
 // ── Tab bar ────────────────────────────────────────────────────────────────
@@ -181,9 +193,10 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
       };
     }
 
-    const task = readTasks(ctx.phrenPath, card.name);
-    const findings = readFindings(ctx.phrenPath, card.name);
-    const review = readReviewQueue(ctx.phrenPath, card.name);
+    const storePath = resolveProjectStorePath(ctx.phrenPath, card.name);
+    const task = readTasks(storePath, card.name);
+    const findings = readFindings(storePath, card.name);
+    const review = readReviewQueue(storePath, card.name);
 
     return {
       ...card,
@@ -363,7 +376,8 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     return { lines: [style.dim("  No project selected — navigate to Projects (← →) and press ↵")], subsectionsCache };
   }
 
-  const result = readTasks(ctx.phrenPath, project);
+  const storePath = resolveProjectStorePath(ctx.phrenPath, project);
+  const result = readTasks(storePath, project);
   if (!result.ok) return { lines: [result.error], subsectionsCache };
 
   const parsed = result.data;
@@ -371,9 +385,9 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
     : [];
 
-  const taskFile = resolveTaskFilePath(ctx.phrenPath, project)
-    ?? canonicalTaskFilePath(ctx.phrenPath, project)
-    ?? path.join(ctx.phrenPath, project, "tasks.md");
+  const taskFile = resolveTaskFilePath(storePath, project)
+    ?? canonicalTaskFilePath(storePath, project)
+    ?? path.join(storePath, project, "tasks.md");
   const subsResult = parseSubsections(taskFile, project, subsectionsCache);
   const subsections = subsResult.map;
   const newCache = subsResult.cache;
@@ -463,7 +477,8 @@ function renderFindingsView(ctx: ViewContext, cursor: number, height: number): s
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
-  const result = readFindings(ctx.phrenPath, project);
+  const storePath = resolveProjectStorePath(ctx.phrenPath, project);
+  const result = readFindings(storePath, project);
   if (!result.ok) return [result.error];
 
   const all = result.data;
@@ -532,7 +547,8 @@ function renderMemoryQueueView(ctx: ViewContext, cursor: number, height: number)
   const project = ctx.state.project;
   if (!project) return [style.dim("  No project selected.")];
 
-  const result = readReviewQueue(ctx.phrenPath, project);
+  const storePath = resolveProjectStorePath(ctx.phrenPath, project);
+  const result = readReviewQueue(storePath, project);
   if (!result.ok) return [result.error];
 
   const filtered = ctx.state.filter

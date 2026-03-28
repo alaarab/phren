@@ -96,6 +96,23 @@ export function checkConsolidationNeeded(phrenPath: string, profile?: string): C
     }
   }
 
+  // Include projects from team stores
+  try {
+    const storeRegistry = require("../store-registry.js");
+    const { getNonPrimaryStores } = storeRegistry;
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (!fs.existsSync(store.path)) continue;
+      for (const dir of getProjectDirs(store.path)) {
+        const status = getProjectConsolidationStatus(dir);
+        if (status && status.recommended) {
+          results.push(status);
+        }
+      }
+    }
+  } catch {
+    // store-registry not available or error loading, continue with primary only
+  }
+
   return results;
 }
 

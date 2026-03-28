@@ -61,7 +61,7 @@ export function handleTaskView(profile: string) {
   console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
 }
 
-export function handleSessionsView(args: string[]) {
+export async function handleSessionsView(args: string[]) {
   const phrenPath = getPhrenPath();
   const sessionId = args[0];
 
@@ -73,7 +73,7 @@ export function handleSessionsView(args: string[]) {
       console.error(`Session "${sessionId}" not found.`);
       process.exit(1);
     }
-    const artifacts = getSessionArtifacts(phrenPath, session.sessionId);
+    const artifacts = await getSessionArtifacts(phrenPath, session.sessionId);
     console.log(`Session: ${session.sessionId.slice(0, 8)}`);
     console.log(`Project: ${session.project ?? "—"}`);
     console.log(`Started: ${session.startedAt.slice(0, 16).replace("T", " ")}`);

@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -393,21 +393,27 @@ interface SessionArtifactTask {
   checked: boolean;
 }
 
-export function getSessionArtifacts(
+export async function getSessionArtifacts(
   phrenPath: string,
   sessionId: string,
   project?: string,
-): { findings: SessionArtifactFinding[]; tasks: SessionArtifactTask[] } {
+): Promise<{ findings: SessionArtifactFinding[]; tasks: SessionArtifactTask[] }> {
   const findings: SessionArtifactFinding[] = [];
   const tasks: SessionArtifactTask[] = [];
   const shortId = sessionId.slice(0, 8);
 
   try {
+    // Primary store projects
     const projectDirs = getProjectDirs(phrenPath);
     const targetProjects = project ? [project] : projectDirs.map((d) => path.basename(d));
-    for (const proj of targetProjects) {
+    const seen = new Set<string>();
+
+    const readProjectArtifacts = (storePath: string, proj: string) => {
+      if (seen.has(proj)) return;
+      seen.add(proj);
+
       // Findings with matching sessionId
-      const findingsResult = readFindings(phrenPath, proj);
+      const findingsResult = readFindings(storePath, proj);
       if (findingsResult.ok) {
         for (const f of findingsResult.data) {
           if (f.sessionId && (f.sessionId === sessionId || f.sessionId.startsWith(shortId))) {
@@ -421,7 +427,7 @@ export function getSessionArtifacts(
         }
       }
       // Tasks with matching sessionId
-      const tasksResult = readTasks(phrenPath, proj);
+      const tasksResult = readTasks(storePath, proj);
       if (tasksResult.ok) {
         for (const section of ["Active", "Queue", "Done"] as const) {
           for (const t of tasksResult.data.items[section]) {
@@ -437,7 +443,24 @@ export function getSessionArtifacts(
           }
         }
       }
+    };
+
+    for (const proj of targetProjects) {
+      readProjectArtifacts(phrenPath, proj);
     }
+
+    // Team store projects
+    try {
+      const { getNonPrimaryStores } = await import("../store-registry.js");
+      for (const store of getNonPrimaryStores(phrenPath)) {
+        if (!fs.existsSync(store.path)) continue;
+        const storeDirs = getProjectDirs(store.path).map(d => path.basename(d)).filter(p => p !== "global");
+        const storeTargetProjects = project ? (storeDirs.includes(project) ? [project] : []) : storeDirs;
+        for (const proj of storeTargetProjects) {
+          readProjectArtifacts(store.path, proj);
+        }
+      }
+    } catch { /* store-registry not available */ }
   } catch (err: unknown) {
     debugLog(`getSessionArtifacts error: ${errorMessage(err)}`);
   }
@@ -445,8 +468,8 @@ export function getSessionArtifacts(
   return { findings, tasks };
 }
 
-function hasCompletedTasksInSession(phrenPath: string, sessionId: string, project?: string): boolean {
-  const artifacts = getSessionArtifacts(phrenPath, sessionId, project);
+async function hasCompletedTasksInSession(phrenPath: string, sessionId: string, project?: string): Promise<boolean> {
+  const artifacts = await getSessionArtifacts(phrenPath, sessionId, project);
   return artifacts.tasks.some((task) => task.section === "Done" && task.checked);
 }
 
@@ -552,8 +575,11 @@ export function register(server: McpServer, ctx: McpContext): void {
     const activeProject = project ?? priorProject;
     const activeScope = normalizedAgentScope;
     if (activeProject && isValidProjectName(activeProject)) {
+      const projectStorePath = (() => {
+        try { return resolveStoreForProject(ctx, activeProject).phrenPath; } catch { return phrenPath; }
+      })();
       try {
-        const findings = readFindings(phrenPath, activeProject);
+        const findings = readFindings(projectStorePath, activeProject);
         if (findings.ok) {
           const bullets = findings.data
             .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
@@ -567,7 +593,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         debugError("session_start findingsRead", err);
       }
       try {
-        const tasks = readTasks(phrenPath, activeProject);
+        const tasks = readTasks(projectStorePath, activeProject);
         if (tasks.ok) {
           const activeItems = tasks.data.items.Active
             .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
@@ -582,7 +608,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
       // Surface extracted preferences/facts for this project
       try {
-        const facts = readExtractedFacts(phrenPath, activeProject).slice(-10);
+        const facts = readExtractedFacts(projectStorePath, activeProject).slice(-10);
         if (facts.length > 0) {
           parts.push(`## Preferences (${activeProject})\n${facts.map(f => `- ${f.fact}`).join("\n")}`);
         }
@@ -591,7 +617,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }
 
       try {
-          const checkpoints = listTaskCheckpoints(phrenPath, activeProject).slice(0, 3);
+          const checkpoints = listTaskCheckpoints(projectStorePath, activeProject).slice(0, 3);
         if (checkpoints.length > 0) {
           const lines: string[] = [];
           for (const checkpoint of checkpoints) {
@@ -702,19 +728,23 @@ export function register(server: McpServer, ctx: McpContext): void {
     }
 
     if (endedState.project && isValidProjectName(endedState.project)) {
+      const projectStorePath = (() => {
+        if (!endedState.project) return phrenPath;
+        try { return resolveStoreForProject(ctx, endedState.project).phrenPath; } catch { return phrenPath; }
+      })();
       try {
-        const trackedActiveTask = getActiveTaskForSession(phrenPath, state.sessionId, endedState.project);
+        const trackedActiveTask = getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project);
         const activeTask = trackedActiveTask ?? (() => {
-          const tasks = readTasks(phrenPath, endedState.project!);
+          const tasks = readTasks(projectStorePath, endedState.project!);
           if (!tasks.ok) return null;
           return tasks.data.items.Active[0] ?? null;
         })();
         if (activeTask) {
           const taskId = activeTask.stableId || activeTask.id;
-          const projectConfig = readProjectConfig(phrenPath, endedState.project);
+          const projectConfig = readProjectConfig(projectStorePath, endedState.project);
           const snapshotRoot =
-            getProjectSourcePath(phrenPath, endedState.project, projectConfig) ||
-            path.join(phrenPath, endedState.project);
+            getProjectSourcePath(projectStorePath, endedState.project, projectConfig) ||
+            path.join(projectStorePath, endedState.project);
           const { gitStatus, editedFiles } = collectGitStatusSnapshot(snapshotRoot);
           const resumptionHint = extractResumptionHint(
             effectiveSummary,
@@ -741,7 +771,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
     try {
       const tasksCompleted = Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0;
-      if (tasksCompleted > 0 || hasCompletedTasksInSession(phrenPath, state.sessionId, endedState.project)) {
+      if (tasksCompleted > 0 || await hasCompletedTasksInSession(phrenPath, state.sessionId, endedState.project)) {
         markImpactEntriesCompletedForSession(phrenPath, state.sessionId, endedState.project);
       }
     } catch (err: unknown) {
@@ -818,7 +848,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       const session = sessions.find(s => s.sessionId === targetSessionId || s.sessionId.startsWith(targetSessionId));
       if (!session) return mcpResponse({ ok: false, error: `Session ${targetSessionId} not found.` });
 
-      const artifacts = getSessionArtifacts(phrenPath, session.sessionId, project);
+      const artifacts = await getSessionArtifacts(phrenPath, session.sessionId, project);
       const parts = [
         `Session: ${session.sessionId.slice(0, 8)}`,
         `Project: ${session.project ?? "none"}`,

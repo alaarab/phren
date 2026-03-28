@@ -325,6 +325,25 @@ export function listProjectCards(phrenPath: string, profile?: string): ProjectCa
   const dirs = getProjectDirs(phrenPath, profile).sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
   const cards: ProjectCard[] = dirs.map(buildProjectCard);
 
+  const seen = new Set(dirs.map((d) => path.basename(d)));
+
+  // Include projects from team stores
+  try {
+    const storeRegistry = require("./store-registry.js");
+    const { getNonPrimaryStores } = storeRegistry;
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (!fs.existsSync(store.path)) continue;
+      for (const dir of getProjectDirs(store.path)) {
+        const name = path.basename(dir);
+        if (seen.has(name) || name === "global") continue;
+        seen.add(name);
+        cards.push(buildProjectCard(dir));
+      }
+    }
+  } catch {
+    // store-registry not available or error loading, continue with primary only
+  }
+
   // Prepend global as a pinned entry so it's always accessible from the shell
   const globalDir = path.join(phrenPath, "global");
   if (fs.existsSync(globalDir)) {
