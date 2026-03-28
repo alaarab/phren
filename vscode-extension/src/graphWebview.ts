@@ -999,6 +999,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
         <button id="btn-zoom-in" title="Zoom in">+</button>
         <button id="btn-zoom-out" title="Zoom out">&minus;</button>
         <button id="btn-zoom-reset" title="Reset view">R</button>
+        <button id="btn-layout-reset" title="Re-run layout">L</button>
       </div>
       <div id="node-popover" role="dialog" aria-label="Node detail">
         <div id="node-popover-card">
@@ -1140,9 +1141,11 @@ ${graphScript}
   var zoomInBtn = document.getElementById('btn-zoom-in');
   var zoomOutBtn = document.getElementById('btn-zoom-out');
   var zoomResetBtn = document.getElementById('btn-zoom-reset');
+  var layoutResetBtn = document.getElementById('btn-layout-reset');
   if (zoomInBtn) zoomInBtn.addEventListener('click', function() { window.graphZoom(1.2); });
   if (zoomOutBtn) zoomOutBtn.addEventListener('click', function() { window.graphZoom(0.8); });
   if (zoomResetBtn) zoomResetBtn.addEventListener('click', function() { window.graphReset(); });
+  if (layoutResetBtn) layoutResetBtn.addEventListener('click', function() { if (typeof window.graphResetLayout === 'function') window.graphResetLayout(); });
 
   var popover = document.getElementById('node-popover');
   var popoverCard = document.getElementById('node-popover-card');

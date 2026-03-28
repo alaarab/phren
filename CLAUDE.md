@@ -216,6 +216,8 @@ phren team join <git-url> [--name <name>]   Join an existing team store
 phren team add-project <store> <project>    Add a project to a team store
 phren team list                             List team stores
 
+phren promote <project> "..." --to <store>  Promote finding to team store
+
 phren truths <project>                Show pinned truths for a project
 phren config machines                 Registered machines
 phren config profiles                 Profiles and projects
