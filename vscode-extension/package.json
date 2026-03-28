@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.5.19",
+  "version": "0.5.20",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
