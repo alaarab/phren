@@ -225,6 +225,12 @@ export class PhrenClient {
     return this.callTool("toggle_hooks", args);
   }
 
+  async clearProjectHookOverride(project: string, event?: string): Promise<unknown> {
+    const args: Record<string, unknown> = { enabled: true, clear: true, project };
+    if (event) args.event = event;
+    return this.callTool("toggle_hooks", args);
+  }
+
   async listHookErrors(): Promise<unknown> {
     return this.callTool("list_hook_errors", {});
   }

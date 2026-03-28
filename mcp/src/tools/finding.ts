@@ -407,13 +407,18 @@ async function handleGetContradictions(
   ctx: McpContext,
   { project, finding_text }: { project?: string; finding_text?: string },
 ) {
-  const { phrenPath } = ctx;
   if (project && !isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-  const projects = project
-    ? [project]
-    : fs.readdirSync(phrenPath, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !RESERVED_PROJECT_DIR_NAMES.has(entry.name) && isValidProjectName(entry.name))
-      .map((entry) => entry.name);
+
+  // Build project list from all stores (primary + team)
+  let projectsWithPaths: Array<{ project: string; storePath: string }>;
+  if (project) {
+    const resolved = resolveStoreForProject(ctx, project);
+    projectsWithPaths = [{ project: resolved.project, storePath: resolved.phrenPath }];
+  } else {
+    const { listAllProjects } = await import("../store-routing.js");
+    projectsWithPaths = listAllProjects(ctx.phrenPath, ctx.profile)
+      .map((p) => ({ project: p.projectName, storePath: p.store.path }));
+  }
 
   const contradictions: Array<{
     project: string;
@@ -426,8 +431,8 @@ async function handleGetContradictions(
     status_ref?: string;
   }> = [];
 
-  for (const p of projects) {
-    const result = readFindings(phrenPath, p);
+  for (const { project: p, storePath } of projectsWithPaths) {
+    const result = readFindings(storePath, p);
     if (!result.ok) continue;
     for (const finding of result.data) {
       if (finding.status !== "contradicted") continue;

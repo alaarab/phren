@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.5.15",
+  "version": "0.5.17",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -66,6 +66,10 @@
       {
         "command": "phren.toggleHook",
         "title": "Phren: Toggle Hook"
+      },
+      {
+        "command": "phren.toggleProjectHook",
+        "title": "Phren: Toggle Project Hook"
       },
       {
         "command": "phren.openSessionOverview",
@@ -247,6 +251,10 @@
           "when": "false"
         },
         {
+          "command": "phren.toggleProjectHook",
+          "when": "false"
+        },
+        {
           "command": "phren.openSessionOverview",
           "when": "false"
         },
@@ -330,6 +338,11 @@
         {
           "command": "phren.toggleHook",
           "when": "viewItem == phren.hookItem",
+          "group": "inline"
+        },
+        {
+          "command": "phren.toggleProjectHook",
+          "when": "viewItem == phren.projectHookEventItem",
           "group": "inline"
         },
         {

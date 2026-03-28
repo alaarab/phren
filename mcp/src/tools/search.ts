@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -681,8 +681,9 @@ async function handleGetFindings(
     status?: FindingLifecycleStatus;
   },
 ) {
-  const { phrenPath } = ctx;
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+  const resolved = resolveStoreForProject(ctx, project);
+  const { phrenPath } = resolved;
   const includeHistory = include_history ?? include_superseded ?? false;
   // Always read with archive so we can compute historyCount without a second read
   const result = readFindings(phrenPath, project, { includeArchived: true });

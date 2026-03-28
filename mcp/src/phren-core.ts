@@ -9,7 +9,7 @@
  * each project's FINDINGS.md via extractDynamicEntities().
  */
 export const UNIVERSAL_TECH_TERMS_RE =
-  /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git)\b/gi;
+  /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git|React|Vue|Angular|Svelte|Next\.?js|Nuxt|Vite|esbuild|Webpack|Rollup|Babel|ESLint|Biome|Prettier|Jest|Vitest|Playwright|Cypress|Node\.?js|Deno|Bun|Express|Fastify|Hono|Koa|NestJS|Prisma|Drizzle|Sequelize|TypeORM|Postgres|PostgreSQL|MySQL|SQLite|MongoDB|Redis|Elasticsearch|GraphQL|REST|gRPC|tRPC|Zod|Pydantic|FastAPI|Django|Flask|Rails|Spring|Laravel|Tailwind|Bootstrap|MUI|Material|Fluent|Chakra|Radix|shadcn|SharePoint|SPFx|Teams|OneDrive|Power\s*Apps|Deltek|VantagePoint|Hangfire|ASP\.?NET|MVC|Blazor|MAUI|Electron|VSCode|GitHub|GitLab|Bitbucket|Vercel|Netlify|Railway|Fly\.io|Cloudflare|Lambda|S3|EC2|RDS|DynamoDB|Stripe|Twilio|SendGrid|OpenAI|Anthropic|Claude|LLM|MCP|FTS5|SQLCipher|Sigma|ForceAtlas|Graphology|Playwright|Puppeteer|Selenium|Turbo|Turborepo|Lerna|nx|pnpm|yarn|npm|Bun)\b/gi;
 
 /**
  * Additional fragment patterns beyond CamelCase and acronyms.

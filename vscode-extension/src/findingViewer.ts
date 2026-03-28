@@ -126,13 +126,13 @@ function renderFindingHtml(finding: FindingData): string {
   ${finding.confidence !== undefined ? `<span class="badge" style="background:${finding.confidence >= 70 ? '#388a34' : '#7B68AE'}">${Math.round(finding.confidence)}% confidence</span>` : ""}
   <span class="date">${esc(finding.date)}</span>
   <div class="toolbar">
-    <button id="btnEdit" class="btn-primary" onclick="startEdit()">Edit</button>
-    <button id="btnSave" class="btn-primary hidden" onclick="save()">Save</button>
-    <button id="btnCancel" class="btn-secondary hidden" onclick="cancelEdit()">Cancel</button>
-    <button class="btn-secondary" onclick="supersede()">Supersede</button>
-    <button class="btn-secondary" onclick="retract()">Retract</button>
-    ${finding.contradicted ? '<button class="btn-secondary" onclick="resolveContradiction()">Resolve Contradiction</button>' : ""}
-    <button class="btn-danger" onclick="del()">Delete</button>
+    <button id="btnEdit" class="btn-primary">Edit</button>
+    <button id="btnSave" class="btn-primary hidden">Save</button>
+    <button id="btnCancel" class="btn-secondary hidden">Cancel</button>
+    <button id="btnSupersede" class="btn-secondary">Supersede</button>
+    <button id="btnRetract" class="btn-secondary">Retract</button>
+    ${finding.contradicted ? '<button id="btnResolve" class="btn-secondary">Resolve Contradiction</button>' : ""}
+    <button id="btnDelete" class="btn-danger">Delete</button>
   </div>
   <div id="viewMode" class="content-view">${esc(finding.text)}</div>
   <textarea id="editMode" class="hidden">${esc(finding.text)}</textarea>
@@ -153,26 +153,29 @@ function renderFindingHtml(finding: FindingData): string {
       document.getElementById("btnSave").classList.add("hidden");
       document.getElementById("btnCancel").classList.add("hidden");
     }
-    function save() {
+    document.getElementById("btnEdit").addEventListener("click", startEdit);
+    document.getElementById("btnSave").addEventListener("click", function() {
       const text = document.getElementById("editMode").value;
       vscode.postMessage({ type: "save", newText: text });
       document.getElementById("viewMode").textContent = text;
       cancelEdit();
-    }
-    function del() {
+    });
+    document.getElementById("btnCancel").addEventListener("click", cancelEdit);
+    document.getElementById("btnSupersede").addEventListener("click", function() {
+      vscode.postMessage({ type: "supersede" });
+    });
+    document.getElementById("btnRetract").addEventListener("click", function() {
+      vscode.postMessage({ type: "retract" });
+    });
+    const btnResolve = document.getElementById("btnResolve");
+    if (btnResolve) btnResolve.addEventListener("click", function() {
+      vscode.postMessage({ type: "resolveContradiction" });
+    });
+    document.getElementById("btnDelete").addEventListener("click", function() {
       if (confirm("Delete this finding?")) {
         vscode.postMessage({ type: "delete" });
       }
-    }
-    function supersede() {
-      vscode.postMessage({ type: "supersede" });
-    }
-    function retract() {
-      vscode.postMessage({ type: "retract" });
-    }
-    function resolveContradiction() {
-      vscode.postMessage({ type: "resolveContradiction" });
-    }
+    });
   </script>
 </body>
 </html>`;

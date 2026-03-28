@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import { addFindingsToFile } from "../shared/content.js";
@@ -61,7 +61,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         dryRun: z.boolean().optional().describe("If true, return what would be extracted without saving."),
       }),
     },
-    async ({ project, text, model, dryRun }) => {
+    async ({ project: projectInput, text, model, dryRun }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
       if (!isValidProjectName(project)) {
         return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       }
@@ -128,7 +131,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Use addFindingsToFile so extracted findings go through the full pipeline:
         // secret scan, dedup check, validation, and index update.
-        const result = addFindingsToFile(phrenPath, project, findings, { source: "extract" });
+        const result = addFindingsToFile(targetPath, project, findings, { source: "extract" });
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error });
         }
@@ -136,7 +139,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const allSkipped = [...skipped, ...rejected.map(r => r.text)];
 
         // Update index for the findings file
-        const resolvedDir = safeProjectPath(phrenPath, project);
+        const resolvedDir = safeProjectPath(targetPath, project);
         if (resolvedDir) {
           updateFileInIndex(path.join(resolvedDir, "FINDINGS.md"));
         }

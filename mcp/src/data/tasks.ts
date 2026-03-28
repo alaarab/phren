@@ -421,15 +421,38 @@ export function readTasks(phrenPath: string, project: string): PhrenResult<TaskD
 }
 
 export function readTasksAcrossProjects(phrenPath: string, profile?: string): TaskDoc[] {
-  const projects = getProjectDirs(phrenPath, profile).map((dir) => path.basename(dir)).sort();
   const result: TaskDoc[] = [];
-  for (const project of projects) {
+  const seen = new Set<string>();
+
+  // Primary store projects (with profile filtering)
+  const primaryProjects = getProjectDirs(phrenPath, profile).map((dir) => path.basename(dir)).sort();
+  for (const project of primaryProjects) {
     const file = canonicalTaskFilePath(phrenPath, project);
     if (!file || !fs.existsSync(file)) continue;
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) continue;
     result.push(parsed.data);
+    seen.add(project);
   }
+
+  // Non-primary store projects (no profile — team stores don't have profiles)
+  try {
+    const { getNonPrimaryStores } = require("../store-registry.js");
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (!fs.existsSync(store.path)) continue;
+      const storeProjects = getProjectDirs(store.path).map((dir) => path.basename(dir));
+      for (const project of storeProjects) {
+        if (seen.has(project)) continue;
+        seen.add(project);
+        const file = canonicalTaskFilePath(store.path, project);
+        if (!file || !fs.existsSync(file)) continue;
+        const parsed = readTasks(store.path, project);
+        if (!parsed.ok) continue;
+        result.push(parsed.data);
+      }
+    }
+  } catch { /* store-registry not available — primary only */ }
+
   return result;
 }
 

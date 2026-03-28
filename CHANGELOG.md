@@ -3,6 +3,20 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.51] - 2026-03-28
+
+### Fixed
+- **Team store profile bug** — `getProjectDirs(store.path, profile)` silently returned `[]` for non-primary stores (team stores have no profile YAML). Fixed in `buildGraph`, FTS5 `refreshStoreProjectDirs`, `listAllProjects`, `findProjectInStore`. Web UI graph went from 234 to 364 nodes.
+- **MCP tool store routing** — `complete_task`, `remove_task`, `update_task`, `tidy_done_tasks`, `get_tasks`, `auto_extract_findings`, and `get_contradictions` now use `resolveStoreForProject()` instead of hardcoded primary store path. Team store tasks and findings are no longer invisible or written to the wrong location.
+- **`export_project` store resolution** — now correctly reads from team stores when exporting team-owned projects.
+- **Topic config store resolution** — `get_config`/`set_config` topic domain now resolves team store projects.
+- **Web UI findings endpoint** — `/api/findings/:project` now uses `resolveProjectBasePath()` to find team store projects.
+- **`readTasksAcrossProjects` federation** — now aggregates tasks from primary + all team stores (used by web UI Tasks view and `get_tasks` without project filter).
+
+### Added
+- **VS Code: review queue per-project grouping** — review queue items grouped by project with conflict/review counts, sorted conflicts-first.
+- **VS Code: fragment graph ambient animation** — transparent canvas overlay with drifting particle system using `requestAnimationFrame`, reads `--accent` CSS variable.
+
 ## [0.0.47] - 2026-03-28
 
 ### Changed

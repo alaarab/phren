@@ -6,7 +6,7 @@ import * as path from "path";
 import { readInstallPreferences, updateInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, validateCustomWebhookUrl, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "../hooks.js";
 import { hookConfigPath } from "../shared.js";
-import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig } from "../project-config.js";
+import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig, clearProjectHookOverride } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
@@ -131,14 +131,28 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Enable or disable hooks globally, for a specific tool, or for a tracked project.",
       inputSchema: z.object({
         enabled: z.boolean().describe("true to enable, false to disable."),
+        clear: z.boolean().optional().describe("When true and project is set, removes the per-project override and restores inheritance from global. Ignores enabled."),
         tool: z.string().optional().describe("Specific tool. Omit to toggle globally."),
         project: z.string().optional().describe("Tracked project name for project-level lifecycle hook overrides."),
         event: z.string().optional().describe("Optional lifecycle event for project-level overrides: UserPromptSubmit, Stop, SessionStart, PostToolUse."),
       }),
     },
-    async ({ enabled, tool, project, event }) => {
+    async ({ enabled, clear, tool, project, event }) => {
       if (tool && project) {
         return mcpResponse({ ok: false, error: "Pass either tool or project, not both." });
+      }
+
+      // Clear per-project override (restore inheritance)
+      if (clear && project) {
+        if (!isValidProjectName(project) || !fs.existsSync(path.join(phrenPath, project))) {
+          return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
+        }
+        clearProjectHookOverride(phrenPath, project, event);
+        const scope = event ? `${event} hook` : "hooks";
+        return mcpResponse({ ok: true, message: `Cleared ${scope} override for ${project} — now inheriting from global.`, data: { project, event, cleared: true } });
+      }
+      if (clear) {
+        return mcpResponse({ ok: false, error: "clear requires project." });
       }
 
       if (event && !project) {
