@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.46",
+  "version": "0.0.47",
   "description": "Knowledge layer for AI agents. Phren learns and recalls.",
   "type": "module",
   "bin": {
@@ -29,11 +29,9 @@
     "@playwright/test": "^1.58.2",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.57.2",
-    "@typescript-eslint/parser": "^8.57.2",
+    "@biomejs/biome": "^2.1.0",
     "@vitest/coverage-v8": "^4.1.2",
     "esbuild": "^0.27.4",
-    "eslint": "^10.1.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
@@ -41,7 +39,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "tsx mcp/src/index.ts",
-    "lint": "eslint mcp/src/ --ignore-pattern '*.test.ts'",
+    "lint": "biome lint mcp/src/",
     "validate-docs": "bash scripts/validate-docs.sh",
     "pretest": "npm run build",
     "test": "vitest run",
