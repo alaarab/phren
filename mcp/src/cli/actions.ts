@@ -20,6 +20,17 @@ import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { listAllSessions } from "../tools/session.js";
 
+function resolveProjectStorePath(phrenPath: string, project: string): string {
+  try {
+    const { getNonPrimaryStores } = require("../store-registry.js");
+    if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (fs.existsSync(path.join(store.path, project))) return store.path;
+    }
+  } catch { /* fall through */ }
+  return phrenPath;
+}
+
 async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
   const result = await fn();
   if (result.lines.length > 0) console.log(result.lines.join("\n"));
@@ -76,7 +87,8 @@ export async function handleTruths(project: string) {
     process.exit(1);
   }
   const phrenPath = getPhrenPath();
-  const truthsPath = path.join(phrenPath, project, "truths.md");
+  const storePath = resolveProjectStorePath(phrenPath, project);
+  const truthsPath = path.join(storePath, project, "truths.md");
   if (!fs.existsSync(truthsPath)) {
     console.log(`No truths pinned for "${project}" yet.`);
     console.log(`\nPin one: phren pin ${project} "your truth here"`);
@@ -385,7 +397,8 @@ export async function handleConsolidationStatus(args: string[]) {
   const projectDirs = project
     ? (() => {
         if (!isValidProjectName(project)) return null;
-        const dir = path.join(phrenPath, project);
+        const storePath = resolveProjectStorePath(phrenPath, project);
+        const dir = path.join(storePath, project);
         return fs.existsSync(dir) ? [dir] : [];
       })()
     : getProjectDirs(phrenPath, profile);

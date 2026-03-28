@@ -14,6 +14,17 @@ import {
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+
+function resolveProjectStorePath(phrenPath: string, project: string): string {
+  try {
+    const { getNonPrimaryStores } = require("../store-registry.js");
+    if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (fs.existsSync(path.join(store.path, project))) return store.path;
+    }
+  } catch { /* fall through */ }
+  return phrenPath;
+}
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/registry.js";
 import { detectSkillCollisions } from "../link/skills.js";
@@ -292,9 +303,16 @@ export function handleHooksNamespace(args: string[]) {
     const hooksEnabled = prefs.hooksEnabled !== false;
     const toolPrefs = prefs.hookTools && typeof prefs.hookTools === "object" ? prefs.hookTools : {};
     const project = getOptionValue(args.slice(1), "--project");
-    if (project && (!isValidProjectName(project) || !fs.existsSync(path.join(phrenPath, project)))) {
+    if (project && !isValidProjectName(project)) {
       console.error(`Project "${project}" not found.`);
       process.exit(1);
+    }
+    if (project) {
+      const storePath = resolveProjectStorePath(phrenPath, project);
+      if (!fs.existsSync(path.join(storePath, project))) {
+        console.error(`Project "${project}" not found.`);
+        process.exit(1);
+      }
     }
     const rows = HOOK_TOOLS.map((tool) => ({
       tool,
@@ -732,7 +750,8 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       process.exit(1);
     }
     const phrenPath = getPhrenPath();
-    const projectDir = path.join(phrenPath, name);
+    const storePath = resolveProjectStorePath(phrenPath, name);
+    const projectDir = path.join(storePath, name);
     if (!fs.existsSync(projectDir)) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
@@ -741,14 +760,14 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     const exported: Record<string, unknown> = { project: name, exportedAt: new Date().toISOString(), version: 1 };
     const summaryPath = path.join(projectDir, "summary.md");
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
-    const learningsResult = readFindings(phrenPath, name);
+    const learningsResult = readFindings(storePath, name);
     if (learningsResult.ok) exported.learnings = learningsResult.data;
     const findingsPath = path.join(projectDir, "FINDINGS.md");
     if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
-    const taskResult = readTasks(phrenPath, name);
+    const taskResult = readTasks(storePath, name);
     if (taskResult.ok) {
       exported.task = taskResult.data.items;
-      const taskRawPath = resolveTaskFilePath(phrenPath, name);
+      const taskRawPath = resolveTaskFilePath(storePath, name);
       if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
     }
     const claudePath = path.join(projectDir, "CLAUDE.md");
@@ -857,8 +876,9 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     const phrenPath = getPhrenPath();
     if (subcommand === "archive") {
       const activeProject = findProjectNameCaseInsensitive(phrenPath, name);
-      const projectDir = activeProject ? path.join(phrenPath, activeProject) : path.join(phrenPath, name);
-      const archiveDir = path.join(phrenPath, `${activeProject ?? name}.archived`);
+      const storePath = resolveProjectStorePath(phrenPath, activeProject ?? name);
+      const projectDir = activeProject ? path.join(storePath, activeProject) : path.join(storePath, name);
+      const archiveDir = path.join(storePath, `${activeProject ?? name}.archived`);
       if (!fs.existsSync(projectDir)) {
         console.error(`Project "${name}" not found.`);
         process.exit(1);
@@ -882,8 +902,9 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
         process.exit(1);
       }
       const archivedProject = findArchivedProjectNameCaseInsensitive(phrenPath, name);
-      const projectDir = path.join(phrenPath, archivedProject ?? name);
-      const archiveDir = path.join(phrenPath, `${archivedProject ?? name}.archived`);
+      const storePath = resolveProjectStorePath(phrenPath, archivedProject ?? name);
+      const projectDir = path.join(storePath, archivedProject ?? name);
+      const archiveDir = path.join(storePath, `${archivedProject ?? name}.archived`);
       if (!fs.existsSync(archiveDir)) {
         const available = fs.readdirSync(phrenPath)
           .filter((e) => e.endsWith(".archived"))
@@ -1385,8 +1406,10 @@ export async function handleFindingNamespace(args: string[]) {
       console.error("Usage: phren finding list <project>");
       process.exit(1);
     }
+    const phrenPath = getPhrenPath();
     const { readFindings } = await import("../data/access.js");
-    const result = readFindings(getPhrenPath(), project);
+    const storePath = resolveProjectStorePath(phrenPath, project);
+    const result = readFindings(storePath, project);
     if (!result.ok) {
       console.error(result.error);
       process.exit(1);
