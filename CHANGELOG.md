@@ -3,6 +3,13 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.47] - 2026-03-28
+
+### Changed
+- **Biome replaces ESLint** — switched from `@typescript-eslint/eslint-plugin` + `@typescript-eslint/parser` + `eslint` (3 packages) to `@biomejs/biome` (1 package). Enables TypeScript 6 support, 42ms lint vs multi-second eslint runs. Same rules: `noUnusedVariables`, `noUnusedImports`, `noExplicitAny`.
+- **TypeScript 6** — `typescript@^6.0.2` now works with the build toolchain (esbuild + biome).
+- **Release parity**: bumped core npm package to `0.0.47`.
+
 ## [0.0.46] - 2026-03-28
 
 ### Added
@@ -1126,7 +1133,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.46...HEAD
+[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.47...HEAD
+[0.0.47]: https://github.com/alaarab/phren/compare/v0.0.46...v0.0.47
 [0.0.46]: https://github.com/alaarab/phren/compare/v0.0.45...v0.0.46
 [0.0.45]: https://github.com/alaarab/phren/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/alaarab/phren/compare/v0.0.43...v0.0.44
