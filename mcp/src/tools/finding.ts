@@ -14,7 +14,6 @@ import {
   EXEC_TIMEOUT_MS,
   FINDING_TYPES,
   normalizeMemoryScope,
-  RESERVED_PROJECT_DIR_NAMES,
 } from "../shared.js";
 import {
   addFindingToFile,
