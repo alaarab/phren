@@ -195,6 +195,35 @@ export function isProjectHookEnabled(
   return true;
 }
 
+/**
+ * Remove a per-project hook override, restoring inheritance from global config.
+ * Pass event to clear a specific event override; omit to clear the whole hooks block.
+ */
+export function clearProjectHookOverride(
+  phrenPath: string,
+  project: string,
+  event?: string,
+): ProjectConfig {
+  const configPath = resolveProjectConfigPath(phrenPath, project);
+  if (!configPath) throw new Error("Project config path escapes phren store");
+  return withFileLock(configPath, () => {
+    const current = readProjectConfig(phrenPath, project);
+    const existingHooks = normalizeHookConfig(current);
+    let nextHooks: ProjectHookConfig;
+    if (event && PROJECT_HOOK_EVENTS.includes(event as ProjectHookEvent)) {
+      // Delete just this event key
+      const { [event as ProjectHookEvent]: _removed, ...rest } = existingHooks;
+      nextHooks = rest as ProjectHookConfig;
+    } else {
+      // Clear all overrides
+      nextHooks = {};
+    }
+    const next: ProjectConfig = { ...current, hooks: nextHooks };
+    writeProjectConfigFile(configPath, next);
+    return next;
+  });
+}
+
 export function writeProjectHookConfig(
   phrenPath: string,
   project: string,

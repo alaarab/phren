@@ -1,9 +1,10 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { PhrenClient } from "../phrenClient";
 import { readDeviceContext } from "../profileConfig";
 
 type TaskSection = "Active" | "Queue" | "Done";
-type PhrenCategory = "findings" | "truths" | "sessions" | "task" | "queue" | "reference";
+type PhrenCategory = "findings" | "truths" | "sessions" | "task" | "queue" | "reference" | "hooks";
 type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
@@ -23,19 +24,28 @@ interface StoreGroupNode {
   storeName: string;
   role: string;
   count: number;
+  syncMode?: string;
+  lastSync?: string;
+  reviewCount?: number;
+  conflictCount?: number;
 }
 
 interface ManageItemNode {
   kind: "manageItem";
-  item: "health" | "profile" | "machine" | "lastSync";
+  item: "health" | "profile" | "machine" | "lastSync" | "storeSync";
   label: string;
   value: string;
+  storeName?: string;
+  syncMode?: string;
 }
 
 interface ProjectNode {
   kind: "project";
   projectName: string;
   brief?: string;
+  active?: boolean;
+  reviewCount?: number;
+  conflictCount?: number;
 }
 
 interface CategoryNode {
@@ -119,6 +129,14 @@ interface HookErrorNode {
   message: string;
 }
 
+interface ProjectHookEventNode {
+  kind: "projectHookEvent";
+  projectName: string;
+  event: string;
+  enabled: boolean;
+  configured: boolean | null;
+}
+
 type QueueSection = "Review" | "Stale" | "Conflicts";
 
 interface QueueSectionGroupNode {
@@ -132,6 +150,13 @@ interface AggregateQueueSectionGroupNode {
   kind: "aggregateQueueSectionGroup";
   section: QueueSection;
   count: number;
+}
+
+interface ReviewProjectGroupNode {
+  kind: "reviewProjectGroup";
+  projectName: string;
+  reviewCount: number;
+  conflictCount: number;
 }
 
 interface QueueItemNode {
@@ -208,12 +233,14 @@ type PhrenNode =
   | TaskNode
   | QueueSectionGroupNode
   | AggregateQueueSectionGroupNode
+  | ReviewProjectGroupNode
   | QueueItemNode
   | SkillGroupNode
   | SkillNode
   | HookNode
   | CustomHookNode
   | HookErrorNode
+  | ProjectHookEventNode
   | ReferenceFileNode
   | SessionDateGroupNode
   | SessionNode
@@ -225,6 +252,7 @@ interface ProjectSummary {
   name: string;
   brief?: string;
   store?: string;
+  source?: string;
 }
 
 interface FindingSummary {
@@ -350,7 +378,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         return this.getMachineNodes();
       }
       if (element.section === "review") {
-        return this.getAggregateQueueSectionGroups();
+        return this.getReviewProjectGroups();
       }
       if (element.section === "skills") {
         return this.getSkillGroupNodes();
@@ -379,6 +407,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         { kind: "category", projectName: element.projectName, category: "sessions" },
         { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "queue" },
+        { kind: "category", projectName: element.projectName, category: "hooks" },
         { kind: "category", projectName: element.projectName, category: "reference" },
       ];
     }
@@ -399,6 +428,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       if (element.category === "queue") {
         return this.getQueueSectionGroups(element.projectName);
       }
+      if (element.category === "hooks") {
+        return this.getProjectHookNodes(element.projectName);
+      }
       if (element.category === "reference") {
         return this.getReferenceNodes(element.projectName);
       }
@@ -411,6 +443,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
     if (element.kind === "aggregateQueueSectionGroup") {
       return this.getAggregateQueueItemsForSection(element.section);
+    }
+
+    if (element.kind === "reviewProjectGroup") {
+      return this.getQueueSectionGroups(element.projectName);
     }
 
     if (element.kind === "sessionDateGroup") {
@@ -478,15 +514,24 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       }
       case "project": {
         const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
-        item.description = element.brief ? truncate(element.brief, 72) : undefined;
-        item.iconPath = themeIcon("folder");
+        const reviewBadge: string[] = [];
+        if (element.conflictCount && element.conflictCount > 0) reviewBadge.push(`⚠ ${element.conflictCount}`);
+        else if (element.reviewCount && element.reviewCount > 0) reviewBadge.push(`${element.reviewCount} review`);
+        const badgeSuffix = reviewBadge.length > 0 ? `  ${reviewBadge.join(" · ")}` : "";
+        if (element.active) {
+          item.description = `★${badgeSuffix}${element.brief ? ` ${truncate(element.brief, 50)}` : ""}`;
+          item.iconPath = themeIcon("star-full", "list.highlightForeground");
+        } else {
+          item.description = badgeSuffix || (element.brief ? truncate(element.brief, 72) : undefined);
+          item.iconPath = element.conflictCount ? themeIcon("warning") : themeIcon("folder");
+        }
         item.id = `phren.project.${element.projectName}`;
         item.contextValue = "phren.project";
         return item;
       }
       case "category": {
         const cat = element.category ?? "unknown";
-        const categoryLabels: Record<string, string> = { findings: "Findings", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", reference: "Reference" };
+        const categoryLabels: Record<string, string> = { findings: "Findings", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", hooks: "Hooks", reference: "Reference" };
         let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
         if (cat === "findings" && this.dateFilter) {
           categoryLabel += ` [${this.dateFilter.label}]`;
@@ -574,6 +619,17 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         };
         return item;
       }
+      case "reviewProjectGroup": {
+        const total = element.reviewCount + element.conflictCount;
+        const item = new vscode.TreeItem(element.projectName, vscode.TreeItemCollapsibleState.Collapsed);
+        const parts: string[] = [];
+        if (element.conflictCount > 0) parts.push(`⚠ ${element.conflictCount}`);
+        if (element.reviewCount > 0) parts.push(`${element.reviewCount} review`);
+        item.description = parts.length > 0 ? parts.join(" · ") : `${total}`;
+        item.iconPath = element.conflictCount > 0 ? themeIcon("warning") : themeIcon("inbox");
+        item.id = `phren.reviewProjectGroup.${element.projectName}`;
+        return item;
+      }
       case "queueSectionGroup": {
         const queueIcons: Record<string, string> = { Review: "inbox", Stale: "history", Conflicts: "warning" };
         const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
@@ -648,6 +704,21 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         item.iconPath = themeIcon("zap");
         item.id = `phren.customHook.${element.event}.${element.target.slice(0, 20)}`;
         item.contextValue = "phren.customHookItem";
+        return item;
+      }
+      case "projectHookEvent": {
+        const overrideLabel = element.configured === null ? "(inherit)" : element.configured ? "(override: on)" : "(override: off)";
+        const item = new vscode.TreeItem(element.event, vscode.TreeItemCollapsibleState.None);
+        item.description = `${element.enabled ? "enabled" : "disabled"} ${overrideLabel}`;
+        item.tooltip = `${element.event}: ${element.enabled ? "enabled" : "disabled"}\n${element.configured === null ? "Inheriting from global" : `Per-project override: ${element.configured ? "enabled" : "disabled"}`}\nClick to toggle`;
+        item.iconPath = themeIcon(element.enabled ? "check" : "circle-slash");
+        item.id = `phren.projectHookEvent.${element.projectName}.${element.event}`;
+        item.contextValue = "phren.projectHookEventItem";
+        item.command = {
+          command: "phren.toggleProjectHook",
+          title: "Toggle Project Hook",
+          arguments: [element],
+        };
         return item;
       }
       case "hookError": {
@@ -725,20 +796,23 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         return item;
       }
       case "storeGroup": {
-        const roleIcons: Record<string, string> = { primary: "home", team: "organization", readonly: "eye" };
+        const roleIcons: Record<string, string> = { primary: "home", team: "organization", readonly: "eye", "pull-only": "cloud-download" };
         const item = new vscode.TreeItem(element.storeName, vscode.TreeItemCollapsibleState.Collapsed);
-        item.description = `${element.count} project${element.count === 1 ? "" : "s"}`;
+        const descParts: string[] = [element.role];
+        if (element.syncMode) descParts.push(element.syncMode);
+        descParts.push(element.lastSync ? formatRelativeTime(element.lastSync) : "never synced");
+        item.description = descParts.join(" \u00b7 ");
         item.iconPath = themeIcon(roleIcons[element.role] ?? "database");
         item.id = `phren.storeGroup.${element.storeName}`;
-        item.tooltip = `Store: ${element.storeName} (${element.role})`;
+        item.tooltip = `Store: ${element.storeName}\nRole: ${element.role}\nSync: ${element.syncMode ?? "none"}\nLast sync: ${element.lastSync ?? "never"}`;
         return item;
       }
       case "manageItem": {
-        const manageIcons: Record<string, string> = { health: "heart", profile: "vm", machine: "server", lastSync: "cloud" };
+        const manageIcons: Record<string, string> = { health: "heart", profile: "vm", machine: "server", lastSync: "cloud", storeSync: "cloud" };
         const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
         item.description = element.value;
         item.iconPath = themeIcon(manageIcons[element.item] ?? "info");
-        item.id = `phren.manage.${element.item}`;
+        item.id = element.item === "storeSync" ? `phren.manage.storeSync.${element.storeName}` : `phren.manage.${element.item}`;
         if (element.item === "health") {
           item.command = { command: "phren.doctor", title: "Run Doctor" };
           item.tooltip = "Click to run Phren Doctor";
@@ -751,6 +825,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         } else if (element.item === "lastSync") {
           item.command = { command: "phren.sync", title: "Sync Now" };
           item.tooltip = "Click to sync Phren";
+        } else if (element.item === "storeSync") {
+          item.command = { command: "phren.sync", title: "Sync Now" };
+          item.tooltip = `Store: ${element.storeName}\nSync mode: ${element.syncMode ?? "none"}\nClick to sync`;
         }
         return item;
       }
@@ -1021,6 +1098,43 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         }));
     } catch (error) {
       return [this.errorNode("Failed to load queue items", error)];
+    }
+  }
+
+  private async getReviewProjectGroups(): Promise<PhrenNode[]> {
+    try {
+      const items = await this.fetchQueueItems();
+      if (items.length === 0) {
+        return [{ kind: "message", label: "No items in review queue", iconId: "inbox" }];
+      }
+
+      const reviewCounts = new Map<string, number>();
+      const conflictCounts = new Map<string, number>();
+      for (const item of items) {
+        const p = item.projectName;
+        if (item.section === "Conflicts") {
+          conflictCounts.set(p, (conflictCounts.get(p) ?? 0) + 1);
+        } else {
+          reviewCounts.set(p, (reviewCounts.get(p) ?? 0) + 1);
+        }
+      }
+
+      const projects = new Set([...reviewCounts.keys(), ...conflictCounts.keys()]);
+      const nodes: ReviewProjectGroupNode[] = [...projects].map((p) => ({
+        kind: "reviewProjectGroup" as const,
+        projectName: p,
+        reviewCount: reviewCounts.get(p) ?? 0,
+        conflictCount: conflictCounts.get(p) ?? 0,
+      }));
+
+      nodes.sort((a, b) => {
+        if (b.conflictCount !== a.conflictCount) return b.conflictCount - a.conflictCount;
+        return (b.reviewCount + b.conflictCount) - (a.reviewCount + a.conflictCount);
+      });
+
+      return nodes;
+    } catch (error) {
+      return [this.errorNode("Failed to load review queue", error)];
     }
   }
 
@@ -1295,8 +1409,91 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     }
   }
 
+  private async getProjectHookNodes(projectName: string): Promise<PhrenNode[]> {
+    try {
+      const raw = await this.cachedFetch(`projectHooks:${projectName}`, () => this.client.listHooks(projectName));
+      const data = responseData(raw);
+      const projectHooks = asRecord(data?.projectHooks);
+      if (!projectHooks) {
+        return [{ kind: "message", label: "No hook overrides", iconId: "plug" }];
+      }
+
+      const events = asArray(projectHooks.events);
+      if (events.length === 0) {
+        return [{ kind: "message", label: "No hook events", iconId: "plug" }];
+      }
+
+      const nodes: PhrenNode[] = [];
+      for (const entry of events) {
+        const record = asRecord(entry);
+        if (!record) continue;
+        const event = asString(record.event);
+        if (!event) continue;
+        const enabled = asBoolean(record.enabled) ?? true;
+        const configured = record.configured === null || record.configured === undefined ? null : (asBoolean(record.configured) ?? null);
+        nodes.push({ kind: "projectHookEvent", projectName, event, enabled, configured });
+      }
+      return nodes;
+    } catch (error) {
+      return [this.errorNode("Failed to load project hooks", error)];
+    }
+  }
+
   private readDeviceContext(): { profile: string; activeProjects: Set<string>; machine: string; lastSync: string } {
     return readDeviceContext(this.storePath);
+  }
+
+  /**
+   * Detect the active project by matching workspace folders against project names/source paths.
+   */
+  private detectActiveProject(projects: ProjectSummary[]): string | undefined {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
+    const cwdPath = workspaceFolders[0].uri.fsPath;
+    const cwdName = path.basename(cwdPath).toLowerCase();
+
+    // Match by source path (exact)
+    for (const p of projects) {
+      if (p.source && p.source === cwdPath) return p.name;
+    }
+    // Match by project name (case-insensitive)
+    for (const p of projects) {
+      if (p.name.toLowerCase() === cwdName) return p.name;
+    }
+    // Match by source path basename
+    for (const p of projects) {
+      if (p.source && path.basename(p.source).toLowerCase() === cwdName) return p.name;
+    }
+    return undefined;
+  }
+
+  /**
+   * Sort projects so the active project appears first, marking it with active=true.
+   */
+  private sortWithActiveFirst(
+    projects: ProjectSummary[],
+    activeProjectName: string | undefined,
+    reviewCounts?: Map<string, { review: number; conflicts: number }>,
+  ): ProjectNode[] {
+    const nodes: ProjectNode[] = projects.map((project) => {
+      const counts = reviewCounts?.get(project.name.toLowerCase());
+      return {
+        kind: "project" as const,
+        projectName: project.name,
+        brief: project.brief,
+        active: activeProjectName !== undefined && project.name === activeProjectName,
+        reviewCount: counts?.review,
+        conflictCount: counts?.conflicts,
+      };
+    });
+    if (activeProjectName) {
+      nodes.sort((a, b) => {
+        if (a.active && !b.active) return -1;
+        if (!a.active && b.active) return 1;
+        return 0;
+      });
+    }
+    return nodes;
   }
 
   private async getProjectNodes(): Promise<PhrenNode[]> {
@@ -1312,21 +1509,31 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       const resolvedStore = (p: ProjectSummary) => p.store ?? primaryStoreName;
       const storeNames = [...new Set(projects.map(resolvedStore))];
       if (storeNames.length > 1) {
+        // Fetch review queue counts per store (best-effort)
+        const storeReviewCounts = await this.fetchReviewCountsByStore(projects, resolvedStore);
         return storeNames.map((storeName) => {
           const storeProjects = projects.filter((p) => resolvedStore(p) === storeName);
-          const role = stores.find((s) => s.name === storeName)?.role ?? "team";
-          return { kind: "storeGroup" as const, storeName, role, count: storeProjects.length };
+          const storeInfo = stores.find((s) => s.name === storeName);
+          const counts = storeReviewCounts.get(storeName);
+          return {
+            kind: "storeGroup" as const,
+            storeName,
+            role: storeInfo?.role ?? "team",
+            count: storeProjects.length,
+            syncMode: storeInfo?.syncMode,
+            lastSync: storeInfo?.lastSync,
+            reviewCount: counts?.review,
+            conflictCount: counts?.conflicts,
+          };
         });
       }
 
       // Single store: fall back to device grouping
       const ctx = this.readDeviceContext();
+      const activeProjectName = this.detectActiveProject(projects);
+      const reviewCounts = await this.fetchReviewCountsByProject();
       if (ctx.activeProjects.size === 0) {
-        return projects.map((project) => ({
-          kind: "project" as const,
-          projectName: project.name,
-          brief: project.brief,
-        }));
+        return this.sortWithActiveFirst(projects, activeProjectName, reviewCounts);
       }
       const deviceProjects = projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()));
       const otherProjects = projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
@@ -1345,14 +1552,15 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private async getProjectNodesForStore(storeName: string): Promise<PhrenNode[]> {
     try {
-      const [projects, stores] = await Promise.all([this.fetchProjects(), this.fetchStores()]);
+      const [projects, stores, reviewCounts] = await Promise.all([
+        this.fetchProjects(),
+        this.fetchStores(),
+        this.fetchReviewCountsByProject(),
+      ]);
       const primaryStoreName = stores.find((s) => s.role === "primary")?.name ?? "personal";
       const filtered = projects.filter((p) => (p.store ?? primaryStoreName) === storeName);
-      return filtered.map((project) => ({
-        kind: "project" as const,
-        projectName: project.name,
-        brief: project.brief,
-      }));
+      const activeProjectName = this.detectActiveProject(filtered);
+      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts);
     } catch (error) {
       return [this.errorNode("Failed to load projects", error)];
     }
@@ -1360,26 +1568,50 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
   private async getProjectNodesForGroup(group: "device" | "other"): Promise<PhrenNode[]> {
     try {
-      const projects = await this.fetchProjects();
+      const [allProjects, reviewCounts] = await Promise.all([
+        this.fetchProjects(),
+        this.fetchReviewCountsByProject(),
+      ]);
       const ctx = this.readDeviceContext();
       const filtered = group === "device"
-        ? projects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
-        : projects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
-      return filtered.map((project) => ({
-        kind: "project" as const,
-        projectName: project.name,
-        brief: project.brief,
-      }));
+        ? allProjects.filter((p) => ctx.activeProjects.has(p.name.toLowerCase()))
+        : allProjects.filter((p) => !ctx.activeProjects.has(p.name.toLowerCase()));
+      const activeProjectName = this.detectActiveProject(allProjects);
+      return this.sortWithActiveFirst(filtered, activeProjectName, reviewCounts);
     } catch (error) {
       return [this.errorNode("Failed to load projects", error)];
     }
   }
 
-  private getManageNodes(): PhrenNode[] {
-    const ctx = this.readDeviceContext();
+  private async getManageNodes(): Promise<PhrenNode[]> {
     const nodes: PhrenNode[] = [];
     nodes.push({ kind: "manageItem", item: "health", label: "Health", value: this.lastHealthOk === true ? "ok" : this.lastHealthOk === false ? "issues" : "..." });
-    nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+
+    // Per-store sync status rows
+    try {
+      const stores = await this.fetchStores();
+      if (stores.length > 0) {
+        for (const store of stores) {
+          const syncTime = store.lastSync ? formatRelativeTime(store.lastSync) : "never";
+          const syncLabel = store.syncMode ? `${store.syncMode} \u00b7 ${syncTime}` : syncTime;
+          nodes.push({
+            kind: "manageItem",
+            item: "storeSync",
+            label: store.name,
+            value: syncLabel,
+            storeName: store.name,
+            syncMode: store.syncMode,
+          });
+        }
+      } else {
+        const ctx = this.readDeviceContext();
+        nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+      }
+    } catch {
+      const ctx = this.readDeviceContext();
+      nodes.push({ kind: "manageItem", item: "lastSync", label: "Sync", value: ctx.lastSync || "(never)" });
+    }
+
     return nodes;
   }
 
@@ -1432,14 +1664,15 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
         const brief = asString(record?.brief);
         const store = asString(record?.store);
-        parsed.push(store ? { name, brief, store } : brief ? { name, brief } : { name });
+        const source = asString(record?.source);
+        parsed.push({ name, brief, store, source });
       }
 
       return parsed;
     });
   }
 
-  private fetchStores(): Promise<Array<{ name: string; role: string; exists: boolean }>> {
+  private fetchStores(): Promise<Array<{ name: string; role: string; exists: boolean; syncMode?: string; lastSync?: string }>> {
     return this.cachedFetch("stores", async () => {
       try {
         const raw = await this.client.storeList();
@@ -1447,7 +1680,13 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         const stores = asArray(data?.stores);
         return stores.map((s) => {
           const r = asRecord(s);
-          return { name: asString(r?.name) ?? "", role: asString(r?.role) ?? "primary", exists: asBoolean(r?.exists) ?? true };
+          return {
+            name: asString(r?.name) ?? "",
+            role: asString(r?.role) ?? "primary",
+            exists: asBoolean(r?.exists) ?? true,
+            syncMode: asString(r?.sync),
+            lastSync: asString(r?.lastSync),
+          };
         }).filter((s) => s.name);
       } catch {
         return [];
@@ -1564,6 +1803,53 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
       return parsed;
     });
+  }
+
+  private async fetchReviewCountsByProject(): Promise<Map<string, { review: number; conflicts: number }>> {
+    const counts = new Map<string, { review: number; conflicts: number }>();
+    try {
+      const items = await this.fetchQueueItems();
+      for (const item of items) {
+        const key = item.projectName.toLowerCase();
+        if (!counts.has(key)) counts.set(key, { review: 0, conflicts: 0 });
+        const entry = counts.get(key)!;
+        if (item.section === "Conflicts") entry.conflicts++;
+        else entry.review++;
+      }
+    } catch { /* best-effort */ }
+    return counts;
+  }
+
+  private async fetchReviewCountsByStore(
+    projects: ProjectSummary[],
+    resolvedStore: (p: ProjectSummary) => string,
+  ): Promise<Map<string, { review: number; conflicts: number }>> {
+    const counts = new Map<string, { review: number; conflicts: number }>();
+    try {
+      // Fetch all review queue items at once (no project arg)
+      const items = await this.fetchQueueItems();
+      // Build project→store lookup
+      const projectStore = new Map<string, string>();
+      for (const p of projects) {
+        projectStore.set(p.name.toLowerCase(), resolvedStore(p));
+      }
+      for (const item of items) {
+        const storeName = projectStore.get(item.projectName.toLowerCase());
+        if (!storeName) continue;
+        if (!counts.has(storeName)) {
+          counts.set(storeName, { review: 0, conflicts: 0 });
+        }
+        const entry = counts.get(storeName)!;
+        if (item.section === "Conflicts") {
+          entry.conflicts++;
+        } else {
+          entry.review++;
+        }
+      }
+    } catch {
+      // Best-effort: don't fail store listing if review queue is unavailable
+    }
+    return counts;
   }
 
   private fetchSkills(): Promise<SkillSummary[]> {
@@ -1703,6 +1989,9 @@ function categoryIconId(category: PhrenCategory): string {
   if (category === "queue") {
     return "inbox";
   }
+  if (category === "hooks") {
+    return "plug";
+  }
   return "book";
 }
 
@@ -1795,6 +2084,21 @@ function formatSessionTimeLabel(startedAt: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatRelativeTime(iso: string): string {
+  const date = new Date(iso);
+  if (isNaN(date.getTime())) { return "unknown"; }
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 0) { return "just now"; }
+  const diffMins = Math.floor(diffMs / 60_000);
+  if (diffMins < 1) { return "just now"; }
+  if (diffMins < 60) { return `${diffMins}m ago`; }
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) { return `${diffHours}h ago`; }
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) { return `${diffDays}d ago`; }
+  return `${Math.floor(diffDays / 30)}mo ago`;
 }
 
 function themeIcon(id: string, color?: string): vscode.ThemeIcon {

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import {
   getRetentionPolicy,
@@ -115,7 +115,16 @@ async function handleGetConfig(
     const err = validateProject(project);
     if (err) return mcpResponse({ ok: false, error: err });
 
-    const topicResult = getTopicConfigData(phrenPath, project);
+    // Resolve store-qualified project names for team stores
+    let resolvedPhrenPath = phrenPath;
+    let resolvedProject = project;
+    try {
+      const resolved = resolveStoreForProject(ctx, project);
+      resolvedPhrenPath = resolved.phrenPath;
+      resolvedProject = resolved.project;
+    } catch { /* fall back to primary */ }
+
+    const topicResult = getTopicConfigData(resolvedPhrenPath, resolvedProject);
     if (!topicResult.ok) return mcpResponse({ ok: false, error: topicResult.error });
 
     return mcpResponse({
@@ -516,9 +525,18 @@ async function handleSetConfig(
       const err = validateProject(project);
       if (err) return mcpResponse({ ok: false, error: err });
 
-      const projectDir = safeProjectPath(phrenPath, project);
+      // Resolve store-qualified project names for team stores
+      let topicPhrenPath = phrenPath;
+      let topicProject = project;
+      try {
+        const resolved = resolveStoreForProject(ctx, project);
+        topicPhrenPath = resolved.phrenPath;
+        topicProject = resolved.project;
+      } catch { /* fall back to primary */ }
+
+      const projectDir = safeProjectPath(topicPhrenPath, topicProject);
       if (!projectDir || !fs.existsSync(projectDir)) {
-        return mcpResponse({ ok: false, error: `Project "${project}" not found in phren.` });
+        return mcpResponse({ ok: false, error: `Project "${topicProject}" not found in phren.` });
       }
 
       const topics = settings.topics as Array<{
@@ -560,7 +578,7 @@ async function handleSetConfig(
         }
       }
 
-      const result = writeProjectTopics(phrenPath, project, normalized);
+      const result = writeProjectTopics(topicPhrenPath, topicProject, normalized);
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error });
       }

@@ -146,7 +146,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readTasks(phrenPath, project);
+        const resolvedPath = resolveStoreForProject(ctx, project).phrenPath;
+        const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
@@ -178,7 +179,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Full task list for one project
       if (project) {
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const result = readTasks(phrenPath, project);
+        const resolvedPath = resolveStoreForProject(ctx, project).phrenPath;
+        const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const view = buildTaskView(doc, status, limit, done_limit, offset);
@@ -298,27 +300,30 @@ export function register(server: McpServer, ctx: McpContext): void {
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
       }),
     },
-    async ({ project, item, sessionId }) => {
+    async ({ project: projectInput, item, sessionId }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const completeTaskDenied = permissionDeniedError(phrenPath, "complete_task", project);
+      const completeTaskDenied = permissionDeniedError(targetPath, "complete_task", project);
       if (completeTaskDenied) return mcpResponse({ ok: false, error: completeTaskDenied });
 
       if (Array.isArray(item)) {
         return withWriteQueue(async () => {
           const resolvedItems = item
             .map((match) => {
-              const resolved = resolveTaskItem(phrenPath, project, match);
-              return resolved.ok ? resolved.data : null;
+              const resolvedItem = resolveTaskItem(targetPath, project, match);
+              return resolvedItem.ok ? resolvedItem.data : null;
             })
             .filter((task): task is TaskItem => task !== null);
-          const result = completeTasksBatch(phrenPath, project, item);
+          const result = completeTasksBatch(targetPath, project, item);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           const { completed, errors } = result.data;
           if (completed.length > 0) {
             const completedSet = new Set(completed);
             for (const task of resolvedItems) {
               if (!completedSet.has(task.line)) continue;
-              clearTaskCheckpoint(phrenPath, {
+              clearTaskCheckpoint(targetPath, {
                 project,
                 taskId: task.stableId ?? task.id,
                 stableId: task.stableId,
@@ -326,19 +331,19 @@ export function register(server: McpServer, ctx: McpContext): void {
                 taskLine: task.line,
               });
             }
-            incrementSessionTasksCompleted(phrenPath, completed.length, sessionId, project);
+            incrementSessionTasksCompleted(targetPath, completed.length, sessionId, project);
           }
-          if (completed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          if (completed.length > 0) refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({ ok: completed.length > 0, ...(completed.length === 0 ? { error: `No tasks completed: ${errors.join("; ")}` } : {}), message: `Completed ${completed.length}/${item.length} items`, data: { project, completed, errors } });
         });
       }
 
       return withWriteQueue(async () => {
-        const before = resolveTaskItem(phrenPath, project, item);
-        const result = completeTaskStore(phrenPath, project, item);
+        const before = resolveTaskItem(targetPath, project, item);
+        const result = completeTaskStore(targetPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         if (before.ok) {
-          clearTaskCheckpoint(phrenPath, {
+          clearTaskCheckpoint(targetPath, {
             project,
             taskId: before.data.stableId ?? before.data.id,
             stableId: before.data.stableId,
@@ -346,8 +351,8 @@ export function register(server: McpServer, ctx: McpContext): void {
             taskLine: before.data.line,
           });
         }
-        incrementSessionTasksCompleted(phrenPath, 1, sessionId, project);
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
+        incrementSessionTasksCompleted(targetPath, 1, sessionId, project);
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -366,25 +371,28 @@ export function register(server: McpServer, ctx: McpContext): void {
         ]).describe("The task(s) to remove. Pass a string for one, or an array for bulk."),
       }),
     },
-    async ({ project, item }) => {
+    async ({ project: projectInput, item }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const removeTaskDenied = permissionDeniedError(phrenPath, "remove_task", project);
+      const removeTaskDenied = permissionDeniedError(targetPath, "remove_task", project);
       if (removeTaskDenied) return mcpResponse({ ok: false, error: removeTaskDenied });
 
       if (Array.isArray(item)) {
         return withWriteQueue(async () => {
-          const result = removeTasksBatch(phrenPath, project, item);
+          const result = removeTasksBatch(targetPath, project, item);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           const { removed, errors } = result.data;
-          if (removed.length > 0) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          if (removed.length > 0) refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({ ok: removed.length > 0, ...(removed.length === 0 ? { error: `No tasks removed: ${errors.join("; ")}` } : {}), message: `Removed ${removed.length}/${item.length} items`, data: { project, removed, errors } });
         });
       }
 
       return withWriteQueue(async () => {
-        const result = removeTaskStore(phrenPath, project, item);
+        const result = removeTaskStore(targetPath, project, item);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item } });
       });
     }
@@ -418,9 +426,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         }).describe("Fields to update. All are optional."),
       }),
     },
-    async ({ project, item, updates }) => {
+    async ({ project: projectInput, item, updates }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const updateTaskDenied = permissionDeniedError(phrenPath, "update_task", project);
+      const updateTaskDenied = permissionDeniedError(targetPath, "update_task", project);
       if (updateTaskDenied) return mcpResponse({ ok: false, error: updateTaskDenied });
 
       // Runtime validation: item is required unless work_next is true
@@ -463,25 +474,25 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Handle work_next: pick highest-priority Queue item, move to Active
         if (updates.work_next) {
-          const result = workNextTask(phrenPath, project);
+          const result = workNextTask(targetPath, project);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({ ok: true, message: result.data, data: { project } });
         }
 
         // Handle pin
         if (updates.pin) {
-          const result = pinTask(phrenPath, project, item!);
+          const result = pinTask(targetPath, project, item!);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({ ok: true, message: result.data, data: { project, item } });
         }
 
         // Handle promote (clear speculative flag)
         if (updates.promote) {
-          const result = promoteTask(phrenPath, project, item!, updates.move_to_active ?? false);
+          const result = promoteTask(targetPath, project, item!, updates.move_to_active ?? false);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({
             ok: true,
             message: `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
@@ -490,9 +501,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         if (updates.create_issue) {
-          const resolved = resolveTaskItem(phrenPath, project, item!);
-          if (!resolved.ok) return mcpResponse({ ok: false, error: resolved.error });
-          const repo = resolveProjectGithubRepo(phrenPath, project);
+          const resolvedItem = resolveTaskItem(targetPath, project, item!);
+          if (!resolvedItem.ok) return mcpResponse({ ok: false, error: resolvedItem.error });
+          const repo = resolveProjectGithubRepo(targetPath, project);
           if (!repo) {
             return mcpResponse({
               ok: false,
@@ -501,16 +512,16 @@ export function register(server: McpServer, ctx: McpContext): void {
           }
           const created = createGithubIssueForTask({
             repo,
-            title: resolved.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
-            body: buildTaskIssueBody(project, resolved.data),
+            title: resolvedItem.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
+            body: buildTaskIssueBody(project, resolvedItem.data),
           });
           if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
-          const linked = linkTaskIssue(phrenPath, project, item!, {
+          const linked = linkTaskIssue(targetPath, project, item!, {
             github_issue: created.data.issueNumber,
             github_url: created.data.url,
           });
           if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
-          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({
             ok: true,
             message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
@@ -531,13 +542,13 @@ export function register(server: McpServer, ctx: McpContext): void {
           if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
             return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
           }
-          const result = linkTaskIssue(phrenPath, project, item!, {
+          const result = linkTaskIssue(targetPath, project, item!, {
             github_issue: updates.github_issue,
             github_url: updates.github_url,
             unlink: updates.unlink_github ?? false,
           });
           if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-          refreshTaskIndex(updateFileInIndex, phrenPath, project);
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({
             ok: true,
             message: updates.unlink_github
@@ -554,9 +565,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Standard update path
-        const result = updateTaskStore(phrenPath, project, item!, updates);
+        const result = updateTaskStore(targetPath, project, item!, updates);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        refreshTaskIndex(updateFileInIndex, phrenPath, project);
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
       });
     }
@@ -573,12 +584,15 @@ export function register(server: McpServer, ctx: McpContext): void {
         dry_run: z.boolean().optional().describe("If true, preview changes without writing."),
       }),
     },
-    async ({ project, keep, dry_run }) => {
+    async ({ project: projectInput, keep, dry_run }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
       return withWriteQueue(async () => {
-        const result = tidyDoneTasks(phrenPath, project, keep ?? 30, dry_run ?? false);
+        const result = tidyDoneTasks(targetPath, project, keep ?? 30, dry_run ?? false);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        if (!dry_run) refreshTaskIndex(updateFileInIndex, phrenPath, project);
+        if (!dry_run) refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
       });
     }

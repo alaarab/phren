@@ -126,7 +126,7 @@ export function listAllProjects(
   const results: Array<{ store: StoreEntry; projectName: string; projectDir: string }> = [];
 
   for (const store of stores) {
-    const dirs = getProjectDirs(store.path, profile);
+    const dirs = getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
     for (const dir of dirs) {
       const projectName = path.basename(dir);
       results.push({ store, projectName, projectDir: dir });
@@ -151,7 +151,7 @@ function findProjectInStore(
 ): string | null {
   if (!fs.existsSync(store.path)) return null;
 
-  const dirs = getProjectDirs(store.path, profile);
+  const dirs = getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
   for (const dir of dirs) {
     if (path.basename(dir) === projectName) return dir;
   }

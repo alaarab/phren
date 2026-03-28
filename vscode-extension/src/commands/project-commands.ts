@@ -100,6 +100,34 @@ export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposabl
     },
   );
 
+  const toggleProjectHook = vscode.commands.registerCommand(
+    "phren.toggleProjectHook",
+    async (node: { projectName: string; event: string; enabled: boolean; configured: boolean | null }) => {
+      try {
+        // 3-state cycle: inherit → override-off → override-on → inherit
+        // configured === null means inheriting global
+        // configured === true means overridden on
+        // configured === false means overridden off
+        if (node.configured === null) {
+          // Currently inheriting: set explicit override to OFF (opposite of enabled to make it visible)
+          await phrenClient.toggleHooks(false, undefined, node.projectName, node.event);
+          await vscode.window.showInformationMessage(`Hook "${node.event}" for "${node.projectName}" overridden: disabled.`);
+        } else if (node.configured === false) {
+          // Currently overridden off: flip to overridden on
+          await phrenClient.toggleHooks(true, undefined, node.projectName, node.event);
+          await vscode.window.showInformationMessage(`Hook "${node.event}" for "${node.projectName}" overridden: enabled.`);
+        } else {
+          // Currently overridden on: clear override, restore inheritance
+          await phrenClient.clearProjectHookOverride(node.projectName, node.event);
+          await vscode.window.showInformationMessage(`Hook "${node.event}" for "${node.projectName}" now inheriting from global.`);
+        }
+        treeDataProvider.refresh();
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to toggle project hook: ${toErrorMessage(error)}`);
+      }
+    },
+  );
+
   const sync = vscode.commands.registerCommand("phren.sync", async () => {
     try {
       await vscode.window.withProgress(
@@ -399,6 +427,7 @@ export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposabl
     openSkill,
     toggleSkill,
     toggleHook,
+    toggleProjectHook,
     sync,
     hooksStatus,
     toggleHooks,
