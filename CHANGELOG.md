@@ -3,6 +3,14 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.45] - 2026-03-28
+
+### Fixed
+- **Multi-store FTS5 index** — `buildIndex` now aggregates project dirs from all stores (primary + team + readonly). Team store projects are now searchable via `search_knowledge` and visible in hook-prompt context injection.
+- **Project detection across stores** — `detectProject` scans all stores, checking each store's `phren.project.yaml` for source path matching. Working in `~/projects/arc` now correctly detects the project even when it's claimed by a team store.
+- **Pull-only sync enforcement** — Stop hook now checks `store.sync === "pull-only"` before committing/pushing, ensuring private stores configured for manual-only push are never auto-synced.
+- **Windows CI** — Fixed `PHREN_FEDERATION_PATHS` splitting on `:` which broke Windows drive letters. Now uses `path.delimiter`.
+
 ## [0.0.44] - 2026-03-27
 
 ### Added
@@ -1107,7 +1115,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.44...HEAD
+[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.45...HEAD
+[0.0.45]: https://github.com/alaarab/phren/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/alaarab/phren/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/alaarab/phren/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/alaarab/phren/compare/v0.0.41...v0.0.42
