@@ -23,12 +23,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   hooksOutputChannel = vscode.window.createOutputChannel("Phren Hooks");
   context.subscriptions.push(hooksOutputChannel);
   outputChannel.appendLine("Phren extension activating...");
-
-  // Set context keys optimistically to prevent "not set up" / "no projects"
-  // flash while async initialization runs. Real values override below.
-  await vscode.commands.executeCommand("setContext", "phren.backendInstalled", true);
-  await vscode.commands.executeCommand("setContext", "phren.firstProjectAdded", true);
-
   const config = vscode.workspace.getConfiguration("phren");
   await runOnboardingIfNeeded(config, outputChannel);
   const runtimeConfig = resolveRuntimeConfig(vscode.workspace.getConfiguration("phren"));
@@ -44,7 +38,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // --- Check walkthrough state; bail if backend/store not ready ---
   const ready = await handleWalkthroughChecks(runtimeConfig, outputChannel);
-  if (!ready) return;
+  if (!ready) {
+    await vscode.commands.executeCommand("setContext", "phren.activationComplete", true);
+    return;
+  }
 
   // --- Create shared state ---
   const phrenClient = new PhrenClient({
@@ -179,6 +176,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   } catch {
     // Non-critical — walkthrough step just won't auto-complete
   }
+
+  // Signal activation complete — viewsWelcome messages gated on this key
+  // so they don't flash during async startup
+  await vscode.commands.executeCommand("setContext", "phren.activationComplete", true);
 
   // --- Workspace folder detection: offer to track untracked folders ---
   detectAndOfferWorkspaceFolders(phrenClient, context, treeDataProvider, projectsRaw);

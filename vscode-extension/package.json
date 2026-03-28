@@ -454,12 +454,12 @@
       {
         "view": "phren.explorer",
         "contents": "Phren is not set up yet.\n[Install Phren](command:phren.installBackend)\n[Open Walkthrough](command:workbench.action.openWalkthrough?%22alaarab.phren-vscode%23phren.gettingStarted%22)",
-        "when": "!phren.backendInstalled"
+        "when": "phren.activationComplete && !phren.backendInstalled"
       },
       {
         "view": "phren.explorer",
         "contents": "No projects tracked yet.\n[Add Project](command:phren.addProject)",
-        "when": "phren.backendInstalled && !phren.firstProjectAdded"
+        "when": "phren.activationComplete && phren.backendInstalled && !phren.firstProjectAdded"
       }
     ],
     "walkthroughs": [
