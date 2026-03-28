@@ -42,7 +42,7 @@ function parseFindings(raw: string): string[] {
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  const { withWriteQueue, updateFileInIndex } = ctx;
 
   server.registerTool(
     "auto_extract_findings",
