@@ -47,7 +47,7 @@ Every finding has a confidence score. The score degrades over time in four steps
 
 Entries below 0.35 are suppressed entirely and move to the review queue instead of being injected. Entries with file/line/commit citations hold their score longer than uncited ones.
 
-You can save a truth with `pin_memory` to make it never decay. Truths live in `truths.md` and always inject regardless of age.
+You can save a truth with `pin_memory` to make it never decay. Truths live in `truths.md` and are always prepended to context injection for the detected project, with priority second only to findings. Use `get_truths` to read all truths for a project, or `phren truths <project>` from the CLI.
 
 All thresholds are configurable via `phren config policy`.
 
@@ -146,7 +146,7 @@ Project setup note:
 
 ## Does phren require MCP?
 
-No. MCP is recommended. It gives agents 52 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended. It gives agents 53 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 phren init --mcp off

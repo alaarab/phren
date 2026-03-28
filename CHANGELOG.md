@@ -3,6 +3,25 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.44] - 2026-03-27
+
+### Added
+- **Team stores Phase 2** — full writable team stores. `phren team init`, `phren team join`, `phren team add-project` CLI commands for creating, joining, and managing shared knowledge repos.
+- **Write routing via project claims** — `resolveStoreForProject()` checks store `projects[]` claims before defaulting to primary. Once a project is claimed by a team store, writes route there automatically.
+- **Per-store git sync** — Stop hook now commits and pushes team store changes (journal/, tasks.md, truths.md). Session start pulls all stores.
+- **`get_truths` MCP tool** (53 tools total) — dedicated retrieval of all pinned truths for a project.
+- **`phren truths <project>` CLI** — list pinned truths from the terminal.
+- **VS Code extension truths category** — "Truths" tab with pin icon in the project tree, backed by `get_truths` MCP tool.
+- **Truths in `get_project_summary`** — project summary now shows pinned truths section and includes `truthsPath` in response data.
+- **Store routing for all write tools** — `supersede_finding`, `retract_finding`, `resolve_contradiction`, `edit_finding`, `remove_finding`, and `pin_memory` now respect store-qualified names and project claims.
+- **Multi-store `push_changes`** — syncs team stores after primary, with pull-rebase retry.
+
+### Changed
+- **Install messaging** — all docs, README, doctor messages now recommend `npx @phren/cli init` over `npm install -g`. No sudo needed on Linux/Mac.
+- **Truths always-inject** — removed `LIMIT 1` on canonical prepend, added dedup so truths are reliably injected for the detected project.
+- **Truths docs accuracy** — API reference, FAQ, and llms-install updated to describe actual always-prepend behavior instead of vague "always injects" claim.
+- **Release parity**: bumped core npm package to `0.0.44` and VS Code extension to `0.5.15`.
+
 ## [0.0.43] - 2026-03-25
 
 ### Fixed
@@ -1088,7 +1107,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.43...HEAD
+[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.44...HEAD
+[0.0.44]: https://github.com/alaarab/phren/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/alaarab/phren/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/alaarab/phren/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/alaarab/phren/compare/v0.0.40...v0.0.41

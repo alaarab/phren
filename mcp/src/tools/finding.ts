@@ -311,9 +311,18 @@ async function handleAddFinding(
 
 async function handleSupersedeFinding(
   ctx: McpContext,
-  { project, finding_text, superseded_by }: { project: string; finding_text: string; superseded_by: string },
+  { project: projectInput, finding_text, superseded_by }: { project: string; finding_text: string; superseded_by: string },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, projectInput);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   return withLifecycleMutation(
     phrenPath, project, withWriteQueue, updateFileInIndex,
     () => supersedeFinding(phrenPath, project, finding_text, superseded_by),
@@ -326,9 +335,18 @@ async function handleSupersedeFinding(
 
 async function handleRetractFinding(
   ctx: McpContext,
-  { project, finding_text, reason }: { project: string; finding_text: string; reason: string },
+  { project: projectInput, finding_text, reason }: { project: string; finding_text: string; reason: string },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, projectInput);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   return withLifecycleMutation(
     phrenPath, project, withWriteQueue, updateFileInIndex,
     () => retractFindingLifecycle(phrenPath, project, finding_text, reason),
@@ -341,7 +359,7 @@ async function handleRetractFinding(
 
 async function handleResolveContradiction(
   ctx: McpContext,
-  { project, finding_text, finding_text_other, finding_a, finding_b, resolution }: {
+  { project: projectInput, finding_text, finding_text_other, finding_a, finding_b, resolution }: {
     project: string;
     finding_text?: string;
     finding_text_other?: string;
@@ -350,7 +368,16 @@ async function handleResolveContradiction(
     resolution: "keep_a" | "keep_b" | "keep_both" | "retract_both";
   },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, projectInput);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   const findingText = (finding_text ?? finding_a)?.trim();
   const findingTextOther = (finding_text_other ?? finding_b)?.trim();
   if (!findingText || !findingTextOther) {
@@ -433,9 +460,18 @@ async function handleGetContradictions(
 
 async function handleEditFinding(
   ctx: McpContext,
-  { project, old_text, new_text }: { project: string; old_text: string; new_text: string },
+  { project: projectInput, old_text, new_text }: { project: string; old_text: string; new_text: string },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, projectInput);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
   const editDenied = permissionDeniedError(phrenPath, "edit_finding", project);
   if (editDenied) return mcpResponse({ ok: false, error: editDenied });
@@ -454,9 +490,18 @@ async function handleEditFinding(
 
 async function handleRemoveFinding(
   ctx: McpContext,
-  { project, finding }: { project: string; finding: string | string[] },
+  { project: projectInput, finding }: { project: string; finding: string | string[] },
 ) {
-  const { phrenPath, withWriteQueue, updateFileInIndex } = ctx;
+  let phrenPath: string;
+  let project: string;
+  try {
+    const resolved = resolveStoreForProject(ctx, projectInput);
+    phrenPath = resolved.phrenPath;
+    project = resolved.project;
+  } catch (err: unknown) {
+    return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+  }
+  const { withWriteQueue, updateFileInIndex } = ctx;
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
   const removeDenied = permissionDeniedError(phrenPath, "remove_finding", project);
   if (removeDenied) return mcpResponse({ ok: false, error: removeDenied });
@@ -588,6 +633,56 @@ async function handlePushChanges(
       }
     } catch (err: unknown) {
       return mcpResponse({ ok: false, error: `Save failed: ${errorMessage(err)}`, errorCode: "INTERNAL_ERROR" });
+    }
+
+    // Sync team stores: commit and push journal/tasks/truths changes
+    try {
+      const { getNonPrimaryStores } = await import("../store-registry.js");
+      const teamStores = getNonPrimaryStores(phrenPath).filter((s) => s.role === "team");
+      const teamResults: Array<{ store: string; pushed: boolean; error?: string }> = [];
+
+      for (const store of teamStores) {
+        if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
+        const runStoreGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string =>
+          execFileSync("git", args, {
+            cwd: store.path,
+            encoding: "utf8",
+            timeout: opts.timeout ?? EXEC_TIMEOUT_MS,
+            env: opts.env,
+            stdio: ["ignore", "pipe", "pipe"],
+          }).trim();
+
+        try {
+          const storeStatus = runStoreGit(["status", "--porcelain"]);
+          if (!storeStatus) { teamResults.push({ store: store.name, pushed: false }); continue; }
+
+          // Only stage team-safe files: journal/, tasks.md, truths.md, FINDINGS.md, summary.md
+          runStoreGit(["add", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/summary.md"]);
+          const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
+          runStoreGit(["commit", "-m", `phren: ${actor} team sync`]);
+
+          try {
+            runStoreGit(["push"], { timeout: 15000 });
+            teamResults.push({ store: store.name, pushed: true });
+          } catch (pushErr: unknown) {
+            try {
+              runStoreGit(["pull", "--rebase", "--quiet"], { timeout: 15000 });
+              runStoreGit(["push"], { timeout: 15000 });
+              teamResults.push({ store: store.name, pushed: true });
+            } catch (retryErr: unknown) {
+              teamResults.push({ store: store.name, pushed: false, error: errorMessage(retryErr) });
+            }
+          }
+        } catch (storeErr: unknown) {
+          teamResults.push({ store: store.name, pushed: false, error: errorMessage(storeErr) });
+        }
+      }
+      // Team store results are best-effort — don't fail the primary push for them
+      if (teamResults.length > 0) {
+        debugLog(`push_changes team stores: ${JSON.stringify(teamResults)}`);
+      }
+    } catch {
+      // store-registry not available — skip silently
     }
   });
 }

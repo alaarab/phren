@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 52 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 53 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -248,12 +248,20 @@ Finding lifecycle and impact scoring notes:
 
 ### `pin_memory`
 
-Write a truth into truths.md, a high-confidence entry that never decays and always injects.
+Write a truth into truths.md, a high-confidence entry that never decays. Truths for the detected project are always prepended to hook-prompt context injection with priority second only to findings. Use `get_truths` to read all truths for a project.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `memory` | string | yes | Truth text. |
+
+### `get_truths`
+
+Read all pinned truths for a project. Returns the full list of truth entries from truths.md.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
 
 ### `memory_feedback`
 

@@ -253,6 +253,10 @@ export class PhrenClient {
     return this.callTool("pin_memory", { project, memory });
   }
 
+  async getTruths(project: string): Promise<unknown> {
+    return this.callTool("get_truths", { project });
+  }
+
   async editFinding(project: string, oldText: string, newText: string): Promise<unknown> {
     return this.callTool("edit_finding", { project, old_text: oldText, new_text: newText });
   }

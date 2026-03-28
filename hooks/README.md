@@ -125,8 +125,6 @@ hooks:
 
 `hooks.enabled` sets the default for that project. Event-specific keys (`UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`) override the base toggle when present. This lets you keep hooks disabled for one project while still allowing a specific lifecycle event if needed.
 
-See `docs/internal/hook-config-spec.md` for the full schema specification.
-
 ## Dependencies
 
 - `jq` for JSON parsing (`apt install jq` or `brew install jq`)

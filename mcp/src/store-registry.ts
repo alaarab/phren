@@ -222,6 +222,20 @@ export function removeStoreFromRegistry(phrenPath: string, name: string): StoreE
   });
 }
 
+/** Update the projects[] claim list for a store. Uses file locking. */
+export function updateStoreProjects(phrenPath: string, storeName: string, projects: string[]): void {
+  withFileLock(storesFilePath(phrenPath), () => {
+    const registry = readStoreRegistry(phrenPath);
+    if (!registry) throw new Error(`${PhrenError.FILE_NOT_FOUND}: No stores.yaml found`);
+
+    const store = registry.stores.find((s) => s.name === storeName);
+    if (!store) throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found`);
+
+    store.projects = projects.length > 0 ? projects : undefined;
+    writeStoreRegistry(phrenPath, registry);
+  });
+}
+
 // ── Validation ───────────────────────────────────────────────────────────────
 
 function validateRegistry(registry: StoreRegistry): string | null {

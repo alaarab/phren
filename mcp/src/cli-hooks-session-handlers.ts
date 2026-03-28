@@ -288,6 +288,22 @@ export async function handleHookSessionStart() {
     logger.debug("hookSessionStart trackSession", errorMessage(err));
   }
 
+  // Pull non-primary stores (team + readonly) so session starts with fresh data
+  try {
+    const { getNonPrimaryStores } = await import("./store-registry.js");
+    const otherStores = getNonPrimaryStores(phrenPath);
+    for (const store of otherStores) {
+      if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
+      try {
+        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+      } catch (err: unknown) {
+        debugLog(`session-start store-pull ${store.name}: ${errorMessage(err)}`);
+      }
+    }
+  } catch {
+    // store-registry not available — skip silently
+  }
+
   updateRuntimeHealth(phrenPath, {
     lastSessionStartAt: startedAt,
     lastSync: {

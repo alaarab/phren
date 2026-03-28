@@ -5,9 +5,15 @@ phren keeps project memory portable across sessions and machines. It runs as an 
 ## Quick Start
 
 ```bash
-npm install -g @phren/cli
-phren init
-phren init --dry-run
+npx @phren/cli init
+```
+
+No global install needed — `npx` runs it directly. On Windows, if `npx` isn't available, use `npm install -g @phren/cli && phren init`.
+
+Preview what init will do without making changes:
+
+```bash
+npx @phren/cli init --dry-run
 ```
 
 This creates `~/.phren`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
@@ -39,7 +45,7 @@ phren uninstall
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (52)
+## MCP Tools (53)
 
 ### Search and Browse
 
@@ -80,7 +86,8 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `pin_memory` | `project`, `memory` | Write a truth into truths.md. Never decays, always injected. |
+| `pin_memory` | `project`, `memory` | Write a truth into truths.md. Never decays, always prepended to context. |
+| `get_truths` | `project` | Read all pinned truths for a project. |
 | `memory_feedback` | `key`, `feedback` | Record whether an injected memory was `helpful`, a `reprompt`, or a `regression`. |
 
 ### Data Management

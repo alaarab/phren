@@ -517,16 +517,45 @@ export async function handleHookStop() {
 
   }); // end withFileLock(gitOpLockPath)
 
-  // Pull non-primary stores (best-effort, non-blocking)
+  // Sync non-primary stores: commit+push team stores, pull-only readonly stores
   try {
     const { getNonPrimaryStores } = await import("./store-registry.js");
     const otherStores = getNonPrimaryStores(phrenPath);
     for (const store of otherStores) {
       if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
-      try {
-        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
-      } catch (err: unknown) {
-        debugLog(`hook-stop store-pull ${store.name}: ${errorMessage(err)}`);
+
+      if (store.role === "team") {
+        // Team stores: stage team-safe files, commit, and push
+        try {
+          const storeStatus = await runBestEffortGit(["status", "--porcelain"], store.path);
+          if (storeStatus.ok && storeStatus.output) {
+            // Only stage journal/, tasks.md, truths.md, FINDINGS.md, summary.md — NOT .runtime/
+            await runBestEffortGit(["add", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/summary.md", ".phren-team.yaml"], store.path);
+            const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
+            const teamCommit = await runBestEffortGit(["commit", "-m", `phren: ${actor} team sync`], store.path);
+            if (teamCommit.ok) {
+              // Check for remote before pushing
+              const storeRemotes = await runBestEffortGit(["remote"], store.path);
+              if (storeRemotes.ok && storeRemotes.output?.trim()) {
+                const teamPush = await runBestEffortGit(["push"], store.path);
+                if (!teamPush.ok) {
+                  // Try pull-rebase then push
+                  await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+                  await runBestEffortGit(["push"], store.path);
+                }
+              }
+            }
+          }
+        } catch (err: unknown) {
+          debugLog(`hook-stop team-store-sync ${store.name}: ${errorMessage(err)}`);
+        }
+      } else {
+        // Readonly stores: pull only
+        try {
+          await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+        } catch (err: unknown) {
+          debugLog(`hook-stop store-pull ${store.name}: ${errorMessage(err)}`);
+        }
       }
     }
   } catch {

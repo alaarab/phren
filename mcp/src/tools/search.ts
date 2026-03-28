@@ -520,7 +520,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ filename: string; type: string; content: string; path: string }> = [];
-      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], ["FINDINGS.md", "findings"], ["tasks.md", "task"]] as const) {
+      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], ["FINDINGS.md", "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -538,6 +538,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
 
   const summaryDoc = docs.find(doc => doc.type === "summary");
   const claudeDoc = docs.find(doc => doc.type === "claude");
+  const canonicalDoc = docs.find(doc => doc.type === "canonical");
   const indexedFiles = docs.map(doc => ({ filename: doc.filename, type: doc.type, path: doc.path }));
 
   const parts: string[] = [`# ${name}`];
@@ -549,6 +550,13 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
   if (claudeDoc) {
     parts.push(`\n## CLAUDE.md path\n\`${claudeDoc.path}\``);
   }
+  // Show truths if they exist
+  if (canonicalDoc) {
+    const truthLines = canonicalDoc.content.split("\n").filter((l: string) => l.startsWith("- "));
+    if (truthLines.length > 0) {
+      parts.push(`\n## Truths (${truthLines.length})\n${truthLines.join("\n")}`);
+    }
+  }
   const fileList = indexedFiles.map((f) => `- ${f.filename} (${f.type})`).join("\n");
   parts.push(`\n## Indexed files\n${fileList}`);
 
@@ -559,6 +567,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
       name,
       summary: summaryDoc?.content ?? null,
       claudeMdPath: claudeDoc?.path ?? null,
+      truthsPath: canonicalDoc?.path ?? null,
       files: indexedFiles,
     },
   });
