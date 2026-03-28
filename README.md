@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-Every time you start a new session, your AI agent forgets everything it learned. Phren fixes that. Findings, decisions, and patterns persist as markdown in a git repo you control. No database, no hosted service, no vendor lock-in.
+Persistent memory for AI agents. Findings, tasks, and patterns live in markdown files in a git repo you control. No database, no vendor lock-in. Works with Claude, Copilot, Cursor, and Codex.
 </p>
 
 ---
@@ -21,63 +21,108 @@ Every time you start a new session, your AI agent forgets everything it learned.
 npx @phren/cli init
 ```
 
-That single command creates `~/.phren`, wires up MCP, installs hooks, and gives your agents a memory they can actually keep. Re-running on a new machine with an existing remote picks up right where you left off.
+One command. Sets up `~/.phren`, wires up MCP for your tools, installs hooks. Next time you open a project, context starts flowing automatically. On a new machine? Re-run init and you're back in sync.
 
-## What phren tracks
+---
 
-- **Findings**: bugs hit, patterns discovered, decisions and their reasoning. Tagged by type (`[pattern]`, `[decision]`, `[pitfall]`, `[observation]`) with per-type decay rates
-- **Fragments**: named concepts (auth, build, React) that connect findings across projects. Search for a topic and phren pulls in everything linked to that fragment
-- **Tasks**: work items that persist across sessions with priority, pinning, and GitHub issue linking
-- **Sessions**: conversation boundaries with summaries and checkpoints, so the next session picks up where the last one left off
-- **Skills**: reusable slash commands you teach phren. Drop them in `~/.phren/global/skills/` and they work everywhere
+## What actually happens
 
-## How it works
+**When you open a prompt:**
+- Hooks extract keywords from your question
+- Phren searches findings across projects (FTS5 full-text with semantic fallback)
+- Relevant snippets inject into your prompt before you hit send
+- You ask; Claude already knows the gotchas
 
-- **Surfaces relevant context on every prompt** via hooks. Agents build on what they know instead of starting fresh
-- **Trust scores decay over time.** Old findings lose confidence. Decisions never decay. Observations expire in 14 days
-- **Syncs across machines** through git push/pull. No coordination service
-- **Works with Claude Code, Copilot, Cursor, and Codex.** One store, every agent
-- **Shell and web UI** for browsing, searching, and triaging (`phren` or `phren web-ui`)
+**When you discover something:**
+- `phren add-finding <project> "finding text"` captures it with optional tags (`[decision]`, `[pattern]`, `[pitfall]`, `[bug]`)
+- Trust scores decay over time; decisions never do; observations expire in 14 days
+- Findings link to fragments (named concepts like "auth" or "build") that connect knowledge across projects
 
-## Quick start
+**Sessions:**
+- Mark boundaries with `session_start` / `session_end`
+- Next session sees your prior summary, active tasks, recent findings, and where you left off
+- Checkpoints track edited files and failing tests so you can resume exactly where you stopped
 
+**Tasks:**
+- Add with priority/section. Pin across sessions. Link to GitHub issues.
+- Track completions and cross-project rollups.
+
+---
+
+## Key features
+
+### Fragment graph
+Explore connections visually. Drag nodes to reorganize; graph auto-settles. Click a fragment to see every finding linked to it across all projects.
+
+### Finding lifecycle
+- **Supersede**: "Finding X is obsoleted by finding Y"
+- **Retract**: "We were wrong about this; here's why"
+- **Contradict**: "We have two findings that conflict; this is why"
+
+Helps you reason about contradictions instead of hiding them.
+
+### Multi-agent support
+Same store works with Claude Code, Copilot, Cursor, and Codex. Agents tag findings with their tool, so you see who discovered what.
+
+### Review queue
+Mark findings as needing review (`[Review]` section). Phren surfaces review items on every session start. Approve, reject, or edit in place.
+
+### Governance & policies
+Per-project retention policies. Confidence decay curves. Access control. Audit logs. Configure with `phren config` or the web UI.
+
+### Store subscriptions
+Subscribe to specific projects in a team store — others stay hidden from search and context injection:
 ```bash
-npx @phren/cli init          # set up phren (interactive walkthrough)
+phren store subscribe team-store arc intranet
+phren store unsubscribe team-store legacy-projects
 ```
 
-Init detects your tools, registers MCP servers, and installs lifecycle hooks. After it finishes, open a prompt in any tracked project. Phren is already injecting context.
+### Progressive disclosure
+Enable `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1` to get compact memory indices instead of full snippets. Call `get_memory_detail(id)` to expand only what you need.
 
-To add a project later, run `phren add` from that directory. To browse what phren knows, run `phren` to open the interactive shell.
+### Semantic dedup & conflict detection
+Optional: enable LLM-based duplicate detection and contradiction flagging on `add_finding`. Prevents near-duplicate entries and catches "always use X" vs "never use X" contradictions.
+
+### Skills & hooks
+Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user prompt, tool use, and session events — wire phren into your own workflows.
+
+---
+
+## CLI quick reference
+
+```bash
+phren                                   Interactive shell (explore/search)
+phren search <query>                    Full-text search with FTS5
+phren add-finding <project> "insight"   Capture a finding
+phren task add <project> "item"         Add a task
+phren session_start <project>           Start a session
+phren store list                        List personal + team stores
+phren team init <name> --remote <url>   Create a team store
+phren team join <url>                   Join a team store
+phren web-ui [--port 3499]              Launch the web UI
+phren doctor                            Health check & auto-fix
+```
+
+See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).
+
+---
 
 ## Team stores
 
-Phren supports shared team knowledge repos alongside your personal store. A team store is a separate git repo that multiple people push to. Findings, tasks, and skills saved there are visible to everyone on the team.
+Shared knowledge repos for teams. One person creates with `phren team init`, others join with `phren team join`. Findings, tasks, and skills sync across team members.
 
-Create a team store:
+Each team store can be configured with per-project subscriptions so people only see what they care about.
 
-```bash
-phren team init my-team --remote git@github.com:org/phren-team.git
-phren team add-project my-team my-project
-```
+---
 
-Join an existing team store:
+## Platforms
 
-```bash
-phren team join git@github.com:org/phren-team.git
-```
+- **Claude Code** (VS Code, Web, Desktop) — MCP hooks + CLI
+- **Copilot** (VS Code, GitHub.com) — MCP hooks
+- **Cursor** (IDE) — MCP hooks + built-in skill system
+- **Codex** (Claude Agent SDK) — MCP tools + hooks
 
-Each team store syncs independently. Run `phren team list` to see all registered stores.
-
-### Filtering Team Store Projects
-
-Subscribe to only the projects you care about:
-
-```bash
-phren store subscribe qualus-shared arc intranet ogrid
-phren store unsubscribe qualus-shared dendron powergrid-api
-```
-
-Unsubscribed projects still exist in the store but won't appear in search, UI, or context injection.
+All use the same phren store. No vendor lock-in.
 
 ---
 

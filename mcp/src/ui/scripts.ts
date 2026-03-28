@@ -1472,6 +1472,8 @@ export function renderEventWiringScript(): string {
   if (graphZoomOut) graphZoomOut.addEventListener('click', function() { graphZoom(0.8); });
   var graphResetBtn = document.getElementById('graph-reset');
   if (graphResetBtn) graphResetBtn.addEventListener('click', function() { graphReset(); });
+  var graphResetLayoutBtn = document.getElementById('graph-reset-layout');
+  if (graphResetLayoutBtn) graphResetLayoutBtn.addEventListener('click', function() { if (typeof graphResetLayout === 'function') graphResetLayout(); });
 
   // --- Tasks filters ---
   var tasksFilterProject = document.getElementById('tasks-filter-project');

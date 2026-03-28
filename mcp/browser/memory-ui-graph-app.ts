@@ -121,6 +121,18 @@ const KIND_COLORS = {
   other: "#94a3b8",
 };
 
+// Distinct colors per store — up to 6 stores, then cycles
+const STORE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ef4444", "#10b981", "#ec4899"];
+let _storeColorMap: Map<string, string> | null = null;
+function storeColor(storeName?: string): string | null {
+  if (!storeName || storeName === "primary") return null; // primary keeps default orange
+  if (!_storeColorMap) _storeColorMap = new Map();
+  if (_storeColorMap.has(storeName)) return _storeColorMap.get(storeName)!;
+  const idx = (_storeColorMap.size + 1) % STORE_COLORS.length;
+  _storeColorMap.set(storeName, STORE_COLORS[idx]);
+  return STORE_COLORS[idx];
+}
+
 function drawCustomLabel(
   context: CanvasRenderingContext2D,
   data: { label: string; x: number; y: number; size: number; color: string },
@@ -333,7 +345,7 @@ function baseColorForNode(node: RawNode): string {
     if (node.section === "Active" || node.group === "task-active") return KIND_COLORS["task-active"];
     return KIND_COLORS["task-queue"];
   }
-  if (kind === "project") return KIND_COLORS.project;
+  if (kind === "project") return storeColor(node.store) || KIND_COLORS.project;
   if (kind === "entity") return KIND_COLORS.entity;
   if (kind === "reference") return KIND_COLORS.reference;
   return KIND_COLORS.other;
@@ -808,11 +820,9 @@ function refreshRenderer(resetCamera: boolean): void {
         const ratio = state.cameraRatio;
 
         // Semantic zoom: fade nodes based on zoom level
-        // ratio ~1 = zoomed out, ratio < 0.3 = zoomed in
-        // Level 1 (zoomed out): projects only
-        // Level 2 (medium): + findings + tasks
-        // Level 3 (zoomed in): + entities + references
-        if (!state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
+        // Skip semantic zoom if user has actively filtered types (explicit choice overrides zoom)
+        const allTypesOn = state.filterTypes.project && state.filterTypes.finding && state.filterTypes.task && state.filterTypes.entity && state.filterTypes.reference;
+        if (allTypesOn && !state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
           if (ratio > 0.65 && kind !== "project") {
             const fade = kind === "finding" || kind === "task" ? 0.12 : 0.04;
             next.color = hexToRgba(String(data.color), fade);
@@ -907,6 +917,21 @@ function refreshRenderer(resetCamera: boolean): void {
           return next;
         }
 
+        // Distance-based edge fading — long stretched edges fade out
+        const extremitiesForDist = state.graph?.extremities(edgeId);
+        if (extremitiesForDist && state.graph) {
+          const srcA = state.graph.getNodeAttributes(extremitiesForDist[0]);
+          const tgtA = state.graph.getNodeAttributes(extremitiesForDist[1]);
+          const dx = srcA.x - tgtA.x;
+          const dy = srcA.y - tgtA.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 300) {
+            const fade = Math.max(0.03, 1 - (dist - 300) / 400);
+            next.color = hexToRgba(String(data.color || "#888"), fade * 0.3);
+            next.size = Math.max(0.3, (data.size || 1) * fade);
+          }
+        }
+
         // Normal selection/hover
         const focus = state.hoveredNodeId || state.selectedNodeId;
         if (!focus) return next;
@@ -988,14 +1013,23 @@ function refreshRenderer(resetCamera: boolean): void {
       state.isDragging = false;
       state.renderer?.setSettings({ enableCameraPanning: false });
       if (state.container) state.container.style.cursor = "grabbing";
-      // Store original neighbor positions for smooth spring-back on release
+      // Capture relative positions of all neighbors (offsets from project center)
       state.neighborPositions.clear();
-      const neighbors = state.visibleAdjacency.get(payload.node);
-      if (neighbors && state.graph) {
-        neighbors.forEach((neighborId) => {
-          const nAttrs = state.graph!.getNodeAttributes(neighborId);
-          state.neighborPositions.set(neighborId, { x: nAttrs.x, y: nAttrs.y });
-        });
+      if (state.graph) {
+        const projAttrs = state.graph.getNodeAttributes(payload.node);
+        state.neighborPositions.set(payload.node, { x: projAttrs.x, y: projAttrs.y });
+        const neighbors = state.visibleAdjacency.get(payload.node);
+        if (neighbors) {
+          neighbors.forEach((neighborId) => {
+            const n = state.nodeById.get(neighborId);
+            if (!n || n.kind === "project") return;
+            try {
+              const nAttrs = state.graph!.getNodeAttributes(neighborId);
+              // Store offset FROM project, not absolute position
+              state.neighborPositions.set(neighborId, { x: nAttrs.x - projAttrs.x, y: nAttrs.y - projAttrs.y });
+            } catch { /* skip */ }
+          });
+        }
       }
     });
 
@@ -1012,45 +1046,52 @@ function refreshRenderer(resetCamera: boolean): void {
       state.isDragging = true;
       const graphCoords = state.renderer.viewportToGraph({ x: event.offsetX, y: event.offsetY });
       state.graph.mergeNodeAttributes(state.draggedNode, { x: graphCoords.x, y: graphCoords.y });
-      // Pull direct neighbors toward the drag position with gentle spring effect
-      const neighbors = state.visibleAdjacency.get(state.draggedNode);
-      if (neighbors) {
-        const dragPos = state.graph.getNodeAttributes(state.draggedNode);
-        neighbors.forEach((neighborId) => {
-          try {
-            const nAttrs = state.graph!.getNodeAttributes(neighborId);
-            const pullStrength = 0.15;
-            state.graph!.setNodeAttribute(neighborId, "x", nAttrs.x + (dragPos.x - nAttrs.x) * pullStrength);
-            state.graph!.setNodeAttribute(neighborId, "y", nAttrs.y + (dragPos.y - nAttrs.y) * pullStrength);
-          } catch { /* neighbor filtered out — skip */ }
-        });
-      }
+      // Gentle gravitational pull — neighbors drift toward the project during drag
+      const curPos = state.graph.getNodeAttributes(state.draggedNode);
+      state.neighborPositions.forEach((offset, neighborId) => {
+        if (neighborId === state.draggedNode) return;
+        try {
+          const nAttrs = state.graph!.getNodeAttributes(neighborId);
+          // Target: orbital position around new project location
+          const targetX = curPos.x + offset.x;
+          const targetY = curPos.y + offset.y;
+          // Ease toward target (gravitational drift, not rigid lock)
+          state.graph!.setNodeAttribute(neighborId, "x", nAttrs.x + (targetX - nAttrs.x) * 0.08);
+          state.graph!.setNodeAttribute(neighborId, "y", nAttrs.y + (targetY - nAttrs.y) * 0.08);
+        } catch { /* skip */ }
+      });
     };
     const endDrag = () => {
       if (state.draggedNode) {
         state.renderer?.setSettings({ enableCameraPanning: true });
         if (state.container) state.container.style.cursor = "default";
 
-        // Spring neighbors back to original positions
-        if (state.neighborPositions.size > 0 && state.graph) {
+        // Continue gravitational drift — animate neighbors to orbital positions around new location
+        const projPos = state.graph?.getNodeAttributes(state.draggedNode);
+        if (projPos && state.graph) {
           const positions = new Map(state.neighborPositions);
+          positions.delete(state.draggedNode);
           let frame = 0;
-          const maxFrames = 12;
-          const springBack = () => {
+          const maxFrames = 30;
+          const drift = () => {
             if (frame >= maxFrames || !state.graph) return;
             frame++;
-            positions.forEach((orig, neighborId) => {
+            let settled = true;
+            positions.forEach((offset, neighborId) => {
               try {
-                const current = state.graph!.getNodeAttributes(neighborId);
-                const nx = current.x + (orig.x - current.x) * 0.25;
-                const ny = current.y + (orig.y - current.y) * 0.25;
-                state.graph!.setNodeAttribute(neighborId, "x", nx);
-                state.graph!.setNodeAttribute(neighborId, "y", ny);
-              } catch { /* node may have been filtered out */ }
+                const cur = state.graph!.getNodeAttributes(neighborId);
+                const targetX = projPos.x + offset.x;
+                const targetY = projPos.y + offset.y;
+                const dx = targetX - cur.x;
+                const dy = targetY - cur.y;
+                if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) settled = false;
+                state.graph!.setNodeAttribute(neighborId, "x", cur.x + dx * 0.15);
+                state.graph!.setNodeAttribute(neighborId, "y", cur.y + dy * 0.15);
+              } catch { /* skip */ }
             });
-            requestAnimationFrame(springBack);
+            if (!settled) requestAnimationFrame(drift);
           };
-          requestAnimationFrame(springBack);
+          requestAnimationFrame(drift);
         }
 
         state.draggedNode = null;
@@ -1198,7 +1239,7 @@ function buildFilterBar(): void {
     checkbox.addEventListener("change", () => {
       const key = checkbox.getAttribute("data-filter-type-check") as keyof typeof state.filterTypes;
       state.filterTypes[key] = checkbox.checked;
-      applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
+      applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
     });
   });
 
@@ -1206,7 +1247,7 @@ function buildFilterBar(): void {
     checkbox.addEventListener("change", () => {
       const slug = checkbox.getAttribute("data-filter-topic-check") || "";
       state.filterTopics[slug] = checkbox.checked;
-      applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
+      applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
     });
   });
 
@@ -1227,7 +1268,7 @@ function buildFilterBar(): void {
   const storeSelect = filterEl.querySelector<HTMLSelectElement>("[data-store-filter]");
   storeSelect?.addEventListener("change", () => {
     state.filterStore = storeSelect.value || "all";
-    applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
+    applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
   });
 
   const limitInput = filterEl.querySelector<HTMLInputElement>("[data-limit-input]");
@@ -1696,6 +1737,25 @@ ROOT.graphZoom = function graphZoom(factor: number): void {
 
 ROOT.graphReset = function graphReset(): void {
   state.renderer?.getCamera().animatedReset({ duration: 180 });
+};
+
+ROOT.graphResetLayout = function graphResetLayout(): void {
+  if (!state.graph || state.graph.order <= 1) return;
+  const settings = forceAtlas2.inferSettings(state.graph);
+  forceAtlas2.assign(state.graph, {
+    iterations: state.graph.order < 80 ? 200 : state.graph.order < 240 ? 160 : 130,
+    settings: {
+      ...settings,
+      linLogMode: true,
+      adjustSizes: true,
+      gravity: 0.3,
+      scalingRatio: Math.max(4, settings.scalingRatio || 0, 7.5),
+      slowDown: state.graph.order > 240 ? 8 : 5,
+      barnesHutOptimize: state.graph.order > 120,
+    },
+  });
+  state.renderer?.refresh();
+  state.renderer?.getCamera().animatedReset({ duration: 220 });
 };
 
 ROOT.graphClearSelection = function graphClearSelection(): void {
