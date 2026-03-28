@@ -18,6 +18,13 @@ interface ProjectGroupNode {
   count: number;
 }
 
+interface StoreGroupNode {
+  kind: "storeGroup";
+  storeName: string;
+  role: string;
+  count: number;
+}
+
 interface ManageItemNode {
   kind: "manageItem";
   item: "health" | "profile" | "machine" | "lastSync";
@@ -191,6 +198,7 @@ interface MessageNode {
 type PhrenNode =
   | RootSectionNode
   | ProjectGroupNode
+  | StoreGroupNode
   | ManageItemNode
   | ProjectNode
   | CategoryNode
@@ -216,6 +224,7 @@ type PhrenNode =
 interface ProjectSummary {
   name: string;
   brief?: string;
+  store?: string;
 }
 
 interface FindingSummary {
@@ -357,6 +366,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
     if (element.kind === "projectGroup") {
       return this.getProjectNodesForGroup(element.group);
+    }
+
+    if (element.kind === "storeGroup") {
+      return this.getProjectNodesForStore(element.storeName);
     }
 
     if (element.kind === "project") {
@@ -709,6 +722,15 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         item.description = `${element.count}`;
         item.iconPath = themeIcon(groupIcons[element.group] ?? "folder");
         item.id = `phren.projectGroup.${element.group}`;
+        return item;
+      }
+      case "storeGroup": {
+        const roleIcons: Record<string, string> = { primary: "home", team: "organization", readonly: "eye" };
+        const item = new vscode.TreeItem(element.storeName, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `${element.count} project${element.count === 1 ? "" : "s"}`;
+        item.iconPath = themeIcon(roleIcons[element.role] ?? "database");
+        item.id = `phren.storeGroup.${element.storeName}`;
+        item.tooltip = `Store: ${element.storeName} (${element.role})`;
         return item;
       }
       case "manageItem": {
@@ -1283,9 +1305,23 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       if (projects.length === 0) {
         return [{ kind: "message", label: "No projects yet \u2014 click + to add one", description: "", iconId: "add" }];
       }
+
+      // Group by store when multiple stores are present
+      const stores = await this.fetchStores();
+      const primaryStoreName = stores.find((s) => s.role === "primary")?.name ?? "personal";
+      const resolvedStore = (p: ProjectSummary) => p.store ?? primaryStoreName;
+      const storeNames = [...new Set(projects.map(resolvedStore))];
+      if (storeNames.length > 1) {
+        return storeNames.map((storeName) => {
+          const storeProjects = projects.filter((p) => resolvedStore(p) === storeName);
+          const role = stores.find((s) => s.name === storeName)?.role ?? "team";
+          return { kind: "storeGroup" as const, storeName, role, count: storeProjects.length };
+        });
+      }
+
+      // Single store: fall back to device grouping
       const ctx = this.readDeviceContext();
       if (ctx.activeProjects.size === 0) {
-        // No device context -- show flat list
         return projects.map((project) => ({
           kind: "project" as const,
           projectName: project.name,
@@ -1302,6 +1338,21 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         groups.push({ kind: "projectGroup", group: "other", count: otherProjects.length });
       }
       return groups;
+    } catch (error) {
+      return [this.errorNode("Failed to load projects", error)];
+    }
+  }
+
+  private async getProjectNodesForStore(storeName: string): Promise<PhrenNode[]> {
+    try {
+      const [projects, stores] = await Promise.all([this.fetchProjects(), this.fetchStores()]);
+      const primaryStoreName = stores.find((s) => s.role === "primary")?.name ?? "personal";
+      const filtered = projects.filter((p) => (p.store ?? primaryStoreName) === storeName);
+      return filtered.map((project) => ({
+        kind: "project" as const,
+        projectName: project.name,
+        brief: project.brief,
+      }));
     } catch (error) {
       return [this.errorNode("Failed to load projects", error)];
     }
@@ -1380,10 +1431,27 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         }
 
         const brief = asString(record?.brief);
-        parsed.push(brief ? { name, brief } : { name });
+        const store = asString(record?.store);
+        parsed.push(store ? { name, brief, store } : brief ? { name, brief } : { name });
       }
 
       return parsed;
+    });
+  }
+
+  private fetchStores(): Promise<Array<{ name: string; role: string; exists: boolean }>> {
+    return this.cachedFetch("stores", async () => {
+      try {
+        const raw = await this.client.storeList();
+        const data = responseData(raw);
+        const stores = asArray(data?.stores);
+        return stores.map((s) => {
+          const r = asRecord(s);
+          return { name: asString(r?.name) ?? "", role: asString(r?.role) ?? "primary", exists: asBoolean(r?.exists) ?? true };
+        }).filter((s) => s.name);
+      } catch {
+        return [];
+      }
     });
   }
 

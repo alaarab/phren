@@ -1,5 +1,13 @@
 # Team Stores Architecture — RFC v2
 
+## Implementation Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Store Registry + Read Path | COMPLETE | Store registry, store-qualified IDs, multi-store search, per-store sync, `store_list` MCP tool, CLI `store add/list/remove/sync` |
+| Phase 2: Explicit Team Writes | 90% complete | Journal append format, write routing, per-store git sync, provenance. Missing: `phren promote` CLI command |
+| Phase 3: Team Features | 40% | Design documented below. Consolidation not yet store-aware. Cross-store skills and advisory dedup not started |
+
 Incorporates feedback from GPT-5.4 architectural review.
 
 ## Problem

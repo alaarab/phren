@@ -3,6 +3,17 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.0.46] - 2026-03-28
+
+### Added
+- **Team stores documentation** — README, FAQ, llms-install, llms-full.txt, llms.txt, architecture.md all updated with team store setup, CLI commands, and multi-store data flow diagrams.
+- **docs.html Team Stores section** — dedicated section with store roles table, CLI examples, write routing, git sync explanation, and setup walkthrough. Team commands added to CLI reference. `store_list` MCP tool documented.
+- **docs/index.html** — "Team knowledge, shared" feature card added.
+- **`phren status` store info** — shows store count, per-store name/role/sync/remote/path status.
+- **`phren doctor` store checks** — validates stores.yaml, per-store path existence, .git directory.
+- **Main help text** — `phren --help` now lists store/team commands. Topics include `stores` and `team`.
+- **architecture-team-stores.md** — implementation status table (Phase 1 complete, Phase 2 90%, Phase 3 40%).
+
 ## [0.0.45] - 2026-03-28
 
 ### Fixed
@@ -1115,7 +1126,8 @@ Initial release.
 - 11 skills: sync, learn, init, discover, consolidate, humanize, swarm, task, pipeline, release, creative
 - `phren` on npm
 
-[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.45...HEAD
+[Unreleased]: https://github.com/alaarab/phren/compare/v0.0.46...HEAD
+[0.0.46]: https://github.com/alaarab/phren/compare/v0.0.45...v0.0.46
 [0.0.45]: https://github.com/alaarab/phren/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/alaarab/phren/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/alaarab/phren/compare/v0.0.42...v0.0.43

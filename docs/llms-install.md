@@ -41,6 +41,31 @@ To remove everything:
 phren uninstall
 ```
 
+## Team Stores
+
+Phren supports shared team stores for collaborative knowledge. A team store is a separate git repo that multiple people push to.
+
+Create a team store:
+
+```bash
+phren team init my-team --remote git@github.com:org/phren-team.git
+phren team add-project my-team my-project
+```
+
+Join an existing team store:
+
+```bash
+phren team join git@github.com:org/phren-team.git
+```
+
+List registered stores:
+
+```bash
+phren team list
+```
+
+Team stores sync independently via git. Findings and tasks in a team store are visible to all members through federated search and context injection.
+
 ## Maintenance Safety
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.

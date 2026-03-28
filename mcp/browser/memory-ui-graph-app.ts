@@ -642,6 +642,7 @@ function buildGraph(nodes: RuntimeNode[], links: RawLink[]): Graph {
   const positions = seedNodeCoordinates(nodes);
 
   nodes.forEach((node, index) => {
+    if (graph.hasNode(node.id)) return; // guard against duplicate IDs across stores
     const position = positions.get(node.id) || { x: index * 0.01, y: index * 0.01 };
     graph.addNode(node.id, {
       x: position.x,

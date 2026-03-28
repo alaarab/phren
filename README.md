@@ -49,6 +49,25 @@ Init detects your tools, registers MCP servers, and installs lifecycle hooks. Af
 
 To add a project later, run `phren add` from that directory. To browse what phren knows, run `phren` to open the interactive shell.
 
+## Team stores
+
+Phren supports shared team knowledge repos alongside your personal store. A team store is a separate git repo that multiple people push to. Findings, tasks, and skills saved there are visible to everyone on the team.
+
+Create a team store:
+
+```bash
+phren team init my-team --remote git@github.com:org/phren-team.git
+phren team add-project my-team my-project
+```
+
+Join an existing team store:
+
+```bash
+phren team join git@github.com:org/phren-team.git
+```
+
+Each team store syncs independently. Run `phren team list` to see all registered stores.
+
 ---
 
 MIT License. Made by [Ala Arab](https://github.com/alaarab).

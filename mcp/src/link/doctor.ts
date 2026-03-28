@@ -304,6 +304,47 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     );
   }
 
+  // Store registry health
+  try {
+    const { resolveAllStores, storesFilePath } = await import("../store-registry.js");
+    const storesFile = storesFilePath(phrenPath);
+    if (fs.existsSync(storesFile)) {
+      const stores = resolveAllStores(phrenPath);
+      checks.push({
+        name: "store-registry",
+        ok: stores.length > 0,
+        detail: stores.length > 0
+          ? `${stores.length} stores configured`
+          : "stores.yaml exists but no stores parsed",
+      });
+      for (const store of stores) {
+        const pathExists = fs.existsSync(store.path);
+        const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
+        if (!pathExists) {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: false,
+            detail: `store '${store.name}' path missing: ${store.path}`,
+          });
+        } else if (!gitExists) {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: false,
+            detail: `store '${store.name}' path exists but .git directory missing`,
+          });
+        } else {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: true,
+            detail: `${store.role} store, sync=${store.sync}${store.remote ? `, remote=${store.remote}` : ""}`,
+          });
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`doctor: store registry check failed: ${errorMessage(err)}`);
+  }
+
   const settingsPath = hookConfigPath("claude");
   const configWritable = nearestWritableTarget(settingsPath);
   checks.push({
