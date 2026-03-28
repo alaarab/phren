@@ -55,6 +55,7 @@ import {
   handleSkillsNamespace,
   handleSkillList,
   handlePromoteNamespace,
+  handleReviewNamespace,
   handleStoreNamespace,
   handleTaskNamespace,
 } from "./namespaces.js";
@@ -75,7 +76,6 @@ import {
   handlePinCanonical,
   handleQualityFeedback,
   handleRelatedDocs,
-  handleReview,
   handleConsolidationStatus,
   handleSessionContext,
   handleSearch,
@@ -179,7 +179,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "graph":
       return handleGraphNamespace(args);
     case "review":
-      return handleReview(args);
+      return handleReviewNamespace(args);
     case "consolidation-status":
       return handleConsolidationStatus(args);
     case "session-context":

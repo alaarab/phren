@@ -29,6 +29,64 @@ export function renderSharedWebUiHelpers(authToken: string): string {
 })();`;
 }
 
+
+export function renderProfileSwitcherScript(_authToken: string): string {
+  return `(function() {
+  var esc = window._phrenEsc;
+  var authUrl = window._phrenAuthUrl;
+
+  function loadProfiles() {
+    fetch(authUrl('/api/profiles')).then(function(r) { return r.json(); }).then(function(data) {
+      var select = document.getElementById('profile-select');
+      if (!select) return;
+      if (!data.ok || !data.profiles) {
+        select.innerHTML = '<option>Error loading profiles</option>';
+        return;
+      }
+      var html = '';
+      data.profiles.forEach(function(p) {
+        var selected = p.name === data.activeProfile ? ' selected' : '';
+        html += '<option value="' + esc(p.name) + '"' + selected + '>' + esc(p.name) + '</option>';
+      });
+      select.innerHTML = html;
+      select.onchange = function() { switchProfile(this.value); };
+    }).catch(function(err) {
+      var select = document.getElementById('profile-select');
+      if (select) select.innerHTML = '<option>Error loading</option>';
+    });
+  }
+
+  function switchProfile(profileName) {
+    if (!profileName) return;
+    var status = document.getElementById('profile-status');
+    if (status) status.textContent = 'Switching...';
+    fetch(authUrl('/api/profile'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: window._phrenAuthBody('profile=' + encodeURIComponent(profileName))
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.ok) {
+        if (status) status.textContent = 'Reloading...';
+        setTimeout(function() { location.reload(); }, 500);
+      } else {
+        if (status) status.textContent = 'Error: ' + (data.error || 'Unknown');
+      }
+    }).catch(function(err) {
+      if (status) status.textContent = 'Error loading';
+    });
+  }
+
+  window.phrenLoadProfiles = loadProfiles;
+  window.phrenSwitchProfile = switchProfile;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadProfiles);
+  } else {
+    loadProfiles();
+  }
+})();`;
+}
+
 export function renderSkillUiEnhancementScript(_authToken: string): string {
   return `(function() {
     var _skillCurrent = null;
@@ -883,6 +941,48 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
     }
 
+    function postGlobalRetention(field, value, clearField) {
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var payload = { field: field, value: value || '', clear: clearField ? 'true' : 'false', globalUpdate: 'true' };
+        var body = new URLSearchParams(payload);
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl('/api/settings/project-overrides') : '/api/settings/project-overrides';
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Failed to update retention policy', 'err');
+          return;
+        }
+        _settingsLoaded = false;
+        loadSettings();
+        setSettingsStatus('Retention policy updated', 'ok');
+      }).catch(function(err) {
+        setSettingsStatus('Failed: ' + String(err), 'err');
+      });
+    }
+
+    function postGlobalWorkflow(field, value, clearField) {
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var payload = { field: field, value: value || '', clear: clearField ? 'true' : 'false', globalUpdate: 'true' };
+        var body = new URLSearchParams(payload);
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl('/api/settings/project-overrides') : '/api/settings/project-overrides';
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Failed to update workflow policy', 'err');
+          return;
+        }
+        _settingsLoaded = false;
+        loadSettings();
+        setSettingsStatus('Workflow policy updated', 'ok');
+      }).catch(function(err) {
+        setSettingsStatus('Failed: ' + String(err), 'err');
+      });
+    }
+
     function loadSettings() {
       var selectedProject = getSettingsProject();
       var baseUrl = '/api/settings';
@@ -1062,12 +1162,11 @@ export function renderTasksAndSettingsScript(authToken: string): string {
             }
             retHtml += '</div>';
             if (note) retHtml += '<div class="settings-control-note">' + esc(note) + '</div>';
-            if (isProject) {
-              retHtml += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
-                '<input type="number" id="ret-input-' + esc(field) + '" value="' + esc(String(value != null ? value : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
-                '<button data-ts-action="setProjectRetention" data-field="' + esc(field) + '" class="settings-chip active" style="font-size:11px">Set</button>' +
-                '</div>';
-            }
+            // Show editable inputs for both global and per-project
+            retHtml += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+              '<input type="number" id="ret-input-' + esc(field) + '" value="' + esc(String(value != null ? value : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+              '<button data-ts-action="' + (isProject ? 'setProjectRetention' : 'setGlobalRetention') + '" data-field="' + esc(field) + '" class="settings-chip active" style="font-size:11px">Set</button>' +
+              '</div>';
             retHtml += '</div>';
           }
           retRow('TTL days', 'ttlDays', ret.ttlDays, 'Memories older than this are eligible for pruning.');
@@ -1089,14 +1188,11 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           if (isProject && lctOverride) {
             wfHtml += '<button data-ts-action="clearProjectOverride" data-field="lowConfidenceThreshold" class="settings-chip" style="font-size:11px">Clear</button>';
           }
-          if (isProject) {
-            wfHtml += '</div><div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
-              '<input type="number" id="wf-input-lowConfidenceThreshold" min="0" max="1" step="0.05" value="' + esc(String(wf.lowConfidenceThreshold != null ? wf.lowConfidenceThreshold : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
-              '<button data-ts-action="setProjectWorkflow" data-field="lowConfidenceThreshold" class="settings-chip active" style="font-size:11px">Set</button>' +
-              '</div>';
-          } else {
-            wfHtml += '</div>';
-          }
+          // Show editable inputs for both global and per-project
+          wfHtml += '</div><div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+            '<input type="number" id="wf-input-lowConfidenceThreshold" min="0" max="1" step="0.05" value="' + esc(String(wf.lowConfidenceThreshold != null ? wf.lowConfidenceThreshold : '')) + '" style="width:100px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+            '<button data-ts-action="' + (isProject ? 'setProjectWorkflow' : 'setGlobalWorkflow') + '" data-field="lowConfidenceThreshold" class="settings-chip active" style="font-size:11px">Set</button>' +
+            '</div>';
           wfHtml += '<div class="settings-control-note">Memories below this confidence score are flagged for review.</div></div>';
           wfHtml += '<div class="settings-control">';
           wfHtml += '<div class="settings-control-header"><span class="settings-control-label">Risky sections</span>' + sourceBadge(riskySectionsOverride);
@@ -1178,6 +1274,25 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var inputEl = document.getElementById('ret-input-' + field);
         var val = inputEl ? inputEl.value : '';
         postProjectOverride(proj, field, val, false);
+      }
+      else if (action === 'setGlobalRetention') {
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('ret-input-' + field);
+        var val = inputEl ? inputEl.value : '';
+        postGlobalRetention(field, val);
+      }
+      else if (action === 'setProjectRetention') {
+        var proj = getSettingsProject();
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('ret-input-' + field);
+        var val = inputEl ? inputEl.value : '';
+        postProjectOverride(proj, field, val, false);
+      }
+      else if (action === 'setGlobalWorkflow') {
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('wf-input-' + field);
+        var val = inputEl ? inputEl.value : '';
+        postGlobalWorkflow(field, val);
       }
       else if (action === 'setProjectWorkflow') {
         var proj = getSettingsProject();
@@ -1839,7 +1954,7 @@ export function renderGraphHostScript(): string {
     if (priorityEl) updates.priority = priorityEl.value;
     graphRequest('/api/tasks/update', 'POST', {
       project: currentNode.projectName,
-      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
+      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
       text: updates.text,
       section: updates.section || '',
       priority: updates.priority || ''
@@ -1876,7 +1991,7 @@ export function renderGraphHostScript(): string {
     if (currentNode.kind === 'task') {
       graphRequest('/api/tasks/remove', 'POST', {
         project: currentNode.projectName,
-        item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
+        item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
       }).then(function(result) {
         if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
         graphToast('Task removed', 'ok');
@@ -1891,7 +2006,7 @@ export function renderGraphHostScript(): string {
     if (!currentNode) return;
     graphRequest('/api/tasks/complete', 'POST', {
       project: currentNode.projectName,
-      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
+      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
     }).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
       graphToast('Task completed', 'ok');
@@ -1905,7 +2020,7 @@ export function renderGraphHostScript(): string {
     if (!currentNode) return;
     graphRequest('/api/tasks/update', 'POST', {
       project: currentNode.projectName,
-      item: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
+      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
       section: section
     }).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
