@@ -13,6 +13,7 @@ import {
 import { validateTaskFormat } from "../shared/content.js";
 import { safeProjectPath } from "../utils.js";
 import { withSafeLock, ensureProject } from "../shared/data-utils.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
@@ -437,10 +438,9 @@ export function readTasksAcrossProjects(phrenPath: string, profile?: string): Ta
 
   // Non-primary store projects (no profile — team stores don't have profiles)
   try {
-    const { getNonPrimaryStores } = require("../store-registry.js");
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
-      const storeProjects = getProjectDirs(store.path).map((dir) => path.basename(dir));
+      const storeProjects = getStoreProjectDirs(store).map((dir: string) => path.basename(dir));
       for (const project of storeProjects) {
         if (seen.has(project)) continue;
         seen.add(project);

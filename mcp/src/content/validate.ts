@@ -7,6 +7,7 @@ import { errorMessage } from "../utils.js";
 import { countActiveFindings } from "./archive.js";
 import { isTaskFileName } from "../data/tasks.js";
 import { METADATA_REGEX } from "./metadata.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -98,11 +99,9 @@ export function checkConsolidationNeeded(phrenPath: string, profile?: string): C
 
   // Include projects from team stores
   try {
-    const storeRegistry = require("../store-registry.js");
-    const { getNonPrimaryStores } = storeRegistry;
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
-      for (const dir of getProjectDirs(store.path)) {
+      for (const dir of getStoreProjectDirs(store)) {
         const status = getProjectConsolidationStatus(dir);
         if (status && status.recommended) {
           results.push(status);

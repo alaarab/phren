@@ -3,18 +3,23 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.0.52] - 2026-03-28
+## [0.0.53] - 2026-03-28
 
 ### Added
-- **Focus mode** — click a project node in the fragment graph to isolate its subgraph. Everything outside fades to ~10% opacity. Click again to unfocus, or press Escape. Works in both web UI and VS Code extension.
-- **Complete team store routing** — all CLI commands, shell TUI views, session tools, governance checks, and data layer functions now resolve team store projects correctly.
+- **Focus mode** — click a project node in the fragment graph to isolate its subgraph. Everything outside fades to ~10% opacity. Click again to unfocus, or press Escape.
+- **Semantic zoom** — zoomed out shows only project nodes; zoom in to reveal findings/tasks; zoom further for fragments. Progressive detail like a map.
+- **Neighborhood drag** — dragging a node applies soft 15% spring pull on direct connections. Release to spring back.
+- **Store filter** — filter graph by store (primary, qualus-shared, qualus-private) via dropdown in Filters panel. Each node tagged with its source store.
+- **Store subscription** — `phren store subscribe/unsubscribe` CLI commands to filter which team store projects are visible.
+- **Store chip in popover** — node detail popover shows which store a node came from.
 
 ### Fixed
-- **Shell TUI** — readTasks/readFindings/readReviewQueue now resolve team store paths for project data.
-- **CLI** — truths, consolidation status, export, archive, findings list, hooks validation all resolve team stores.
-- **Session tools** — session_start/end read project findings/tasks from correct store. getSessionArtifacts iterates all stores.
-- **Data layer** — readReviewQueueAcrossProjects, listProjectCards, checkConsolidationNeeded include team store projects.
-- **Graph** — get_related_docs resolves store per doc project name.
+- **Team store routing** — 40+ bugs fixed across all MCP tools, CLI, shell TUI, session tools, governance, and data layer. All project reads/writes now resolve the correct store.
+- **ESM require() bug** — agents used `require()` in ESM modules which silently failed; converted to static imports.
+- **"Never synced" display** — VS Code store groups now show actual git commit timestamps instead of "never synced".
+- **Orphan removal** — projects no longer disappear when tasks filter is unchecked.
+- **Topics layout** — filter panel topics now use 2-column grid instead of single column.
+- **Entity size cap** — fragment nodes capped at 5px radius (ambient, not dominant).
 
 ## [0.0.51] - 2026-03-28
 

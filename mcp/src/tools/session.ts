@@ -451,10 +451,10 @@ export async function getSessionArtifacts(
 
     // Team store projects
     try {
-      const { getNonPrimaryStores } = await import("../store-registry.js");
+      const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
       for (const store of getNonPrimaryStores(phrenPath)) {
         if (!fs.existsSync(store.path)) continue;
-        const storeDirs = getProjectDirs(store.path).map(d => path.basename(d)).filter(p => p !== "global");
+        const storeDirs = getStoreProjectDirs(store).map((d: string) => path.basename(d)).filter((p: string) => p !== "global");
         const storeTargetProjects = project ? (storeDirs.includes(project) ? [project] : []) : storeDirs;
         for (const proj of storeTargetProjects) {
           readProjectArtifacts(store.path, proj);

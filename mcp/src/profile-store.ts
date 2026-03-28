@@ -17,6 +17,7 @@ import { TASK_FILE_ALIASES } from "./data/tasks.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "./store-registry.js";
 
 export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
@@ -329,11 +330,9 @@ export function listProjectCards(phrenPath: string, profile?: string): ProjectCa
 
   // Include projects from team stores
   try {
-    const storeRegistry = require("./store-registry.js");
-    const { getNonPrimaryStores } = storeRegistry;
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
-      for (const dir of getProjectDirs(store.path)) {
+      for (const dir of getStoreProjectDirs(store)) {
         const name = path.basename(dir);
         if (seen.has(name) || name === "global") continue;
         seen.add(name);

@@ -115,6 +115,7 @@ interface GraphNode {
   scoreKey?: string;
   taskItemId?: string;
   checked?: boolean;
+  store?: string;
 }
 
 interface GraphEdge {
@@ -297,7 +298,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
         fetchFindings(client, p.name, topicConfig),
         fetchTasks(client, p.name),
       ]);
-      return { projectName: p.name, summary, findings, tasks, topicConfig };
+      return { projectName: p.name, summary, findings, tasks, topicConfig, store: p.store };
     }),
   );
 
@@ -323,7 +324,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const edges: GraphEdge[] = [];
   const summaryMap: Record<string, ProjectSummaryData> = {};
   // Build project nodes (skip empty orphans)
-  for (const { projectName, summary, findings, tasks, topicConfig } of perProjectResults) {
+  for (const { projectName, summary, findings, tasks, topicConfig, store } of perProjectResults) {
     if (findings.length === 0 && tasks.length === 0) continue;
 
     const projectNodeId = `project:${projectName}`;
@@ -338,6 +339,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
       text: summary.summary,
       radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
       color: "#7B68AE",
+      store,
     });
 
     // Finding nodes
@@ -362,6 +364,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
         qualityMultiplier: qualityMultiplierFromEntry(findingScore),
         lastUsedAt: findingScore?.lastUsedAt,
         helpful: findingScore?.helpful,
+        store,
       });
       edges.push({ source: projectNodeId, target: findingId });
     }
@@ -390,6 +393,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
         helpful: taskScore?.helpful,
         taskItemId: task.id,
         checked: task.checked,
+        store,
       });
       edges.push({ source: projectNodeId, target: taskId });
     }
@@ -482,11 +486,11 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
 
 /* ── Fetch helpers ───────────────────────────────────────── */
 
-async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string }[]> {
+async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string; store?: string }[]> {
   const raw = await client.listProjects();
   const data = responseData(raw);
   const seen = new Set<string>();
-  const parsed: { name: string; brief?: string }[] = [];
+  const parsed: { name: string; brief?: string; store?: string }[] = [];
   for (const entry of asArray(data?.projects)) {
     const record = asRecord(entry);
     const name = asString(record?.name);
@@ -499,7 +503,7 @@ async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief
     // Deduplicate: same project name can appear across multiple stores — take first occurrence
     if (seen.has(name)) continue;
     seen.add(name);
-    parsed.push({ name, brief: asString(record?.brief) });
+    parsed.push({ name, brief: asString(record?.brief), store: asString(record?.store) });
   }
   return parsed;
 }
@@ -1199,6 +1203,7 @@ ${graphScript}
     var title = node.label || node.text || node.id;
     var chips = [chip(nodeKindLabel(node))];
     if (node.projectName) chips.push(chip(node.projectName));
+    if (node.store) chips.push(chip(node.store));
     if (node.kind === 'task' && node.section) chips.push(chip(node.section));
     if (node.kind === 'task' && node.priority) chips.push(chip('Priority ' + node.priority));
     if (node.kind === 'finding' && node.topicLabel) chips.push(chip(node.topicLabel));

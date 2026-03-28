@@ -303,16 +303,17 @@ export function register(server: McpServer, ctx: McpContext): void {
     },
     async ({ project, action }) => {
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const resolved = resolveStoreForProject(ctx, project);
       return withWriteQueue(async () => {
-      const activeProject = findProjectNameCaseInsensitive(phrenPath, project);
-      const archivedProject = findArchivedProjectNameCaseInsensitive(phrenPath, project);
+      const activeProject = findProjectNameCaseInsensitive(resolved.phrenPath, project);
+      const archivedProject = findArchivedProjectNameCaseInsensitive(resolved.phrenPath, project);
 
       if (action === "archive") {
         if (!activeProject) {
           return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
-        const projectDir = path.join(phrenPath, activeProject);
-        const archiveDir = path.join(phrenPath, `${activeProject}.archived`);
+        const projectDir = path.join(resolved.phrenPath, activeProject);
+        const archiveDir = path.join(resolved.phrenPath, `${activeProject}.archived`);
         if (!fs.existsSync(projectDir)) {
           return mcpResponse({ ok: false, error: `Project "${project}" not found.` });
         }
@@ -339,12 +340,12 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: `Project "${activeProject}" already exists as an active project.` });
       }
       if (!archivedProject) {
-        const entries = fs.readdirSync(phrenPath).filter((e) => e.endsWith(".archived"));
+        const entries = fs.readdirSync(resolved.phrenPath).filter((e) => e.endsWith(".archived"));
         const available = entries.map((e) => e.replace(/\.archived$/, ""));
         return mcpResponse({ ok: false, error: `No archive found for "${project}".`, data: { availableArchives: available } });
       }
-      const projectDir = path.join(phrenPath, archivedProject);
-      const archiveDir = path.join(phrenPath, `${archivedProject}.archived`);
+      const projectDir = path.join(resolved.phrenPath, archivedProject);
+      const archiveDir = path.join(resolved.phrenPath, `${archivedProject}.archived`);
 
       fs.renameSync(archiveDir, projectDir);
       try {

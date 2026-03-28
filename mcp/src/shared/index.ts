@@ -38,12 +38,12 @@ function getAllStoreProjectDirs(phrenPath: string, profile?: string): string[] {
  */
 async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Promise<void> {
   try {
-    const { getNonPrimaryStores } = await import("../store-registry.js");
+    const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
     const otherStores = getNonPrimaryStores(phrenPath);
     const dirs: string[] = [];
     for (const store of otherStores) {
       if (!fs.existsSync(store.path)) continue;
-      dirs.push(...getProjectDirs(store.path));
+      dirs.push(...getStoreProjectDirs(store));
     }
     _cachedStoreProjectDirs = dirs;
     _cachedStorePhrenPath = phrenPath;
