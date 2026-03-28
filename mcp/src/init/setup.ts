@@ -213,6 +213,7 @@ interface RepairInstallResult {
   createdRuntimeAssets: string[];
   createdFeatureDefaults: string[];
   createdSkillArtifacts: string[];
+  repairedGlobalSymlink: boolean;
 }
 
 function ensureGlobalStarterAssets(phrenPath: string): string[] {
@@ -360,6 +361,7 @@ export function repairPreexistingInstall(phrenPath: string): RepairInstallResult
   const profileRepair = pruneLegacySampleProjectsFromProfiles(phrenPath);
   const preferredHome = resolvePreferredHomeDir(phrenPath);
   const createdSkillArtifacts = ensureGeneratedSkillArtifacts(phrenPath, preferredHome);
+  const repairedGlobalSymlink = repairGlobalClaudeSymlink(phrenPath);
   return {
     profileFilesUpdated: profileRepair.filesUpdated,
     removedLegacyProjects: profileRepair.removed,
@@ -369,7 +371,38 @@ export function repairPreexistingInstall(phrenPath: string): RepairInstallResult
     createdRuntimeAssets,
     createdFeatureDefaults,
     createdSkillArtifacts,
+    repairedGlobalSymlink,
   };
+}
+
+/** Re-create ~/.claude/CLAUDE.md symlink if the source exists but the link is missing/broken. */
+function repairGlobalClaudeSymlink(phrenPath: string): boolean {
+  const src = path.join(phrenPath, "global", "CLAUDE.md");
+  if (!fs.existsSync(src)) return false;
+  const dest = homePath(".claude", "CLAUDE.md");
+  try {
+    const stat = fs.lstatSync(dest);
+    if (stat.isSymbolicLink()) {
+      const target = path.resolve(path.dirname(dest), fs.readlinkSync(dest));
+      if (target === path.resolve(src)) return false; // already correct
+      // Stale symlink pointing elsewhere — managed by phren, safe to replace
+      if (target.includes(".phren")) fs.unlinkSync(dest);
+      else return false; // not ours, don't touch
+    } else {
+      return false; // regular file exists, don't clobber
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.symlinkSync(src, dest);
+    debugLog(`repaired global CLAUDE.md symlink: ${dest} -> ${src}`);
+    return true;
+  } catch (err) {
+    debugLog(`failed to repair global CLAUDE.md symlink: ${errorMessage(err)}`);
+    return false;
+  }
 }
 
 function isExpectedVerifyFailure(phrenPath: string, check: Pick<PostInitCheck, "name" | "ok">): boolean {
@@ -1496,7 +1529,7 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
     ok: true, // always pass — wrapper is optional (global install or npx work too)
     detail: cliWrapperOk
       ? `CLI wrapper exists: ${cliWrapperPath}`
-      : `CLI wrapper not found (optional — use 'npm i -g @phren/cli' or 'npx @phren/cli' instead)`,
+      : `CLI wrapper not found (optional — use 'npx @phren/cli' instead)`,
   });
 
   const ok = checks.every((c) => c.ok);

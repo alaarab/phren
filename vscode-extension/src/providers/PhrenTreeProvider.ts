@@ -3,7 +3,7 @@ import { PhrenClient } from "../phrenClient";
 import { readDeviceContext } from "../profileConfig";
 
 type TaskSection = "Active" | "Queue" | "Done";
-type PhrenCategory = "findings" | "sessions" | "task" | "queue" | "reference";
+type PhrenCategory = "findings" | "truths" | "sessions" | "task" | "queue" | "reference";
 type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
@@ -142,6 +142,12 @@ interface QueueItemNode {
   showProjectName?: boolean;
 }
 
+interface TruthNode {
+  kind: "truth";
+  projectName: string;
+  text: string;
+}
+
 interface ReferenceFileNode {
   kind: "referenceFile";
   projectName: string;
@@ -204,6 +210,7 @@ type PhrenNode =
   | SessionDateGroupNode
   | SessionNode
   | SessionBucketNode
+  | TruthNode
   | MessageNode;
 
 interface ProjectSummary {
@@ -355,6 +362,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "project") {
       return [
         { kind: "category", projectName: element.projectName, category: "findings" },
+        { kind: "category", projectName: element.projectName, category: "truths" },
         { kind: "category", projectName: element.projectName, category: "sessions" },
         { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "queue" },
@@ -365,6 +373,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "category") {
       if (element.category === "findings") {
         return this.getFindingDateGroups(element.projectName);
+      }
+      if (element.category === "truths") {
+        return this.getTruthNodes(element.projectName);
       }
       if (element.category === "sessions") {
         return this.getSessionDateGroups(element.projectName);
@@ -462,7 +473,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       }
       case "category": {
         const cat = element.category ?? "unknown";
-        const categoryLabels: Record<string, string> = { findings: "Findings", sessions: "Sessions", task: "Tasks", queue: "Review Queue", reference: "Reference" };
+        const categoryLabels: Record<string, string> = { findings: "Findings", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", reference: "Reference" };
         let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
         if (cat === "findings" && this.dateFilter) {
           categoryLabel += ` [${this.dateFilter.label}]`;
@@ -634,6 +645,14 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         item.iconPath = themeIcon("warning");
         item.id = `phren.hookError.${element.timestamp}`;
         item.contextValue = "phren.hookErrorItem";
+        return item;
+      }
+      case "truth": {
+        const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
+        item.tooltip = element.text;
+        item.iconPath = themeIcon("pin");
+        item.id = `phren.truth.${element.projectName}.${element.text.slice(0, 40).replace(/\W/g, "_")}`;
+        item.contextValue = "phren.truthItem";
         return item;
       }
       case "referenceFile": {
@@ -1102,6 +1121,22 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       }));
     } catch (error) {
       return [this.errorNode("Failed to load session artifacts", error)];
+    }
+  }
+
+  private async getTruthNodes(projectName: string): Promise<PhrenNode[]> {
+    try {
+      const raw = await this.client.getTruths(projectName);
+      const data = responseData(raw);
+      const truths = asArray(data?.truths);
+      if (truths.length === 0) {
+        return [{ kind: "message", label: "No truths pinned yet", iconId: "pin" }];
+      }
+      return truths
+        .filter((t): t is string => typeof t === "string")
+        .map((text) => ({ kind: "truth" as const, projectName, text }));
+    } catch (error) {
+      return [this.errorNode("Failed to load truths", error)];
     }
   }
 
@@ -1587,6 +1622,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 function categoryIconId(category: PhrenCategory): string {
   if (category === "findings") {
     return "list-flat";
+  }
+  if (category === "truths") {
+    return "pin";
   }
   if (category === "sessions") {
     return "history";

@@ -23,6 +23,16 @@ export function resolveStoreForProject(
   const { storeName, projectName } = parseStoreQualified(projectInput);
 
   if (!storeName) {
+    // Check if any non-readonly store claims this project via projects[] array.
+    // This enables automatic write routing: once a project is claimed by a team
+    // store (via `phren team add-project`), writes go there without needing the
+    // store-qualified prefix.
+    const stores = resolveAllStores(ctx.phrenPath);
+    for (const store of stores) {
+      if (store.role !== "readonly" && store.role !== "primary" && store.projects?.includes(projectName)) {
+        return { phrenPath: store.path, project: projectName, storeRole: store.role };
+      }
+    }
     return { phrenPath: ctx.phrenPath, project: projectName, storeRole: "primary" };
   }
 

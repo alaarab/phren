@@ -4,7 +4,7 @@ MCP server that indexes your personal phren and exposes it to AI agents via full
 
 On startup it walks your phren directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
 
-Public surface: 52 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
+Public surface: 53 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
 - finding lifecycle tools: `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`
@@ -21,9 +21,10 @@ Notable shipped capabilities:
 ## Install
 
 ```bash
-npm install -g @phren/cli
-phren init
+npx @phren/cli init
 ```
+
+This sets up phren without needing `sudo` or a global install. On Windows, use `npm install -g @phren/cli` if `npx` isn't available.
 
 Or add manually to Claude Code:
 
