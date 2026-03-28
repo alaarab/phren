@@ -526,6 +526,13 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           .map((ref) => ref.scoreKey)
           .filter((key): key is string => Boolean(key))
           .sort();
+        // Only include entities that link to at least one visible project
+        const linkedProjects = new Set<string>();
+        for (const ref of refs) {
+          if (ref.project && projectSet.has(ref.project)) linkedProjects.add(ref.project);
+        }
+        if (linkedProjects.size === 0) continue; // skip orphan entities from other profiles/stores
+
         const nodeId = `entity:${stableId("entity", type, name)}`;
         nodes.push({
           id: nodeId,
@@ -540,11 +547,6 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           entityType: type,
           refDocs: refs,
         });
-        // Link fragment to each project it appears in
-        const linkedProjects = new Set<string>();
-        for (const ref of refs) {
-          if (ref.project && projectSet.has(ref.project)) linkedProjects.add(ref.project);
-        }
         for (const proj of linkedProjects) {
           links.push({ source: nodeId, target: proj });
         }

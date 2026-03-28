@@ -214,6 +214,7 @@ ${REVIEW_UI_STYLES}
         <button id="graph-zoom-in" title="Zoom in">+</button>
         <button id="graph-zoom-out" title="Zoom out">-</button>
         <button id="graph-reset" title="Reset view">R</button>
+        <button id="graph-reset-layout" title="Re-run layout">L</button>
       </div>
       <div class="graph-filters">
         <div class="graph-filter" id="graph-filter"></div>
