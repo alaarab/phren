@@ -25,6 +25,30 @@ function sessionFile(phrenPath: string, sessionId: string): string {
   return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
 }
 
+/**
+ * Simple file-based lock for synchronizing read-modify-write on session files.
+ * Uses a .lock file alongside the target, with stale lock detection.
+ */
+function withFileLock<T>(lockPath: string, fn: () => T, timeoutMs = 3000): T {
+  const start = Date.now();
+  while (fs.existsSync(lockPath)) {
+    if (Date.now() - start > timeoutMs) {
+      // Stale lock — force release
+      try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+      break;
+    }
+    // Busy wait with small sleep (sync context)
+    const end = Date.now() + 50;
+    while (Date.now() < end) { /* spin */ }
+  }
+  fs.writeFileSync(lockPath, String(process.pid));
+  try {
+    return fn();
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+  }
+}
+
 export function startSession(ctx: PhrenContext, sessionName?: string): string {
   const sessionId = crypto.randomUUID();
   const state: SessionState & { sessionName?: string } = {
@@ -47,34 +71,40 @@ export function startSession(ctx: PhrenContext, sessionName?: string): string {
 export function endSession(ctx: PhrenContext, sessionId: string, summary?: string, sessionName?: string): void {
   const file = sessionFile(ctx.phrenPath, sessionId);
   if (!fs.existsSync(file)) return;
+  const lockPath = file + ".lock";
   try {
-    const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
-    state.endedAt = new Date().toISOString();
-    if (summary) {
-      // Also write to last-summary.json for fast pickup by next session_start
-      const summaryFile = path.join(sessionsDir(ctx.phrenPath), "last-summary.json");
-      const summaryData: Record<string, unknown> = {
-        summary,
-        sessionId,
-        project: state.project,
-        endedAt: state.endedAt,
-      };
-      if (sessionName) {
-        summaryData.sessionName = sessionName;
+    withFileLock(lockPath, () => {
+      const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
+      state.endedAt = new Date().toISOString();
+      if (summary) {
+        // Also write to last-summary.json for fast pickup by next session_start
+        const summaryFile = path.join(sessionsDir(ctx.phrenPath), "last-summary.json");
+        const summaryData: Record<string, unknown> = {
+          summary,
+          sessionId,
+          project: state.project,
+          endedAt: state.endedAt,
+        };
+        if (sessionName) {
+          summaryData.sessionName = sessionName;
+        }
+        fs.writeFileSync(summaryFile, JSON.stringify(summaryData, null, 2) + "\n");
       }
-      fs.writeFileSync(summaryFile, JSON.stringify(summaryData, null, 2) + "\n");
-    }
-    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+      fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+    });
   } catch { /* best effort */ }
 }
 
 export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: "findingsAdded" | "tasksCompleted" | "tasksAdded"): void {
   const file = sessionFile(phrenPath, sessionId);
   if (!fs.existsSync(file)) return;
+  const lockPath = file + ".lock";
   try {
-    const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
-    state[counter] = (state[counter] ?? 0) + 1;
-    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+    withFileLock(lockPath, () => {
+      const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
+      state[counter] = (state[counter] ?? 0) + 1;
+      fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+    });
   } catch { /* best effort */ }
 }
 
