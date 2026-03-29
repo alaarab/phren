@@ -251,11 +251,13 @@ describe("hooks platform compatibility", () => {
   });
 
   describe("hook preferences and tool-level control", () => {
+    const wrapperExt = process.platform === "win32" ? ".cmd" : "";
+
     it("missing install-preferences.json defaults to hooks enabled", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
       // Wrapper should be installed because default is enabled
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
+      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
       expect(fs.existsSync(wrapper)).toBe(true);
     });
 
@@ -263,8 +265,8 @@ describe("hooks platform compatibility", () => {
       setupFakeBinaries(["copilot", "cursor"]);
       writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: {} }));
       configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor"]) });
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", `copilot${wrapperExt}`))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", `cursor${wrapperExt}`))).toBe(true);
     });
 
     it("handles non-object hookTools gracefully", () => {
@@ -272,15 +274,17 @@ describe("hooks platform compatibility", () => {
       writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: "not-an-object" }));
       // Should not throw, just default to enabled
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", `codex${wrapperExt}`))).toBe(true);
     });
   });
 
   describe("wrapper script structure", () => {
+    const wrapperExt = process.platform === "win32" ? ".cmd" : "";
+
     it.skipIf(process.platform === "win32")("wrapper contains run_with_timeout function", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
+      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
       if (fs.existsSync(wrapper)) {
         const content = fs.readFileSync(wrapper, "utf8");
         expect(content).toContain("run_with_timeout");
@@ -292,7 +296,7 @@ describe("hooks platform compatibility", () => {
     it.skipIf(process.platform === "win32")("wrapper passes through help/version/completion flags", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
+      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
       if (fs.existsSync(wrapper)) {
         const content = fs.readFileSync(wrapper, "utf8");
         expect(content).toContain("--help");
@@ -304,7 +308,7 @@ describe("hooks platform compatibility", () => {
     it.skipIf(process.platform === "win32")("wrapper uses set -u for undefined variable safety", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
+      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
       if (fs.existsSync(wrapper)) {
         const content = fs.readFileSync(wrapper, "utf8");
         expect(content).toContain("set -u");
