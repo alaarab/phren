@@ -4,6 +4,8 @@
  * that LLMs produce: headers, bold, inline code, code blocks, bullet lists.
  */
 
+import { highlightCode, detectLanguage } from "./syntax-highlight.js";
+
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
@@ -23,6 +25,7 @@ export function renderMarkdown(text: string): string {
   const out: string[] = [];
   let inCodeBlock = false;
   let codeLang = "";
+  let codeBuffer: string[] = [];
 
   for (const line of lines) {
     // Code block fences
@@ -30,18 +33,26 @@ export function renderMarkdown(text: string): string {
       if (!inCodeBlock) {
         inCodeBlock = true;
         codeLang = line.trimStart().slice(3).trim();
+        codeBuffer = [];
         const label = codeLang ? ` ${codeLang}` : "";
         out.push(`${DIM}  ┌──${label}${"─".repeat(Math.max(0, MAX_WIDTH - 6 - label.length))}${RESET}`);
       } else {
+        // Flush code buffer through syntax highlighter
+        const lang = codeLang ? detectLanguage(codeLang) : "generic";
+        const highlighted = highlightCode(codeBuffer.join("\n"), lang);
+        for (const hl of highlighted.split("\n")) {
+          out.push(`${DIM}  │ ${RESET}${hl}`);
+        }
         inCodeBlock = false;
         codeLang = "";
+        codeBuffer = [];
         out.push(`${DIM}  └${"─".repeat(MAX_WIDTH - 3)}${RESET}`);
       }
       continue;
     }
 
     if (inCodeBlock) {
-      out.push(`${DIM}  │ ${line.slice(0, MAX_WIDTH - 4)}${RESET}`);
+      codeBuffer.push(line.slice(0, MAX_WIDTH - 4));
       continue;
     }
 
