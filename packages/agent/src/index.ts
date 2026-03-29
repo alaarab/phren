@@ -21,7 +21,7 @@ import { notebookEditTool } from "./tools/notebook-edit.js";
 import { askUserTool } from "./tools/ask-user.js";
 import { cronCreateTool, cronListTool, cronDeleteTool, cancelAllCronTasks } from "./tools/cron.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
-import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionMessages } from "./memory/session.js";
+import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionMessages, saveNamedSessionMessages, loadNamedSessionMessages } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { runAgent, createSession, runTurn } from "./agent-loop.js";
@@ -89,8 +89,8 @@ export async function runAgentCli(raw: string[]) {
     process.stderr.write(`Effort: ${args.effort}\n`);
   }
 
-  // Build phren context
-  const phrenCtx = await buildPhrenContext(args.project);
+  // Build phren context (skip in bare mode for reproducible CI runs)
+  const phrenCtx = args.bare ? null : await buildPhrenContext(args.project);
   let contextSnippet = "";
   let priorSummary: string | null = null;
   let sessionId: string | null = null;
@@ -101,7 +101,7 @@ export async function runAgentCli(raw: string[]) {
     }
     contextSnippet = await buildContextSnippet(phrenCtx, args.task);
     priorSummary = getPriorSummary(phrenCtx);
-    sessionId = startSession(phrenCtx);
+    sessionId = startSession(phrenCtx, args.sessionName);
 
     // Load evolved project context for warm start
     const projectCtx = loadProjectContext(phrenCtx);
@@ -133,10 +133,12 @@ export async function runAgentCli(raw: string[]) {
     if (parsed) denyRules.push(parsed);
   }
 
-  // Load .phrenignore patterns from project root
-  const hasIgnore = loadIgnorePatterns(process.cwd());
-  if (args.verbose && hasIgnore) {
-    process.stderr.write(`Loaded .phrenignore patterns\n`);
+  // Load .phrenignore patterns from project root (skip in bare mode)
+  if (!args.bare) {
+    const hasIgnore = loadIgnorePatterns(process.cwd());
+    if (args.verbose && hasIgnore) {
+      process.stderr.write(`Loaded .phrenignore patterns\n`);
+    }
   }
 
   // Register tools
@@ -211,10 +213,10 @@ export async function runAgentCli(raw: string[]) {
   const modelName = args.model ?? provider.name;
   const costTracker = createCostTracker(modelName, args.budget);
 
-  // Build lint/test config from CLI flags or auto-detect
+  // Build lint/test config from CLI flags or auto-detect (bare mode skips auto-detect)
   const cwd = process.cwd();
-  const lintCmd = args.lintCmd ?? detectLintCommand(cwd);
-  const testCmd = args.testCmd ?? detectTestCommand(cwd);
+  const lintCmd = args.lintCmd ?? (args.bare ? null : detectLintCommand(cwd));
+  const testCmd = args.testCmd ?? (args.bare ? null : detectTestCommand(cwd));
   const lintTestConfig = (lintCmd || testCmd) ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined } : undefined;
 
   if (args.verbose && lintTestConfig) {
@@ -222,15 +224,15 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
-  // Load hook manager
-  const hookManager = HookManager.fromConfigFile(args.hooksConfig);
+  // Load hook manager (bare mode uses empty hooks)
+  const hookManager = args.bare ? new HookManager() : HookManager.fromConfigFile(args.hooksConfig);
   if (args.verbose && hookManager.getHooks().length > 0) {
     process.stderr.write(`Hooks: ${hookManager.getHooks().length} registered\n`);
   }
 
-  // Memory-aware effort auto-tuning
+  // Memory-aware effort auto-tuning (skip in bare mode)
   let effort = args.effort;
-  if (phrenCtx && args.task) {
+  if (!args.bare && phrenCtx && args.task) {
     try {
       const tuning = await tuneEffort(args.task, effort, phrenCtx);
       if (tuning.adjusted) {
@@ -313,7 +315,7 @@ export async function runAgentCli(raw: string[]) {
       } finally {
         await spawner.shutdown();
         if (phrenCtx && sessionId) {
-          endSession(phrenCtx, sessionId, scrubSummary("Team session ended"));
+          endSession(phrenCtx, sessionId, scrubSummary("Team session ended"), args.sessionName);
         }
         cleanup();
       }
@@ -333,7 +335,7 @@ export async function runAgentCli(raw: string[]) {
     await startMultiTui(spawner, agentConfig);
     await spawner.shutdown();
     if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, "Multi-agent session ended");
+      endSession(phrenCtx, sessionId, "Multi-agent session ended", args.sessionName);
     }
     cleanup();
     return;
@@ -341,6 +343,9 @@ export async function runAgentCli(raw: string[]) {
 
   // Interactive mode — TUI if terminal, fallback to REPL if not
   if (args.interactive) {
+    if (args.outputFormat !== "text") {
+      process.stderr.write(`Warning: --output-format ${args.outputFormat} is not supported in interactive mode, falling back to text\n`);
+    }
     const isTTY = process.stdout.isTTY && process.stdin.isTTY;
     const session = isTTY
       ? await (await import("./tui.js")).startTui(agentConfig)
@@ -354,14 +359,14 @@ export async function runAgentCli(raw: string[]) {
 
     if (phrenCtx && sessionId) {
       const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
-      endSession(phrenCtx, sessionId, lastText);
+      endSession(phrenCtx, sessionId, lastText, args.sessionName);
     }
     cleanup();
     return;
   }
 
-  // Create initial checkpoint before agent starts
-  const initCheckpoint = createCheckpoint(cwd, "pre-agent");
+  // Create initial checkpoint before agent starts (skip in bare mode)
+  const initCheckpoint = args.bare ? null : createCheckpoint(cwd, "pre-agent");
   if (args.verbose && initCheckpoint) {
     process.stderr.write(`Checkpoint: ${initCheckpoint.slice(0, 8)}\n`);
   }
@@ -379,20 +384,30 @@ export async function runAgentCli(raw: string[]) {
     process.exit(130);
   });
 
+  // Suppress verbose stderr when outputFormat is not text
+  const suppressVerbose = args.outputFormat !== "text";
+
   // One-shot mode
   try {
     let result;
     if (args.resume && phrenCtx) {
-      // Resume: load previous messages and continue
-      const prevMessages = loadLastSessionMessages(phrenCtx.phrenPath);
+      // Resume: load previous messages by session name or last session
+      const prevMessages = args.sessionName
+        ? loadNamedSessionMessages(phrenCtx.phrenPath, args.sessionName)
+        : loadLastSessionMessages(phrenCtx.phrenPath);
       if (prevMessages && prevMessages.length > 0) {
-        if (args.verbose) process.stderr.write(`Resuming session with ${prevMessages.length} messages\n`);
+        if (args.verbose && !suppressVerbose) process.stderr.write(`Resuming session with ${prevMessages.length} messages\n`);
         const contextLimit = provider.contextWindow ?? 200_000;
         const session = createSession(contextLimit);
         session.messages = prevMessages as typeof session.messages;
         const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
         // Save messages for future resume
-        saveSessionMessages(phrenCtx.phrenPath, sessionId!, session.messages);
+        const saveId = args.sessionName ?? sessionId!;
+        if (args.sessionName) {
+          saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, session.messages);
+        } else {
+          saveSessionMessages(phrenCtx.phrenPath, saveId, session.messages);
+        }
         result = {
           finalText: turnResult.text,
           turns: turnResult.turns,
@@ -401,14 +416,14 @@ export async function runAgentCli(raw: string[]) {
           messages: session.messages,
         };
       } else {
-        process.stderr.write("No previous session to resume.\n");
+        if (!suppressVerbose) process.stderr.write("No previous session to resume.\n");
         result = await runAgent(args.task, agentConfig);
       }
     } else {
       result = await runAgent(args.task, agentConfig);
     }
 
-    if (args.verbose) {
+    if (args.verbose && !suppressVerbose) {
       const costStr = result.totalCost ? `, ${result.totalCost}` : "";
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
@@ -423,18 +438,44 @@ export async function runAgentCli(raw: string[]) {
     // End session with summary + memory intelligence
     if (phrenCtx && sessionId) {
       const summary = scrubSummary(result.finalText.slice(0, 500));
-      endSession(phrenCtx, sessionId, summary);
+      endSession(phrenCtx, sessionId, summary, args.sessionName);
 
-      // Save messages for resume
-      saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages);
+      // Save messages for resume (by name if session-name is set)
+      if (args.sessionName) {
+        saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, result.messages);
+      } else {
+        saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages);
+      }
 
       // Evolve project context via lightweight LLM reflection
       try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }
     }
+
+    // Emit structured JSON output for CI pipelines
+    if (args.outputFormat === "json") {
+      const output = {
+        ok: true,
+        result: result.finalText,
+        turns: result.turns,
+        toolCalls: result.toolCalls,
+        cost: result.totalCost ?? null,
+        sessionId: args.sessionName ?? sessionId ?? null,
+      };
+      process.stdout.write(JSON.stringify(output) + "\n");
+    }
   } catch (err: unknown) {
-    console.error(err instanceof Error ? err.message : String(err));
+    if (args.outputFormat === "json") {
+      const output = {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        sessionId: args.sessionName ?? sessionId ?? null,
+      };
+      process.stdout.write(JSON.stringify(output) + "\n");
+    } else {
+      console.error(err instanceof Error ? err.message : String(err));
+    }
     if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
+      endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`, args.sessionName);
     }
     cleanup();
     process.exit(1);

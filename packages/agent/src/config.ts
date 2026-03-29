@@ -31,6 +31,12 @@ export interface CliArgs {
   denyRules: string[];
   /** Custom compaction instructions. */
   compactionInstructions?: string;
+  /** Bare mode: skip all auto-discovery (hooks, context, warm start) for reproducible CI runs. */
+  bare: boolean;
+  /** Output format: text (default), json (structured output for CI), stream-json (ndjson events). */
+  outputFormat: "text" | "json" | "stream-json";
+  /** Named session for resume by name (e.g., --session-name auth-refactor). */
+  sessionName?: string;
   help: boolean;
   version: boolean;
 }
@@ -61,6 +67,9 @@ Options:
   --hooks-config <p>   Load agent hooks config from JSON file
   --team <name>        Start in team mode with named team coordination
   --multi              Start in multi-agent TUI mode
+  --bare               Skip all auto-discovery (hooks, context, warm start) for CI
+  --output-format <f>  Output: text (default), json (structured), stream-json (ndjson)
+  --session-name <n>   Name this session for resume by name
   --dry-run            Show system prompt and exit
   --verbose            Show tool calls as they execute
   --version            Show version
@@ -114,6 +123,8 @@ export function parseArgs(argv: string[]): CliArgs {
     effort: "high",
     allowRules: [],
     denyRules: [],
+    bare: false,
+    outputFormat: "text",
     help: false,
     version: false,
   };
@@ -136,6 +147,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--hooks-config" && argv[i + 1]) { args.hooksConfig = argv[++i]; }
     else if (arg === "--team" && argv[i + 1]) { args.team = argv[++i]; }
     else if (arg === "--multi") { args.multi = true; }
+    else if (arg === "--bare") { args.bare = true; }
+    else if (arg === "--session-name" && argv[i + 1]) { args.sessionName = argv[++i]; }
+    else if (arg === "--output-format" && argv[i + 1]) {
+      const fmt = argv[++i];
+      if (fmt === "json" || fmt === "stream-json") args.outputFormat = fmt;
+    }
     else if (arg === "--effort" && argv[i + 1]) {
       const level = argv[++i];
       if (level === "low" || level === "medium" || level === "high" || level === "max") {

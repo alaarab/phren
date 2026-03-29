@@ -25,9 +25,9 @@ function sessionFile(phrenPath: string, sessionId: string): string {
   return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
 }
 
-export function startSession(ctx: PhrenContext): string {
+export function startSession(ctx: PhrenContext, sessionName?: string): string {
   const sessionId = crypto.randomUUID();
-  const state: SessionState = {
+  const state: SessionState & { sessionName?: string } = {
     sessionId,
     project: ctx.project || undefined,
     startedAt: new Date().toISOString(),
@@ -36,12 +36,15 @@ export function startSession(ctx: PhrenContext): string {
     tasksAdded: 0,
     agentCreated: true,
   };
+  if (sessionName) {
+    state.sessionName = sessionName;
+  }
   const file = sessionFile(ctx.phrenPath, sessionId);
   fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
   return sessionId;
 }
 
-export function endSession(ctx: PhrenContext, sessionId: string, summary?: string): void {
+export function endSession(ctx: PhrenContext, sessionId: string, summary?: string, sessionName?: string): void {
   const file = sessionFile(ctx.phrenPath, sessionId);
   if (!fs.existsSync(file)) return;
   try {
@@ -50,12 +53,16 @@ export function endSession(ctx: PhrenContext, sessionId: string, summary?: strin
     if (summary) {
       // Also write to last-summary.json for fast pickup by next session_start
       const summaryFile = path.join(sessionsDir(ctx.phrenPath), "last-summary.json");
-      fs.writeFileSync(summaryFile, JSON.stringify({
+      const summaryData: Record<string, unknown> = {
         summary,
         sessionId,
         project: state.project,
         endedAt: state.endedAt,
-      }, null, 2) + "\n");
+      };
+      if (sessionName) {
+        summaryData.sessionName = sessionName;
+      }
+      fs.writeFileSync(summaryFile, JSON.stringify(summaryData, null, 2) + "\n");
     }
     fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
   } catch { /* best effort */ }
@@ -121,4 +128,148 @@ export function loadLastSessionMessages(phrenPath: string): SerializedMessage[] 
   } catch {
     return null;
   }
+}
+
+/** Save session messages under a named session for later resume by name. */
+export function saveNamedSessionMessages(phrenPath: string, sessionName: string, messages: SerializedMessage[]): void {
+  const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const file = path.join(messagesDir(phrenPath), `named-${safeName}-messages.json`);
+  fs.writeFileSync(file, JSON.stringify(messages, null, 2) + "\n");
+}
+
+/** Load a named session's messages for resume. Returns null if none found. */
+export function loadNamedSessionMessages(phrenPath: string, sessionName: string): SerializedMessage[] | null {
+  try {
+    const safeName = sessionName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const file = path.join(messagesDir(phrenPath), `named-${safeName}-messages.json`);
+    if (!fs.existsSync(file)) return null;
+    const data = fs.readFileSync(file, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+
+// --- Session picker support ---
+
+export interface SessionInfo {
+  id: string;
+  name?: string;
+  timestamp: string;
+  summary: string;
+}
+
+/**
+ * List recent sessions with their IDs, names, timestamps, and summary snippets.
+ * Reads session JSON files from the sessions directory, sorted newest first.
+ */
+export function listRecentSessions(phrenPath: string, limit = 10): SessionInfo[] {
+  try {
+    const dir = sessionsDir(phrenPath);
+    // Find session state files (not message files or named files)
+    const files = fs.readdirSync(dir)
+      .filter(f => /^session-[0-9a-f-]+\.json$/.test(f))
+      .map(f => {
+        const fullPath = path.join(dir, f);
+        return { name: f, fullPath, mtime: fs.statSync(fullPath).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, limit);
+
+    const results: SessionInfo[] = [];
+
+    for (const file of files) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(file.fullPath, "utf-8"));
+        const sessionId: string = raw.sessionId || "";
+        if (!sessionId) continue;
+
+        // Try to load the summary from last-summary.json or from the session state
+        let summary = "";
+        const summaryFile = path.join(dir, "last-summary.json");
+        if (fs.existsSync(summaryFile)) {
+          try {
+            const summaryData = JSON.parse(fs.readFileSync(summaryFile, "utf-8"));
+            if (summaryData.sessionId === sessionId && summaryData.summary) {
+              summary = summaryData.summary;
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Count turns from messages file if available
+        const msgFile = path.join(dir, `session-${sessionId}-messages.json`);
+        let turnCount: number | undefined;
+        if (fs.existsSync(msgFile)) {
+          try {
+            const msgs = JSON.parse(fs.readFileSync(msgFile, "utf-8"));
+            if (Array.isArray(msgs)) {
+              turnCount = msgs.filter((m: SerializedMessage) => m.role === "assistant").length;
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Build a summary snippet if we don't have one
+        if (!summary) {
+          const parts: string[] = [];
+          if (raw.project) parts.push(`project: ${raw.project}`);
+          if (raw.findingsAdded) parts.push(`${raw.findingsAdded} findings`);
+          if (raw.tasksCompleted) parts.push(`${raw.tasksCompleted} tasks done`);
+          summary = parts.join(", ") || "(no summary)";
+        }
+
+        // Truncate summary for display
+        if (summary.length > 120) {
+          summary = summary.slice(0, 117) + "...";
+        }
+
+        const info: SessionInfo = {
+          id: sessionId,
+          name: raw.sessionName || undefined,
+          timestamp: raw.startedAt || new Date(file.mtime).toISOString(),
+          summary,
+        };
+        if (turnCount !== undefined) {
+          (info as unknown as Record<string, unknown>).turnCount = turnCount;
+        }
+
+        results.push(info);
+      } catch { /* skip malformed session files */ }
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Load messages for a session identified by name.
+ * Tries named session files first, then falls back to searching session state
+ * files for a matching sessionName field.
+ */
+export function loadSessionMessagesByName(phrenPath: string, name: string): SerializedMessage[] | null {
+  // Try named session file first (exact match)
+  const named = loadNamedSessionMessages(phrenPath, name);
+  if (named) return named;
+
+  // Fall back to scanning session state files for a matching sessionName
+  try {
+    const dir = sessionsDir(phrenPath);
+    const files = fs.readdirSync(dir)
+      .filter(f => /^session-[0-9a-f-]+\.json$/.test(f));
+
+    for (const f of files) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(dir, f), "utf-8"));
+        if (raw.sessionName === name && raw.sessionId) {
+          const msgFile = path.join(dir, `session-${raw.sessionId}-messages.json`);
+          if (fs.existsSync(msgFile)) {
+            return JSON.parse(fs.readFileSync(msgFile, "utf-8"));
+          }
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* ignore */ }
+
+  return null;
 }

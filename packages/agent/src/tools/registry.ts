@@ -18,14 +18,37 @@ interface DeferredToolEntry {
   resolved?: AgentTool;
 }
 
+/** Tools allowed in plan mode (read-only operations). */
+const PLAN_MODE_ALLOWED = new Set([
+  "read_file",
+  "glob",
+  "grep",
+  "phren_search",
+  "phren_get_tasks",
+  "git_status",
+  "git_diff",
+  "lsp",
+  "ask_user",
+]);
+
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
   private deferred = new Map<string, DeferredToolEntry>();
+  private _planModeActive = false;
   permissionConfig: PermissionConfig = {
     mode: "suggest",
     projectRoot: process.cwd(),
     allowedPaths: [],
   };
+
+  /** Enable or disable plan mode. When active, only read-only tools are allowed. */
+  setPlanMode(active: boolean): void {
+    this._planModeActive = active;
+  }
+
+  get planModeActive(): boolean {
+    return this._planModeActive;
+  }
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name, tool);
@@ -77,6 +100,14 @@ export class ToolRegistry {
   }
 
   async execute(name: string, input: Record<string, unknown>): Promise<AgentToolResult> {
+    // Plan mode enforcement — block write tools before plan is approved
+    if (this._planModeActive && !PLAN_MODE_ALLOWED.has(name)) {
+      return {
+        output: "Tool blocked in plan mode. Describe your plan using read-only tools first.",
+        is_error: true,
+      };
+    }
+
     let tool = this.tools.get(name);
 
     // Check deferred tools if not found in regular tools

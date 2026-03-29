@@ -3,7 +3,7 @@
  */
 import type { AgentSession } from "./agent-loop.js";
 import type { LlmMessage } from "./providers/types.js";
-import { estimateMessageTokens } from "./context/token-counter.js";
+import { estimateTokens, estimateMessageTokens } from "./context/token-counter.js";
 import { pruneMessages } from "./context/pruner.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from "./multi/presets.js";
@@ -33,6 +33,12 @@ export interface CommandContext {
   currentModel?: string;
   /** Callback when model/reasoning changes */
   onModelChange?: (result: PickerResult) => void;
+  /** Callback to update compaction instructions in agent config */
+  onCompactionInstructions?: (instructions: string) => void;
+  /** LLM provider for /btw side conversations */
+  provider?: import("./providers/types.js").LlmProvider;
+  /** System prompt for /btw side conversations */
+  systemPrompt?: string;
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -69,10 +75,12 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
   /turns      Show turn and tool call counts
   /clear      Clear conversation history
   /cost       Show token usage and estimated cost
+  /context    Show context usage breakdown
   /plan       Show conversation plan (tool calls so far)
   /undo       Undo last user message and response
   /history [n|full]  Show last N messages (default 10) with rich formatting
-  /compact    Compact conversation to save context space
+  /compact [instructions]  Compact conversation with optional retention instructions
+  /btw <question>  Side question without polluting conversation history
   /mode       Toggle input mode (steering ↔ queue)
   /effort [low|medium|high|max]  Show or set effort level
   /spawn <name> <task>  Spawn a background agent
@@ -266,10 +274,119 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
     }
 
     case "/compact": {
+      const customInstructions = parts.slice(1).join(" ").trim() || undefined;
+      if (customInstructions && ctx.onCompactionInstructions) {
+        ctx.onCompactionInstructions(customInstructions);
+      }
       const before = ctx.session.messages.length;
-      ctx.session.messages = pruneMessages(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
+      ctx.session.messages = pruneMessages(ctx.session.messages, {
+        contextLimit: ctx.contextLimit,
+        keepRecentTurns: 4,
+        compactionInstructions: customInstructions,
+      });
       const after = ctx.session.messages.length;
-      process.stderr.write(`${DIM}Compacted: ${before} → ${after} messages.${RESET}\n`);
+      if (customInstructions) {
+        process.stderr.write(`${DIM}Context compacted with custom instructions: ${before} → ${after} messages.${RESET}\n`);
+      } else {
+        process.stderr.write(`${DIM}Compacted: ${before} → ${after} messages.${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/context": {
+      const msgs = ctx.session.messages;
+      const totalTokens = estimateMessageTokens(msgs);
+      const pct = ctx.contextLimit > 0 ? ((totalTokens / ctx.contextLimit) * 100).toFixed(1) : "?";
+
+      // Count message types
+      let userMessages = 0;
+      let assistantMessages = 0;
+      let toolResults = 0;
+      let systemTokens = 0;
+      let conversationTokens = 0;
+      let toolResultTokens = 0;
+
+      for (const msg of msgs) {
+        if (msg.role === "user") {
+          if (typeof msg.content === "string") {
+            userMessages++;
+            conversationTokens += estimateMessageTokens([msg]);
+          } else {
+            // Tool result blocks
+            for (const block of msg.content) {
+              if (block.type === "tool_result") {
+                toolResults++;
+                toolResultTokens += estimateTokens(block.content ?? "");
+              } else if (block.type === "text") {
+                conversationTokens += estimateTokens((block as { text: string }).text);
+              }
+            }
+          }
+        } else if (msg.role === "assistant") {
+          assistantMessages++;
+          if (typeof msg.content === "string") {
+            conversationTokens += estimateMessageTokens([msg]);
+          } else {
+            for (const block of msg.content) {
+              if (block.type === "text") {
+                conversationTokens += estimateTokens((block as { text: string }).text);
+              } else if (block.type === "tool_use") {
+                conversationTokens += estimateTokens(JSON.stringify((block as { input: unknown }).input));
+              }
+            }
+          }
+        }
+      }
+
+      // Estimate system prompt tokens if available
+      if (ctx.systemPrompt) {
+        systemTokens = estimateTokens(ctx.systemPrompt);
+      }
+
+      process.stderr.write(`${DIM}── Context Usage ──${RESET}\n`);
+      process.stderr.write(`${DIM}  Total:          ~${totalTokens} / ${ctx.contextLimit} tokens (${pct}%)${RESET}\n`);
+      process.stderr.write(`${DIM}  Messages:       ${msgs.length} total${RESET}\n`);
+      process.stderr.write(`${DIM}    User:         ${userMessages}${RESET}\n`);
+      process.stderr.write(`${DIM}    Assistant:     ${assistantMessages}${RESET}\n`);
+      process.stderr.write(`${DIM}    Tool results:  ${toolResults}${RESET}\n`);
+      process.stderr.write(`${DIM}  Breakdown:${RESET}\n`);
+      if (systemTokens > 0) {
+        process.stderr.write(`${DIM}    System prompt: ~${systemTokens} tokens${RESET}\n`);
+      }
+      process.stderr.write(`${DIM}    Conversation:  ~${conversationTokens} tokens${RESET}\n`);
+      process.stderr.write(`${DIM}    Tool results:  ~${toolResultTokens} tokens${RESET}\n`);
+      process.stderr.write(`${DIM}── end ──${RESET}\n`);
+      return true;
+    }
+
+    case "/btw": {
+      const question = parts.slice(1).join(" ").trim();
+      if (!question) {
+        process.stderr.write(`${DIM}Usage: /btw <question>${RESET}\n`);
+        return true;
+      }
+      if (!ctx.provider) {
+        process.stderr.write(`${DIM}Provider not available for side conversations.${RESET}\n`);
+        return true;
+      }
+      const sideSystemPrompt = ctx.systemPrompt
+        ? ctx.systemPrompt + "\n\nThis is a brief side question. Answer concisely."
+        : "You are a helpful assistant. Answer concisely.";
+      const sideMessages: LlmMessage[] = [{ role: "user", content: question }];
+      process.stderr.write(`${DIM}── side conversation ──${RESET}\n`);
+      ctx.provider.chat(sideSystemPrompt, sideMessages, []).then((response) => {
+        const text = typeof response.content === "string"
+          ? response.content
+          : response.content
+              .filter((b): b is { type: "text"; text: string } => b.type === "text")
+              .map((b) => b.text)
+              .join("");
+        process.stderr.write(`${DIM}${text}${RESET}\n`);
+        process.stderr.write(`${DIM}── end side conversation ──${RESET}\n`);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`${RED}Side conversation error: ${msg}${RESET}\n`);
+      });
       return true;
     }
 
