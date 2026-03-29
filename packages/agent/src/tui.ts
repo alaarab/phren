@@ -166,6 +166,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   let inputMode: InputMode = loadInputMode();
   let pendingInput: string | null = null;
+  const steerQueue: string[] = [];
   let running = false;
   let inputLine = "";
   let cursorPos = 0;
@@ -676,16 +677,20 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         return;
       }
 
-      // If agent is running, buffer input
+      // If agent is running, add to steer queue
       if (running) {
-        pendingInput = line;
-        const label = inputMode === "steering" ? "steering" : "queued";
-        w.write(s.dim(`  ↳ ${label}: "${line.slice(0, 60)}"\n`));
+        if (inputMode === "steering") {
+          steerQueue.push(line);
+        } else {
+          pendingInput = line;
+        }
+        // Show queued input above the thinking line
+        w.write(`${ESC}2K${s.dim(`  ↳ ${inputMode === "steering" ? "steer" : "queued"}: ${line.slice(0, 60)}`)}\n`);
         return;
       }
 
-      // Echo user input inline, then run turn
-      w.write(`${s.bold("You:")} ${line}\n\n`);
+      // Echo user input into chat history, then run turn
+      w.write(`\n${s.bold("You:")} ${line}\n\n`);
       runAgentTurn(line);
       return;
     }
@@ -899,6 +904,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     },
     onStatus: (msg) => w.write(s.dim(msg)),
     getSteeringInput: () => {
+      // Drain steer queue first (newest steering inputs)
+      if (steerQueue.length > 0 && inputMode === "steering") {
+        const steer = steerQueue.shift()!;
+        w.write(s.yellow(`  ↳ steering: ${steer}\n`));
+        return steer;
+      }
       if (pendingInput && inputMode === "steering") {
         const steer = pendingInput;
         pendingInput = null;
@@ -942,12 +953,18 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
     running = false;
 
-    // Process queued input
-    if (pendingInput) {
+    // Process queued input — steer queue first, then pending
+    if (steerQueue.length > 0) {
+      const queued = steerQueue.shift()!;
+      w.write(`\n${s.bold("You:")} ${queued}\n\n`);
+      runAgentTurn(queued);
+    } else if (pendingInput) {
       const queued = pendingInput;
       pendingInput = null;
+      w.write(`\n${s.bold("You:")} ${queued}\n\n`);
       runAgentTurn(queued);
     } else {
+      w.write("\n");
       prompt();
     }
   }
