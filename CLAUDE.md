@@ -7,25 +7,35 @@ Open-source knowledge layer for AI agents. Published as `@phren/cli` on npm.
 
 Source lives at `~phren`. Published to npm. Starter templates are bundled in the package.
 
+## Monorepo Structure
+
+pnpm workspace with turborepo. Three packages:
+
+| Package | Path | npm | Description |
+|---------|------|-----|-------------|
+| `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
+| `@phren/agent` | `packages/agent/` | Published | Standalone coding agent |
+| `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension |
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `mcp/src/index.ts` | Entry point: CLI routing + MCP server with 53 tools |
-| `mcp/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
-| `mcp/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
-| `mcp/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
-| `mcp/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
-| `mcp/src/cli/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
-| `mcp/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
-| `mcp/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
-| `mcp/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
-| `mcp/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
-| `mcp/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
-| `mcp/src/status.ts` | `phren status`: health, project, stats overview |
-| `skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |
-| `starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
-| `starter/templates/` | Project templates: python-project, monorepo, library, frontend |
+| `packages/cli/src/index.ts` | Entry point: CLI routing + MCP server with 53 tools |
+| `packages/cli/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
+| `packages/cli/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
+| `packages/cli/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
+| `packages/cli/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
+| `packages/cli/src/cli/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
+| `packages/cli/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
+| `packages/cli/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
+| `packages/cli/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
+| `packages/cli/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
+| `packages/cli/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
+| `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
+| `packages/cli/skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |
+| `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
+| `packages/cli/starter/templates/` | Project templates: python-project, monorepo, library, frontend |
 | `docs/index.html` | GitHub Pages site |
 | `global/CLAUDE.md` | User-level instructions shipped with the package |
 
@@ -33,9 +43,9 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 ```bash
 cd ~phren
-npm run build      # compile TypeScript
-npm test           # run the vitest suite
-npm publish        # publish to npm (needs OTP)
+pnpm build         # compile TypeScript (all packages)
+pnpm test          # run the vitest suite
+pnpm lint          # lint all packages
 ```
 
 ## Current Version
@@ -353,32 +363,32 @@ Env overrides: `PHREN_AGENT_PROVIDER`, `PHREN_AGENT_MODEL`.
 
 | File | Purpose |
 |------|---------|
-| `agent/src/index.ts` | Entry point: CLI parsing, provider resolution, session lifecycle |
-| `agent/src/agent-loop.ts` | Core agent loop: turn management, streaming, tool dispatch |
-| `agent/src/config.ts` | CLI argument parsing and help text |
-| `agent/src/system-prompt.ts` | System prompt builder with phren context injection |
-| `agent/src/tui.ts` | Terminal UI: status bar, streaming, raw stdin steering |
-| `agent/src/repl.ts` | REPL fallback: readline with history, steering/queue modes |
-| `agent/src/commands.ts` | Slash command dispatch for interactive modes |
-| `agent/src/cost.ts` | Cost tracking with per-model pricing table |
-| `agent/src/plan.ts` | Plan mode: prompt injection and approval flow |
-| `agent/src/checkpoint.ts` | Git checkpoint creation for rollback on one-shot runs |
-| `agent/src/mcp-client.ts` | MCP client: stdio transport, JSON-RPC, tool wrapping |
-| `agent/src/spinner.ts` | TTY spinner and formatting helpers |
-| `agent/src/phren-imports.ts` | Typed dynamic imports from mcp/dist/ |
-| `agent/src/providers/` | LLM providers: openrouter, anthropic, openai, codex, ollama |
-| `agent/src/providers/retry.ts` | Exponential backoff retry wrapper |
-| `agent/src/providers/codex-auth.ts` | Codex OAuth PKCE login/logout flow |
-| `agent/src/tools/` | Tool implementations: read/write/edit file, shell, glob, grep, git, phren-* |
-| `agent/src/tools/git.ts` | Git tools: status, diff, commit |
-| `agent/src/tools/lint-test.ts` | Auto-detect and run lint/test commands |
-| `agent/src/tools/registry.ts` | Tool registry with permission checking |
-| `agent/src/memory/` | Memory subsystem: context, session, error recovery, auto-capture |
-| `agent/src/memory/anti-patterns.ts` | Anti-pattern tracker (failed→succeeded tool pairs) |
-| `agent/src/memory/context-flush.ts` | One-time knowledge extraction at 75% context |
-| `agent/src/memory/project-context.ts` | Evolving project context via LLM reflection |
-| `agent/src/context/pruner.ts` | Conversation pruning to fit context windows |
-| `agent/src/permissions/` | Permission system: modes, sandbox, shell safety, env scrubbing |
+| `packages/agent/src/index.ts` | Entry point: CLI parsing, provider resolution, session lifecycle |
+| `packages/agent/src/agent-loop.ts` | Core agent loop: turn management, streaming, tool dispatch |
+| `packages/agent/src/config.ts` | CLI argument parsing and help text |
+| `packages/agent/src/system-prompt.ts` | System prompt builder with phren context injection |
+| `packages/agent/src/tui.ts` | Terminal UI: status bar, streaming, raw stdin steering |
+| `packages/agent/src/repl.ts` | REPL fallback: readline with history, steering/queue modes |
+| `packages/agent/src/commands.ts` | Slash command dispatch for interactive modes |
+| `packages/agent/src/cost.ts` | Cost tracking with per-model pricing table |
+| `packages/agent/src/plan.ts` | Plan mode: prompt injection and approval flow |
+| `packages/agent/src/checkpoint.ts` | Git checkpoint creation for rollback on one-shot runs |
+| `packages/agent/src/mcp-client.ts` | MCP client: stdio transport, JSON-RPC, tool wrapping |
+| `packages/agent/src/spinner.ts` | TTY spinner and formatting helpers |
+| `packages/agent/src/phren-imports.ts` | Typed dynamic imports from packages/cli/dist/ |
+| `packages/agent/src/providers/` | LLM providers: openrouter, anthropic, openai, codex, ollama |
+| `packages/agent/src/providers/retry.ts` | Exponential backoff retry wrapper |
+| `packages/agent/src/providers/codex-auth.ts` | Codex OAuth PKCE login/logout flow |
+| `packages/agent/src/tools/` | Tool implementations: read/write/edit file, shell, glob, grep, git, phren-* |
+| `packages/agent/src/tools/git.ts` | Git tools: status, diff, commit |
+| `packages/agent/src/tools/lint-test.ts` | Auto-detect and run lint/test commands |
+| `packages/agent/src/tools/registry.ts` | Tool registry with permission checking |
+| `packages/agent/src/memory/` | Memory subsystem: context, session, error recovery, auto-capture |
+| `packages/agent/src/memory/anti-patterns.ts` | Anti-pattern tracker (failed→succeeded tool pairs) |
+| `packages/agent/src/memory/context-flush.ts` | One-time knowledge extraction at 75% context |
+| `packages/agent/src/memory/project-context.ts` | Evolving project context via LLM reflection |
+| `packages/agent/src/context/pruner.ts` | Conversation pruning to fit context windows |
+| `packages/agent/src/permissions/` | Permission system: modes, sandbox, shell safety, env scrubbing |
 
 ## Hooks (registered by init, live in ~/.claude/settings.json)
 
