@@ -9,6 +9,8 @@ import { shellTool } from "./tools/shell.js";
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
+import { createWebSearchTool } from "./tools/web-search.js";
+import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
 import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
@@ -119,10 +121,12 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createPhrenFindingTool(phrenCtx, sessionId));
     registry.register(createPhrenGetTasksTool(phrenCtx));
     registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
   }
 
-  // Web + Git tools
+  // Web tools
   registry.register(createWebFetchTool());
+  registry.register(createWebSearchTool());
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
