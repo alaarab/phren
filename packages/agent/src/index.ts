@@ -198,12 +198,20 @@ export async function runAgentCli(raw: string[]) {
     return;
   }
 
-  // Interactive mode — TUI if terminal, fallback to REPL if not
+  // Interactive mode — Ink TUI if available, legacy TUI fallback, REPL if not TTY
   if (args.interactive) {
     const isTTY = process.stdout.isTTY && process.stdin.isTTY;
-    const session = isTTY
-      ? await (await import("./tui.js")).startTui(agentConfig)
-      : await (await import("./repl.js")).startRepl(agentConfig);
+    let session;
+    if (!isTTY) {
+      session = await (await import("./repl.js")).startRepl(agentConfig);
+    } else {
+      try {
+        session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig);
+      } catch {
+        // Ink not installed or component not built yet — fall back to legacy TUI
+        session = await (await import("./tui.js")).startTui(agentConfig);
+      }
+    }
 
     // Flush anti-patterns at session end
     if (phrenCtx) {
