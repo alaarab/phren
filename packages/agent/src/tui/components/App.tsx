@@ -162,12 +162,7 @@ export function App({
           if (item.kind === "banner") {
             return (
               <Box key="banner">
-                <Banner
-                  provider={state.provider}
-                  project={state.project}
-                  version={state.version}
-                  permissionMode={state.permMode}
-                />
+                <Banner version={state.version} />
               </Box>
             );
           }

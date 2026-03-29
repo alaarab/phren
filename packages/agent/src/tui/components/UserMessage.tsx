@@ -6,9 +6,9 @@ interface UserMessageProps {
 
 export function UserMessage({ text }: UserMessageProps) {
   return (
-    <Box>
-      <Text bold>You: </Text>
-      <Text>{text}</Text>
+    <Box flexDirection="column">
+      <Text bold>{"❯"} {text}</Text>
+      <Text>{""}</Text>
     </Box>
   );
 }
