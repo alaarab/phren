@@ -1,8 +1,18 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import type { AgentTool } from "./types.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { looksLikeSecretsFile, scrubToolOutput } from "../permissions/privacy.js";
+
+// ── Read deduplication ──────────────────────────────────────────────────
+// Track file hashes per session to avoid re-sending unchanged content to LLM.
+const readCache = new Map<string, { hash: string; lines: number }>();
+
+/** Reset the read cache (call at session start). */
+export function resetReadCache(): void {
+  readCache.clear();
+}
 
 export const readFileTool: AgentTool = {
   name: "read_file",
@@ -36,7 +46,18 @@ export const readFileTool: AgentTool = {
 
     if (!fs.existsSync(filePath)) return { output: `File not found: ${filePath}`, is_error: true };
 
+    const stat = fs.statSync(filePath);
     const content = fs.readFileSync(filePath, "utf-8");
+
+    // Deduplication: if same file+range was read before and content unchanged, return stub
+    const cacheKey = `${resolved}:${offset}:${limit}`;
+    const contentHash = crypto.createHash("md5").update(content).digest("hex");
+    const cached = readCache.get(cacheKey);
+    if (cached && cached.hash === contentHash) {
+      return {
+        output: `(file unchanged since last read — ${cached.lines} lines, ${stat.size} bytes)`,
+      };
+    }
 
     // Privacy: detect secrets files and scrub their content
     if (looksLikeSecretsFile(content)) {
@@ -53,6 +74,9 @@ export const readFileTool: AgentTool = {
     const selected = lines.slice(offset - 1, offset - 1 + limit);
     const numbered = selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
     const truncated = selected.length < lines.length - (offset - 1);
+
+    // Cache this read for dedup
+    readCache.set(cacheKey, { hash: contentHash, lines: lines.length });
 
     return {
       output: truncated

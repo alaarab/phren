@@ -33,6 +33,8 @@ export interface HookResult {
   output?: string;
   /** Error message if hook failed. */
   error?: string;
+  /** If true, the agent should NOT stop (Stop hook exit code 2). The output/error is injected as a user message. */
+  preventStop?: boolean;
 }
 
 export interface HookContext {
@@ -129,6 +131,15 @@ export class HookManager {
         return {
           allowed: false,
           error: stderr.trim() || `Hook denied: ${hook.command}`,
+        };
+      }
+
+      // Exit code 2 from a Stop hook means "don't stop, keep going"
+      if (ctx.event === "Stop" && exitCode === 2) {
+        return {
+          allowed: true,
+          preventStop: true,
+          output: stderr.trim() || "Stop hook requested continuation.",
         };
       }
 
