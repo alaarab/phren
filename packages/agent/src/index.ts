@@ -41,6 +41,364 @@ import { clearAllowlist } from "./permissions/allowlist.js";
 
 const VERSION = "0.0.1";
 
+// ---------------------------------------------------------------------------
+// Helper types used by extracted functions
+// ---------------------------------------------------------------------------
+
+type PhrenCtx = Awaited<ReturnType<typeof buildPhrenContext>>;
+type AgentConfigObj = Parameters<typeof runAgent>[1];
+
+interface SetupToolsResult {
+  mcpCleanup: (() => void) | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// setupPermissions — parse allow/deny rules and .phrenignore
+// ---------------------------------------------------------------------------
+
+function setupPermissions(args: import("./config.js").CliArgs) {
+  const allowRules: PermissionPattern[] = [];
+  const denyRules: PermissionPattern[] = [];
+  for (const rule of args.allowRules) {
+    const parsed = parsePermissionPattern(rule, "allow");
+    if (parsed) allowRules.push(parsed);
+  }
+  for (const rule of args.denyRules) {
+    const parsed = parsePermissionPattern(rule, "deny");
+    if (parsed) denyRules.push(parsed);
+  }
+
+  // Load .phrenignore patterns from project root (skip in bare mode)
+  let ignoreCtx: import("./permissions/ignore.js").IgnoreContext | undefined;
+  if (!args.bare) {
+    ignoreCtx = loadIgnorePatterns(process.cwd());
+  }
+
+  return { allowRules, denyRules, ignoreCtx };
+}
+
+// ---------------------------------------------------------------------------
+// setupTools — register all tools and MCP connections
+// ---------------------------------------------------------------------------
+
+async function setupTools(
+  registry: ToolRegistry,
+  phrenCtx: PhrenCtx,
+  sessionId: string | null,
+  args: import("./config.js").CliArgs,
+): Promise<SetupToolsResult> {
+  // Core file / shell / search tools
+  registry.register(readFileTool);
+  registry.register(writeFileTool);
+  registry.register(editFileTool);
+  registry.register(shellTool);
+  registry.register(globTool);
+  registry.register(grepTool);
+
+  if (phrenCtx) {
+    registry.register(createPhrenSearchTool(phrenCtx));
+    registry.register(createPhrenFindingTool(phrenCtx, sessionId));
+    registry.register(createPhrenGetTasksTool(phrenCtx));
+    registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
+  }
+
+  // Web tools
+  registry.register(createWebFetchTool());
+  registry.register(createWebSearchTool());
+
+  // Interaction tools
+  registry.register(askUserTool);
+
+  // Notebook editing
+  registry.register(notebookEditTool);
+
+  // Scheduled tasks
+  registry.register(cronCreateTool);
+  registry.register(cronListTool);
+  registry.register(cronDeleteTool);
+
+  // Git tools
+  registry.register(gitStatusTool);
+  registry.register(gitDiffTool);
+  registry.register(gitCommitTool);
+
+  // LSP tool — registered as deferred (loaded on first use since it spawns processes)
+  registry.registerDeferred({
+    name: lspTool.name,
+    description: lspTool.description,
+    input_schema: lspTool.input_schema,
+    resolve: async () => lspTool,
+  });
+
+  // MCP server connections
+  let mcpCleanup: (() => void) | undefined;
+  const mcpServers: Record<string, McpConfigEntry> = {};
+  if (args.mcpConfig) {
+    Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
+  }
+  for (let idx = 0; idx < args.mcp.length; idx++) {
+    const entry = parseMcpInline(args.mcp[idx]);
+    mcpServers[`mcp-${idx}`] = entry;
+  }
+  if (Object.keys(mcpServers).length > 0) {
+    const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
+    mcpCleanup = cleanup;
+    for (const tool of mcpTools) registry.register(tool);
+  }
+
+  return { mcpCleanup };
+}
+
+// ---------------------------------------------------------------------------
+// runMultiMode — multi-agent and team mode
+// ---------------------------------------------------------------------------
+
+async function runMultiMode(
+  args: import("./config.js").CliArgs,
+  agentConfig: AgentConfigObj,
+  phrenCtx: PhrenCtx,
+  sessionId: string | null,
+  cleanup: () => void,
+) {
+  const { AgentSpawner } = await import("./multi/spawner.js");
+
+  if (args.team) {
+    // Team mode — run TeamAgent with coordination
+    const { TeamCoordinator } = await import("./multi/coordinator.js");
+    const { runTeamAgent } = await import("./multi/team-agent.js");
+    const spawner = new AgentSpawner();
+    const coordinator = new TeamCoordinator(args.team);
+
+    process.on("SIGINT", async () => {
+      await spawner.shutdown();
+      cleanup();
+      process.exit(130);
+    });
+
+    try {
+      const result = await runTeamAgent(args.task, {
+        agentConfig,
+        spawner,
+        coordinator,
+        verbose: args.verbose,
+      });
+
+      if (args.verbose) {
+        process.stderr.write(
+          `\nTeam done: ${result.agentsUsed} agents, ${result.tasksCompleted} tasks completed, ` +
+          `${result.tasksFailed} failed, ${result.totalTurns} turns\n`,
+        );
+      }
+
+      // Save team memory as phren finding
+      if (phrenCtx) {
+        try {
+          const { buildTeamSummary, saveTeamMemory } = await import("./memory/team-memory.js");
+          const summary = buildTeamSummary(
+            args.team,
+            args.task,
+            spawner.listAgents(),
+            coordinator.getTaskList(),
+          );
+          await saveTeamMemory(phrenCtx, summary);
+        } catch { /* best effort */ }
+      }
+    } finally {
+      await spawner.shutdown();
+      if (phrenCtx && sessionId) {
+        endSession(phrenCtx, sessionId, scrubSummary("Team session ended"), args.sessionName);
+      }
+      cleanup();
+    }
+    return;
+  }
+
+  // Multi TUI mode (no team coordination)
+  const { startMultiTui } = await import("./multi/tui-multi.js");
+  const spawner = new AgentSpawner();
+
+  process.on("SIGINT", async () => {
+    await spawner.shutdown();
+    cleanup();
+    process.exit(130);
+  });
+
+  await startMultiTui(spawner, agentConfig);
+  await spawner.shutdown();
+  if (phrenCtx && sessionId) {
+    endSession(phrenCtx, sessionId, "Multi-agent session ended", args.sessionName);
+  }
+  cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// runInteractiveMode — TUI if terminal, fallback to REPL
+// ---------------------------------------------------------------------------
+
+async function runInteractiveMode(
+  args: import("./config.js").CliArgs,
+  agentConfig: AgentConfigObj,
+  phrenCtx: PhrenCtx,
+  sessionId: string | null,
+  cleanup: () => void,
+) {
+  if (args.outputFormat !== "text") {
+    process.stderr.write(`Warning: --output-format ${args.outputFormat} is not supported in interactive mode, falling back to text\n`);
+  }
+  const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+  const session = isTTY
+    ? await (await import("./tui.js")).startTui(agentConfig)
+    : await (await import("./repl.js")).startRepl(agentConfig);
+
+  // Flush anti-patterns at session end
+  if (phrenCtx) {
+    try { await session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
+    try { await evolveProjectContext(phrenCtx, agentConfig.provider, session.messages); } catch { /* best effort */ }
+  }
+
+  if (phrenCtx && sessionId) {
+    const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
+    endSession(phrenCtx, sessionId, lastText, args.sessionName);
+  }
+  cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// runOneShotMode — single task execution with resume support
+// ---------------------------------------------------------------------------
+
+async function runOneShotMode(
+  args: import("./config.js").CliArgs,
+  agentConfig: AgentConfigObj,
+  phrenCtx: PhrenCtx,
+  sessionId: string | null,
+  cleanup: () => void,
+) {
+  const cwd = process.cwd();
+
+  // Create initial checkpoint before agent starts (skip in bare mode)
+  const initCheckpoint = args.bare ? null : createCheckpoint(cwd, "pre-agent");
+  if (args.verbose && initCheckpoint) {
+    process.stderr.write(`Checkpoint: ${initCheckpoint.slice(0, 8)}\n`);
+  }
+
+  // SIGINT handler: offer rollback
+  process.on("SIGINT", () => {
+    process.stderr.write("\nInterrupted. Use --resume to continue later.\n");
+    if (process.stdin.isTTY) {
+      try { process.stdin.setRawMode(false); } catch {}
+    }
+    cleanup();
+    if (phrenCtx && sessionId) {
+      endSession(phrenCtx, sessionId, "Interrupted by user");
+    }
+    process.exit(130);
+  });
+
+  // Suppress verbose stderr when outputFormat is not text
+  const suppressVerbose = args.outputFormat !== "text";
+
+  try {
+    let result;
+    if (args.resume && phrenCtx) {
+      // Resume: load previous messages by session name or last session
+      const prevMessages = args.sessionName
+        ? loadNamedSessionMessages(phrenCtx.phrenPath, args.sessionName)
+        : loadLastSessionMessages(phrenCtx.phrenPath);
+      if (prevMessages && prevMessages.length > 0) {
+        if (args.verbose && !suppressVerbose) process.stderr.write(`Resuming session with ${prevMessages.length} messages\n`);
+        const contextLimit = agentConfig.provider.contextWindow ?? 200_000;
+        const session = createSession(contextLimit);
+        session.messages = prevMessages as typeof session.messages;
+        const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
+        // Save messages for future resume
+        const saveId = args.sessionName ?? sessionId!;
+        if (args.sessionName) {
+          saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, session.messages);
+        } else {
+          saveSessionMessages(phrenCtx.phrenPath, saveId, session.messages);
+        }
+        result = {
+          finalText: turnResult.text,
+          turns: turnResult.turns,
+          toolCalls: turnResult.toolCalls,
+          totalCost: agentConfig.costTracker?.formatCost(),
+          messages: session.messages,
+        };
+      } else {
+        if (!suppressVerbose) process.stderr.write("No previous session to resume.\n");
+        result = await runAgent(args.task, agentConfig);
+      }
+    } else {
+      result = await runAgent(args.task, agentConfig);
+    }
+
+    if (args.verbose && !suppressVerbose) {
+      const costStr = result.totalCost ? `, ${result.totalCost}` : "";
+      process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
+    }
+
+    // Run Stop hooks
+    if (agentConfig.hookManager?.hasHooks("Stop")) {
+      try {
+        await agentConfig.hookManager.runHooks({ event: "Stop" });
+      } catch { /* best effort */ }
+    }
+
+    // End session with summary + memory intelligence
+    if (phrenCtx && sessionId) {
+      const summary = scrubSummary(result.finalText.slice(0, 500));
+      endSession(phrenCtx, sessionId, summary, args.sessionName);
+
+      // Save messages for resume (by name if session-name is set)
+      if (args.sessionName) {
+        saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, result.messages);
+      } else {
+        saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages);
+      }
+
+      // Evolve project context via lightweight LLM reflection
+      try { await evolveProjectContext(phrenCtx, agentConfig.provider, result.messages); } catch { /* best effort */ }
+    }
+
+    // Emit structured JSON output for CI pipelines
+    if (args.outputFormat === "json") {
+      const output = {
+        ok: true,
+        result: result.finalText,
+        turns: result.turns,
+        toolCalls: result.toolCalls,
+        cost: result.totalCost ?? null,
+        sessionId: args.sessionName ?? sessionId ?? null,
+      };
+      process.stdout.write(JSON.stringify(output) + "\n");
+    }
+  } catch (err: unknown) {
+    if (args.outputFormat === "json") {
+      const output = {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        sessionId: args.sessionName ?? sessionId ?? null,
+      };
+      process.stdout.write(JSON.stringify(output) + "\n");
+    } else {
+      console.error(err instanceof Error ? err.message : String(err));
+    }
+    if (phrenCtx && sessionId) {
+      endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`, args.sessionName);
+    }
+    cleanup();
+    process.exit(1);
+  }
+
+  cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// runAgentCli — top-level orchestrator
+// ---------------------------------------------------------------------------
+
 /**
  * Run the agent CLI with the given argv tokens.
  * Called from `phren agent ...` or directly via `phren-agent ...`.
@@ -120,23 +478,8 @@ export async function runAgentCli(raw: string[]) {
     process.exit(0);
   }
 
-  // Parse permission patterns
-  const allowRules: PermissionPattern[] = [];
-  const denyRules: PermissionPattern[] = [];
-  for (const rule of args.allowRules) {
-    const parsed = parsePermissionPattern(rule, "allow");
-    if (parsed) allowRules.push(parsed);
-  }
-  for (const rule of args.denyRules) {
-    const parsed = parsePermissionPattern(rule, "deny");
-    if (parsed) denyRules.push(parsed);
-  }
-
-  // Load .phrenignore patterns from project root (skip in bare mode)
-  let ignoreCtx: import("./permissions/ignore.js").IgnoreContext | undefined;
-  if (!args.bare) {
-    ignoreCtx = loadIgnorePatterns(process.cwd());
-  }
+  // Parse permission patterns and load .phrenignore
+  const { allowRules, denyRules, ignoreCtx } = setupPermissions(args);
 
   // Register tools
   const registry = new ToolRegistry();
@@ -150,64 +493,8 @@ export async function runAgentCli(raw: string[]) {
   if (ignoreCtx) {
     registry.setIgnoreContext(ignoreCtx);
   }
-  registry.register(readFileTool);
-  registry.register(writeFileTool);
-  registry.register(editFileTool);
-  registry.register(shellTool);
-  registry.register(globTool);
-  registry.register(grepTool);
 
-  if (phrenCtx) {
-    registry.register(createPhrenSearchTool(phrenCtx));
-    registry.register(createPhrenFindingTool(phrenCtx, sessionId));
-    registry.register(createPhrenGetTasksTool(phrenCtx));
-    registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
-    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
-  }
-
-  // Web tools
-  registry.register(createWebFetchTool());
-  registry.register(createWebSearchTool());
-
-  // Interaction tools
-  registry.register(askUserTool);
-
-  // Notebook editing
-  registry.register(notebookEditTool);
-
-  // Scheduled tasks
-  registry.register(cronCreateTool);
-  registry.register(cronListTool);
-  registry.register(cronDeleteTool);
-
-  // Git tools
-  registry.register(gitStatusTool);
-  registry.register(gitDiffTool);
-  registry.register(gitCommitTool);
-
-  // LSP tool — registered as deferred (loaded on first use since it spawns processes)
-  registry.registerDeferred({
-    name: lspTool.name,
-    description: lspTool.description,
-    input_schema: lspTool.input_schema,
-    resolve: async () => lspTool,
-  });
-
-  // MCP server connections
-  let mcpCleanup: (() => void) | undefined;
-  const mcpServers: Record<string, McpConfigEntry> = {};
-  if (args.mcpConfig) {
-    Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
-  }
-  for (let idx = 0; idx < args.mcp.length; idx++) {
-    const entry = parseMcpInline(args.mcp[idx]);
-    mcpServers[`mcp-${idx}`] = entry;
-  }
-  if (Object.keys(mcpServers).length > 0) {
-    const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
-    mcpCleanup = cleanup;
-    for (const tool of mcpTools) registry.register(tool);
-  }
+  const { mcpCleanup } = await setupTools(registry, phrenCtx, sessionId, args);
 
   // Build cost tracker from model info
   const modelName = args.model ?? provider.name;
@@ -267,221 +554,18 @@ export async function runAgentCli(raw: string[]) {
     cancelAllCronTasks();
   };
 
-  // Multi-agent TUI mode
+  // Dispatch to the appropriate mode
   if (args.multi || args.team) {
-    const { AgentSpawner } = await import("./multi/spawner.js");
-
-    if (args.team) {
-      // Team mode — run TeamAgent with coordination
-      const { TeamCoordinator } = await import("./multi/coordinator.js");
-      const { runTeamAgent } = await import("./multi/team-agent.js");
-      const spawner = new AgentSpawner();
-      const coordinator = new TeamCoordinator(args.team);
-
-      process.on("SIGINT", async () => {
-        await spawner.shutdown();
-        cleanup();
-        process.exit(130);
-      });
-
-      try {
-        const result = await runTeamAgent(args.task, {
-          agentConfig,
-          spawner,
-          coordinator,
-          verbose: args.verbose,
-        });
-
-        if (args.verbose) {
-          process.stderr.write(
-            `\nTeam done: ${result.agentsUsed} agents, ${result.tasksCompleted} tasks completed, ` +
-            `${result.tasksFailed} failed, ${result.totalTurns} turns\n`,
-          );
-        }
-
-        // Save team memory as phren finding
-        if (phrenCtx) {
-          try {
-            const { buildTeamSummary, saveTeamMemory } = await import("./memory/team-memory.js");
-            const summary = buildTeamSummary(
-              args.team,
-              args.task,
-              spawner.listAgents(),
-              coordinator.getTaskList(),
-            );
-            await saveTeamMemory(phrenCtx, summary);
-          } catch { /* best effort */ }
-        }
-      } finally {
-        await spawner.shutdown();
-        if (phrenCtx && sessionId) {
-          endSession(phrenCtx, sessionId, scrubSummary("Team session ended"), args.sessionName);
-        }
-        cleanup();
-      }
-      return;
-    }
-
-    // Multi TUI mode (no team coordination)
-    const { startMultiTui } = await import("./multi/tui-multi.js");
-    const spawner = new AgentSpawner();
-
-    process.on("SIGINT", async () => {
-      await spawner.shutdown();
-      cleanup();
-      process.exit(130);
-    });
-
-    await startMultiTui(spawner, agentConfig);
-    await spawner.shutdown();
-    if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, "Multi-agent session ended", args.sessionName);
-    }
-    cleanup();
+    await runMultiMode(args, agentConfig, phrenCtx, sessionId, cleanup);
     return;
   }
 
-  // Interactive mode — TUI if terminal, fallback to REPL if not
   if (args.interactive) {
-    if (args.outputFormat !== "text") {
-      process.stderr.write(`Warning: --output-format ${args.outputFormat} is not supported in interactive mode, falling back to text\n`);
-    }
-    const isTTY = process.stdout.isTTY && process.stdin.isTTY;
-    const session = isTTY
-      ? await (await import("./tui.js")).startTui(agentConfig)
-      : await (await import("./repl.js")).startRepl(agentConfig);
-
-    // Flush anti-patterns at session end
-    if (phrenCtx) {
-      try { await session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
-      try { await evolveProjectContext(phrenCtx, provider, session.messages); } catch { /* best effort */ }
-    }
-
-    if (phrenCtx && sessionId) {
-      const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
-      endSession(phrenCtx, sessionId, lastText, args.sessionName);
-    }
-    cleanup();
+    await runInteractiveMode(args, agentConfig, phrenCtx, sessionId, cleanup);
     return;
   }
 
-  // Create initial checkpoint before agent starts (skip in bare mode)
-  const initCheckpoint = args.bare ? null : createCheckpoint(cwd, "pre-agent");
-  if (args.verbose && initCheckpoint) {
-    process.stderr.write(`Checkpoint: ${initCheckpoint.slice(0, 8)}\n`);
-  }
-
-  // SIGINT handler: offer rollback
-  process.on("SIGINT", () => {
-    process.stderr.write("\nInterrupted. Use --resume to continue later.\n");
-    if (process.stdin.isTTY) {
-      try { process.stdin.setRawMode(false); } catch {}
-    }
-    cleanup();
-    if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, "Interrupted by user");
-    }
-    process.exit(130);
-  });
-
-  // Suppress verbose stderr when outputFormat is not text
-  const suppressVerbose = args.outputFormat !== "text";
-
-  // One-shot mode
-  try {
-    let result;
-    if (args.resume && phrenCtx) {
-      // Resume: load previous messages by session name or last session
-      const prevMessages = args.sessionName
-        ? loadNamedSessionMessages(phrenCtx.phrenPath, args.sessionName)
-        : loadLastSessionMessages(phrenCtx.phrenPath);
-      if (prevMessages && prevMessages.length > 0) {
-        if (args.verbose && !suppressVerbose) process.stderr.write(`Resuming session with ${prevMessages.length} messages\n`);
-        const contextLimit = provider.contextWindow ?? 200_000;
-        const session = createSession(contextLimit);
-        session.messages = prevMessages as typeof session.messages;
-        const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
-        // Save messages for future resume
-        const saveId = args.sessionName ?? sessionId!;
-        if (args.sessionName) {
-          saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, session.messages);
-        } else {
-          saveSessionMessages(phrenCtx.phrenPath, saveId, session.messages);
-        }
-        result = {
-          finalText: turnResult.text,
-          turns: turnResult.turns,
-          toolCalls: turnResult.toolCalls,
-          totalCost: agentConfig.costTracker?.formatCost(),
-          messages: session.messages,
-        };
-      } else {
-        if (!suppressVerbose) process.stderr.write("No previous session to resume.\n");
-        result = await runAgent(args.task, agentConfig);
-      }
-    } else {
-      result = await runAgent(args.task, agentConfig);
-    }
-
-    if (args.verbose && !suppressVerbose) {
-      const costStr = result.totalCost ? `, ${result.totalCost}` : "";
-      process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
-    }
-
-    // Run Stop hooks
-    if (agentConfig.hookManager?.hasHooks("Stop")) {
-      try {
-        await agentConfig.hookManager.runHooks({ event: "Stop" });
-      } catch { /* best effort */ }
-    }
-
-    // End session with summary + memory intelligence
-    if (phrenCtx && sessionId) {
-      const summary = scrubSummary(result.finalText.slice(0, 500));
-      endSession(phrenCtx, sessionId, summary, args.sessionName);
-
-      // Save messages for resume (by name if session-name is set)
-      if (args.sessionName) {
-        saveNamedSessionMessages(phrenCtx.phrenPath, args.sessionName, result.messages);
-      } else {
-        saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages);
-      }
-
-      // Evolve project context via lightweight LLM reflection
-      try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }
-    }
-
-    // Emit structured JSON output for CI pipelines
-    if (args.outputFormat === "json") {
-      const output = {
-        ok: true,
-        result: result.finalText,
-        turns: result.turns,
-        toolCalls: result.toolCalls,
-        cost: result.totalCost ?? null,
-        sessionId: args.sessionName ?? sessionId ?? null,
-      };
-      process.stdout.write(JSON.stringify(output) + "\n");
-    }
-  } catch (err: unknown) {
-    if (args.outputFormat === "json") {
-      const output = {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        sessionId: args.sessionName ?? sessionId ?? null,
-      };
-      process.stdout.write(JSON.stringify(output) + "\n");
-    } else {
-      console.error(err instanceof Error ? err.message : String(err));
-    }
-    if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`, args.sessionName);
-    }
-    cleanup();
-    process.exit(1);
-  }
-
-  cleanup();
+  await runOneShotMode(args, agentConfig, phrenCtx, sessionId, cleanup);
 }
 
 // When run directly (phren-agent binary), parse from process.argv
