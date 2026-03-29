@@ -80,6 +80,39 @@ declare module "@phren/cli/data/tasks" {
   };
 }
 
+declare module "@phren/cli/shell/render-api" {
+  export type MenuView =
+    | "Projects" | "Tasks" | "Findings" | "Review Queue"
+    | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
+
+  export interface MenuState {
+    view: MenuView;
+    project?: string;
+    filter?: string;
+    cursor: number;
+    scroll: number;
+  }
+
+  export interface MenuRenderResult {
+    output: string;
+    listCount: number;
+  }
+
+  export function renderMenuFrame(
+    phrenPath: string,
+    profile: string,
+    state: MenuState,
+  ): Promise<MenuRenderResult>;
+
+  export function handleMenuKey(
+    state: MenuState,
+    keyName: string,
+    listCount: number,
+    phrenPath?: string,
+    profile?: string,
+  ): MenuState | null;
+}
+
 declare module "@phren/cli/core/finding" {
   export function addFinding(
     phrenPath: string,

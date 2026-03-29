@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.0.55",
+  "version": "0.0.56",
   "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
@@ -15,7 +15,8 @@
     "./data/access": "./dist/data/access.js",
     "./data/tasks": "./dist/data/tasks.js",
     "./core/finding": "./dist/core/finding.js",
-    "./session/utils": "./dist/session/utils.js"
+    "./session/utils": "./dist/session/utils.js",
+    "./shell/render-api": "./dist/shell/render-api.js"
   },
   "files": [
     "dist",
