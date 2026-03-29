@@ -147,14 +147,7 @@ export function App({
 
   return (
     <>
-      <StatusBar
-        provider={state.provider}
-        project={state.project}
-        turns={state.turns}
-        cost={state.cost}
-        permMode={state.permMode}
-        agentCount={state.agentCount}
-      />
+      {/* No status bar — clean interface */}
 
       {/* Banner and completed messages — rendered once, leave React tree */}
       <Static items={staticItems}>
