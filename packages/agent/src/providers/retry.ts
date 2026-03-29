@@ -12,11 +12,23 @@ const DEFAULT_CONFIG: RetryConfig = {
   retryableStatuses: new Set([429, 500, 502, 503, 529]),
 };
 
+const RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE"]);
+
 /** Extract HTTP status from error message like "API error 429: ..." */
 function extractStatus(error: unknown): number | null {
   const msg = error instanceof Error ? error.message : String(error);
   const match = msg.match(/\berror\s+(\d{3})\b/i);
   return match ? parseInt(match[1], 10) : null;
+}
+
+/** Check if the error is a retryable network error by code or message. */
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof Error && "code" in error) {
+    const code = (error as Error & { code?: string }).code;
+    if (code && RETRYABLE_NETWORK_CODES.has(code)) return true;
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return RETRYABLE_NETWORK_CODES.has(msg) || Array.from(RETRYABLE_NETWORK_CODES).some((c) => msg.includes(c));
 }
 
 /** Extract Retry-After hint from error message. */
@@ -43,7 +55,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (error) {
       const status = extractStatus(error);
-      const isRetryable = status !== null && cfg.retryableStatuses.has(status);
+      const isRetryable = (status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error);
 
       if (!isRetryable || attempt >= cfg.maxRetries) {
         throw error;

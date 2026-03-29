@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -7,6 +7,13 @@ import { editFileTool } from "../tools/edit-file.js";
 import { shellTool } from "../tools/shell.js";
 import { globTool } from "../tools/glob.js";
 import { grepTool } from "../tools/grep.js";
+
+// Mock sandbox validation so tool execute() doesn't reject temp-dir paths.
+// The permission checker tests cover sandbox logic; tool tests focus on functionality.
+vi.mock("../permissions/sandbox.js", () => ({
+  validatePath: () => ({ ok: true, resolved: "" }),
+  checkSensitivePath: () => ({ sensitive: false }),
+}));
 
 describe("readFileTool", () => {
   let tmpDir: string;

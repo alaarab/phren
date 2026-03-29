@@ -37,8 +37,23 @@ export function pruneMessages(
   }
 
   const first = messages[0]; // original task
-  const middle = messages.slice(1, messages.length - keepRecentMessages);
-  const tail = messages.slice(messages.length - keepRecentMessages);
+
+  // Walk backwards from split point to ensure tail starts with a user text message,
+  // not a tool_result-only message (which would be orphaned without its tool_use).
+  let splitIdx = messages.length - keepRecentMessages;
+  while (splitIdx > 1) {
+    const msg = messages[splitIdx];
+    if (msg.role === "user") {
+      // Check if this is a text message (not just tool_results)
+      if (typeof msg.content === "string") break;
+      const hasText = msg.content.some((b: ContentBlock) => b.type === "text");
+      if (hasText) break;
+    }
+    splitIdx--;
+  }
+
+  const middle = messages.slice(1, splitIdx);
+  const tail = messages.slice(splitIdx);
 
   // Collect tool names used in the pruned middle section
   const toolsUsed = new Set<string>();

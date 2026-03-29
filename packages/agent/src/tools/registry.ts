@@ -6,7 +6,11 @@ import { askUser } from "../permissions/prompt.js";
 
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
-  permissionConfig?: PermissionConfig;
+  permissionConfig: PermissionConfig = {
+    mode: "suggest",
+    projectRoot: process.cwd(),
+    allowedPaths: [],
+  };
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name, tool);
@@ -28,17 +32,15 @@ export class ToolRegistry {
     const tool = this.tools.get(name);
     if (!tool) return { output: `Unknown tool: ${name}`, is_error: true };
 
-    // Permission check
-    if (this.permissionConfig) {
-      const rule = checkPermission(this.permissionConfig, name, input);
-      if (rule.verdict === "deny") {
-        return { output: `Permission denied: ${rule.reason}`, is_error: true };
-      }
-      if (rule.verdict === "ask") {
-        const allowed = await askUser(name, input, rule.reason);
-        if (!allowed) {
-          return { output: "User denied permission.", is_error: true };
-        }
+    // Permission check — always enforced
+    const rule = checkPermission(this.permissionConfig, name, input);
+    if (rule.verdict === "deny") {
+      return { output: `Permission denied: ${rule.reason}`, is_error: true };
+    }
+    if (rule.verdict === "ask") {
+      const allowed = await askUser(name, input, rule.reason);
+      if (!allowed) {
+        return { output: "User denied permission.", is_error: true };
       }
     }
 

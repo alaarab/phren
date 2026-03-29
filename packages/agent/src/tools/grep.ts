@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
+import { validatePath } from "../permissions/sandbox.js";
 
 function searchFile(filePath: string, regex: RegExp, context: number): string[] {
   let content: string;
@@ -52,6 +53,12 @@ export const grepTool: AgentTool = {
     const searchPath = (input.path as string) || process.cwd();
     const context = (input.context as number) ?? 2;
     const fileGlob = input.glob as string | undefined;
+
+    // Defense-in-depth: validate search path against sandbox
+    const pathResult = validatePath(searchPath, process.cwd(), []);
+    if (!pathResult.ok) {
+      return { output: `Path outside sandbox: ${pathResult.error}`, is_error: true };
+    }
 
     let regex: RegExp;
     try { regex = new RegExp(pattern, "i"); } catch {

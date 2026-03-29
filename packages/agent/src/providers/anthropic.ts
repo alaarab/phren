@@ -117,8 +117,9 @@ export class AnthropicProvider implements LlmProvider {
         }
       } else if (type === "content_block_stop") {
         const index = data.index as number;
-        const id = indexToToolId.get(index) ?? String(index);
-        yield { type: "tool_use_end", id };
+        if (indexToToolId.has(index)) {
+          yield { type: "tool_use_end", id: indexToToolId.get(index)! };
+        }
       } else if (type === "message_delta") {
         const delta = data.delta as Record<string, unknown>;
         if (delta.stop_reason === "tool_use") stopReason = "tool_use";
@@ -147,7 +148,8 @@ export class AnthropicProvider implements LlmProvider {
 
 /** Parse SSE stream from a fetch Response. */
 async function* parseSSE(res: Response): AsyncIterable<{ event: string; data: Record<string, unknown> }> {
-  const reader = res.body!.getReader();
+  if (!res.body) throw new Error("Provider returned empty response body");
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
   let currentEvent = "";

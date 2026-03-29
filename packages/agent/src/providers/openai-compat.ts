@@ -82,7 +82,8 @@ export function parseOpenAiResponse(data: Record<string, unknown>): LlmResponse 
 
 /** Parse OpenAI-compatible SSE stream into StreamDelta events. */
 export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDelta> {
-  const reader = res.body!.getReader();
+  if (!res.body) throw new Error("Provider returned empty response body");
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
 
@@ -103,6 +104,11 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
       if (!line.startsWith("data: ")) continue;
       const raw = line.slice(6).trim();
       if (raw === "[DONE]") {
+        // Close out any active tool calls before signaling done
+        for (const [, toolId] of activeTools) {
+          yield { type: "tool_use_end", id: toolId };
+        }
+        activeTools.clear();
         yield { type: "done", stop_reason: stopReason, usage };
         return;
       }

@@ -9,6 +9,7 @@ import { createSession, type AgentSession } from "./agent-loop.js";
 import type { LlmMessage, ContentBlock, ToolUseBlock, StreamDelta } from "./providers/types.js";
 import { handleCommand } from "./commands.js";
 import { searchErrorRecovery } from "./memory/error-recovery.js";
+import { analyzeAndCapture } from "./memory/auto-capture.js";
 import { shouldPrune, pruneMessages } from "./context/pruner.js";
 import { withRetry } from "./providers/retry.js";
 import type { InputMode } from "./repl.js";
@@ -109,11 +110,8 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
       menuState,
     );
     menuListCount = result.listCount;
-    // Full-screen write: clear screen and render
-    w.write(`${ESC}?25l`);  // hide cursor
-    w.write(`${ESC}H${ESC}2J`);  // home + clear
-    w.write(result.output);
-    w.write(`${ESC}?25h`);  // show cursor
+    // Full-screen write: single write to avoid flicker
+    w.write(`${ESC}?25l${ESC}H${ESC}2J${result.output}${ESC}?25h`);
   }
 
   function enterMenuMode() {
@@ -153,6 +151,15 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
     const modeTag = inputMode === "steering" ? s.dim("[steer]") : s.dim("[queue]");
     w.write(`\n${s.cyan("phren>")} ${modeTag} `);
   }
+
+  // Terminal cleanup: restore state on exit
+  function cleanupTerminal() {
+    w.write("\x1b[?1049l"); // leave alt screen if active
+    if (process.stdin.isTTY) {
+      try { process.stdin.setRawMode(false); } catch {}
+    }
+  }
+  process.on("exit", cleanupTerminal);
 
   // Setup: alternate screen not needed — just reserve top line for status
   if (isTTY) {
@@ -351,9 +358,7 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
           const content: ContentBlock[] = [];
           let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
           let currentText = "";
-          let activeToolId = "";
-          let activeToolName = "";
-          let activeToolJson = "";
+          const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
 
           w.write(`${ESC}2K\r`); // clear "Thinking..." line
 
@@ -364,15 +369,18 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
               currentText += delta.text;
             } else if (delta.type === "tool_use_start") {
               if (currentText) { content.push({ type: "text", text: currentText }); currentText = ""; }
-              activeToolId = delta.id;
-              activeToolName = delta.name;
-              activeToolJson = "";
+              toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
             } else if (delta.type === "tool_use_delta") {
-              activeToolJson += delta.json;
+              const tool = toolsByIndex.get(delta.id);
+              if (tool) tool.jsonParts.push(delta.json);
             } else if (delta.type === "tool_use_end") {
-              let input: Record<string, unknown> = {};
-              try { input = JSON.parse(activeToolJson); } catch {}
-              content.push({ type: "tool_use", id: activeToolId, name: activeToolName, input });
+              const tool = toolsByIndex.get(delta.id);
+              if (tool) {
+                const jsonStr = tool.jsonParts.join("");
+                let input: Record<string, unknown> = {};
+                try { input = JSON.parse(jsonStr); } catch {}
+                content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
+              }
             } else if (delta.type === "done") {
               stopReason = delta.stop_reason;
             }
@@ -417,11 +425,15 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
           const result = await config.registry.execute(block.name, block.input);
           const dur = Date.now() - start;
 
-          // Error recovery
+          // Error recovery + auto-capture
           if (result.is_error && config.phrenCtx) {
             try {
               const recovery = await searchErrorRecovery(config.phrenCtx, result.output);
               if (recovery) result.output += recovery;
+            } catch {}
+
+            try {
+              await analyzeAndCapture(config.phrenCtx, result.output, session.captureState);
             } catch {}
           }
 

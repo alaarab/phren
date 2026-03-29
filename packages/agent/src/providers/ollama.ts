@@ -105,7 +105,8 @@ export class OllamaProvider implements LlmProvider {
       throw new Error(`Ollama API error ${res.status}: ${text}`);
     }
 
-    const reader = res.body!.getReader();
+    if (!res.body) throw new Error("Provider returned empty response body");
+    const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
     let stopReason: LlmResponse["stop_reason"] = "end_turn";
