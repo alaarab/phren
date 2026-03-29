@@ -5,13 +5,8 @@
  */
 import * as readline from "node:readline";
 import type { AgentConfig } from "./agent-loop.js";
-import { createSession, type AgentSession } from "./agent-loop.js";
-import type { LlmMessage, ContentBlock, ToolUseBlock, StreamDelta } from "./providers/types.js";
+import { createSession, runTurn, type AgentSession, type TurnHooks } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
-import { searchErrorRecovery } from "./memory/error-recovery.js";
-import { analyzeAndCapture } from "./memory/auto-capture.js";
-import { shouldPrune, pruneMessages } from "./context/pruner.js";
-import { withRetry } from "./providers/retry.js";
 import type { InputMode } from "./repl.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -332,133 +327,33 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
     }
   });
 
+  // TUI hooks — render streaming text, tool calls, and status inline
+  const tuiHooks: TurnHooks = {
+    onTextDelta: (text) => w.write(text),
+    onTextBlock: (text) => { w.write(text); if (!text.endsWith("\n")) w.write("\n"); },
+    onToolStart: (name, _input, _count) => { w.write(s.dim(`  ⠋ ${name}...\r`)); },
+    onToolEnd: (name, input, output, isError, dur) => {
+      w.write(`${ESC}2K\r`);
+      w.write(renderToolCall(name, input, output, isError, dur) + "\n");
+    },
+    onStatus: (msg) => w.write(s.dim(msg)),
+    getSteeringInput: () => {
+      if (pendingInput && inputMode === "steering") {
+        const steer = pendingInput;
+        pendingInput = null;
+        w.write(s.yellow(`  ↳ steering: ${steer}\n`));
+        return steer;
+      }
+      return null;
+    },
+  };
+
   async function runAgentTurn(userInput: string) {
     running = true;
     w.write(s.dim("  ⠋ Thinking...\r"));
 
     try {
-      session.messages.push({ role: "user", content: userInput });
-
-      // Prune if needed
-      if (shouldPrune(config.systemPrompt, session.messages, { contextLimit })) {
-        session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
-        w.write(s.dim("  [context pruned]\n"));
-      }
-
-      const toolDefs = config.registry.getDefinitions();
-      const useStream = typeof config.provider.chatStream === "function";
-
-      // Inner turn loop (tool calling continues until end_turn)
-      let turnActive = true;
-      while (turnActive) {
-        let response;
-
-        if (useStream) {
-          // Streaming path
-          const content: ContentBlock[] = [];
-          let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
-          let currentText = "";
-          const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
-
-          w.write(`${ESC}2K\r`); // clear "Thinking..." line
-
-          const stream = config.provider.chatStream!(config.systemPrompt, session.messages, toolDefs);
-          for await (const delta of stream) {
-            if (delta.type === "text_delta") {
-              w.write(delta.text);
-              currentText += delta.text;
-            } else if (delta.type === "tool_use_start") {
-              if (currentText) { content.push({ type: "text", text: currentText }); currentText = ""; }
-              toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
-            } else if (delta.type === "tool_use_delta") {
-              const tool = toolsByIndex.get(delta.id);
-              if (tool) tool.jsonParts.push(delta.json);
-            } else if (delta.type === "tool_use_end") {
-              const tool = toolsByIndex.get(delta.id);
-              if (tool) {
-                const jsonStr = tool.jsonParts.join("");
-                let input: Record<string, unknown> = {};
-                try { input = JSON.parse(jsonStr); } catch {}
-                content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
-              }
-            } else if (delta.type === "done") {
-              stopReason = delta.stop_reason;
-            }
-          }
-          if (currentText) { content.push({ type: "text", text: currentText }); }
-          if (currentText) w.write("\n");
-
-          response = { content, stop_reason: stopReason };
-        } else {
-          // Non-streaming fallback
-          response = await withRetry(
-            () => config.provider.chat(config.systemPrompt, session.messages, toolDefs),
-            undefined,
-            config.verbose,
-          );
-          w.write(`${ESC}2K\r`); // clear "Thinking..."
-          for (const block of response.content) {
-            if (block.type === "text" && block.text) {
-              w.write(block.text);
-              if (!block.text.endsWith("\n")) w.write("\n");
-            }
-          }
-        }
-
-        session.messages.push({ role: "assistant", content: response.content });
-        session.turns++;
-
-        if (response.stop_reason !== "tool_use") {
-          turnActive = false;
-          break;
-        }
-
-        // Execute tool calls
-        const toolBlocks = response.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
-        const toolResults: ContentBlock[] = [];
-
-        for (const block of toolBlocks) {
-          session.toolCalls++;
-          const start = Date.now();
-          w.write(s.dim(`  ⠋ ${block.name}...\r`));
-
-          const result = await config.registry.execute(block.name, block.input);
-          const dur = Date.now() - start;
-
-          // Error recovery + auto-capture
-          if (result.is_error && config.phrenCtx) {
-            try {
-              const recovery = await searchErrorRecovery(config.phrenCtx, result.output);
-              if (recovery) result.output += recovery;
-            } catch {}
-
-            try {
-              await analyzeAndCapture(config.phrenCtx, result.output, session.captureState);
-            } catch {}
-          }
-
-          w.write(`${ESC}2K\r`); // clear spinner
-          w.write(renderToolCall(block.name, block.input, result.output, !!result.is_error, dur) + "\n");
-
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: block.id,
-            content: result.output,
-            is_error: result.is_error,
-          });
-        }
-
-        session.messages.push({ role: "user", content: toolResults });
-
-        // Check for pending steering input
-        if (pendingInput && inputMode === "steering") {
-          const steer = pendingInput;
-          pendingInput = null;
-          w.write(s.yellow(`  ↳ steering: ${steer}\n`));
-          session.messages.push({ role: "user", content: steer });
-        }
-      }
-
+      await runTurn(userInput, session, config, tuiHooks);
       statusBar();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
