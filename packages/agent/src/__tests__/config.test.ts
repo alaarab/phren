@@ -7,8 +7,8 @@ describe("parseArgs", () => {
     expect(args.task).toBe("fix the bug");
   });
 
-  it("defaults to auto-confirm permissions", () => {
-    expect(parseArgs([]).permissions).toBe("auto-confirm");
+  it("defaults to suggest permissions", () => {
+    expect(parseArgs([]).permissions).toBe("suggest");
   });
 
   it("defaults maxTurns to 50", () => {
@@ -98,7 +98,7 @@ describe("parseArgs", () => {
   });
 
   it("ignores invalid permission mode", () => {
-    expect(parseArgs(["--permissions", "invalid"]).permissions).toBe("auto-confirm");
+    expect(parseArgs(["--permissions", "invalid"]).permissions).toBe("suggest");
   });
 
   // ── Mixed flags and positional ──────────────────────────────────────
