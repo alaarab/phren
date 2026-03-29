@@ -1,30 +1,206 @@
-import * as readline from "readline";
+/**
+ * Smart permission prompt — color-coded, full context, keyboard shortcuts.
+ *
+ * Responses:
+ *   y = allow once
+ *   n = deny
+ *   a = allow this tool for the rest of the session (any input)
+ *   s = allow this exact tool+pattern for the rest of the session
+ */
+
+import * as readline from "node:readline";
+import { addAllow } from "./allowlist.js";
+
+// ── ANSI colors ─────────────────────────────────────────────────────────
+
+const RESET = "\x1b[0m";
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const RED = "\x1b[31m";
+const CYAN = "\x1b[36m";
+
+// ── Risk classification ─────────────────────────────────────────────────
+
+type Risk = "read" | "write" | "dangerous";
+
+const READ_TOOLS = new Set(["read_file", "glob", "grep", "git_status", "git_diff", "phren_search", "phren_get_tasks"]);
+const DANGEROUS_TOOLS = new Set(["shell"]);
+
+function classifyRisk(toolName: string): Risk {
+  if (READ_TOOLS.has(toolName)) return "read";
+  if (DANGEROUS_TOOLS.has(toolName)) return "dangerous";
+  return "write";
+}
+
+function riskColor(risk: Risk): string {
+  switch (risk) {
+    case "read": return GREEN;
+    case "write": return YELLOW;
+    case "dangerous": return RED;
+  }
+}
+
+function riskLabel(risk: Risk): string {
+  switch (risk) {
+    case "read": return "READ";
+    case "write": return "WRITE";
+    case "dangerous": return "SHELL";
+  }
+}
+
+// ── Summary generation ──────────────────────────────────────────────────
+
+function summarizeCall(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case "read_file": {
+      const p = (input.path as string) || "?";
+      const offset = input.offset ? ` from line ${input.offset}` : "";
+      const limit = input.limit ? ` (${input.limit} lines)` : "";
+      return `Read ${p}${offset}${limit}`;
+    }
+    case "write_file": {
+      const p = (input.path as string) || "?";
+      const content = (input.content as string) || "";
+      const lines = content.split("\n").length;
+      return `Write ${lines} lines to ${p}`;
+    }
+    case "edit_file": {
+      const p = (input.path as string) || "?";
+      return `Edit ${p}`;
+    }
+    case "glob": {
+      const pattern = (input.pattern as string) || "?";
+      const dir = (input.path as string) || ".";
+      return `Glob "${pattern}" in ${dir}`;
+    }
+    case "grep": {
+      const pattern = (input.pattern as string) || "?";
+      const dir = (input.path as string) || ".";
+      return `Grep "${pattern}" in ${dir}`;
+    }
+    case "shell": {
+      const cmd = (input.command as string) || "?";
+      return cmd.length > 120 ? cmd.slice(0, 117) + "..." : cmd;
+    }
+    case "git_commit": {
+      const msg = (input.message as string) || "";
+      return `Commit: ${msg.slice(0, 80)}`;
+    }
+    case "phren_add_finding":
+      return `Save finding to phren`;
+    case "phren_complete_task":
+      return `Complete phren task`;
+    default: {
+      const keys = Object.keys(input);
+      return keys.length > 0 ? `${toolName}(${keys.join(", ")})` : toolName;
+    }
+  }
+}
+
+// ── Main prompt ─────────────────────────────────────────────────────────
+
+export type PromptResult = "allow" | "deny" | "allow-session" | "allow-tool";
 
 /**
  * Ask the user on stderr whether to allow a tool call.
- * Returns true if user approves, false otherwise.
+ * Returns true if user approves (y, a, or s), false if denied (n).
+ *
+ * Side effect: "a" and "s" responses add to the session allowlist.
  */
 export async function askUser(
   toolName: string,
   input: Record<string, unknown>,
   reason: string,
 ): Promise<boolean> {
-  const preview = JSON.stringify(input).slice(0, 300);
-  const more = JSON.stringify(input).length > 300 ? "..." : "";
+  const risk = classifyRisk(toolName);
+  const color = riskColor(risk);
+  const label = riskLabel(risk);
+  const summary = summarizeCall(toolName, input);
 
-  process.stderr.write(`\n⚠  Permission required: ${toolName}\n`);
-  process.stderr.write(`   Reason: ${reason}\n`);
-  process.stderr.write(`   Input:  ${preview}${more}\n`);
+  // Header
+  process.stderr.write(`\n${color}${BOLD}[${label}]${RESET} ${BOLD}${toolName}${RESET}\n`);
+  process.stderr.write(`${DIM}  ${reason}${RESET}\n`);
+  process.stderr.write(`${CYAN}  ${summary}${RESET}\n`);
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stderr,
-  });
+  // Show full input for shell commands or when details matter
+  if (toolName === "shell") {
+    const cmd = (input.command as string) || "";
+    if (cmd.length > 120) {
+      process.stderr.write(`${DIM}  Full command:${RESET}\n`);
+      process.stderr.write(`${DIM}  ${cmd}${RESET}\n`);
+    }
+  }
 
-  return new Promise<boolean>((resolve) => {
-    rl.question("   Allow? [y/N] ", (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === "y");
-    });
+  const result = await promptKey();
+
+  // Persist allowlist entries for session/tool scopes
+  if (result === "allow-session") {
+    addAllow(toolName, input, "session");
+  } else if (result === "allow-tool") {
+    addAllow(toolName, input, "tool");
+  }
+
+  return result !== "deny";
+}
+
+/**
+ * Read a single keypress from stdin.
+ * Temporarily exits raw mode if the TUI has it enabled, restores after.
+ */
+async function promptKey(): Promise<PromptResult> {
+  const hint = `${DIM}  [y]es  [n]o  [a]llow-tool  [s]ession-allow${RESET}  `;
+  process.stderr.write(hint);
+
+  const wasRaw = process.stdin.isTTY && (process.stdin as NodeJS.ReadStream).isRaw;
+
+  return new Promise<PromptResult>((resolve) => {
+    if (process.stdin.isTTY) {
+      // Single-keypress mode
+      if (!wasRaw) {
+        process.stdin.setRawMode(true);
+      }
+      process.stdin.resume();
+
+      const onData = (data: Buffer) => {
+        process.stdin.removeListener("data", onData);
+        if (!wasRaw && process.stdin.isTTY) {
+          process.stdin.setRawMode(false);
+        }
+        process.stdin.pause();
+
+        const key = data.toString().trim().toLowerCase();
+        process.stderr.write(key + "\n");
+
+        switch (key) {
+          case "y": resolve("allow"); break;
+          case "a": resolve("allow-tool"); break;
+          case "s": resolve("allow-session"); break;
+          case "n": resolve("deny"); break;
+          case "\x03": // Ctrl+C
+            process.stderr.write("\n");
+            resolve("deny");
+            break;
+          default:
+            resolve("deny"); // Unknown key = deny (safe default)
+        }
+      };
+
+      process.stdin.on("data", onData);
+    } else {
+      // Non-TTY fallback: readline
+      const iface = readline.createInterface({ input: process.stdin, output: process.stderr });
+      iface.question("", (answer: string) => {
+        iface.close();
+        const key = answer.trim().toLowerCase();
+        switch (key) {
+          case "y": resolve("allow"); break;
+          case "a": resolve("allow-tool"); break;
+          case "s": resolve("allow-session"); break;
+          default: resolve("deny");
+        }
+      });
+    }
   });
 }

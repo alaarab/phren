@@ -8,7 +8,7 @@ const MAX_OUTPUT_BYTES = 100_000;
 
 export const shellTool: AgentTool = {
   name: "shell",
-  description: "Run a shell command and return stdout + stderr. Commands are run via bash -c.",
+  description: "Run a shell command via bash -c and return stdout + stderr. Use for: running tests, linters, build commands, git operations, and exploring the environment. Prefer specific tools (read_file, glob, grep) over shell equivalents when available.",
   input_schema: {
     type: "object",
     properties: {

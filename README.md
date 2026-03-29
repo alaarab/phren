@@ -109,6 +109,15 @@ phren agent --provider codex --budget 2.00 "add tests"   # pick provider, set co
 
 **Security:** Three permission modes (suggest, auto-confirm, full-auto), path sandboxing, sensitive file protection, shell command safety checks, env scrubbing.
 
+**Multi-agent:** Spawn and coordinate multiple agents from a single TUI. Agents run as forked child processes with IPC messaging, shared task coordination, and per-agent output panes.
+
+```bash
+phren agent --multi                    # multi-agent TUI
+phren agent --team myproject "build X" # team mode with shared task list
+```
+
+In the multi-agent TUI: `/spawn <name> <task>` to create agents, `1-9` to switch panes, `/list` to see status, `/kill` to terminate, `/broadcast` to message all.
+
 ---
 
 ## CLI quick reference
