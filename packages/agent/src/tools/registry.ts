@@ -7,7 +7,7 @@ import { askUser } from "../permissions/prompt.js";
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
   permissionConfig: PermissionConfig = {
-    mode: "auto-confirm",
+    mode: "suggest",
     projectRoot: process.cwd(),
     allowedPaths: [],
   };
