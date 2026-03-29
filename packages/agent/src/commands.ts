@@ -9,6 +9,7 @@ import type { AgentSpawner } from "./multi/spawner.js";
 import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from "./multi/presets.js";
 import { renderMarkdown } from "./multi/markdown.js";
 import { showModelPicker, type PickerResult } from "./multi/model-picker.js";
+import { formatProviderList, formatModelAddHelp, addCustomModel, removeCustomModel, type ReasoningLevel } from "./multi/provider-manager.js";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -62,6 +63,9 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
       process.stderr.write(`${DIM}Commands:
   /help       Show this help
   /model      Interactive model + reasoning picker
+  /model add <id>  Add a custom model
+  /model remove <id>  Remove a custom model
+  /provider   Show configured providers + auth status
   /turns      Show turn and tool call counts
   /clear      Clear conversation history
   /cost       Show token usage and estimated cost
@@ -77,11 +81,51 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
       return true;
 
     case "/model": {
+      const sub = parts[1]?.toLowerCase();
+
+      // /model add <id> [provider=X] [context=N] [reasoning=X]
+      if (sub === "add") {
+        const modelId = parts[2];
+        if (!modelId) {
+          process.stderr.write(formatModelAddHelp() + "\n");
+          return true;
+        }
+        let provider = ctx.providerName ?? "openrouter";
+        let contextWindow = 128_000;
+        let reasoning: ReasoningLevel = null;
+        const reasoningRange: ReasoningLevel[] = [];
+        for (const arg of parts.slice(3)) {
+          const [k, v] = arg.split("=", 2);
+          if (k === "provider") provider = v;
+          else if (k === "context") contextWindow = parseInt(v, 10) || 128_000;
+          else if (k === "reasoning") {
+            reasoning = v as ReasoningLevel;
+            reasoningRange.push("low", "medium", "high");
+            if (v === "max") reasoningRange.push("max");
+          }
+        }
+        addCustomModel(modelId, provider, { contextWindow, reasoning, reasoningRange });
+        process.stderr.write(`${GREEN}→ Added ${modelId} to ${provider}${RESET}\n`);
+        return true;
+      }
+
+      // /model remove <id>
+      if (sub === "remove" || sub === "rm") {
+        const modelId = parts[2];
+        if (!modelId) {
+          process.stderr.write(`${DIM}Usage: /model remove <model-id>${RESET}\n`);
+          return true;
+        }
+        const ok = removeCustomModel(modelId);
+        process.stderr.write(ok ? `${GREEN}→ Removed ${modelId}${RESET}\n` : `${DIM}Model "${modelId}" not found in custom models.${RESET}\n`);
+        return true;
+      }
+
+      // /model (no sub) — interactive picker
       if (!ctx.providerName) {
         process.stderr.write(`${DIM}Provider not configured. Start with --provider to set one.${RESET}\n`);
         return true;
       }
-      // Async — show picker inline (works because TUI is already in raw mode)
       showModelPicker(ctx.providerName, ctx.currentModel, process.stdout).then((result) => {
         if (result && ctx.onModelChange) {
           ctx.onModelChange(result);
@@ -91,6 +135,11 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
           process.stderr.write(`${DIM}Model selected: ${result.model} — restart to apply.${RESET}\n`);
         }
       });
+      return true;
+    }
+
+    case "/provider": {
+      process.stderr.write(formatProviderList());
       return true;
     }
 
