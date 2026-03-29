@@ -5,7 +5,7 @@ set -e
 ERRORS=0
 
 # 1. Check tool count in docs matches actual registrations in tools/*.ts files
-REGISTERED=$(grep -r 'server\.registerTool(' mcp/src/tools/*.ts | wc -l | tr -d ' ')
+REGISTERED=$(grep -r 'server\.registerTool(' packages/cli/src/tools/*.ts | wc -l | tr -d ' ')
 DOCUMENTED=$(perl -ne 'print "$1\n" if /MCP Tools \((\d+)\)/' docs/llms-install.md | head -n 1)
 DOCUMENTED=${DOCUMENTED:-0}
 
@@ -17,7 +17,7 @@ else
 fi
 
 # 2. Check that package.json version is not a placeholder
-VERSION=$(node -p "require('./package.json').version")
+VERSION=$(node -p "require('./packages/cli/package.json').version")
 if [ -z "$VERSION" ] || [ "$VERSION" = "0.0.0" ]; then
   echo "FAIL: package.json version is missing or placeholder"
   ERRORS=$((ERRORS + 1))
@@ -26,7 +26,7 @@ else
 fi
 
 # 3. Verify runtime version comes from shared package metadata (not a hardcoded string)
-if grep -q 'export const VERSION' mcp/src/package-metadata.ts && grep -q 'package.json' mcp/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' mcp/src/index.ts; then
+if grep -q 'export const VERSION' packages/cli/src/package-metadata.ts && grep -q 'package.json' packages/cli/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' packages/cli/src/index.ts; then
   echo "OK: runtime version is derived from shared package metadata"
 else
   echo "FAIL: runtime version metadata may be hardcoded or disconnected from package.json"

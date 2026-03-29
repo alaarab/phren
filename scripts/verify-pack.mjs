@@ -42,13 +42,13 @@ try {
 }
 
 const files = new Set((packInfo?.[0]?.files ?? []).map((file) => file.path));
-for (const requiredFile of ["package.json", "mcp/dist/index.js", "mcp/dist/tool-registry.js", "icon.svg"]) {
+for (const requiredFile of ["package.json", "dist/index.js", "dist/tool-registry.js"]) {
   if (!files.has(requiredFile)) {
     fail(`Pack verification failed: missing ${requiredFile}`);
   }
 }
 
-if (files.has("mcp/src/index.ts")) {
+if (files.has("src/index.ts")) {
   fail("Pack verification failed: source TypeScript unexpectedly shipped");
 }
 

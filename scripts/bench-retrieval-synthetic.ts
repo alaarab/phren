@@ -5,9 +5,9 @@ import * as os from "os";
 import * as path from "path";
 import { performance } from "perf_hooks";
 
-import { buildIndex, type DocRow } from "../mcp/src/shared-index.js";
-import { searchDocuments, searchDocumentsAsync, rankResults, selectSnippets } from "../mcp/src/cli-hooks-retrieval.js";
-import { buildRobustFtsQuery, extractKeywords } from "../mcp/src/utils.js";
+import { buildIndex, type DocRow } from "../packages/cli/src/shared-index.js";
+import { searchDocuments, searchDocumentsAsync, rankResults, selectSnippets } from "../packages/cli/src/cli-hooks-retrieval.js";
+import { buildRobustFtsQuery, extractKeywords } from "../packages/cli/src/utils.js";
 
 const DEFAULT_SIZES = [1000, 10000];
 const DEFAULT_QUERY_TARGETS = 12;

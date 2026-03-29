@@ -7,11 +7,11 @@ import { build as esbuild } from "esbuild";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const mcpRoot = path.join(repoRoot, "mcp");
-const srcRoot = path.join(mcpRoot, "src");
-const distRoot = path.join(mcpRoot, "dist");
-const browserRoot = path.join(mcpRoot, "browser");
-const tempRoot = path.join(mcpRoot, `.dist-build-${process.pid}-${Date.now()}`);
+const cliRoot = path.join(repoRoot, "packages", "cli");
+const srcRoot = path.join(cliRoot, "src");
+const distRoot = path.join(cliRoot, "dist");
+const browserRoot = path.join(cliRoot, "browser");
+const tempRoot = path.join(cliRoot, `.dist-build-${process.pid}-${Date.now()}`);
 
 function tscExec() {
   return process.platform === "win32" ? "tsc.cmd" : "tsc";
@@ -76,7 +76,7 @@ try {
   fs.rmSync(tempRoot, { recursive: true, force: true });
   fs.mkdirSync(tempRoot, { recursive: true });
   await bundleBrowserAssets(tempRoot);
-  execFileSync(tscExec(), ["-p", path.join(mcpRoot, "tsconfig.json"), "--outDir", tempRoot], {
+  execFileSync(tscExec(), ["-p", path.join(cliRoot, "tsconfig.json"), "--outDir", tempRoot], {
     cwd: repoRoot,
     stdio: "inherit",
     shell: process.platform === "win32",

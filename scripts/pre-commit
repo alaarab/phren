@@ -17,7 +17,7 @@ echo "[pre-commit] Linting staged TypeScript files..."
 LINT_FILES=""
 for f in $STAGED_TS; do
   case "$f" in
-    mcp/src/*) LINT_FILES="$LINT_FILES $f" ;;
+    packages/cli/src/*|packages/agent/src/*) LINT_FILES="$LINT_FILES $f" ;;
   esac
 done
 

@@ -1,0 +1,62 @@
+{
+  "name": "@phren/cli",
+  "version": "0.0.55",
+  "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
+  "type": "module",
+  "bin": {
+    "phren": "dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./paths": "./dist/phren-paths.js",
+    "./runtime-profile": "./dist/runtime-profile.js",
+    "./shared": "./dist/shared/index.js",
+    "./shared/retrieval": "./dist/shared/retrieval.js",
+    "./data/access": "./dist/data/access.js",
+    "./data/tasks": "./dist/data/tasks.js",
+    "./core/finding": "./dist/core/finding.js",
+    "./session/utils": "./dist/session/utils.js"
+  },
+  "files": [
+    "dist",
+    "starter",
+    "skills",
+    "scripts/preuninstall.mjs"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "dev": "tsx src/index.ts",
+    "lint": "biome lint --config-path ../../biome.json src/",
+    "test": "echo 'Run tests from repo root: pnpm -w test'",
+    "preuninstall": "node scripts/preuninstall.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "chalk": "^5.6.2",
+    "glob": "^13.0.6",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "inquirer": "^13.3.2",
+    "js-yaml": "^4.1.1",
+    "sigma": "^3.0.2",
+    "sql.js-fts5": "^1.4.0",
+    "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "memory",
+    "knowledge"
+  ],
+  "author": "Ala Arab",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alaarab/phren.git",
+    "directory": "packages/cli"
+  }
+}

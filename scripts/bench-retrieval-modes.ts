@@ -5,12 +5,12 @@ import * as os from "os";
 import * as path from "path";
 import { performance } from "perf_hooks";
 
-import { buildIndex, type DocRow } from "../mcp/src/shared-index.js";
-import { searchDocuments, searchDocumentsAsync, rankResults, selectSnippets } from "../mcp/src/cli-hooks-retrieval.js";
-import { buildRobustFtsQuery, extractKeywords } from "../mcp/src/utils.js";
-import { getEmbeddingCache } from "../mcp/src/shared-embedding-cache.js";
-import { embedText, getEmbeddingModel, cosineSimilarity } from "../mcp/src/shared-ollama.js";
-import { getPersistentVectorIndex } from "../mcp/src/shared-vector-index.js";
+import { buildIndex, type DocRow } from "../packages/cli/src/shared-index.js";
+import { searchDocuments, searchDocumentsAsync, rankResults, selectSnippets } from "../packages/cli/src/cli-hooks-retrieval.js";
+import { buildRobustFtsQuery, extractKeywords } from "../packages/cli/src/utils.js";
+import { getEmbeddingCache } from "../packages/cli/src/shared-embedding-cache.js";
+import { embedText, getEmbeddingModel, cosineSimilarity } from "../packages/cli/src/shared-ollama.js";
+import { getPersistentVectorIndex } from "../packages/cli/src/shared-vector-index.js";
 
 const DEFAULT_QUERIES = [
   "duplicate uppercase project directories",
