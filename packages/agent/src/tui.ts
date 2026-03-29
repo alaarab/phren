@@ -220,9 +220,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     menuFilterActive = false;
     menuFilterBuf = "";
     w.write("\x1b[?1049l"); // leave alternate screen (restores chat)
-    setScrollRegion(); // re-establish scroll region after alt screen
     statusBar();
-    prompt(true); // skip newline — alt screen restore already positioned cursor
+    prompt();
   }
 
   // Print status bar
@@ -239,85 +238,37 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
   }
 
-  // Print prompt — bordered input bar at bottom
+  // Print prompt — inline input bar (written at current cursor position)
   let bashMode = false;
+  // Track how many lines the bottom bar occupies so we can clear it on submit
+  const PROMPT_LINES = 4; // separator, input, separator, permissions
 
-  function prompt(skipNewline = false) {
+  function prompt() {
     if (!isTTY) return;
     const mode = config.registry.permissionConfig.mode;
     const color = PERMISSION_COLORS[mode];
     const icon = PERMISSION_ICONS[mode];
-    const rows = process.stdout.rows || 24;
     const c = cols();
-    if (!skipNewline) {
-      // Advance content cursor within the scroll region so text scrolls up
-      cursorToScrollEnd();
-      w.write("\n");
-    }
-    // Save cursor position in the scroll region before drawing the bottom bar.
-    w.write(`${ESC}s`);
-    // Temporarily reset DECSTBM so writes to the fixed bottom rows work.
-    w.write(`${ESC}r`);
-    // Layout (bottom 5 rows): separator, input, separator, permissions, blank
     const sep = s.dim("─".repeat(c));
     const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab toggle · esc to interrupt)")}`;
-    w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
-    w.write(`${ESC}${rows - 3};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
-    w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
-    w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
-    w.write(`${ESC}${rows};1H${ESC}2K`); // blank bottom row
-    // Re-establish scroll region and position cursor at the input line
-    setScrollRegion();
-    w.write(`${ESC}${rows - 3};${bashMode ? 3 : 4}H`);
-  }
-
-  /** Draw bottom bar without moving the content cursor — used during streaming */
-  function drawBottomBar() {
-    if (!isTTY) return;
-    const mode = config.registry.permissionConfig.mode;
-    const color = PERMISSION_COLORS[mode];
-    const icon = PERMISSION_ICONS[mode];
-    const rows = process.stdout.rows || 24;
-    const c = cols();
-    // Save cursor, reset scroll region, draw bar, restore scroll region, restore cursor
-    w.write(`${ESC}s`);
-    w.write(`${ESC}r`);
-    const sep = s.dim("─".repeat(c));
-    const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab toggle · esc to interrupt)")}`;
-    w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
-    w.write(`${ESC}${rows - 3};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
-    w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
-    w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
-    w.write(`${ESC}${rows};1H${ESC}2K`);
-    setScrollRegion();
-    w.write(`${ESC}u`); // restore cursor back into the scroll region
+    // Write inline — this naturally sits at the bottom
+    w.write(`${sep}\n`);
+    w.write(`${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
+    w.write(`\n${sep}\n`);
+    w.write(`${permLine}\n`);
+    // Move cursor back up to the input line
+    w.write(`${ESC}${PROMPT_LINES - 1}A`); // move up to input line
+    w.write(`${ESC}${bashMode ? 3 : 4}G`); // move to column after prompt char
   }
 
   // Redraw the input line and position the terminal cursor at cursorPos
   function redrawInput() {
     w.write(`${ESC}2K\r`);
-    prompt(true);
+    w.write(`${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
     w.write(inputLine);
     // Move terminal cursor back from end to cursorPos
     const back = inputLine.length - cursorPos;
     if (back > 0) w.write(`${ESC}${back}D`);
-  }
-
-  // ── Scroll region management ─────────────────────────────────────────
-  // DECSTBM: rows 1..(rows-5) scroll; bottom 5 rows are fixed for the input bar.
-  function setScrollRegion() {
-    if (!isTTY) return;
-    const rows = process.stdout.rows || 24;
-    const scrollBottom = Math.max(1, rows - 5);
-    w.write(`${ESC}1;${scrollBottom}r`);
-  }
-
-  // Move cursor to the bottom of the scroll region so new output scrolls naturally.
-  function cursorToScrollEnd() {
-    if (!isTTY) return;
-    const rows = process.stdout.rows || 24;
-    const scrollBottom = Math.max(1, rows - 5);
-    w.write(`${ESC}${scrollBottom};1H`);
   }
 
   // Periodic status bar refresh (every 30s) — keeps cost/turns current during long tool runs
@@ -329,7 +280,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   // Terminal cleanup: restore state on exit
   function cleanupTerminal() {
     if (statusRefreshTimer) clearInterval(statusRefreshTimer);
-    w.write(`${ESC}r`); // reset scroll region
     w.write("\x1b[?1049l"); // leave alt screen if active
     if (process.stdin.isTTY) {
       try { process.stdin.setRawMode(false); } catch {}
@@ -337,17 +287,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   }
   process.on("exit", cleanupTerminal);
 
-  // Re-establish scroll region on terminal resize.
-  // Node's "resize" event already fires on SIGWINCH — no separate signal handler needed.
+  // Refresh status bar on terminal resize.
   process.stdout.on("resize", () => {
     if (tuiMode === "chat") {
-      setScrollRegion();
       statusBar();
-      if (running) {
-        drawBottomBar(); // redraw bar but restore cursor to content area
-      } else {
-        prompt(true);
-      }
     }
   });
 
@@ -390,7 +333,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write(`\n  ${info[0]}\n  ${info[1]}  ${info[2]}\n  ${info[4]}\n\n  ${info[6]}\n\n`);
     }
     w.write("\n");
-    setScrollRegion(); // establish scroll region after banner
   }
 
   // Raw stdin for steering
@@ -478,8 +420,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const next = nextPermissionMode(config.registry.permissionConfig.mode);
       config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
       savePermissionMode(next);
-      // Just update bottom bar in-place — no scrollback output
-      prompt(true);
+      // Redraw the entire prompt bar in-place (permissions line changed)
+      w.write(`\r${ESC}J`); // clear from cursor to end of screen
+      prompt();
+      w.write(inputLine);
+      const back = inputLine.length - cursorPos;
+      if (back > 0) w.write(`${ESC}${back}D`);
       return;
     }
 
@@ -499,10 +445,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
           cursorPos = inputLine.length;
           redrawInput();
         } else if (matches.length > 1) {
-          // Show matches in scroll area, then redraw prompt
-          cursorToScrollEnd();
+          // Show matches above prompt, then redraw
+          w.write(`\r${ESC}J`); // clear from cursor to end of screen
           w.write(`\n${s.dim("  " + matches.join("  "))}\n`);
-          prompt(true);
+          prompt();
           w.write(inputLine);
           const back = inputLine.length - cursorPos;
           if (back > 0) w.write(`${ESC}${back}D`);
@@ -531,7 +477,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
             redrawInput();
           } else if (matches.length > 1) {
             const names = matches.map((e) => e.name + (e.isDirectory() ? "/" : ""));
-            cursorToScrollEnd();
+            w.write(`\r${ESC}J`); // clear from cursor to end of screen
             w.write(`\n${s.dim("  " + names.join("  "))}\n`);
             // Find longest common prefix for partial completion
             let common = matches[0].name;
@@ -545,7 +491,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
               inputLine = prefix + fullPath;
               cursorPos = inputLine.length;
             }
-            prompt(true);
+            prompt();
             w.write(inputLine);
             const back = inputLine.length - cursorPos;
             if (back > 0) w.write(`${ESC}${back}D`);
@@ -576,13 +522,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         bashMode = false;
         inputLine = "";
         cursorPos = 0;
-        prompt(true);
+        redrawInput();
         return;
       }
       if (inputLine) {
         inputLine = "";
         cursorPos = 0;
-        prompt(true);
+        redrawInput();
         return;
       }
     }
@@ -600,7 +546,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         bashMode = false;
         inputLine = "";
         cursorPos = 0;
-        prompt(true);
+        redrawInput();
         ctrlCCount = 0;
         return;
       }
@@ -608,15 +554,17 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         // Clear input
         inputLine = "";
         cursorPos = 0;
-        prompt(true);
+        redrawInput();
         ctrlCCount = 0;
         return;
       }
       // Nothing to cancel — progressive quit
       ctrlCCount++;
       if (ctrlCCount === 1) {
+        // Clear current prompt, print warning, redraw prompt
+        w.write(`\r${ESC}J`);
         w.write(s.dim("\n  Press Ctrl+C again to exit.\n"));
-        prompt(true);
+        prompt();
         // Reset after 2 seconds
         setTimeout(() => { ctrlCCount = 0; }, 2000);
       } else {
@@ -633,9 +581,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const line = inputLine.trim();
       cursorPos = 0;
       inputLine = "";
-      // Move to the bottom of the scroll region so new output scrolls naturally
-      cursorToScrollEnd();
-      w.write("\n");
+      // Clear the bottom bar: we're on the input line, move down past remaining
+      // prompt lines (separator + permissions) and clear them, then move back up
+      // to write output where the prompt was
+      if (isTTY) {
+        // Erase from input line down through the prompt area
+        w.write(`\r${ESC}J`); // clear from cursor to end of screen
+      }
 
       if (!line) { prompt(); return; }
 
@@ -655,7 +607,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
           if (cdMatch) {
             try {
               const target = cdMatch[1].trim().replace(/^~/, os.homedir());
-              const resolved = require("path").resolve(process.cwd(), target);
+              const resolved = path.resolve(process.cwd(), target);
               process.chdir(resolved);
               w.write(s.dim(process.cwd()) + "\n");
             } catch (err: unknown) {
@@ -698,14 +650,14 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         startTime,
         phrenPath: config.phrenCtx?.phrenPath,
         phrenCtx: config.phrenCtx,
-        onModelChange: (result) => {
+        onModelChange: async (result) => {
           // Live model switch — re-resolve provider with new model
           try {
-            const { resolveProvider } = require("./providers/resolve.js") as typeof import("./providers/resolve.js");
+            const { resolveProvider } = await import("./providers/resolve.js") as typeof import("./providers/resolve.js");
             const newProvider = resolveProvider(config.provider.name, result.model);
             config.provider = newProvider;
             // Rebuild system prompt with new model info
-            const { buildSystemPrompt } = require("./system-prompt.js") as typeof import("./system-prompt.js");
+            const { buildSystemPrompt } = await import("./system-prompt.js") as typeof import("./system-prompt.js");
             config.systemPrompt = buildSystemPrompt(
               config.systemPrompt.split("\n## Last session")[0], // preserve context, strip old summary
               null,
@@ -732,7 +684,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         return;
       }
 
-      // Run agent turn
+      // Echo user input inline, then run turn
+      w.write(`${s.bold("You:")} ${line}\n\n`);
       runAgentTurn(line);
       return;
     }
@@ -880,7 +833,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       // ! at start of empty input toggles bash mode
       if (key.sequence === "!" && inputLine === "" && !bashMode) {
         bashMode = true;
-        prompt(true);
+        redrawInput();
         return;
       }
       inputLine = inputLine.slice(0, cursorPos) + key.sequence + inputLine.slice(cursorPos);
@@ -959,8 +912,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
-    // Draw bottom bar to ensure it's visible, then restore cursor to content area
-    drawBottomBar();
     const thinkStart = Date.now();
     // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;
