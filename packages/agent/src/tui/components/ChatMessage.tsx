@@ -12,7 +12,7 @@ export interface ToolCallEntry {
 
 export interface ChatMessageProps {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   text: string;
   toolCalls?: ToolCallEntry[];
 }
@@ -25,6 +25,14 @@ export function ChatMessage({ role, text, toolCalls }: ChatMessageProps) {
       <Box flexDirection="column" marginBottom={0}>
         <Text bold>You: </Text>
         <Text>{text}</Text>
+      </Box>
+    );
+  }
+
+  if (role === "system") {
+    return (
+      <Box marginBottom={0}>
+        <Text dimColor>{text}</Text>
       </Box>
     );
   }
