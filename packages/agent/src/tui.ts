@@ -14,6 +14,10 @@ import { renderMarkdown } from "./multi/markdown.js";
 import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
 import * as os from "os";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { createRequire } from "node:module";
+
+const _require = createRequire(import.meta.url);
+const AGENT_VERSION = (_require("../package.json") as { version: string }).version;
 
 type TuiMode = "chat" | "menu";
 
@@ -191,7 +195,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     menuFilterBuf = "";
     w.write("\x1b[?1049l"); // leave alternate screen (restores chat)
     statusBar();
-    prompt();
+    prompt(true); // skip newline — alt screen restore already positioned cursor
   }
 
   // Print status bar
@@ -208,12 +212,16 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
   }
 
-  // Print prompt
-  function prompt() {
+  // Print prompt — always at bottom of terminal
+  function prompt(skipNewline = false) {
+    if (!isTTY) return;
     const mode = config.registry.permissionConfig.mode;
     const modeIcon = mode === "full-auto" ? "●" : mode === "auto-confirm" ? "◐" : "○";
     const modeColor = mode === "full-auto" ? s.yellow : mode === "auto-confirm" ? s.green : s.cyan;
-    w.write(`\n${modeColor(modeIcon)} ${s.dim("▸")} `);
+    const rows = process.stdout.rows || 24;
+    // Move to bottom row, clear it, write prompt
+    if (!skipNewline) w.write("\n");
+    w.write(`${ESC}${rows};1H${ESC}2K${modeColor(modeIcon)} ${s.dim("▸")} `);
   }
 
   // Terminal cleanup: restore state on exit
@@ -248,7 +256,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     if (artLines.length > 0) {
       // Art on left, info on right
       const info = [
-        `${s.brand("◆ phren agent")}  ${s.dim("v0.0.1")}`,
+        `${s.brand("◆ phren agent")}  ${s.dim("v${AGENT_VERSION}")}`,
         `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
         `${s.dim(cwd)}`,
         ``,
@@ -265,7 +273,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       }
     } else {
       // Fallback: text-only banner
-      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim("v0.0.1")}\n`);
+      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim("v${AGENT_VERSION}")}\n`);
       w.write(`  ${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}  ${s.dim(cwd)}\n`);
       w.write(`  ${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
       w.write(`  ${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit\n\n`);
