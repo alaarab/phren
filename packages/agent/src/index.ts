@@ -205,15 +205,8 @@ export async function runAgentCli(raw: string[]) {
     if (!isTTY) {
       session = await (await import("./repl.js")).startRepl(agentConfig);
     } else {
-      try {
-        session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig);
-      } catch (inkErr) {
-        // Log why Ink failed so we can debug
-        if (process.env.PHREN_DEBUG) {
-          process.stderr.write(`[phren] Ink TUI failed, falling back to legacy: ${inkErr instanceof Error ? inkErr.message : String(inkErr)}\n`);
-        }
-        session = await (await import("./tui.js")).startTui(agentConfig);
-      }
+      // Ink TUI only — no legacy fallback
+      session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig);
     }
 
     // Flush anti-patterns at session end
