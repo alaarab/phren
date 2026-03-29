@@ -63,6 +63,24 @@ export interface TurnResult {
   toolCalls: number;
 }
 
+/** UI hooks for pluggable rendering. Defaults write to stdout/stderr. */
+export interface TurnHooks {
+  /** Streaming text token. Default: process.stdout.write(text) */
+  onTextDelta?: (text: string) => void;
+  /** Final newline after a streaming text block. Default: write "\n" if needed */
+  onTextDone?: (text: string) => void;
+  /** Non-streaming text block output. Default: process.stdout.write */
+  onTextBlock?: (text: string) => void;
+  /** Before tool execution. Default: spinner */
+  onToolStart?: (name: string, input: Record<string, unknown>, count: number) => void;
+  /** After tool execution. Default: verbose log */
+  onToolEnd?: (name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => void;
+  /** Status messages (prune, flush, budget, cost). Default: stderr */
+  onStatus?: (msg: string) => void;
+  /** Mid-turn steering input injection. Return null for none. */
+  getSteeringInput?: () => string | null;
+}
+
 /** Run tool blocks with concurrency limit. */
 async function runToolsConcurrently(
   blocks: ToolUseBlock[],
@@ -93,10 +111,11 @@ async function runToolsConcurrently(
   return results;
 }
 
-/** Consume a chatStream into ContentBlock[] + stop_reason, streaming text to stdout. */
+/** Consume a chatStream into ContentBlock[] + stop_reason, streaming text via callback. */
 async function consumeStream(
   stream: AsyncIterable<StreamDelta>,
   costTracker?: CostTracker | null,
+  onTextDelta?: (text: string) => void,
 ): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens" }> {
   const content: ContentBlock[] = [];
   let stop_reason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
@@ -107,7 +126,7 @@ async function consumeStream(
 
   for await (const delta of stream) {
     if (delta.type === "text_delta") {
-      process.stdout.write(delta.text);
+      (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
       currentText += delta.text;
     } else if (delta.type === "tool_use_start") {
       // Flush accumulated text
@@ -142,7 +161,9 @@ async function consumeStream(
 
   // Flush remaining text
   if (currentText) {
-    if (!currentText.endsWith("\n")) process.stdout.write("\n");
+    if (!currentText.endsWith("\n")) {
+      (onTextDelta ?? process.stdout.write.bind(process.stdout))("\n");
+    }
     content.push({ type: "text", text: currentText });
   }
 
@@ -153,12 +174,15 @@ export async function runTurn(
   userInput: string,
   session: AgentSession,
   config: AgentConfig,
+  hooks?: TurnHooks,
 ): Promise<TurnResult> {
   const { provider, registry, maxTurns, verbose, costTracker } = config;
   let systemPrompt = config.systemPrompt;
   const toolDefs = registry.getDefinitions();
   const spinner = createSpinner();
   const useStream = typeof provider.chatStream === "function";
+  const write = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
+  const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
 
   // Plan mode: modify system prompt for first turn
   let planPending = config.plan && session.turns === 0;
@@ -175,12 +199,12 @@ export async function runTurn(
   while (session.turns - turnStart < maxTurns) {
     // Budget check
     if (costTracker?.isOverBudget()) {
-      process.stderr.write(`\x1b[33m[budget exceeded: ${costTracker.formatCost()}]\x1b[0m\n`);
+      status(`\x1b[33m[budget exceeded: ${costTracker.formatCost()}]\x1b[0m\n`);
       break;
     }
 
     if (verbose && session.turns > turnStart) {
-      process.stderr.write(`\n${formatTurnHeader(session.turns + 1, turnToolCalls)}\n`);
+      status(`\n${formatTurnHeader(session.turns + 1, turnToolCalls)}\n`);
     }
 
     // Check if context flush is needed (one-time per session) — must run before pruning
@@ -188,13 +212,13 @@ export async function runTurn(
     const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
     if (flushPrompt) {
       session.messages.push({ role: "user", content: flushPrompt });
-      if (verbose) process.stderr.write("[context flush injected]\n");
+      if (verbose) status("[context flush injected]\n");
     }
 
     // Prune context if approaching limit
     if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
       session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
-      if (verbose) process.stderr.write("[context pruned]\n");
+      if (verbose) status("[context pruned]\n");
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
@@ -210,7 +234,7 @@ export async function runTurn(
         undefined,
         verbose,
       );
-      const result = await consumeStream(stream, costTracker);
+      const result = await consumeStream(stream, costTracker, hooks?.onTextDelta);
       assistantContent = result.content;
       stopReason = result.stop_reason;
     } else {
@@ -234,8 +258,12 @@ export async function runTurn(
       // Print text blocks (streaming already prints inline)
       for (const block of assistantContent) {
         if (block.type === "text" && block.text) {
-          process.stdout.write(block.text);
-          if (!block.text.endsWith("\n")) process.stdout.write("\n");
+          if (hooks?.onTextBlock) {
+            hooks.onTextBlock(block.text);
+          } else {
+            process.stdout.write(block.text);
+            if (!block.text.endsWith("\n")) process.stdout.write("\n");
+          }
         }
       }
     }
@@ -245,7 +273,7 @@ export async function runTurn(
 
     // Show turn cost
     if (verbose && costTracker) {
-      process.stderr.write(`\x1b[2m  cost: ${costTracker.formatCost()}\x1b[0m\n`);
+      status(`\x1b[2m  cost: ${costTracker.formatCost()}\x1b[0m\n`);
     }
 
     // Plan mode gate: after first response, ask for approval
@@ -273,7 +301,7 @@ export async function runTurn(
 
     // If max_tokens, warn user and inject continuation prompt
     if (stopReason === "max_tokens") {
-      process.stderr.write("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
+      status("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
       session.messages.push({ role: "user", content: "Your response was truncated due to length. Please continue where you left off." });
       continue;
     }
@@ -285,13 +313,15 @@ export async function runTurn(
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
 
     // Log all tool calls upfront
-    for (const block of toolUseBlocks) {
-      process.stderr.write(formatToolCall(block.name, block.input) + "\n");
+    if (hooks?.onToolStart) {
+      for (const block of toolUseBlocks) hooks.onToolStart(block.name, block.input, toolUseBlocks.length);
+    } else {
+      for (const block of toolUseBlocks) status(formatToolCall(block.name, block.input) + "\n");
     }
 
-    spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
+    if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
     const execResults = await runToolsConcurrently(toolUseBlocks, registry);
-    spinner.stop();
+    if (!hooks?.onToolStart) spinner.stop();
 
     const toolResults: ContentBlock[] = [];
 
@@ -317,9 +347,11 @@ export async function runTurn(
         } catch { /* best effort */ }
       }
 
-      if (verbose) {
+      if (hooks?.onToolEnd) {
+        hooks.onToolEnd(block.name, block.input, finalOutput, is_error, 0);
+      } else if (verbose) {
         const preview = finalOutput.slice(0, 200);
-        process.stderr.write(`\x1b[2m  ← ${is_error ? "ERROR: " : ""}${preview}${finalOutput.length > 200 ? "..." : ""}\x1b[0m\n`);
+        status(`\x1b[2m  ← ${is_error ? "ERROR: " : ""}${preview}${finalOutput.length > 200 ? "..." : ""}\x1b[0m\n`);
       }
 
       toolResults.push({
@@ -342,7 +374,7 @@ export async function runTurn(
       for (const cmd of [lintCmd, testCmd].filter(Boolean) as string[]) {
         const check = runPostEditCheck(cmd, cwd);
         if (!check.passed) {
-          if (verbose) process.stderr.write(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
+          if (verbose) status(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
           lintFailures.push(`Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`);
         }
       }
@@ -362,6 +394,12 @@ export async function runTurn(
 
     // Add tool results as a user message
     session.messages.push({ role: "user", content: toolResults });
+
+    // Steering input injection (TUI mid-turn input)
+    const steer = hooks?.getSteeringInput?.();
+    if (steer) {
+      session.messages.push({ role: "user", content: steer });
+    }
   }
 
   // Extract text from the last assistant message in this turn
