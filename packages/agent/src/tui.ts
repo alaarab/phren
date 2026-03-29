@@ -121,7 +121,7 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
   const preview = formatToolInput(name, input);
   const dur = formatDuration(durationMs);
-  const icon = isError ? s.red("✗") : s.green("✓");
+  const icon = isError ? s.red("✗") : s.green("→");
   const header = `  ${icon} ${s.bold(name)} ${s.gray(preview)}  ${s.dim(dur)}`;
 
   // Compact: show first 3 lines only, with overflow count
@@ -220,9 +220,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   // Print prompt
   function prompt() {
-    const modeTag = inputMode === "steering" ? s.gray("steer") : s.gray("queue");
-    const permLabel = PERMISSION_LABELS[config.registry.permissionConfig.mode];
-    w.write(`\n${s.brand("❯")} ${s.dim(`${modeTag} · ${permLabel}`)} `);
+    const mode = config.registry.permissionConfig.mode;
+    const modeIcon = mode === "full-auto" ? "●" : mode === "auto-confirm" ? "◐" : "○";
+    const modeColor = mode === "full-auto" ? s.yellow : mode === "auto-confirm" ? s.green : s.cyan;
+    w.write(`\n${modeColor(modeIcon)} ${s.dim("▸")} `);
   }
 
   // Terminal cleanup: restore state on exit
@@ -261,7 +262,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
         `${s.dim(cwd)}`,
         ``,
-        `${modeColor(`◆ ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}`,
+        `${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}`,
         ``,
         `${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit`,
       ];
@@ -276,7 +277,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       // Fallback: text-only banner
       w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim("v0.0.1")}\n`);
       w.write(`  ${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}  ${s.dim(cwd)}\n`);
-      w.write(`  ${modeColor(`◆ ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
+      w.write(`  ${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
       w.write(`  ${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit\n\n`);
     }
     w.write("\n");
@@ -369,7 +370,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
       savePermissionMode(next);
       const modeColor = next === "full-auto" ? s.yellow : next === "auto-confirm" ? s.green : s.cyan;
-      const modeIcon = next === "full-auto" ? "◆" : next === "auto-confirm" ? "◇" : "○";
+      const modeIcon = next === "full-auto" ? "●" : next === "auto-confirm" ? "◐" : "○";
       w.write(`  ${modeColor(`${modeIcon} ${next}`)}\n`);
       statusBar();
       if (!running) prompt();
@@ -486,7 +487,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       flushTextBuffer();
       const preview = formatToolInput(name, input);
       const countLabel = count > 1 ? s.dim(` (${count} tools)`) : "";
-      w.write(`${ESC}2K  ${s.dim("⠋")} ${s.gray(name)} ${s.dim(preview)}${countLabel}\r`);
+      w.write(`${ESC}2K  ${s.dim("◌")} ${s.gray(name)} ${s.dim(preview)}${countLabel}\r`);
     },
     onToolEnd: (name, input, output, isError, dur) => {
       w.write(`${ESC}2K\r`);
@@ -511,7 +512,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   async function runAgentTurn(userInput: string) {
     running = true;
-    w.write(`${ESC}2K  ${s.dim("⠋ Thinking...")}\r`);
+    w.write(`${ESC}2K  ${s.dim("◌ thinking...")}\r`);
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
