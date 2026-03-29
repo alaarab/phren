@@ -6,6 +6,7 @@
  * instead of re-running the subagent — saving time and cost.
  */
 import type { PhrenContext } from "./context.js";
+import { checkFindingIntegrity } from "../permissions/privacy.js";
 
 /**
  * Search phren for a cached subagent result matching the given task.
@@ -72,8 +73,12 @@ export async function cacheSubagentResult(
     const finding = [
       `Subagent result for: ${task.slice(0, 200)}`,
       `Result: ${truncated}`,
-      `<!-- subagent_cache -->`,
+      `<!-- subagent_cache --> <!-- source:subagent -->`,
     ].join("\n");
+
+    // Integrity check: reject cached results that contain adversarial patterns
+    const integrity = checkFindingIntegrity(finding);
+    if (!integrity.safe) return;
 
     addFinding(ctx.phrenPath, project, finding);
   } catch {
