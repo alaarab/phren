@@ -132,12 +132,12 @@ function formatToolEnd(
   const preview = JSON.stringify(input).slice(0, 50);
   const header = s.dim(`  ${toolName}(${preview})`) + ` ${icon} ${s.dim(dur)}`;
 
-  const outputLines = output.split("\n").slice(0, 4);
+  const allLines = output.split("\n");
   const w = cols();
-  const body = outputLines.map((l) => s.dim(`  | ${l.slice(0, w - 6)}`)).join("\n");
-  const more = output.split("\n").length > 4 ? s.dim(`  | ... (${output.split("\n").length} lines)`) : "";
+  const body = allLines.slice(0, 4).map((l) => s.dim(`  | ${l.slice(0, w - 6)}`)).join("\n");
+  const more = allLines.length > 4 ? `\n${s.dim(`  | ... (${allLines.length} lines)`)}` : "";
 
-  return `${header}\n${body}${more ? "\n" + more : ""}`;
+  return `${header}\n${body}${more}`;
 }
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
@@ -692,9 +692,6 @@ export async function startMultiTui(
 
     // Handle terminal resize
     process.stdout.on("resize", () => render());
-
-    // Initial render
-    render();
 
     // Register panes for any agents that already exist
     for (const agent of spawner.listAgents()) {

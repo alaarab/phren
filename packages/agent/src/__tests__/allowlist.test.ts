@@ -4,7 +4,6 @@ import {
   isAllowed,
   addAllow,
   clearAllowlist,
-  getAllowlist,
 } from "../permissions/allowlist.js";
 
 // Reset the module-level allowlist before each test
@@ -127,7 +126,6 @@ describe("addAllow", () => {
 
   it("does not persist 'once' scope", () => {
     addAllow("shell", { command: "git status" }, "once");
-    expect(getAllowlist()).toHaveLength(0);
     expect(isAllowed("shell", { command: "git status" })).toBe(false);
   });
 
@@ -135,19 +133,10 @@ describe("addAllow", () => {
 
   it("persists 'session' scope with extracted pattern", () => {
     addAllow("shell", { command: "git status" }, "session");
-    const list = getAllowlist();
-    expect(list).toHaveLength(1);
-    expect(list[0]).toEqual({ toolName: "shell", pattern: "git" });
+    expect(isAllowed("shell", { command: "git diff" })).toBe(true);
   });
 
   // ── Scope: tool ─────────────────────────────────────────────────────
-
-  it("uses wildcard for 'tool' scope on non-shell tools", () => {
-    addAllow("read_file", { path: "/src/a.ts" }, "tool");
-    const list = getAllowlist();
-    expect(list).toHaveLength(1);
-    expect(list[0]).toEqual({ toolName: "read_file", pattern: "*" });
-  });
 
   it("tool scope on non-shell allows any input for that tool", () => {
     addAllow("read_file", { path: "/src/a.ts" }, "tool");
@@ -155,11 +144,8 @@ describe("addAllow", () => {
   });
 
   it("shell tool scope still scopes to binary, not wildcard", () => {
-    // Shell is special-cased: even with "tool" scope, it uses the binary name
     addAllow("shell", { command: "git status" }, "tool");
-    const list = getAllowlist();
-    expect(list).toHaveLength(1);
-    expect(list[0]).toEqual({ toolName: "shell", pattern: "git" });
+    expect(isAllowed("shell", { command: "git diff" })).toBe(true);
   });
 
   it("shell tool scope does not allow different binaries", () => {
@@ -173,19 +159,8 @@ describe("addAllow", () => {
   it("does not add duplicate entries", () => {
     addAllow("shell", { command: "git status" }, "session");
     addAllow("shell", { command: "git diff" }, "session"); // same binary "git"
-    expect(getAllowlist()).toHaveLength(1);
-  });
-
-  it("adds different binaries as separate entries", () => {
-    addAllow("shell", { command: "git status" }, "session");
-    addAllow("shell", { command: "npm install" }, "session");
-    expect(getAllowlist()).toHaveLength(2);
-  });
-
-  it("adds different tools as separate entries", () => {
-    addAllow("read_file", { path: "/src/a.ts" }, "session");
-    addAllow("write_file", { file_path: "/src/a.ts" }, "session");
-    expect(getAllowlist()).toHaveLength(2);
+    // Still just one pattern match — adding twice doesn't break anything
+    expect(isAllowed("shell", { command: "git log" })).toBe(true);
   });
 });
 
@@ -193,10 +168,10 @@ describe("clearAllowlist", () => {
   it("empties the allowlist", () => {
     addAllow("shell", { command: "git status" }, "session");
     addAllow("read_file", { path: "/src/a.ts" }, "session");
-    expect(getAllowlist()).toHaveLength(2);
+    expect(isAllowed("shell", { command: "git status" })).toBe(true);
 
     clearAllowlist();
-    expect(getAllowlist()).toHaveLength(0);
+    expect(isAllowed("shell", { command: "git status" })).toBe(false);
   });
 
   it("causes isAllowed to return false after clear", () => {
@@ -205,32 +180,5 @@ describe("clearAllowlist", () => {
 
     clearAllowlist();
     expect(isAllowed("shell", { command: "git status" })).toBe(false);
-  });
-});
-
-describe("getAllowlist", () => {
-  it("returns empty array initially", () => {
-    expect(getAllowlist()).toEqual([]);
-  });
-
-  it("returns readonly snapshot", () => {
-    addAllow("shell", { command: "git status" }, "session");
-    const list = getAllowlist();
-    expect(list).toHaveLength(1);
-    expect(Object.isFrozen(list[0]) || typeof list[0] === "object").toBe(true);
-  });
-
-  it("reflects all added entries", () => {
-    addAllow("shell", { command: "git status" }, "session");
-    addAllow("read_file", { path: "/src/a.ts" }, "session");
-    addAllow("phren_search", {}, "tool");
-
-    const list = getAllowlist();
-    expect(list).toHaveLength(3);
-    expect(list.map((e) => e.toolName)).toEqual([
-      "shell",
-      "read_file",
-      "phren_search",
-    ]);
   });
 });

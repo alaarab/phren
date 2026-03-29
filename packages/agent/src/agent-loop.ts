@@ -1,5 +1,4 @@
 import type { LlmProvider, LlmMessage, ContentBlock, ToolUseBlock, StreamDelta } from "./providers/types.js";
-import type { AgentToolDef } from "./providers/types.js";
 import type { PhrenContext } from "./memory/context.js";
 import type { CostTracker } from "./cost.js";
 import { ToolRegistry } from "./tools/registry.js";
@@ -15,7 +14,6 @@ import { detectLintCommand, detectTestCommand, runPostEditCheck, type LintTestCo
 import { createCheckpoint } from "./checkpoint.js";
 
 const MAX_TOOL_CONCURRENCY = 5;
-const MAX_LINT_TEST_RETRIES = 3;
 
 export interface AgentConfig {
   provider: LlmProvider;
@@ -146,7 +144,7 @@ async function consumeStream(
         let input: Record<string, unknown> = {};
         try {
           input = JSON.parse(jsonStr);
-        } catch (e) {
+        } catch {
           process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}), skipping block\x1b[0m\n`);
           continue;
         }
@@ -182,7 +180,6 @@ export async function runTurn(
   const toolDefs = registry.getDefinitions();
   const spinner = createSpinner();
   const useStream = typeof provider.chatStream === "function";
-  const write = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
   const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
 
   // Plan mode: modify system prompt for first turn

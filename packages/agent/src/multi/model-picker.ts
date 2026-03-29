@@ -165,7 +165,6 @@ export function showModelPicker(
       const m = models[i];
       const selected = i === cursor;
       const arrow = selected ? s.cyan("▸") : " ";
-      const label = selected ? s.bold(m.label) : s.dim(m.label);
       const padded = m.label + " ".repeat(maxLabel - m.label.length);
       const labelStr = selected ? s.bold(padded) : s.dim(padded);
       const meter = renderReasoningMeter(reasoningState[i], m.reasoningRange);
@@ -180,8 +179,6 @@ export function showModelPicker(
   drawPicker();
 
   return new Promise((resolve) => {
-    const wasRaw = process.stdin.isRaw;
-
     function onKey(_ch: string, key: readline.Key) {
       if (!key) return;
 
