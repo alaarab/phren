@@ -127,11 +127,9 @@ export async function runAgentCli(raw: string[]) {
   }
 
   // Load .phrenignore patterns from project root (skip in bare mode)
+  let ignoreCtx: import("./permissions/ignore.js").IgnoreContext | undefined;
   if (!args.bare) {
-    const hasIgnore = loadIgnorePatterns(process.cwd());
-    if (args.verbose && hasIgnore) {
-      process.stderr.write(`Loaded .phrenignore patterns\n`);
-    }
+    ignoreCtx = loadIgnorePatterns(process.cwd());
   }
 
   // Register tools
@@ -143,6 +141,9 @@ export async function runAgentCli(raw: string[]) {
     allowRules: allowRules.length > 0 ? allowRules : undefined,
     denyRules: denyRules.length > 0 ? denyRules : undefined,
   });
+  if (ignoreCtx) {
+    registry.setIgnoreContext(ignoreCtx);
+  }
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);

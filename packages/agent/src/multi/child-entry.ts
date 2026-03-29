@@ -28,6 +28,7 @@ import { loadProjectContext } from "../memory/project-context.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { runAgent } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
+import { loadIgnorePatterns } from "../permissions/ignore.js";
 
 /** Send a typed message to the parent process. */
 function send(msg: ChildMessage): void {
@@ -102,6 +103,7 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
     allowedPaths: [],
     projectRoot: cwd,
   });
+  registry.setIgnoreContext(loadIgnorePatterns(cwd));
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
