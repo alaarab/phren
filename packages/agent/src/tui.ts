@@ -259,7 +259,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}r`); // reset scroll region temporarily
     // Layout (bottom up): blank, permissions, separator, input, separator
     const sep = s.dim("─".repeat(c));
-    const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
+    const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab toggle · esc to interrupt)")}`;
     w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
     w.write(`${ESC}${rows - 3};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
     w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
@@ -346,7 +346,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
       `${s.dim(cwd)}`,
       ``,
-      `${permTag(permMode)} ${s.dim("permissions (shift+tab to cycle)")}`,
+      `${permTag(permMode)} ${s.dim("permissions (shift+tab toggle · esc to interrupt)")}`,
       ``,
       `${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit`,
     ];
