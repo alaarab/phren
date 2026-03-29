@@ -227,11 +227,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     if (!skipNewline) w.write("\n");
     // Separator line + prompt on last 2 rows
     const permLabel = PERMISSION_LABELS[mode];
-    const separator = s.dim("─".repeat(c));
-    const rightHints = s.dim(`${bashMode ? "! bash" : permLabel} · shift+tab to cycle · esc to interrupt`);
-    const rightLen = stripAnsi(rightHints).length;
-    const sepLine = s.dim("─".repeat(Math.max(1, c - rightLen - 1))) + " " + rightHints;
-    w.write(`${ESC}${rows - 1};1H${ESC}2K${sepLine}`);
+    // 3 bottom rows: separator, permission line, input
+    const sepLine = s.dim("─".repeat(c));
+    const permLine = `  ${modeColor(`${modeIcon} ${permLabel} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
+    w.write(`${ESC}${rows - 2};1H${ESC}2K${sepLine}`);
+    w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
     if (bashMode) {
       w.write(`${ESC}${rows};1H${ESC}2K${s.yellow("!")} `);
     } else {
@@ -270,7 +270,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     if (artLines.length > 0) {
       // Art on left, info on right
       const info = [
-        `${s.brand("◆ phren agent")}  ${s.dim("v${AGENT_VERSION}")}`,
+        `${s.brand("◆ phren agent")}  ${s.dim(`v${AGENT_VERSION}`)}`,
         `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
         `${s.dim(cwd)}`,
         ``,
@@ -287,7 +287,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       }
     } else {
       // Fallback: text-only banner
-      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim("v${AGENT_VERSION}")}\n`);
+      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim(`v${AGENT_VERSION}`)}\n`);
       w.write(`  ${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}  ${s.dim(cwd)}\n`);
       w.write(`  ${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
       w.write(`  ${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit\n\n`);
@@ -474,13 +474,26 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         const cmd = bashMode ? line : line.slice(1).trim();
         bashMode = false;
         if (cmd) {
-          try {
-            const output = execSync(cmd, { encoding: "utf-8", timeout: 30_000, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
-            w.write(output);
-            if (!output.endsWith("\n")) w.write("\n");
-          } catch (err: unknown) {
-            const e = err as { stderr?: string; message?: string };
-            w.write(s.red(e.stderr || e.message || "Command failed") + "\n");
+          // Handle cd specially — change process cwd
+          const cdMatch = cmd.match(/^cd\s+(.*)/);
+          if (cdMatch) {
+            try {
+              const target = cdMatch[1].trim().replace(/^~/, os.homedir());
+              const resolved = require("path").resolve(process.cwd(), target);
+              process.chdir(resolved);
+              w.write(s.dim(process.cwd()) + "\n");
+            } catch (err: unknown) {
+              w.write(s.red((err as Error).message) + "\n");
+            }
+          } else {
+            try {
+              const output = execSync(cmd, { encoding: "utf-8", timeout: 30_000, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+              w.write(output);
+              if (!output.endsWith("\n")) w.write("\n");
+            } catch (err: unknown) {
+              const e = err as { stderr?: string; message?: string };
+              w.write(s.red(e.stderr || e.message || "Command failed") + "\n");
+            }
           }
         }
         prompt();
