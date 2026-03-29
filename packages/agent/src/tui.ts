@@ -250,14 +250,15 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     const rows = process.stdout.rows || 24;
     const c = cols();
     if (!skipNewline) {
-      // Newline within the scroll region so content scrolls up naturally
+      // Advance content cursor within the scroll region so text scrolls up
       cursorToScrollEnd();
       w.write("\n");
     }
-    // Draw the fixed bottom bar outside the scroll region.
-    // Temporarily reset DECSTBM so writes to rows (rows-4)..(rows) work.
-    w.write(`${ESC}r`); // reset scroll region temporarily
-    // Layout (bottom up): blank, permissions, separator, input, separator
+    // Save cursor position in the scroll region before drawing the bottom bar.
+    w.write(`${ESC}s`);
+    // Temporarily reset DECSTBM so writes to the fixed bottom rows work.
+    w.write(`${ESC}r`);
+    // Layout (bottom 5 rows): separator, input, separator, permissions, blank
     const sep = s.dim("─".repeat(c));
     const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab toggle · esc to interrupt)")}`;
     w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
@@ -268,6 +269,28 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     // Re-establish scroll region and position cursor at the input line
     setScrollRegion();
     w.write(`${ESC}${rows - 3};${bashMode ? 3 : 4}H`);
+  }
+
+  /** Draw bottom bar without moving the content cursor — used during streaming */
+  function drawBottomBar() {
+    if (!isTTY) return;
+    const mode = config.registry.permissionConfig.mode;
+    const color = PERMISSION_COLORS[mode];
+    const icon = PERMISSION_ICONS[mode];
+    const rows = process.stdout.rows || 24;
+    const c = cols();
+    // Save cursor, reset scroll region, draw bar, restore scroll region, restore cursor
+    w.write(`${ESC}s`);
+    w.write(`${ESC}r`);
+    const sep = s.dim("─".repeat(c));
+    const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab toggle · esc to interrupt)")}`;
+    w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
+    w.write(`${ESC}${rows - 3};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
+    w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
+    w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
+    w.write(`${ESC}${rows};1H${ESC}2K`);
+    setScrollRegion();
+    w.write(`${ESC}u`); // restore cursor back into the scroll region
   }
 
   // Redraw the input line and position the terminal cursor at cursorPos
@@ -320,7 +343,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     if (tuiMode === "chat") {
       setScrollRegion();
       statusBar();
-      prompt(true);
+      if (running) {
+        drawBottomBar(); // redraw bar but restore cursor to content area
+      } else {
+        prompt(true);
+      }
     }
   });
 
@@ -865,6 +892,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   // TUI hooks — render streaming text with markdown, compact tool output
   let textBuffer = "";
   let firstDelta = true;
+  let activeThinkTimer: ReturnType<typeof setInterval> | null = null;
 
   function flushTextBuffer() {
     if (!textBuffer) return;
@@ -875,8 +903,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   const tuiHooks: TurnHooks = {
     onTextDelta: (text) => {
       if (firstDelta) {
-        cursorToScrollEnd(); // ensure we're in the scroll region
-        w.write(`${ESC}2K\r`); // clear thinking timer line
+        // Kill the thinking animation IMMEDIATELY
+        if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
+        w.write(`${ESC}2K\r`); // clear thinking line
         firstDelta = false;
       }
       w.write(text);
@@ -885,10 +914,22 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       flushTextBuffer();
     },
     onTextBlock: (text) => {
+      // Kill the thinking animation if this is the first output (non-streaming providers)
+      if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
+      if (firstDelta) {
+        w.write(`${ESC}2K\r`); // clear thinking line
+        firstDelta = false;
+      }
       w.write(renderMarkdown(text));
       if (!text.endsWith("\n")) w.write("\n");
     },
     onToolStart: (name, input, count) => {
+      // Kill the thinking animation if it's still running (tools can fire before any text delta)
+      if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
+      if (firstDelta) {
+        w.write(`${ESC}2K\r`); // clear thinking line
+        firstDelta = false;
+      }
       flushTextBuffer();
       const preview = formatToolInput(name, input);
       const countLabel = count > 1 ? s.dim(` (${count} tools)`) : "";
@@ -918,11 +959,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
-    cursorToScrollEnd(); // ensure all turn output stays within scroll region
+    // Draw bottom bar to ensure it's visible, then restore cursor to content area
+    drawBottomBar();
     const thinkStart = Date.now();
     // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;
-    const thinkTimer = setInterval(() => {
+    activeThinkTimer = setInterval(() => {
       const elapsed = (Date.now() - thinkStart) / 1000;
       // Gentle sine-wave interpolation between phren purple and cyan
       const t = (Math.sin(thinkFrame * 0.08) + 1) / 2; // 0..1, slow oscillation
@@ -936,12 +978,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
-      clearInterval(thinkTimer);
+      if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
       const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
       w.write(`${ESC}2K  ${s.dim(`◆ thought for ${elapsed}s`)}\n`);
       statusBar();
     } catch (err: unknown) {
-      clearInterval(thinkTimer);
+      if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
       const msg = err instanceof Error ? err.message : String(err);
       w.write(`${ESC}2K\r`);
       w.write(s.red(`  Error: ${msg}\n`));
