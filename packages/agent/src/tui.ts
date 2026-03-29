@@ -122,16 +122,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   // Print status bar
   function statusBar() {
-    if (!isTTY) return;
-    const bar = renderStatusBar(
-      config.provider.name,
-      config.phrenCtx?.project ?? null,
-      session.turns,
-      costStr,
-      config.registry.permissionConfig.mode,
-      spawner?.listAgents().length,
-    );
-    w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
+    // Intentionally empty — no top status bar. Info is in the bottom prompt area.
   }
 
   // Print prompt — inline input bar (written at current cursor position)
