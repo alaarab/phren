@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
-import { debugLog, isMemoryScopeVisible, normalizeMemoryScope } from "../shared.js";
+import { debugLog, getProjectDirs, isMemoryScopeVisible, normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { runCustomHooks } from "../hooks.js";
@@ -13,24 +13,16 @@ import { readExtractedFacts } from "./extract-facts.js";
 import { resolveFindingSessionId } from "../finding/context.js";
 import { readTasks } from "../data/tasks.js";
 import { readFindings } from "../data/access.js";
-import { getProjectDirs } from "../shared.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
-import { atomicWriteJson, debugError, scanSessionFiles } from "../session/utils.js";
+import {
+  atomicWriteJson, debugError, scanSessionFiles,
+  type SessionState, sessionsDir, sessionFileForId,
+  readSessionStateFile, writeSessionStateFile,
+} from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
 import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
-
-interface SessionState {
-  sessionId: string;
-  project?: string;
-  agentScope?: string;
-  startedAt: string;
-  endedAt?: string;
-  summary?: string;
-  findingsAdded: number;
-  tasksCompleted: number;
-}
 
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -117,27 +109,6 @@ function extractResumptionHint(
 const MAX_SESSION_MAP_ENTRIES = 200;
 const _sessionMap = new Map<string, string>();
 
-function sessionsDir(phrenPath: string): string {
-  const dir = path.join(phrenPath, ".runtime", "sessions");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function sessionFileForId(phrenPath: string, sessionId: string): string {
-  return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
-}
-
-function readSessionStateFile(file: string): SessionState | null {
-  if (!fs.existsSync(file)) return null;
-  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch (err: unknown) {
-    debugError("readSessionStateFile", err);
-    return null;
-  }
-}
-
-function writeSessionStateFile(file: string, state: SessionState): void {
-  atomicWriteJson(file, state);
-}
 
 /** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(phrenPath: string): { file: string; state: SessionState } | null {
@@ -192,11 +163,7 @@ function lastSummaryPath(phrenPath: string): string {
 /** Write the last summary for fast retrieval by next session_start. */
 function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
   try {
-    const data = { summary, sessionId, project, endedAt: new Date().toISOString() };
-    const summaryFile = lastSummaryPath(phrenPath);
-    const tmpPath = `${summaryFile}.tmp-${crypto.randomUUID()}`;
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-    fs.renameSync(tmpPath, summaryFile);
+    atomicWriteJson(lastSummaryPath(phrenPath), { summary, sessionId, project, endedAt: new Date().toISOString() });
   } catch (err: unknown) {
     debugError("writeLastSummary", err);
   }
@@ -212,13 +179,13 @@ export function findMostRecentSummary(phrenPath: string): string | null {
 function findMostRecentSummaryWithProject(phrenPath: string): { summary: string | null; project?: string; endedAt?: string } {
   // Fast path: read from dedicated last-summary file
   try {
-    const fastPath = lastSummaryPath(phrenPath);
-    if (fs.existsSync(fastPath)) {
-      const data = JSON.parse(fs.readFileSync(fastPath, "utf-8")) as { summary?: string; project?: string; endedAt?: string };
-      if (data.summary) return { summary: data.summary, project: data.project, endedAt: data.endedAt };
-    }
+    const data = JSON.parse(fs.readFileSync(lastSummaryPath(phrenPath), "utf-8")) as { summary?: string; project?: string; endedAt?: string };
+    if (data.summary) return { summary: data.summary, project: data.project, endedAt: data.endedAt };
   } catch (err: unknown) {
-    debugError("findMostRecentSummaryWithProject fastPath", err);
+    // ENOENT is expected when no summary has been written yet
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      debugError("findMostRecentSummaryWithProject fastPath", err);
+    }
   }
 
   // Slow path: scan all session files

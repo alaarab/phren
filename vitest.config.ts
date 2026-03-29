@@ -6,6 +6,6 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: true,
     testTimeout: 15000,
-    include: ["mcp/src/**/*.test.ts"],
+    include: ["mcp/src/**/*.test.ts", "agent/src/**/*.test.ts"],
   },
 });
