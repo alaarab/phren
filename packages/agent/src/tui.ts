@@ -387,9 +387,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const next = nextPermissionMode(config.registry.permissionConfig.mode);
       config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
       savePermissionMode(next);
-      w.write(`  ${permTag(next)}\n`);
-      statusBar();
-      if (!running) prompt();
+      // Just update bottom bar in-place — no scrollback output
+      prompt(true);
       return;
     }
 
@@ -600,6 +599,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   // TUI hooks — render streaming text with markdown, compact tool output
   let textBuffer = "";
+  let firstDelta = true;
 
   function flushTextBuffer() {
     if (!textBuffer) return;
@@ -609,6 +609,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   const tuiHooks: TurnHooks = {
     onTextDelta: (text) => {
+      if (firstDelta) {
+        w.write(`${ESC}2K\r`); // clear thinking timer line
+        firstDelta = false;
+      }
       textBuffer += text;
       // Flush on paragraph boundaries (double newline) or single newline for streaming feel
       if (textBuffer.includes("\n\n") || textBuffer.endsWith("\n")) {
@@ -651,6 +655,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   async function runAgentTurn(userInput: string) {
     running = true;
+    firstDelta = true;
     const thinkStart = Date.now();
     const thinkTimer = setInterval(() => {
       const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
