@@ -35,7 +35,27 @@ export interface AgentToolDef {
 export interface LlmResponse {
   content: ContentBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens";
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+}
+
+// ── Effort levels ──────────────────────────────────────────────────────────
+
+/**
+ * Reasoning effort level — controls how deeply the model thinks.
+ * - low: minimal reasoning, fast/cheap (simple lookups, file reads)
+ * - medium: balanced (routine edits, standard tasks)
+ * - high: thorough analysis (refactoring, debugging)
+ * - max: maximum reasoning depth (complex multi-step problems)
+ */
+export type EffortLevel = "low" | "medium" | "high" | "max";
+
+// ── Request options ────────────────────────────────────────────────────────
+
+export interface LlmRequestOptions {
+  /** Reasoning effort level. Default: "high". */
+  effort?: EffortLevel;
+  /** Enable prompt caching (Anthropic). Default: true. */
+  cacheEnabled?: boolean;
 }
 
 // ── Streaming types ─────────────────────────────────────────────────────────
@@ -55,10 +75,12 @@ export interface LlmProvider {
     system: string,
     messages: LlmMessage[],
     tools: AgentToolDef[],
+    options?: LlmRequestOptions,
   ): Promise<LlmResponse>;
   chatStream?(
     system: string,
     messages: LlmMessage[],
     tools: AgentToolDef[],
+    options?: LlmRequestOptions,
   ): AsyncIterable<StreamDelta>;
 }

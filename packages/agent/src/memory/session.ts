@@ -10,6 +10,7 @@ interface SessionState {
   endedAt?: string;
   findingsAdded: number;
   tasksCompleted: number;
+  tasksAdded: number;
   hookCreated?: boolean;
   agentCreated?: boolean;
 }
@@ -32,6 +33,7 @@ export function startSession(ctx: PhrenContext): string {
     startedAt: new Date().toISOString(),
     findingsAdded: 0,
     tasksCompleted: 0,
+    tasksAdded: 0,
     agentCreated: true,
   };
   const file = sessionFile(ctx.phrenPath, sessionId);
@@ -59,7 +61,7 @@ export function endSession(ctx: PhrenContext, sessionId: string, summary?: strin
   } catch { /* best effort */ }
 }
 
-export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: "findingsAdded" | "tasksCompleted"): void {
+export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: "findingsAdded" | "tasksCompleted" | "tasksAdded"): void {
   const file = sessionFile(phrenPath, sessionId);
   if (!fs.existsSync(file)) return;
   try {

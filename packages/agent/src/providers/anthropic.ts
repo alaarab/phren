@@ -1,4 +1,14 @@
-import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, LlmRequestOptions, EffortLevel } from "./types.js";
+
+/** Map effort levels to Anthropic's thinking/budget parameters. */
+function effortToConfig(effort: EffortLevel): { maxTokens: number; thinkingBudget?: number } {
+  switch (effort) {
+    case "low":    return { maxTokens: 4096 };
+    case "medium": return { maxTokens: 8192 };
+    case "high":   return { maxTokens: 16384 };
+    case "max":    return { maxTokens: 32768, thinkingBudget: 10000 };
+  }
+}
 
 export class AnthropicProvider implements LlmProvider {
   name = "anthropic";
@@ -13,31 +23,41 @@ export class AnthropicProvider implements LlmProvider {
     this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], options?: LlmRequestOptions): Promise<LlmResponse> {
+    const effort = options?.effort ?? "high";
+    const cacheEnabled = options?.cacheEnabled !== false;
+    const effortCfg = effortToConfig(effort);
+
+    // Build system content with cache control
+    const systemContent = cacheEnabled
+      ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+      : system;
+
     const body: Record<string, unknown> = {
       model: this.model,
-      system,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      max_tokens: this.maxOutputTokens,
+      system: systemContent,
+      messages: formatMessages(messages, cacheEnabled),
+      max_tokens: effortCfg.maxTokens || this.maxOutputTokens,
     };
+
     if (tools.length > 0) {
-      body.tools = tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.input_schema,
-      }));
+      body.tools = formatTools(tools, cacheEnabled);
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-api-key": this.apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+
+    // Enable prompt caching beta
+    if (cacheEnabled) {
+      headers["anthropic-beta"] = "prompt-caching-2024-07-31";
     }
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
@@ -56,33 +76,49 @@ export class AnthropicProvider implements LlmProvider {
     return {
       content,
       stop_reason: stop_reason as LlmResponse["stop_reason"],
-      usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
+      usage: usage ? {
+        input_tokens: usage.input_tokens ?? 0,
+        output_tokens: usage.output_tokens ?? 0,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+        cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+      } : undefined,
     };
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], options?: LlmRequestOptions): AsyncIterable<StreamDelta> {
+    const effort = options?.effort ?? "high";
+    const cacheEnabled = options?.cacheEnabled !== false;
+    const effortCfg = effortToConfig(effort);
+
+    const systemContent = cacheEnabled
+      ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
+      : system;
+
     const body: Record<string, unknown> = {
       model: this.model,
-      system,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      max_tokens: this.maxOutputTokens,
+      system: systemContent,
+      messages: formatMessages(messages, cacheEnabled),
+      max_tokens: effortCfg.maxTokens || this.maxOutputTokens,
       stream: true,
     };
+
     if (tools.length > 0) {
-      body.tools = tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.input_schema,
-      }));
+      body.tools = formatTools(tools, cacheEnabled);
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-api-key": this.apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+
+    if (cacheEnabled) {
+      headers["anthropic-beta"] = "prompt-caching-2024-07-31";
     }
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
+      headers,
       body: JSON.stringify(body),
     });
 
@@ -92,8 +128,7 @@ export class AnthropicProvider implements LlmProvider {
     }
 
     let stopReason: LlmResponse["stop_reason"] = "end_turn";
-    let usage: { input_tokens: number; output_tokens: number } | undefined;
-    // Map block index to tool ID for consistent ID across start/delta/end
+    let usage: LlmResponse["usage"] | undefined;
     const indexToToolId = new Map<number, string>();
 
     for await (const event of parseSSE(res)) {
@@ -131,6 +166,8 @@ export class AnthropicProvider implements LlmProvider {
           usage = {
             input_tokens: u.input_tokens ?? 0,
             output_tokens: u.output_tokens ?? 0,
+            cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+            cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
           };
         }
       } else if (type === "message_start") {
@@ -139,6 +176,8 @@ export class AnthropicProvider implements LlmProvider {
           usage = {
             input_tokens: u.input_tokens ?? 0,
             output_tokens: u.output_tokens ?? 0,
+            cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+            cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
           };
         }
       }
@@ -146,6 +185,60 @@ export class AnthropicProvider implements LlmProvider {
 
     yield { type: "done", stop_reason: stopReason, usage };
   }
+}
+
+/**
+ * Format messages for Anthropic API, adding cache_control breakpoints.
+ * We add cache_control to the last user message to maximize cache hits.
+ */
+function formatMessages(messages: LlmMessage[], cacheEnabled: boolean): unknown[] {
+  if (!cacheEnabled) {
+    return messages.map(m => ({ role: m.role, content: m.content }));
+  }
+
+  return messages.map((m, i) => {
+    // Add cache breakpoint to the last two user messages for best cache hit rate
+    const isRecentUser = m.role === "user" && i >= messages.length - 4;
+
+    if (isRecentUser && typeof m.content === "string") {
+      return {
+        role: m.role,
+        content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }],
+      };
+    }
+
+    if (isRecentUser && Array.isArray(m.content)) {
+      const content = [...m.content];
+      if (content.length > 0) {
+        const last = { ...content[content.length - 1] };
+        (last as Record<string, unknown>).cache_control = { type: "ephemeral" };
+        content[content.length - 1] = last;
+      }
+      return { role: m.role, content };
+    }
+
+    return { role: m.role, content: m.content };
+  });
+}
+
+/**
+ * Format tools with cache_control on the last tool definition.
+ * This caches the entire tool block for subsequent requests.
+ */
+function formatTools(tools: AgentToolDef[], cacheEnabled: boolean): unknown[] {
+  const formatted = tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema,
+  }));
+
+  if (cacheEnabled && formatted.length > 0) {
+    const last = { ...formatted[formatted.length - 1] };
+    (last as Record<string, unknown>).cache_control = { type: "ephemeral" };
+    formatted[formatted.length - 1] = last;
+  }
+
+  return formatted;
 }
 
 /** Parse SSE stream from a fetch Response. */

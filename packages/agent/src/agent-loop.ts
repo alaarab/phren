@@ -1,6 +1,7 @@
-import type { LlmProvider, LlmMessage, ContentBlock, ToolUseBlock, StreamDelta } from "./providers/types.js";
+import type { LlmProvider, LlmMessage, ContentBlock, ToolUseBlock, StreamDelta, EffortLevel, LlmRequestOptions } from "./providers/types.js";
 import type { PhrenContext } from "./memory/context.js";
 import type { CostTracker } from "./cost.js";
+import type { HookManager } from "./hooks.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "./spinner.js";
 import { searchErrorRecovery } from "./memory/error-recovery.js";
@@ -26,6 +27,12 @@ export interface AgentConfig {
   plan?: boolean;
   lintTestConfig?: LintTestConfig;
   hooks?: TurnHooks;
+  /** Reasoning effort level. Default: "high". */
+  effort?: EffortLevel;
+  /** Agent-loop hook manager for PreToolUse, PostToolUse, Stop hooks. */
+  hookManager?: HookManager | null;
+  /** Custom compaction instructions for context pruning. */
+  compactionInstructions?: string;
 }
 
 export interface AgentResult {
@@ -181,6 +188,10 @@ export async function runTurn(
   const spinner = createSpinner();
   const useStream = typeof provider.chatStream === "function";
   const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
+  const requestOptions: LlmRequestOptions = {
+    effort: config.effort ?? "high",
+    cacheEnabled: provider.name === "anthropic", // Enable caching for Anthropic
+  };
 
   // Plan mode: modify system prompt for first turn
   let planPending = config.plan && session.turns === 0;
@@ -215,7 +226,11 @@ export async function runTurn(
 
     // Prune context if approaching limit
     if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
-      session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
+      session.messages = pruneMessages(session.messages, {
+        contextLimit,
+        keepRecentTurns: 6,
+        compactionInstructions: config.compactionInstructions,
+      });
       if (verbose) status("[context pruned]\n");
     }
 
@@ -228,7 +243,7 @@ export async function runTurn(
     if (useStream) {
       // Streaming path — retry the initial connection (before consuming deltas)
       const stream = await withRetry(
-        async () => provider.chatStream!(systemPrompt, session.messages, turnTools),
+        async () => provider.chatStream!(systemPrompt, session.messages, turnTools, requestOptions),
         undefined,
         verbose,
       );
@@ -239,7 +254,7 @@ export async function runTurn(
       // Batch path
       spinner.start("Thinking...");
       const response = await withRetry(
-        () => provider.chat(systemPrompt, session.messages, turnTools),
+        () => provider.chat(systemPrompt, session.messages, turnTools, requestOptions),
         undefined,
         verbose,
       );
@@ -309,6 +324,7 @@ export async function runTurn(
 
     // Execute tool calls with concurrency
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
+    const toolResults: ContentBlock[] = [];
 
     // Log all tool calls upfront
     if (hooks?.onToolStart) {
@@ -317,11 +333,32 @@ export async function runTurn(
       for (const block of toolUseBlocks) status(formatToolCall(block.name, block.input) + "\n");
     }
 
+    // Run PreToolUse hooks — may block individual tools
+    if (config.hookManager?.hasHooks("PreToolUse")) {
+      for (let bi = toolUseBlocks.length - 1; bi >= 0; bi--) {
+        const block = toolUseBlocks[bi];
+        const hookResult = await config.hookManager.runHooks({
+          event: "PreToolUse",
+          toolName: block.name,
+          toolInput: block.input,
+        });
+        if (!hookResult.allowed) {
+          // Remove blocked tool and add a synthetic error result
+          toolUseBlocks.splice(bi, 1);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: `Blocked by hook: ${hookResult.error ?? "denied"}`,
+            is_error: true,
+          });
+          if (verbose) status(`\x1b[33m[hook blocked: ${block.name}]\x1b[0m\n`);
+        }
+      }
+    }
+
     if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
     const execResults = await runToolsConcurrently(toolUseBlocks, registry);
     if (!hooks?.onToolStart) spinner.stop();
-
-    const toolResults: ContentBlock[] = [];
 
     for (const { block, output, is_error } of execResults) {
       session.toolCalls++;
@@ -342,6 +379,19 @@ export async function runTurn(
         // Auto-capture error patterns
         try {
           await analyzeAndCapture(config.phrenCtx, output, session.captureState);
+        } catch { /* best effort */ }
+      }
+
+      // Run PostToolUse hooks
+      if (config.hookManager?.hasHooks("PostToolUse")) {
+        try {
+          await config.hookManager.runHooks({
+            event: "PostToolUse",
+            toolName: block.name,
+            toolInput: block.input,
+            toolOutput: finalOutput,
+            isError: is_error,
+          });
         } catch { /* best effort */ }
       }
 
