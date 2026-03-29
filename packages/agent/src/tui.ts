@@ -24,12 +24,17 @@ const s = {
   reset: `${ESC}0m`,
   bold: (t: string) => `${ESC}1m${t}${ESC}0m`,
   dim: (t: string) => `${ESC}2m${t}${ESC}0m`,
+  italic: (t: string) => `${ESC}3m${t}${ESC}0m`,
   cyan: (t: string) => `${ESC}36m${t}${ESC}0m`,
   green: (t: string) => `${ESC}32m${t}${ESC}0m`,
   yellow: (t: string) => `${ESC}33m${t}${ESC}0m`,
   red: (t: string) => `${ESC}31m${t}${ESC}0m`,
+  blue: (t: string) => `${ESC}34m${t}${ESC}0m`,
+  magenta: (t: string) => `${ESC}35m${t}${ESC}0m`,
   gray: (t: string) => `${ESC}90m${t}${ESC}0m`,
   invert: (t: string) => `${ESC}7m${t}${ESC}0m`,
+  // Gradient-style brand text
+  brand: (t: string) => `${ESC}1;35m${t}${ESC}0m`,
 };
 
 function cols(): number {
@@ -61,13 +66,25 @@ function formatPermissionMode(mode: PermissionMode): string {
 
 // ── Status bar ───────────────────────────────────────────────────────────────
 function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
-  const modeStr = permMode ? ` ${PERMISSION_LABELS[permMode]}` : "";
-  const agentTag = agentCount && agentCount > 0 ? ` ${s.dim(`A${agentCount}`)}` : "";
-  const left = ` ${s.bold("phren-agent")} ${s.dim("·")} ${provider}${project ? ` ${s.dim("·")} ${project}` : ""}`;
-  const right = `${modeStr}${agentTag} ${cost ? cost + " " : ""}${s.dim(`T${turns}`)} `;
+  const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
+  const agentTag = agentCount && agentCount > 0 ? ` A${agentCount}` : "";
+
+  // Left: brand + provider + project
+  const parts = [" ◆ phren", provider];
+  if (project) parts.push(project);
+  const left = parts.join(" · ");
+
+  // Right: mode + agents + cost + turns
+  const rightParts: string[] = [];
+  if (modeLabel) rightParts.push(modeLabel);
+  if (agentTag) rightParts.push(agentTag.trim());
+  if (cost) rightParts.push(cost);
+  rightParts.push(`T${turns}`);
+  const right = rightParts.join("  ") + " ";
+
   const w = cols();
-  const pad = Math.max(0, w - stripAnsi(left).length - stripAnsi(right).length);
-  return s.invert(stripAnsi(left) + " ".repeat(pad) + stripAnsi(right));
+  const pad = Math.max(0, w - left.length - right.length);
+  return s.invert(left + " ".repeat(pad) + right);
 }
 
 function stripAnsi(t: string): string {
@@ -85,18 +102,35 @@ function formatDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
+function formatToolInput(name: string, input: Record<string, unknown>): string {
+  // Show the most relevant input field for each tool type
+  switch (name) {
+    case "read_file": return input.file_path as string ?? "";
+    case "write_file": return input.file_path as string ?? "";
+    case "edit_file": return input.file_path as string ?? "";
+    case "shell": return (input.command as string ?? "").slice(0, 60);
+    case "glob": return input.pattern as string ?? "";
+    case "grep": return `/${input.pattern ?? ""}/ ${input.path ?? ""}`;
+    case "git_commit": return (input.message as string ?? "").slice(0, 50);
+    case "phren_search": return input.query as string ?? "";
+    case "phren_add_finding": return (input.finding as string ?? "").slice(0, 50);
+    default: return JSON.stringify(input).slice(0, 60);
+  }
+}
+
 function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
-  const inputPreview = JSON.stringify(input).slice(0, 80);
+  const preview = formatToolInput(name, input);
   const dur = formatDuration(durationMs);
   const icon = isError ? s.red("✗") : s.green("✓");
-  const header = s.dim(`  ${name}(${inputPreview})`) + `  ${icon} ${s.dim(dur)}`;
+  const header = `  ${icon} ${s.bold(name)} ${s.gray(preview)}  ${s.dim(dur)}`;
 
   // Compact: show first 3 lines only, with overflow count
   const allLines = output.split("\n").filter(Boolean);
+  if (allLines.length === 0) return header;
   const shown = allLines.slice(0, COMPACT_LINES);
-  const body = shown.map((l) => s.dim(`  │ ${l.slice(0, cols() - 6)}`)).join("\n");
+  const body = shown.map((l) => s.dim(`    ${l.slice(0, cols() - 6)}`)).join("\n");
   const overflow = allLines.length - COMPACT_LINES;
-  const more = overflow > 0 ? `\n${s.dim(`  │ [+${overflow} lines]`)}` : "";
+  const more = overflow > 0 ? `\n${s.dim(`    ... +${overflow} lines`)}` : "";
 
   return `${header}\n${body}${more}`;
 }
@@ -186,8 +220,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   // Print prompt
   function prompt() {
-    const modeTag = inputMode === "steering" ? s.dim("[steer]") : s.dim("[queue]");
-    w.write(`\n${s.cyan("phren>")} ${modeTag} `);
+    const modeTag = inputMode === "steering" ? s.gray("steer") : s.gray("queue");
+    const permLabel = PERMISSION_LABELS[config.registry.permissionConfig.mode];
+    w.write(`\n${s.brand("❯")} ${s.dim(`${modeTag} · ${permLabel}`)} `);
   }
 
   // Terminal cleanup: restore state on exit
@@ -205,7 +240,46 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}1;1H`); // move to top
     statusBar();
     w.write(`${ESC}2;1H`); // move below status bar
-    w.write(s.dim("phren-agent TUI. Tab: memory browser  Shift+Tab: permissions  /help: commands  Ctrl+D: exit\n"));
+
+    // Startup banner
+    const project = config.phrenCtx?.project;
+    const cwd = process.cwd().replace(os.homedir(), "~");
+    const permMode = config.registry.permissionConfig.mode;
+    const modeColor = permMode === "full-auto" ? s.yellow : permMode === "auto-confirm" ? s.green : s.cyan;
+
+    // Try to show the phren character art alongside info
+    let artLines: string[] = [];
+    try {
+      const { PHREN_ART } = await import("@phren/cli/phren-art" as string);
+      artLines = (PHREN_ART as string[]).filter((l: string) => l.trim());
+    } catch { /* art not available */ }
+
+    if (artLines.length > 0) {
+      // Art on left, info on right
+      const info = [
+        `${s.brand("◆ phren agent")}  ${s.dim("v0.0.1")}`,
+        `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
+        `${s.dim(cwd)}`,
+        ``,
+        `${modeColor(`◆ ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}`,
+        ``,
+        `${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit`,
+      ];
+      const maxArtWidth = 26; // phren art is ~24 chars wide
+      for (let i = 0; i < Math.max(artLines.length, info.length); i++) {
+        const artPart = i < artLines.length ? artLines[i] : "";
+        const infoPart = i < info.length ? info[i] : "";
+        const artPadded = artPart + " ".repeat(Math.max(0, maxArtWidth - stripAnsi(artPart).length));
+        w.write(`${artPadded}${infoPart}\n`);
+      }
+    } else {
+      // Fallback: text-only banner
+      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim("v0.0.1")}\n`);
+      w.write(`  ${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}  ${s.dim(cwd)}\n`);
+      w.write(`  ${modeColor(`◆ ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
+      w.write(`  ${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit\n\n`);
+    }
+    w.write("\n");
   }
 
   // Raw stdin for steering
@@ -294,7 +368,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const next = nextPermissionMode(current);
       config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
       savePermissionMode(next);
-      w.write(s.yellow(`  [mode: ${next}]\n`));
+      const modeColor = next === "full-auto" ? s.yellow : next === "auto-confirm" ? s.green : s.cyan;
+      const modeIcon = next === "full-auto" ? "◆" : next === "auto-confirm" ? "◇" : "○";
+      w.write(`  ${modeColor(`${modeIcon} ${next}`)}\n`);
       statusBar();
       if (!running) prompt();
       return;
@@ -406,9 +482,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write(renderMarkdown(text));
       if (!text.endsWith("\n")) w.write("\n");
     },
-    onToolStart: (name, _input, _count) => {
+    onToolStart: (name, input, count) => {
       flushTextBuffer();
-      w.write(s.dim(`  ⠋ ${name}...\r`));
+      const preview = formatToolInput(name, input);
+      const countLabel = count > 1 ? s.dim(` (${count} tools)`) : "";
+      w.write(`${ESC}2K  ${s.dim("⠋")} ${s.gray(name)} ${s.dim(preview)}${countLabel}\r`);
     },
     onToolEnd: (name, input, output, isError, dur) => {
       w.write(`${ESC}2K\r`);
@@ -433,7 +511,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   async function runAgentTurn(userInput: string) {
     running = true;
-    w.write(s.dim("  ⠋ Thinking...\r"));
+    w.write(`${ESC}2K  ${s.dim("⠋ Thinking...")}\r`);
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
