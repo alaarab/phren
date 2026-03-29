@@ -685,7 +685,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       if (firstDelta) {
         if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
         w.write(`${ESC}2K\r`);
-        w.write(`${s.brand("◆")} `); // diamond prefix for phren's response
+        w.write(`\n${s.brand("◆")} `); // blank line + diamond prefix for phren's response
         firstDelta = false;
       }
       w.write(text);
@@ -694,13 +694,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       flushTextBuffer();
     },
     onTextBlock: (text) => {
-      // Kill the thinking animation if this is the first output (non-streaming providers)
       if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
       if (firstDelta) {
-        w.write(`${ESC}2K\r`); // clear thinking line
+        w.write(`${ESC}2K\r`);
+        w.write(`\n${s.brand("◆")} `); // diamond prefix + blank line before response
         firstDelta = false;
       }
-      w.write(renderMarkdown(text));
+      w.write(text);
       if (!text.endsWith("\n")) w.write("\n");
     },
     onToolStart: (name, input, count) => {
