@@ -13,6 +13,8 @@ import { createFlushConfig, checkFlushNeeded, type FlushConfig } from "./memory/
 import { injectPlanPrompt, requestPlanApproval } from "./plan.js";
 import { detectLintCommand, detectTestCommand, runPostEditCheck, type LintTestConfig } from "./tools/lint-test.js";
 import { createCheckpoint } from "./checkpoint.js";
+import { autoCaptureTool } from "./memory/tool-capture.js";
+import { scrubToolOutput } from "./permissions/privacy.js";
 
 const MAX_TOOL_CONCURRENCY = 5;
 
@@ -364,10 +366,11 @@ export async function runTurn(
       session.toolCalls++;
       turnToolCalls++;
 
-      let finalOutput = output;
+      // Privacy: scrub secrets from tool output before sending to LLM
+      let finalOutput = scrubToolOutput(block.name, output);
 
       // Record for anti-pattern tracking
-      session.antiPatterns.recordAttempt(block.name, block.input, !is_error, output);
+      session.antiPatterns.recordAttempt(block.name, block.input, !is_error, finalOutput);
 
       // Append phren recovery context on tool errors
       if (is_error && config.phrenCtx) {
@@ -392,6 +395,13 @@ export async function runTurn(
             toolOutput: finalOutput,
             isError: is_error,
           });
+        } catch { /* best effort */ }
+      }
+
+      // PostToolUse auto-capture — save interesting patterns as phren findings
+      if (config.phrenCtx) {
+        try {
+          await autoCaptureTool(config.phrenCtx, block.name, block.input, finalOutput, is_error);
         } catch { /* best effort */ }
       }
 

@@ -1,5 +1,7 @@
 /** TTY spinner + formatting helpers for the agent REPL. */
 
+import { t, formatToolName, formatInlineCost, formatEffort } from "./theme.js";
+
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const INTERVAL = 80;
 
@@ -16,7 +18,7 @@ export function createSpinner(): Spinner {
   let text = "";
 
   function render(): void {
-    process.stderr.write(`\r\x1b[2K\x1b[90m${FRAMES[frame]} ${text}\x1b[0m`);
+    process.stderr.write(`\r\x1b[2K${t.brandDim(`${FRAMES[frame]} ${text}`)}`);
     frame = (frame + 1) % FRAMES.length;
   }
 
@@ -44,12 +46,23 @@ export function createSpinner(): Spinner {
 
 /** Format a turn header for REPL output. */
 export function formatTurnHeader(turn: number, toolCalls: number): string {
-  return `\x1b[90m--- turn ${turn} (${toolCalls} tool call${toolCalls !== 1 ? "s" : ""}) ---\x1b[0m`;
+  return t.muted(`── turn ${turn} (${toolCalls} tool call${toolCalls !== 1 ? "s" : ""}) ──`);
 }
 
 /** Format a tool call for display: name + truncated input preview. */
 export function formatToolCall(name: string, input: Record<string, unknown>): string {
   const raw = JSON.stringify(input);
   const preview = raw.length > 100 ? raw.slice(0, 100) + "..." : raw;
-  return `\x1b[2m  ${name}(${preview})\x1b[0m`;
+  return `  ${formatToolName(name)}${t.muted(`(${preview})`)}`;
+}
+
+/** Format a turn cost badge (shown inline after each response). */
+export function formatTurnCostBadge(turnCost: number): string {
+  if (turnCost <= 0) return "";
+  return `  ${formatInlineCost(turnCost)}`;
+}
+
+/** Format effort level badge for status display. */
+export function formatEffortBadge(level: string): string {
+  return formatEffort(level);
 }
