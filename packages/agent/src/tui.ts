@@ -875,10 +875,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   const tuiHooks: TurnHooks = {
     onTextDelta: (text) => {
       if (firstDelta) {
+        cursorToScrollEnd(); // ensure we're in the scroll region
         w.write(`${ESC}2K\r`); // clear thinking timer line
         firstDelta = false;
       }
-      // Stream directly for real-time feel — write each delta immediately
       w.write(text);
     },
     onTextDone: () => {
