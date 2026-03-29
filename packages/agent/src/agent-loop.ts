@@ -83,28 +83,31 @@ export interface TurnHooks {
   getSteeringInput?: () => string | null;
 }
 
-/** Run tool blocks with concurrency limit. */
+/** Run tool blocks with concurrency limit. Tracks execution duration per tool. */
 async function runToolsConcurrently(
   blocks: ToolUseBlock[],
   registry: ToolRegistry,
-): Promise<Array<{ block: ToolUseBlock; output: string; is_error: boolean }>> {
-  const results: Array<{ block: ToolUseBlock; output: string; is_error: boolean }> = [];
+): Promise<Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number }>> {
+  const results: Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number }> = [];
   for (let i = 0; i < blocks.length; i += MAX_TOOL_CONCURRENCY) {
     const batch = blocks.slice(i, i + MAX_TOOL_CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (block) => {
         const TOOL_TIMEOUT_MS = 120_000;
+        const start = Date.now();
         try {
+          let timer: ReturnType<typeof setTimeout> | undefined;
           const result = await Promise.race([
             registry.execute(block.name, block.input),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`Tool '${block.name}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS),
-            ),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error(`Tool '${block.name}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+            }),
           ]);
-          return { block, output: result.output, is_error: !!result.is_error };
+          clearTimeout(timer);
+          return { block, output: result.output, is_error: !!result.is_error, durationMs: Date.now() - start };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          return { block, output: msg, is_error: true };
+          return { block, output: msg, is_error: true, durationMs: Date.now() - start };
         }
       }),
     );
@@ -333,7 +336,7 @@ export async function runTurn(
 
     const toolResults: ContentBlock[] = [];
 
-    for (const { block, output, is_error } of execResults) {
+    for (const { block, output, is_error, durationMs } of execResults) {
       session.toolCalls++;
       turnToolCalls++;
 
@@ -356,7 +359,7 @@ export async function runTurn(
       }
 
       if (hooks?.onToolEnd) {
-        hooks.onToolEnd(block.name, block.input, finalOutput, is_error, 0);
+        hooks.onToolEnd(block.name, block.input, finalOutput, is_error, durationMs);
       } else if (verbose) {
         const preview = finalOutput.slice(0, 200);
         status(`\x1b[2m  ← ${is_error ? "ERROR: " : ""}${preview}${finalOutput.length > 200 ? "..." : ""}\x1b[0m\n`);

@@ -38,7 +38,7 @@ interface McpServerConfig {
 class McpConnection {
   private proc: ChildProcess;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private rl: readline.Interface;
   readonly name: string;
 
@@ -55,7 +55,8 @@ class McpConnection {
       try {
         const msg = JSON.parse(line) as JsonRpcResponse;
         if (msg.id !== undefined && this.pending.has(msg.id)) {
-          const { resolve, reject } = this.pending.get(msg.id)!;
+          const { resolve, reject, timer } = this.pending.get(msg.id)!;
+          clearTimeout(timer);
           this.pending.delete(msg.id);
           if (msg.error) reject(new Error(`MCP error: ${msg.error.message}`));
           else resolve(msg.result);
@@ -64,7 +65,7 @@ class McpConnection {
     });
 
     this.proc.on("error", (err) => {
-      for (const { reject } of this.pending.values()) reject(err);
+      for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(err); }
       this.pending.clear();
     });
   }
@@ -73,16 +74,14 @@ class McpConnection {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const msg: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
-      this.pending.set(id, { resolve, reject });
-      this.proc.stdin!.write(JSON.stringify(msg) + "\n");
-
-      // Timeout after 30s
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`MCP call ${method} timed out (30s)`));
         }
       }, 30_000);
+      this.pending.set(id, { resolve, reject, timer });
+      this.proc.stdin!.write(JSON.stringify(msg) + "\n");
     });
   }
 
@@ -111,7 +110,7 @@ class McpConnection {
     try { this.proc.stdin!.end(); } catch { /* ignore */ }
     try { this.proc.kill(); } catch { /* ignore */ }
     this.rl.close();
-    for (const { reject } of this.pending.values()) reject(new Error("Connection closed"));
+    for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new Error("Connection closed")); }
     this.pending.clear();
   }
 }
