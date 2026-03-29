@@ -629,11 +629,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         w.write(`${ESC}2K\r`); // clear thinking timer line
         firstDelta = false;
       }
-      textBuffer += text;
-      // Flush on paragraph boundaries (double newline) or single newline for streaming feel
-      if (textBuffer.includes("\n\n") || textBuffer.endsWith("\n")) {
-        flushTextBuffer();
-      }
+      // Stream directly for real-time feel — write each delta immediately
+      w.write(text);
     },
     onTextDone: () => {
       flushTextBuffer();

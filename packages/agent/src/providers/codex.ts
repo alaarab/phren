@@ -249,7 +249,8 @@ export class CodexProvider implements LlmProvider {
         const type = event.type as string;
 
         if (type === "response.output_text.delta") {
-          yield { type: "text_delta", text: event.delta as string };
+          const delta = event.delta as string;
+          if (delta) yield { type: "text_delta", text: delta };
         } else if (type === "response.output_item.added") {
           if ((event.item as Record<string, unknown>)?.type === "function_call") {
             const item = event.item as Record<string, unknown>;
