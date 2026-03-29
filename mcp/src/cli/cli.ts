@@ -195,6 +195,10 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleTeamNamespace(args);
     case "promote":
       return handlePromoteNamespace(args);
+    case "agent": {
+      const { runAgentCli } = await import("../agent/index.js");
+      return runAgentCli(args);
+    }
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
       process.exit(1);

@@ -88,10 +88,35 @@ Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user pro
 
 ---
 
+## Built-in coding agent
+
+Phren includes a coding agent that uses LLMs with tool calling to complete tasks autonomously -- backed by phren's persistent memory.
+
+```bash
+phren agent "fix the login bug"                          # one-shot task
+phren agent -i                                           # interactive TUI / REPL
+phren agent --plan "refactor the database layer"         # review plan before execution
+phren agent --provider codex --budget 2.00 "add tests"   # pick provider, set cost cap
+```
+
+**Providers:** OpenRouter, Anthropic, OpenAI, Codex (ChatGPT subscription), Ollama (local). Auto-detected from env vars or set with `--provider`.
+
+**Tools:** File I/O (read, write, edit), shell, glob, grep, git (status, diff, commit), plus phren memory tools (search, add finding, tasks).
+
+**Memory-aware:** The agent starts with phren context (truths, tasks, findings, CLAUDE.md), auto-captures error patterns, tracks anti-patterns, and evolves project context at session end via LLM reflection.
+
+**Interactive features:** Streaming output, TUI with status bar, steering/queue input modes, slash commands (`/cost`, `/plan`, `/undo`, `/compact`), session resume with `--resume`.
+
+**Security:** Three permission modes (suggest, auto-confirm, full-auto), path sandboxing, sensitive file protection, shell command safety checks, env scrubbing.
+
+---
+
 ## CLI quick reference
 
 ```bash
 phren                                   Interactive shell (explore/search)
+phren agent "task"                      Run the coding agent on a task
+phren agent -i                          Interactive agent (TUI/REPL)
 phren search <query>                    Full-text search with FTS5
 phren add-finding <project> "insight"   Capture a finding
 phren task add <project> "item"         Add a task

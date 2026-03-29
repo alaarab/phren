@@ -25,6 +25,8 @@ const HELP_TEXT = `phren - persistent knowledge for your agents
   phren web-ui              Open the knowledge graph
   phren tasks               Cross-project task view
   phren graph               Fragment knowledge graph
+  phren agent <task>        Run the coding agent
+  phren agent -i            Interactive agent TUI
 
   phren store list              List registered stores
   phren team init <name>        Create a team store
@@ -198,6 +200,7 @@ const CLI_COMMANDS = [
   "store",
   "team",
   "promote",
+  "agent",
 ];
 
 async function flushTopLevelOutput(): Promise<void> {

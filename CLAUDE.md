@@ -228,6 +228,158 @@ phren maintain consolidate [project]  Deduplicate FINDINGS.md
 phren maintain extract [project]      Mine git/GitHub signals
 ```
 
+## Agent
+
+Phren includes a built-in coding agent (`phren agent` or `phren-agent`) that uses LLMs with tool calling to complete tasks autonomously, with persistent memory from phren's knowledge base.
+
+### Architecture
+
+```
+Provider (LLM API) → Agent Loop → Tools → Phren Memory
+       ↑                  ↓           ↓
+  Streaming/Batch    Context Prune  Session/Findings
+```
+
+1. **Provider** resolves an LLM backend (OpenRouter, Anthropic, OpenAI, Codex, Ollama)
+2. **Agent loop** sends system prompt + conversation to the provider, receives text + tool calls
+3. **Tools** execute locally (file I/O, shell, grep, glob) and against phren (search, findings, tasks)
+4. **Memory** injects context at session start (warm start), captures findings during execution, and evolves project context at session end via LLM reflection
+
+### CLI Usage
+
+```bash
+phren agent "fix the login bug"                          # one-shot task
+phren agent -i                                           # interactive REPL / TUI
+phren agent --provider codex "add validation"            # force provider
+phren agent --plan "refactor the database layer"         # plan mode (review before tools)
+phren agent --budget 1.50 --verbose "migrate to ESM"     # cost cap + verbose
+phren agent --resume                                     # resume last interrupted session
+phren agent --lint-cmd "npm run lint" "fix all warnings" # override auto-detected lint
+phren agent auth login                                   # authenticate for Codex provider
+phren agent auth logout                                  # remove Codex credentials
+```
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--provider <name>` | Force provider: `openrouter`, `anthropic`, `openai`, `codex`, `ollama` |
+| `--model <model>` | Override LLM model |
+| `--project <name>` | Force phren project context |
+| `--max-turns <n>` | Max tool-use turns (default: 50) |
+| `--budget <dollars>` | Max spend in USD (aborts when exceeded) |
+| `--plan` | Plan mode: LLM describes plan before tools are enabled |
+| `--permissions <mode>` | `suggest` (ask for everything), `auto-confirm` (default), `full-auto` |
+| `--interactive`, `-i` | Interactive multi-turn REPL/TUI mode |
+| `--resume` | Resume last session's conversation (reloads messages from prior run) |
+| `--lint-cmd <cmd>` | Override auto-detected lint command |
+| `--test-cmd <cmd>` | Override auto-detected test command |
+| `--dry-run` | Print system prompt and exit |
+| `--verbose` | Show tool calls, results, and cost per turn |
+| `--version` | Show version |
+| `--help` | Show help |
+
+### Providers
+
+Resolved in priority order from `--provider` flag, `PHREN_AGENT_PROVIDER` env, or auto-detected from API keys:
+
+| Provider | Env Var | Notes |
+|----------|---------|-------|
+| `openrouter` | `OPENROUTER_API_KEY` | Routes to any model. Default when key is set. |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude direct API. |
+| `openai` | `OPENAI_API_KEY` | OpenAI direct API. |
+| `codex` | *(none, uses OAuth)* | ChatGPT/Codex subscription. Setup: `phren agent auth login` |
+| `ollama` | `PHREN_OLLAMA_URL` | Local models. Falls back to `localhost:11434`. |
+
+Env overrides: `PHREN_AGENT_PROVIDER`, `PHREN_AGENT_MODEL`.
+
+### Agent Tools (13)
+
+| Tool | Category | Description |
+|------|----------|-------------|
+| `read_file` | File I/O | Read file contents with optional offset/limit |
+| `write_file` | File I/O | Write/create files (creates parent dirs) |
+| `edit_file` | File I/O | Surgical string replacement in files |
+| `shell` | System | Run shell commands (scrubbed env, timeout, safety checks) |
+| `glob` | Search | Find files by pattern |
+| `grep` | Search | Search file contents with regex |
+| `git_status` | Git | Show working tree status |
+| `git_diff` | Git | Show staged and unstaged diffs |
+| `git_commit` | Git | Create a git commit |
+| `phren_search` | Memory | FTS5 search across phren knowledge base |
+| `phren_add_finding` | Memory | Save findings to phren for future recall |
+| `phren_get_tasks` | Memory | Read active/queued tasks from phren |
+| `phren_complete_task` | Memory | Mark tasks as completed |
+
+### Memory Features
+
+- **Warm start**: Injects pinned truths, active tasks, recent findings, project CLAUDE.md, and FTS5 search results into the system prompt
+- **Prior session summary**: Reads last session's summary for continuity across runs
+- **Error recovery**: On tool errors, searches phren for past knowledge about similar errors and appends recovery context
+- **Auto-capture**: Detects error patterns (missing files, permission errors, port conflicts, etc.) and saves them as findings automatically (session cap: 10, cooldown: 30s)
+- **Anti-pattern tracking**: Detects failed-then-succeeded tool call pairs and saves them as findings at session end
+- **Context flush**: At 75% context usage, injects a prompt asking the LLM to summarize key discoveries (one-time per session)
+- **Evolving project context**: At session end, runs a lightweight LLM reflection on the conversation and appends to `agent-context.md`
+- **Session resume**: `--resume` reloads the previous session's messages and continues where it left off
+- **Checkpoints**: Creates a git checkpoint before starting one-shot tasks for easy rollback
+
+### DX Features
+
+- **Streaming**: Real-time token output from providers that support `chatStream`
+- **TUI**: Full terminal UI with status bar (provider, project, turns, cost), inline tool call rendering with duration, raw stdin for steering
+- **REPL**: Fallback interactive mode for non-TTY terminals with readline history
+- **Slash commands**: `/help`, `/turns`, `/clear`, `/cost`, `/plan`, `/undo`, `/history`, `/compact`, `/mode`, `/exit`
+- **Input modes**: Steering (inject input mid-turn as redirect) and Queue (buffer input for next turn), toggle with `/mode`
+- **Cost tracking**: Per-model pricing table, per-turn and cumulative cost display, budget enforcement
+- **Plan mode**: `--plan` flag blocks tool use on first turn, LLM describes its plan, user can approve/reject/edit before execution proceeds
+- **Lint/test detection**: Auto-detects lint and test commands from package.json, Makefile, etc. Override with `--lint-cmd` / `--test-cmd`
+- **MCP client**: Connect to external MCP servers (stdio transport), auto-discover and wrap tools
+
+### Security
+
+- **Permission modes**: `suggest` (ask for everything), `auto-confirm` (allow safe tools + sandbox writes), `full-auto` (allow all, warn on dangerous)
+- **Path sandboxing**: File tools validate paths against project root + allowed paths, resolve symlinks
+- **Sensitive file protection**: Blocks access to `.ssh/`, `.aws/`, `.env`, `id_rsa`, `credentials.json`, `.pem` files
+- **Shell safety**: Blocks fork bombs, `rm -rf /`, `curl | sh`, `dd of=/dev/`; warns on `sudo`, `git push --force`, `env`/`printenv`
+- **Env scrubbing**: Shell tool strips API keys and secrets (`*_SECRET`, `*_TOKEN`, `*_PASSWORD`) from the child process environment
+
+### Reliability
+
+- **Context pruning**: Automatically compacts conversation when approaching 75% of provider context window. Keeps first message + last N turns, summarizes pruned middle.
+- **API retry**: Exponential backoff with jitter for retryable HTTP errors (429, 500, 502, 503, 529). Respects `Retry-After` headers. Max 3 retries.
+- **Parallel tool execution**: Up to 5 tool calls run concurrently per turn.
+
+### Agent Source Files
+
+| File | Purpose |
+|------|---------|
+| `agent/src/index.ts` | Entry point: CLI parsing, provider resolution, session lifecycle |
+| `agent/src/agent-loop.ts` | Core agent loop: turn management, streaming, tool dispatch |
+| `agent/src/config.ts` | CLI argument parsing and help text |
+| `agent/src/system-prompt.ts` | System prompt builder with phren context injection |
+| `agent/src/tui.ts` | Terminal UI: status bar, streaming, raw stdin steering |
+| `agent/src/repl.ts` | REPL fallback: readline with history, steering/queue modes |
+| `agent/src/commands.ts` | Slash command dispatch for interactive modes |
+| `agent/src/cost.ts` | Cost tracking with per-model pricing table |
+| `agent/src/plan.ts` | Plan mode: prompt injection and approval flow |
+| `agent/src/checkpoint.ts` | Git checkpoint creation for rollback on one-shot runs |
+| `agent/src/mcp-client.ts` | MCP client: stdio transport, JSON-RPC, tool wrapping |
+| `agent/src/spinner.ts` | TTY spinner and formatting helpers |
+| `agent/src/phren-imports.ts` | Typed dynamic imports from mcp/dist/ |
+| `agent/src/providers/` | LLM providers: openrouter, anthropic, openai, codex, ollama |
+| `agent/src/providers/retry.ts` | Exponential backoff retry wrapper |
+| `agent/src/providers/codex-auth.ts` | Codex OAuth PKCE login/logout flow |
+| `agent/src/tools/` | Tool implementations: read/write/edit file, shell, glob, grep, git, phren-* |
+| `agent/src/tools/git.ts` | Git tools: status, diff, commit |
+| `agent/src/tools/lint-test.ts` | Auto-detect and run lint/test commands |
+| `agent/src/tools/registry.ts` | Tool registry with permission checking |
+| `agent/src/memory/` | Memory subsystem: context, session, error recovery, auto-capture |
+| `agent/src/memory/anti-patterns.ts` | Anti-pattern tracker (failed→succeeded tool pairs) |
+| `agent/src/memory/context-flush.ts` | One-time knowledge extraction at 75% context |
+| `agent/src/memory/project-context.ts` | Evolving project context via LLM reflection |
+| `agent/src/context/pruner.ts` | Conversation pruning to fit context windows |
+| `agent/src/permissions/` | Permission system: modes, sandbox, shell safety, env scrubbing |
+
 ## Hooks (registered by init, live in ~/.claude/settings.json)
 
 | Hook | What it does |
@@ -235,9 +387,9 @@ phren maintain extract [project]      Mine git/GitHub signals
 | `UserPromptSubmit` | Runs hook-prompt: extracts keywords, searches phren, injects context. Also checks consolidation threshold and injects phren-notice once per session. |
 | `PostToolUse` | Runs hook-tool: captures tool-level continuity hints and queues compact review candidates from interesting file/command activity. |
 | `Stop` | Auto-commits and pushes ~/.phren changes after every response |
-| `SessionStart` | git pull on ~/.phren at session start, runs hook-context for project context |
+| `SessionStart` | git pull on ~/.phren at session start, creates session record, ends previous hook session |
 
-Hooks handle retrieval and persistence, but they do not create `session_history` records. Agents still need to call `session_start` / `session_end` when resumable session history, checkpoints, or per-session provenance matter.
+The SessionStart hook automatically creates session records (marked `hookCreated: true`) so that `session_history` tracks hook-driven sessions. Each new SessionStart retroactively ends the previous hook session. The active session ID is written to `~/.phren/.runtime/active-hook-session`. Agents can still call `session_start` / `session_end` explicitly for richer context (checkpoints, summaries, scope).
 
 ## Consolidation System
 
