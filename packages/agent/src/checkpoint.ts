@@ -1,6 +1,7 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 export interface Checkpoint {
   ref: string;
@@ -25,8 +26,8 @@ function isGitRepo(cwd: string): boolean {
   }
 }
 
-function storeFile(cwd: string): string {
-  const dir = path.join(cwd, ".runtime");
+function storeFile(_cwd: string): string {
+  const dir = path.join(os.homedir(), ".phren-agent");
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, "checkpoints.json");
 }

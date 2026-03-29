@@ -15,10 +15,16 @@ const SENSITIVE_PATTERNS = [
   "credentials.json",
   "secrets.json",
   "secrets.yaml",
+  ".npmrc",
+  ".netrc",
+  ".docker/config.json",
+  ".kube/config",
+  "/.gnupg/",
+  ".pypirc",
 ];
 
 /** File extensions that are always sensitive. */
-const SENSITIVE_EXTENSIONS = [".pem"];
+const SENSITIVE_EXTENSIONS = [".pem", ".p12", ".pfx", ".key", ".keystore", ".jks"];
 
 export type PathValidation =
   | { ok: true; resolved: string }

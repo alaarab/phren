@@ -189,6 +189,9 @@ export async function codexLogin(): Promise<void> {
   console.log(`Logged in! Token saved to ${tokenPath()}`);
 }
 
+// Lock so concurrent callers share a single in-flight refresh
+let refreshPromise: Promise<TokenSet> | null = null;
+
 /** Load stored token, auto-refresh if expiring within 5 minutes. */
 export async function getAccessToken(): Promise<{ accessToken: string; accountId?: string }> {
   const file = tokenPath();
@@ -203,8 +206,11 @@ export async function getAccessToken(): Promise<{ accessToken: string; accountId
     if (!tokens.refresh_token) {
       throw new Error("Token expired and no refresh token. Run: phren-agent auth login");
     }
-    console.error("Refreshing Codex token...");
-    tokens = await refreshToken(tokens.refresh_token);
+    if (!refreshPromise) {
+      console.error("Refreshing Codex token...");
+      refreshPromise = refreshToken(tokens.refresh_token).finally(() => { refreshPromise = null; });
+    }
+    tokens = await refreshPromise;
     fs.writeFileSync(file, JSON.stringify(tokens, null, 2) + "\n", { mode: 0o600 });
   }
 

@@ -47,6 +47,7 @@ export class OpenRouterProvider implements LlmProvider {
       messages: toOpenAiMessages(system, messages),
       max_tokens: 8192,
       stream: true,
+      stream_options: { include_usage: true },
     };
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
@@ -112,6 +113,7 @@ export class OpenAiProvider implements LlmProvider {
       messages: toOpenAiMessages(system, messages),
       max_tokens: 8192,
       stream: true,
+      stream_options: { include_usage: true },
     };
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
