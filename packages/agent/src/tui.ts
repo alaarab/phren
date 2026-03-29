@@ -582,15 +582,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const line = inputLine.trim();
       cursorPos = 0;
       inputLine = "";
-      // Clear the bottom bar: we're on the input line, move down past remaining
-      // prompt lines (separator + permissions) and clear them, then move back up
-      // to write output where the prompt was
-      if (isTTY) {
-        // Erase from input line down through the prompt area
-        w.write(`\r${ESC}J`); // clear from cursor to end of screen
-      }
 
-      if (!line) { prompt(); return; }
+      if (!line) { redrawInput(); return; }
 
       // Push to history
       if (inputHistory[inputHistory.length - 1] !== line) {
@@ -689,8 +682,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         return;
       }
 
-      // Echo user input into chat history, then run turn
+      // Clear input line, echo user input above prompt, redraw prompt
+      w.write(`\r${ESC}2K`); // clear input line
+      // Scroll up: move to line above prompt area, write content, redraw prompt
+      w.write(`${ESC}${PROMPT_LINES}A`); // move up past the prompt area
       w.write(`\n${s.bold("You:")} ${line}\n`);
+      prompt(); // redraw prompt below
       runAgentTurn(line);
       return;
     }
@@ -920,11 +917,19 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     },
   };
 
+  // Write content above the prompt area: move up past prompt, write, redraw prompt
+  function writeAbovePrompt(text: string) {
+    w.write(`${ESC}s`); // save cursor
+    // Move to the line just above the prompt area
+    const rows = process.stdout.rows || 24;
+    w.write(`${ESC}${rows - PROMPT_LINES};1H`); // position above prompt
+    w.write(`\n${text}`); // newline pushes prompt down, write content
+    w.write(`${ESC}u`); // restore cursor (now in pushed-down prompt)
+  }
+
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
-    // Show initial thinking state immediately (no gap)
-    w.write(`  ${s.dim("◆ thinking...")}\r`);
     const thinkStart = Date.now();
     // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;
