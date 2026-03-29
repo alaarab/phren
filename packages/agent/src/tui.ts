@@ -478,7 +478,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     if (key.name === "return") {
       const line = inputLine.trim();
       inputLine = "";
-      w.write("\n");
+      // Move to scroll area (above the fixed bottom bar) before writing output
+      const rows = process.stdout.rows || 24;
+      w.write(`${ESC}${rows - 5};1H\n`);
 
       if (!line) { prompt(); return; }
 
@@ -680,36 +682,25 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     running = true;
     firstDelta = true;
     const thinkStart = Date.now();
-    // Animated thinking — color-shifting words in phren palette
-    const THINK_WORDS = ["thinking", "reasoning", "analyzing", "processing", "working", "exploring"];
-    const THINK_COLORS = [
-      (t: string) => `${ESC}38;2;155;140;250m${t}${ESC}0m`, // phren purple
-      (t: string) => `${ESC}38;2;40;211;242m${t}${ESC}0m`,  // phren cyan
-      (t: string) => `${ESC}38;2;120;100;250m${t}${ESC}0m`,  // deep purple
-      (t: string) => `${ESC}38;2;80;200;220m${t}${ESC}0m`,   // teal
-      (t: string) => `${ESC}38;2;180;160;255m${t}${ESC}0m`,  // light purple
-      (t: string) => `${ESC}38;2;60;230;200m${t}${ESC}0m`,   // mint
-    ];
-    const THINK_SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;
     const thinkTimer = setInterval(() => {
       const elapsed = (Date.now() - thinkStart) / 1000;
-      const wordIdx = Math.floor(elapsed / 8) % THINK_WORDS.length;
-      const colorIdx = Math.floor(thinkFrame / 3) % THINK_COLORS.length;
-      const spinner = THINK_SPINNERS[thinkFrame % THINK_SPINNERS.length];
-      const colorFn = THINK_COLORS[colorIdx];
-      const word = THINK_WORDS[wordIdx];
-      const dots = ".".repeat((thinkFrame % 12) < 4 ? 1 : (thinkFrame % 12) < 8 ? 2 : 3);
-      w.write(`${ESC}2K  ${colorFn(`${spinner} ${word}${dots}`)} ${s.dim(`${elapsed.toFixed(1)}s`)}\r`);
+      // Gentle sine-wave interpolation between phren purple and cyan
+      const t = (Math.sin(thinkFrame * 0.08) + 1) / 2; // 0..1, slow oscillation
+      const r = Math.round(155 * (1 - t) + 40 * t);
+      const g = Math.round(140 * (1 - t) + 211 * t);
+      const b = Math.round(250 * (1 - t) + 242 * t);
+      const color = `${ESC}38;2;${r};${g};${b}m`;
+      w.write(`${ESC}2K  ${color}◆ thinking${ESC}0m ${s.dim(`${elapsed.toFixed(1)}s`)}\r`);
       thinkFrame++;
-    }, 80);
+    }, 50);
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
       clearInterval(thinkTimer);
-      // Final "thought for Xs" in gray
       const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
-      w.write(`${ESC}2K  ${s.dim(`· thought for ${elapsed}s`)}\r\n`);
+      w.write(`${ESC}2K  ${s.dim(`◆ thought for ${elapsed}s`)}\n`);
       statusBar();
     } catch (err: unknown) {
       clearInterval(thinkTimer);
