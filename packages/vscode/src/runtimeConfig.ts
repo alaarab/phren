@@ -16,7 +16,7 @@ export interface ResolvedRuntimeConfig {
 }
 
 const PACKAGE_NAMES = ["@phren/cli", "phren"];
-const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("mcp", "dist", "index.js");
+const MCP_ENTRYPOINT_RELATIVE_PATH = path.join("dist", "index.js");
 
 export function resolveRuntimeConfig(config: ConfigSource): ResolvedRuntimeConfig {
   const nodePath = normalizeCommandPath(config.get<string>("nodePath", "node")) ?? "node";
@@ -69,7 +69,7 @@ function detectMcpServerPath(): string | undefined {
     }
   }
 
-  candidates.add(path.resolve(__dirname, "..", "..", "mcp", "dist", "index.js"));
+  candidates.add(path.resolve(__dirname, "..", "..", "dist", "index.js"));
 
   // Fallback: extract path from Claude Code or VS Code MCP config files
   const mcpConfigFiles = [
@@ -86,16 +86,30 @@ function detectMcpServerPath(): string | undefined {
   }
 
   // Fallback: scan npx cache for @phren/cli (most recently modified first)
-  const npxCacheDir = path.join(os.homedir(), ".npm", "_npx");
-  try {
-    const hashes = fs.readdirSync(npxCacheDir)
-      .map((name) => ({ name, mtime: safeStat(path.join(npxCacheDir, name))?.mtimeMs ?? 0 }))
-      .sort((a, b) => b.mtime - a.mtime);
-    for (const { name } of hashes) {
-      candidates.add(path.join(npxCacheDir, name, "node_modules", "@phren/cli", MCP_ENTRYPOINT_RELATIVE_PATH));
+  // Windows: %APPDATA%/npm-cache/_npx/ or %LOCALAPPDATA%/npm-cache/_npx/
+  // Linux/Mac: ~/.npm/_npx/
+  const npxCacheDirs: string[] = [];
+  if (process.platform === "win32") {
+    if (process.env.APPDATA) {
+      npxCacheDirs.push(path.join(process.env.APPDATA, "npm-cache", "_npx"));
     }
-  } catch {
-    // npx cache dir doesn't exist — skip
+    if (process.env.LOCALAPPDATA) {
+      npxCacheDirs.push(path.join(process.env.LOCALAPPDATA, "npm-cache", "_npx"));
+    }
+  } else {
+    npxCacheDirs.push(path.join(os.homedir(), ".npm", "_npx"));
+  }
+  for (const npxCacheDir of npxCacheDirs) {
+    try {
+      const hashes = fs.readdirSync(npxCacheDir)
+        .map((name) => ({ name, mtime: safeStat(path.join(npxCacheDir, name))?.mtimeMs ?? 0 }))
+        .sort((a, b) => b.mtime - a.mtime);
+      for (const { name } of hashes) {
+        candidates.add(path.join(npxCacheDir, name, "node_modules", "@phren/cli", MCP_ENTRYPOINT_RELATIVE_PATH));
+      }
+    } catch {
+      // npx cache dir doesn't exist — skip
+    }
   }
 
   for (const candidate of candidates) {

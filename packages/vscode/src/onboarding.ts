@@ -395,7 +395,7 @@ async function runCommandWithProgress(
 async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
-      shell: false,
+      shell: process.platform === "win32",
       env: options.env ? { ...process.env, ...options.env } : process.env,
     });
     let stdout = "";
