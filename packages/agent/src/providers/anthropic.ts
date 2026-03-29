@@ -102,20 +102,22 @@ export class AnthropicProvider implements LlmProvider {
         const delta = data.delta as Record<string, unknown>;
         if (delta.stop_reason === "tool_use") stopReason = "tool_use";
         else if (delta.stop_reason === "max_tokens") stopReason = "max_tokens";
+        // message_delta carries output_tokens — merge with existing input_tokens from message_start
         const u = data.usage as Record<string, number> | undefined;
         if (u) {
           usage = {
-            input_tokens: u.input_tokens ?? 0,
+            input_tokens: usage?.input_tokens ?? 0,
             output_tokens: u.output_tokens ?? 0,
           };
         }
       } else if (type === "message_start") {
+        // message_start carries input_tokens — initialize usage
         const u = (data.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
         if (u) {
           logCacheUsage(u);
           usage = {
             input_tokens: u.input_tokens ?? 0,
-            output_tokens: u.output_tokens ?? 0,
+            output_tokens: usage?.output_tokens ?? 0,
           };
         }
       }

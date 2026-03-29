@@ -58,11 +58,13 @@ export function parseOpenAiResponse(data: Record<string, unknown>): LlmResponse 
   if (toolCalls) {
     for (const tc of toolCalls) {
       const fn = tc.function as Record<string, unknown>;
+      let input: Record<string, unknown> = {};
+      try { input = JSON.parse(fn.arguments as string); } catch { /* malformed arguments */ }
       content.push({
         type: "tool_use",
         id: tc.id as string,
         name: fn.name as string,
-        input: JSON.parse(fn.arguments as string),
+        input,
       });
     }
   }

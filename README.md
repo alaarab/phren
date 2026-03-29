@@ -10,198 +10,144 @@
 </p>
 
 <p align="center">
-A coding agent with persistent memory. Findings, tasks, and patterns live in markdown files in a git repo you control. No database, no vendor lock-in.
+Persistent memory for AI agents. Findings, tasks, and patterns live in markdown files in a git repo you control. No database, no vendor lock-in. Works with Claude, Copilot, Cursor, and Codex.
 </p>
 
 ---
 
-## What is phren?
-
-**A coding agent** that reads, writes, and edits your code with tool calling. It starts each session knowing your project's gotchas, active tasks, and past decisions — because it remembers them.
-
-**A memory layer** for any AI agent. 53 MCP tools, session hooks, and FTS5 full-text search let Claude Code, Copilot, Cursor, and Codex share persistent context across conversations and machines.
-
----
-
-## Quickstart
-
-### A) Use the agent
-
-```bash
-npm i -g @phren/cli @phren/agent
-phren init
-phren agent -i                              # interactive TUI
-phren agent "fix the login bug"             # one-shot task
-phren agent --yolo "add input validation"   # full-auto, no confirmations
-```
-
-### B) Add memory to your existing agent
+## Install
 
 ```bash
 npx @phren/cli init
 ```
 
-One command. Sets up `~/.phren`, wires MCP into Claude Code / Copilot / Cursor / Codex, and installs hooks. Next time you open a prompt, context flows automatically.
-
-### C) VS Code extension
-
-Install **Phren** from the VS Code marketplace. It runs `phren init` on first activation, then gives you a sidebar with projects, findings, tasks, and a knowledge graph.
+One command. Sets up `~/.phren`, wires up MCP for your tools, installs hooks. Next time you open a project, context starts flowing automatically. On a new machine? Re-run init and you're back in sync.
 
 ---
 
-## The Agent
-
-```bash
-phren agent <task>           # run a task
-phren agent -i               # interactive TUI (multi-turn)
-phren agent --plan <task>    # review plan before execution
-phren agent --resume         # resume last session
-phren agent --multi          # multi-agent TUI
-```
-
-### CLI flags
-
-| Flag | Description |
-|------|-------------|
-| `-i`, `--interactive` | Interactive TUI with streaming, history, tab completion |
-| `--provider <name>` | Force provider: `openrouter`, `anthropic`, `openai`, `codex`, `ollama` |
-| `--budget <dollars>` | Max spend in USD (aborts when exceeded) |
-| `--plan` | Show plan before executing tools |
-| `--yolo` | Full-auto permissions — no confirmations |
-| `--resume` | Resume last session's conversation |
-| `--multi` | Multi-agent TUI mode |
-| `--team <name>` | Team mode with shared task coordination |
-| `--verbose` | Debug-level logging |
-
-### Providers
-
-| Provider | Model | Source |
-|----------|-------|--------|
-| OpenRouter | claude-sonnet-4-20250514 | `OPENROUTER_API_KEY` |
-| Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
-| OpenAI | gpt-4.1 | `OPENAI_API_KEY` |
-| Codex | gpt-5.3-codex | ChatGPT subscription (browser auth) |
-| Ollama | llama3.3 | Local, no API key |
-
-### Keyboard shortcuts (interactive TUI)
-
-| Key | Action |
-|-----|--------|
-| Tab | Toggle memory browser |
-| Shift+Tab | Cycle permission mode |
-| Up/Down | Input history |
-| Left/Right | Cursor movement |
-| Ctrl+A / Ctrl+E | Start / end of line |
-| Ctrl+U / Ctrl+K | Kill line / kill forward |
-| Ctrl+W | Delete word |
-| Alt+Left/Right | Jump word |
-| `!` | Enter bash mode |
-| Ctrl+C | Progressive cancel/quit |
-| Ctrl+D | Exit |
-
-### Slash commands
-
-`/help` `/model` `/provider` `/cost` `/plan` `/undo` `/compact` `/context` `/history` `/turns` `/clear` `/files` `/cwd` `/diff` `/git` `/spawn` `/agents` `/preset` `/exit`
-
-### Tools
-
-File I/O (read, write, edit), shell, glob, grep, git (status, diff, commit), web fetch, web search, plus phren memory tools (search, add finding, add task, get tasks, complete task).
-
-### Multi-agent
-
-Spawn sub-agents from the TUI with `/spawn <name> <task>`. Agents run as child processes with IPC messaging and shared task coordination.
-
----
-
-## The Memory Layer
-
-### How it works
+## What actually happens
 
 **When you open a prompt:**
 - Hooks extract keywords from your question
 - Phren searches findings across projects (FTS5 full-text with semantic fallback)
 - Relevant snippets inject into your prompt before you hit send
+- You ask; Claude already knows the gotchas
 
 **When you discover something:**
-- `add_finding` captures it with tags (`[decision]`, `[pattern]`, `[pitfall]`, `[bug]`)
+- `phren add-finding <project> "finding text"` captures it with optional tags (`[decision]`, `[pattern]`, `[pitfall]`, `[bug]`)
 - Trust scores decay over time; decisions never do; observations expire in 14 days
-- Findings link to fragments (named concepts) that connect knowledge across projects
+- Findings link to fragments (named concepts like "auth" or "build") that connect knowledge across projects
 
 **Sessions:**
-- `session_start` / `session_end` mark boundaries
-- Next session sees your prior summary, active tasks, and where you left off
-- Checkpoints track edited files and failing tests for exact resume
+- Mark boundaries with `session_start` / `session_end`
+- Next session sees your prior summary, active tasks, recent findings, and where you left off
+- Checkpoints track edited files and failing tests so you can resume exactly where you stopped
 
-### What's stored
+**Tasks:**
+- Add with priority/section. Pin across sessions. Link to GitHub issues.
+- Track completions and cross-project rollups.
 
-| Concept | Description |
-|---------|-------------|
-| **Findings** | Decisions, patterns, pitfalls, bugs. Typed and tagged. Decay over time. |
-| **Sessions** | Summaries, checkpoints, file lists. Resume where you left off. |
-| **Tasks** | Priority, sections, GitHub issue links. Cross-project rollups. |
-| **Fragments** | Named concepts that link findings across projects. Graph-navigable. |
-| **Truths** | Pinned findings that always inject into context. |
+---
 
-### 53 MCP tools
+## Key features
 
-Search, add/edit/retract/supersede findings, manage tasks, read the knowledge graph, control sessions, configure governance policies, and more. See [docs](https://alaarab.github.io/phren/) for the full reference.
+### Fragment graph
+Explore connections visually. Drag nodes to reorganize; graph auto-settles. Click a fragment to see every finding linked to it across all projects.
 
-### Team stores
+### Finding lifecycle
+- **Supersede**: "Finding X is obsoleted by finding Y"
+- **Retract**: "We were wrong about this; here's why"
+- **Contradict**: "We have two findings that conflict; this is why"
 
-Shared knowledge repos for teams. One person creates with `phren team init`, others join with `phren team join`. Findings, tasks, and skills sync via git.
+Helps you reason about contradictions instead of hiding them.
 
+### Multi-agent support
+Same store works with Claude Code, Copilot, Cursor, and Codex. Agents tag findings with their tool, so you see who discovered what.
+
+### Review queue
+Mark findings as needing review (`[Review]` section). Phren surfaces review items on every session start. Approve, reject, or edit in place.
+
+### Governance & policies
+Per-project retention policies. Confidence decay curves. Access control. Audit logs. Configure with `phren config` or the web UI.
+
+### Store subscriptions
+Subscribe to specific projects in a team store — others stay hidden from search and context injection:
 ```bash
-phren team init my-team --remote git@github.com:org/phren-store.git
-phren team join git@github.com:org/phren-store.git
-phren store subscribe my-team arc intranet    # only see what you care about
+phren store subscribe team-store arc intranet
+phren store unsubscribe team-store legacy-projects
 ```
 
-### Skills and hooks
+### Progressive disclosure
+Enable `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1` to get compact memory indices instead of full snippets. Call `get_memory_detail(id)` to expand only what you need.
 
+### Semantic dedup & conflict detection
+Optional: enable LLM-based duplicate detection and contradiction flagging on `add_finding`. Prevents near-duplicate entries and catches "always use X" vs "never use X" contradictions.
+
+### Skills & hooks
 Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user prompt, tool use, and session events — wire phren into your own workflows.
 
-### Governance
-
-Per-project retention policies, confidence decay curves, review queues, semantic dedup, contradiction detection. Configure with `phren config` or the VS Code extension settings.
-
 ---
 
-## Platform support
+## Built-in Agent
 
-| Platform | Integration |
-|----------|-------------|
-| **Claude Code** (VS Code, Web, Desktop) | MCP server + session hooks |
-| **GitHub Copilot** (VS Code, GitHub.com) | MCP server + hooks |
-| **Cursor** (IDE) | MCP server + skill system |
-| **Codex** (OpenAI) | MCP tools + hooks |
-| **VS Code Extension** | Sidebar UI, knowledge graph, task viewer, setup wizard |
-
-All platforms share the same `~/.phren` store. No vendor lock-in.
-
----
-
-## Project structure
-
-```
-packages/
-  cli/      @phren/cli     — CLI, MCP server, data layer (53 tools, FTS5, hooks)
-  agent/    @phren/agent   — Coding agent with TUI (providers, tools, multi-agent)
-  vscode/   phren-vscode   — VS Code extension (sidebar, graph, onboarding)
-```
-
----
-
-## Contributing
+Phren includes a coding agent (`@phren/agent`) with 5 LLM providers, streaming TUI, multi-agent coordination, and 23 slash commands. [Read the agent docs →](docs/agent.md)
 
 ```bash
-git clone https://github.com/alaarab/phren.git
-cd phren
-pnpm install
-pnpm build
-pnpm test
+npm i -g @phren/agent
+phren-agent -i                         # interactive TUI
+phren-agent "fix the login bug"        # one-shot task
+phren-agent --yolo "add tests"         # full-auto, no confirmations
 ```
 
-See [CLAUDE.md](CLAUDE.md) for development conventions and the full CLI reference.
+---
+
+## CLI quick reference
+
+```bash
+phren                                   Interactive shell (explore/search)
+phren agent "task"                      Run the coding agent on a task
+phren agent -i                          Interactive agent (TUI/REPL)
+phren search <query>                    Full-text search with FTS5
+phren add-finding <project> "insight"   Capture a finding
+phren task add <project> "item"         Add a task
+phren session_start <project>           Start a session
+phren store list                        List personal + team stores
+phren team init <name> --remote <url>   Create a team store
+phren team join <url>                   Join a team store
+phren web-ui [--port 3499]              Launch the web UI
+phren doctor                            Health check & auto-fix
+```
+
+See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).
+
+---
+
+## Team stores
+
+Shared knowledge repos for teams. One person creates with `phren team init`, others join with `phren team join`. Findings, tasks, and skills sync across team members.
+
+Each team store can be configured with per-project subscriptions so people only see what they care about.
+
+---
+
+## Platforms
+
+- **Claude Code** (VS Code, Web, Desktop) — MCP hooks + CLI
+- **Copilot** (VS Code, GitHub.com) — MCP hooks
+- **Cursor** (IDE) — MCP hooks + built-in skill system
+- **Codex** (Claude Agent SDK) — MCP tools + hooks
+
+All use the same phren store. No vendor lock-in.
+
+---
+
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (53 tools, FTS5, hooks) |
+| [`@phren/agent`](packages/agent) | Coding agent with TUI (providers, tools, multi-agent) |
+| [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 
 ---
 

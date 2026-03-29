@@ -42,8 +42,8 @@ export function isAllowed(toolName: string, input: Record<string, unknown>): boo
   return sessionAllowlist.some((entry) => {
     if (entry.toolName !== toolName) return false;
     if (entry.pattern === "*") return true;
-    // For file paths: exact match or child path
-    if (pattern.startsWith(entry.pattern)) return true;
+    // For file paths: exact match or child path (boundary-aware to prevent prefix collisions)
+    if (pattern === entry.pattern || pattern.startsWith(entry.pattern.endsWith("/") ? entry.pattern : entry.pattern + "/")) return true;
     // For shell commands: match the binary name
     return entry.pattern === pattern;
   });
