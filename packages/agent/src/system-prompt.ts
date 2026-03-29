@@ -26,8 +26,8 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: string | n
     "## Important",
     "- Be direct and concise. Lead with the answer, not the reasoning.",
     "- Call multiple tools in parallel when they're independent.",
-    "- Don't ask 'should I read the file?' — just read it.",
-    "- Don't describe your plan unless asked. Execute.",
+    "- NEVER ask 'should I read the file?' or 'would you like me to...' — just call the tool. If permission is needed, the system will prompt the user automatically. You don't handle permissions.",
+    "- Don't describe your plan unless asked. Execute immediately.",
     "- Never write secrets, API keys, or PII to files or findings.",
     "- You ARE phren-agent. You can run `phren` CLI commands via shell to configure yourself.",
   ];
