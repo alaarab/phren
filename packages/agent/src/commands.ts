@@ -74,6 +74,7 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
   /history [n|full]  Show last N messages (default 10) with rich formatting
   /compact    Compact conversation to save context space
   /mode       Toggle input mode (steering ↔ queue)
+  /effort [low|medium|high|max]  Show or set effort level
   /spawn <name> <task>  Spawn a background agent
   /agents     List running agents
   /preset [name|save|delete|list]  Config presets
@@ -370,6 +371,21 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
       } else {
         const isBuiltin = ["fast", "careful", "yolo"].includes(sub);
         process.stderr.write(`${DIM}${formatPreset(sub, preset, isBuiltin)}\nUse: phren-agent --preset ${sub} <task>${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/effort": {
+      const level = parts[1]?.toLowerCase();
+      const VALID_LEVELS = ["low", "medium", "high", "max"];
+      if (!level || !VALID_LEVELS.includes(level)) {
+        process.stderr.write(`${DIM}Usage: /effort <low|medium|high|max>${RESET}\n`);
+        process.stderr.write(`${DIM}  low    — Quick answers, minimal reasoning${RESET}\n`);
+        process.stderr.write(`${DIM}  medium — Balanced depth and speed${RESET}\n`);
+        process.stderr.write(`${DIM}  high   — Deep reasoning, thorough exploration${RESET}\n`);
+        process.stderr.write(`${DIM}  max    — Maximum reasoning depth${RESET}\n`);
+      } else {
+        process.stderr.write(`${GREEN}Effort: ${level}${RESET}\n`);
       }
       return true;
     }

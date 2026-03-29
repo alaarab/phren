@@ -30,6 +30,8 @@ import { connectMcpServers, loadMcpConfig, parseMcpInline, type McpConfigEntry }
 import { HookManager } from "./hooks.js";
 import { parsePermissionPattern } from "./permissions/pattern-parser.js";
 import type { PermissionPattern } from "./permissions/types.js";
+import { tuneEffort } from "./memory/effort-tuner.js";
+import { scrubSummary } from "./permissions/privacy.js";
 
 const VERSION = "0.0.1";
 
@@ -205,6 +207,18 @@ export async function runAgentCli(raw: string[]) {
     process.stderr.write(`Hooks: ${hookManager.getHooks().length} registered\n`);
   }
 
+  // Memory-aware effort auto-tuning
+  let effort = args.effort;
+  if (phrenCtx && args.task) {
+    try {
+      const tuning = await tuneEffort(args.task, effort, phrenCtx);
+      if (tuning.adjusted) {
+        effort = tuning.effort;
+        if (args.verbose) process.stderr.write(`Effort auto-tuned: ${tuning.reason}\n`);
+      }
+    } catch { /* best effort */ }
+  }
+
   const agentConfig = {
     provider,
     registry,
@@ -215,7 +229,7 @@ export async function runAgentCli(raw: string[]) {
     costTracker,
     plan: args.plan,
     lintTestConfig,
-    effort: args.effort,
+    effort,
     hookManager,
     compactionInstructions: args.compactionInstructions,
   };
@@ -260,10 +274,24 @@ export async function runAgentCli(raw: string[]) {
             `${result.tasksFailed} failed, ${result.totalTurns} turns\n`,
           );
         }
+
+        // Save team memory as phren finding
+        if (phrenCtx) {
+          try {
+            const { buildTeamSummary, saveTeamMemory } = await import("./memory/team-memory.js");
+            const summary = buildTeamSummary(
+              args.team,
+              args.task,
+              spawner.listAgents(),
+              coordinator.getTaskList(),
+            );
+            await saveTeamMemory(phrenCtx, summary);
+          } catch { /* best effort */ }
+        }
       } finally {
         await spawner.shutdown();
         if (phrenCtx && sessionId) {
-          endSession(phrenCtx, sessionId, "Team session ended");
+          endSession(phrenCtx, sessionId, scrubSummary("Team session ended"));
         }
         cleanup();
       }
@@ -372,7 +400,7 @@ export async function runAgentCli(raw: string[]) {
 
     // End session with summary + memory intelligence
     if (phrenCtx && sessionId) {
-      const summary = result.finalText.slice(0, 500);
+      const summary = scrubSummary(result.finalText.slice(0, 500));
       endSession(phrenCtx, sessionId, summary);
 
       // Save messages for resume

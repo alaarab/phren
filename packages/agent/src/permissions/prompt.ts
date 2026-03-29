@@ -1,5 +1,5 @@
 /**
- * Smart permission prompt — color-coded, full context, keyboard shortcuts.
+ * Smart permission prompt — themed, color-coded, full context, keyboard shortcuts.
  *
  * Responses:
  *   y = allow once
@@ -10,48 +10,26 @@
 
 import * as readline from "node:readline";
 import { addAllow } from "./allowlist.js";
+import { t, formatPermissionHeader, formatPermissionBorder, formatPermissionHint } from "../theme.js";
 
 // ── Prompt serialization lock ───────────────────────────────────────────
 // Prevents concurrent askUser() calls from interleaving their prompts.
 let promptQueue: Promise<void> = Promise.resolve();
 
-// ── ANSI colors ─────────────────────────────────────────────────────────
-
-const RESET = "\x1b[0m";
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
-const CYAN = "\x1b[36m";
-
 // ── Risk classification ─────────────────────────────────────────────────
 
 type Risk = "read" | "write" | "dangerous";
 
-const READ_TOOLS = new Set(["read_file", "glob", "grep", "git_status", "git_diff", "phren_search", "phren_get_tasks"]);
+const READ_TOOLS = new Set([
+  "read_file", "glob", "grep", "git_status", "git_diff",
+  "phren_search", "phren_get_tasks", "web_search",
+]);
 const DANGEROUS_TOOLS = new Set(["shell"]);
 
 function classifyRisk(toolName: string): Risk {
   if (READ_TOOLS.has(toolName)) return "read";
   if (DANGEROUS_TOOLS.has(toolName)) return "dangerous";
   return "write";
-}
-
-function riskColor(risk: Risk): string {
-  switch (risk) {
-    case "read": return GREEN;
-    case "write": return YELLOW;
-    case "dangerous": return RED;
-  }
-}
-
-function riskLabel(risk: Risk): string {
-  switch (risk) {
-    case "read": return "READ";
-    case "write": return "WRITE";
-    case "dangerous": return "SHELL";
-  }
 }
 
 // ── Summary generation ──────────────────────────────────────────────────
@@ -96,6 +74,14 @@ function summarizeCall(toolName: string, input: Record<string, unknown>): string
       return `Save finding to phren`;
     case "phren_complete_task":
       return `Complete phren task`;
+    case "phren_add_task":
+      return `Add phren task`;
+    case "subagent":
+      return `Spawn subagent: ${((input.task as string) || "").slice(0, 80)}`;
+    case "web_search":
+      return `Search: ${(input.query as string) || "?"}`;
+    case "lsp":
+      return `LSP ${input.action}: ${(input.file as string) || "?"}:${input.line}`;
     default: {
       const keys = Object.keys(input);
       return keys.length > 0 ? `${toolName}(${keys.join(", ")})` : toolName;
@@ -127,23 +113,24 @@ export async function askUser(
 
   try {
     const risk = classifyRisk(toolName);
-    const color = riskColor(risk);
-    const label = riskLabel(risk);
     const summary = summarizeCall(toolName, input);
 
-    // Header
-    process.stderr.write(`\n${color}${BOLD}[${label}]${RESET} ${BOLD}${toolName}${RESET}\n`);
-    process.stderr.write(`${DIM}  ${reason}${RESET}\n`);
-    process.stderr.write(`${CYAN}  ${summary}${RESET}\n`);
+    // Themed header with risk badge
+    process.stderr.write(formatPermissionBorder() + "\n");
+    process.stderr.write(formatPermissionHeader(risk, toolName) + "\n");
+    process.stderr.write(`${t.muted(`  ${reason}`)}\n`);
+    process.stderr.write(`${t.info(`  ${summary}`)}\n`);
 
     // Show full input for shell commands or when details matter
     if (toolName === "shell") {
       const cmd = (input.command as string) || "";
       if (cmd.length > 120) {
-        process.stderr.write(`${DIM}  Full command:${RESET}\n`);
-        process.stderr.write(`${DIM}  ${cmd}${RESET}\n`);
+        process.stderr.write(`${t.muted("  Full command:")}\n`);
+        process.stderr.write(`${t.command(`  ${cmd}`)}\n`);
       }
     }
+
+    process.stderr.write(formatPermissionBorder() + "\n");
 
     const result = await promptKey();
 
@@ -165,8 +152,7 @@ export async function askUser(
  * Temporarily exits raw mode if the TUI has it enabled, restores after.
  */
 async function promptKey(): Promise<PromptResult> {
-  const hint = `${DIM}  [y]es  [n]o  [a]llow-tool  [s]ession-allow${RESET}  `;
-  process.stderr.write(hint);
+  process.stderr.write(formatPermissionHint());
 
   const wasRaw = process.stdin.isTTY && (process.stdin as NodeJS.ReadStream).isRaw;
 
@@ -186,18 +172,31 @@ async function promptKey(): Promise<PromptResult> {
         process.stdin.pause();
 
         const key = data.toString().trim().toLowerCase();
-        process.stderr.write(key + "\n");
 
+        // Echo the choice with color
         switch (key) {
-          case "y": resolve("allow"); break;
-          case "a": resolve("allow-tool"); break;
-          case "s": resolve("allow-session"); break;
-          case "n": resolve("deny"); break;
+          case "y":
+            process.stderr.write(t.success("yes") + "\n");
+            resolve("allow");
+            break;
+          case "a":
+            process.stderr.write(t.success("allow-tool") + "\n");
+            resolve("allow-tool");
+            break;
+          case "s":
+            process.stderr.write(t.success("session-allow") + "\n");
+            resolve("allow-session");
+            break;
+          case "n":
+            process.stderr.write(t.error("denied") + "\n");
+            resolve("deny");
+            break;
           case "\x03": // Ctrl+C
-            process.stderr.write("\n");
+            process.stderr.write(t.error("denied") + "\n");
             resolve("deny");
             break;
           default:
+            process.stderr.write(t.error("denied (unknown key)") + "\n");
             resolve("deny"); // Unknown key = deny (safe default)
         }
       };

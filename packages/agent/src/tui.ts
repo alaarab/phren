@@ -16,6 +16,8 @@ import * as os from "os";
 import { execSync } from "node:child_process";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 import { createRequire } from "node:module";
+import { t, palette, formatContextBar, formatInlineCost, formatCacheHit, formatEffort, formatToolName, toolIcon, autocompleteSlashCommand, renderCompactDiff } from "./theme.js";
+import { estimateMessageTokens } from "./context/token-counter.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../package.json") as { version: string }).version;
@@ -76,7 +78,19 @@ function permTag(mode: PermissionMode): string {
 }
 
 // ── Status bar ───────────────────────────────────────────────────────────────
-function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
+function renderStatusBar(
+  provider: string,
+  project: string | null,
+  turns: number,
+  cost: string,
+  permMode?: PermissionMode,
+  agentCount?: number,
+  contextTokens?: number,
+  contextLimit?: number,
+  effortLevel?: string,
+  cacheRead?: number,
+  cacheCreation?: number,
+): string {
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
   const agentTag = agentCount && agentCount > 0 ? ` A${agentCount}` : "";
 
@@ -85,10 +99,16 @@ function renderStatusBar(provider: string, project: string | null, turns: number
   if (project) parts.push(project);
   const left = parts.join(" · ");
 
-  // Right: mode + agents + cost + turns
+  // Right: effort + context + mode + agents + cache + cost + turns
   const rightParts: string[] = [];
+  if (effortLevel) rightParts.push(stripAnsi(formatEffort(effortLevel)));
+  if (contextTokens && contextLimit) {
+    rightParts.push(stripAnsi(formatContextBar(contextTokens, contextLimit, 8)));
+  }
   if (modeLabel) rightParts.push(modeLabel);
   if (agentTag) rightParts.push(agentTag.trim());
+  const cacheStr = stripAnsi(formatCacheHit(cacheRead ?? 0, cacheCreation ?? 0));
+  if (cacheStr) rightParts.push(cacheStr.trim());
   if (cost) rightParts.push(cost);
   rightParts.push(`T${turns}`);
   const right = rightParts.join("  ") + " ";
@@ -131,16 +151,17 @@ function formatToolInput(name: string, input: Record<string, unknown>): string {
 function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
   const preview = formatToolInput(name, input);
   const dur = formatDuration(durationMs);
-  const icon = isError ? s.red("✗") : s.green("→");
-  const header = `  ${icon} ${s.bold(name)} ${s.gray(preview)}  ${s.dim(dur)}`;
+  const icon = isError ? t.error("✗") : t.success("→");
+  const tIcon = toolIcon(name);
+  const header = `  ${icon} ${tIcon} ${formatToolName(name)} ${t.muted(preview)}  ${t.dim(dur)}`;
 
   // Compact: show first 3 lines only, with overflow count
   const allLines = output.split("\n").filter(Boolean);
   if (allLines.length === 0) return header;
   const shown = allLines.slice(0, COMPACT_LINES);
-  const body = shown.map((l) => s.dim(`    ${l.slice(0, cols() - 6)}`)).join("\n");
+  const body = shown.map((l) => t.dim(`    ${l.slice(0, cols() - 6)}`)).join("\n");
   const overflow = allLines.length - COMPACT_LINES;
-  const more = overflow > 0 ? `\n${s.dim(`    ... +${overflow} lines`)}` : "";
+  const more = overflow > 0 ? `\n${t.dim(`    ... +${overflow} lines`)}` : "";
 
   return `${header}\n${body}${more}`;
 }
@@ -215,9 +236,14 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     prompt(true); // skip newline — alt screen restore already positioned cursor
   }
 
+  // Track cache stats for status bar
+  let cacheReadTokens = 0;
+  let cacheCreationTokens = 0;
+
   // Print status bar
   function statusBar() {
     if (!isTTY) return;
+    const ctxTokens = estimateMessageTokens(session.messages);
     const bar = renderStatusBar(
       config.provider.name,
       config.phrenCtx?.project ?? null,
@@ -225,6 +251,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       costStr,
       config.registry.permissionConfig.mode,
       spawner?.listAgents().length,
+      ctxTokens,
+      contextLimit,
+      config.effort,
+      cacheReadTokens,
+      cacheCreationTokens,
     );
     w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
   }
@@ -542,6 +573,23 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       return;
     }
 
+    // Tab — slash command autocomplete (only in chat mode, not raw Tab for menu)
+    if (key.name === "tab" && !key.shift && inputLine.startsWith("/") && tuiMode === "chat") {
+      const matches = autocompleteSlashCommand(inputLine);
+      if (matches.length === 1) {
+        // Clear current input and replace with completion
+        const clearLen = inputLine.length;
+        w.write("\b".repeat(clearLen) + " ".repeat(clearLen) + "\b".repeat(clearLen));
+        inputLine = matches[0];
+        w.write(inputLine);
+      } else if (matches.length > 1) {
+        w.write(`\n${t.dim(matches.join("  "))}\n`);
+        prompt(true);
+        w.write(inputLine);
+      }
+      return;
+    }
+
     // Regular character
     if (key.sequence && !key.ctrl && !key.meta) {
       // ! at start of empty input toggles bash mode
@@ -582,8 +630,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     onToolStart: (name, input, count) => {
       flushTextBuffer();
       const preview = formatToolInput(name, input);
-      const countLabel = count > 1 ? s.dim(` (${count} tools)`) : "";
-      w.write(`${ESC}2K  ${s.dim("◌")} ${s.gray(name)} ${s.dim(preview)}${countLabel}\r`);
+      const tIcon = toolIcon(name);
+      const countLabel = count > 1 ? t.dim(` (${count} tools)`) : "";
+      w.write(`${ESC}2K  ${t.dim("◌")} ${tIcon} ${formatToolName(name)} ${t.muted(preview)}${countLabel}\r`);
     },
     onToolEnd: (name, input, output, isError, dur) => {
       w.write(`${ESC}2K\r`);
@@ -591,7 +640,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       w.write(renderToolCall(name, input, cleanOutput, isError, dur) + "\n");
       if (diffData) {
-        w.write(renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath) + "\n");
+        // Use themed compact diff from our theme system
+        w.write(renderCompactDiff(diffData.oldContent, diffData.newContent, diffData.filePath) + "\n");
       }
     },
     onStatus: (msg) => w.write(s.dim(msg)),

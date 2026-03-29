@@ -7,6 +7,7 @@
 import type { AgentTool, AgentToolResult } from "./types.js";
 import type { AgentConfig } from "../agent-loop.js";
 import { runAgent } from "../agent-loop.js";
+import { findCachedSubagentResult, cacheSubagentResult } from "../memory/subagent-cache.js";
 
 export interface SubagentConfig {
   /** Parent agent config to inherit provider, phrenCtx, etc. */
@@ -56,6 +57,18 @@ export function createSubagentTool(config: SubagentConfig): AgentTool {
           output: `Too many concurrent subagents (${activeSubagents}/${maxConcurrent}). Wait for one to finish.`,
           is_error: true,
         };
+      }
+
+      // Check phren cache for prior results on similar tasks
+      if (config.parentConfig.phrenCtx && scope === "research") {
+        try {
+          const cached = await findCachedSubagentResult(config.parentConfig.phrenCtx, task);
+          if (cached) {
+            return {
+              output: `[Subagent cache hit — returning prior result]\n\n${cached}`,
+            };
+          }
+        } catch { /* cache miss, proceed normally */ }
       }
 
       activeSubagents++;
@@ -116,6 +129,13 @@ export function createSubagentTool(config: SubagentConfig): AgentTool {
         const summary = result.finalText.length > 3000
           ? result.finalText.slice(0, 3000) + "\n\n[subagent output truncated]"
           : result.finalText;
+
+        // Cache the result for future sessions (research results are most cacheable)
+        if (config.parentConfig.phrenCtx && scope === "research" && result.finalText.length > 50) {
+          try {
+            await cacheSubagentResult(config.parentConfig.phrenCtx, task, result.finalText);
+          } catch { /* best effort */ }
+        }
 
         return {
           output: `[Subagent completed: ${result.turns} turns, ${result.toolCalls} tool calls]\n\n${summary}`,

@@ -9,6 +9,7 @@ import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
 import type { PermissionMode } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { t } from "./theme.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
 const HISTORY_FILE = path.join(HISTORY_DIR, "repl-history.txt");
@@ -51,14 +52,14 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stderr,
-    prompt: `${CYAN}phren>${RESET} `,
+    prompt: `${t.brand("◆")} ${t.dim("▸")} `,
     terminal: process.stdin.isTTY ?? false,
     history,
     historySize: MAX_HISTORY,
   });
 
   const modeLabel = inputMode === "steering" ? "steering" : "queue";
-  process.stderr.write(`${DIM}phren-agent interactive mode (${modeLabel}). Type /help for commands, Ctrl+D to exit.${RESET}\n`);
+  process.stderr.write(t.dim(`phren-agent interactive mode (${modeLabel}). Type /help for commands, Ctrl+D to exit.`) + "\n");
   rl.prompt();
 
   const allHistory = [...history];
