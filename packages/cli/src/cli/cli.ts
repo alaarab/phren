@@ -196,8 +196,13 @@ export async function runCliCommand(command: string, args: string[]) {
     case "promote":
       return handlePromoteNamespace(args);
     case "agent": {
-      const { runAgentCli } = await import("@phren/agent");
-      return runAgentCli(args);
+      try {
+        const { runAgentCli } = await import("@phren/agent");
+        return runAgentCli(args);
+      } catch {
+        console.error("@phren/agent is not installed. Install it with: npm i -g @phren/agent");
+        process.exit(1);
+      }
     }
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
