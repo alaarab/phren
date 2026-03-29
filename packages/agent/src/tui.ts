@@ -13,6 +13,8 @@ import type { AgentSpawner } from "./multi/spawner.js";
 import { renderMarkdown } from "./multi/markdown.js";
 import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
 import * as os from "os";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { execSync } from "node:child_process";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 import { createRequire } from "node:module";
@@ -160,11 +162,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   const session = createSession(contextLimit);
   const w = process.stdout;
   const isTTY = process.stdout.isTTY;
+  const startTime = Date.now();
 
   let inputMode: InputMode = loadInputMode();
   let pendingInput: string | null = null;
   let running = false;
   let inputLine = "";
+  let cursorPos = 0;
   let costStr = "";
 
   // ── Dual-mode state ─────────────────────────────────────────────────────
@@ -216,6 +220,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     menuFilterActive = false;
     menuFilterBuf = "";
     w.write("\x1b[?1049l"); // leave alternate screen (restores chat)
+    setScrollRegion(); // re-establish scroll region after alt screen
     statusBar();
     prompt(true); // skip newline — alt screen restore already positioned cursor
   }
@@ -244,13 +249,15 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     const icon = PERMISSION_ICONS[mode];
     const rows = process.stdout.rows || 24;
     const c = cols();
-    if (!skipNewline) w.write("\n");
+    if (!skipNewline) {
+      // Newline within the scroll region so content scrolls up naturally
+      cursorToScrollEnd();
+      w.write("\n");
+    }
+    // Draw the fixed bottom bar outside the scroll region.
+    // Temporarily reset DECSTBM so writes to rows (rows-4)..(rows) work.
+    w.write(`${ESC}r`); // reset scroll region temporarily
     // Layout (bottom up): blank, permissions, separator, input, separator
-    // Row N   = blank (aesthetic)
-    // Row N-1 = permissions line
-    // Row N-2 = separator ───
-    // Row N-3 = input ▸
-    // Row N-4 = separator ───
     const sep = s.dim("─".repeat(c));
     const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
     w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
@@ -258,18 +265,64 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
     w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
     w.write(`${ESC}${rows};1H${ESC}2K`); // blank bottom row
-    // Move cursor back to input line
+    // Re-establish scroll region and position cursor at the input line
+    setScrollRegion();
     w.write(`${ESC}${rows - 3};${bashMode ? 3 : 4}H`);
   }
 
+  // Redraw the input line and position the terminal cursor at cursorPos
+  function redrawInput() {
+    w.write(`${ESC}2K\r`);
+    prompt(true);
+    w.write(inputLine);
+    // Move terminal cursor back from end to cursorPos
+    const back = inputLine.length - cursorPos;
+    if (back > 0) w.write(`${ESC}${back}D`);
+  }
+
+  // ── Scroll region management ─────────────────────────────────────────
+  // DECSTBM: rows 1..(rows-5) scroll; bottom 5 rows are fixed for the input bar.
+  function setScrollRegion() {
+    if (!isTTY) return;
+    const rows = process.stdout.rows || 24;
+    const scrollBottom = Math.max(1, rows - 5);
+    w.write(`${ESC}1;${scrollBottom}r`);
+  }
+
+  // Move cursor to the bottom of the scroll region so new output scrolls naturally.
+  function cursorToScrollEnd() {
+    if (!isTTY) return;
+    const rows = process.stdout.rows || 24;
+    const scrollBottom = Math.max(1, rows - 5);
+    w.write(`${ESC}${scrollBottom};1H`);
+  }
+
+  // Periodic status bar refresh (every 30s) — keeps cost/turns current during long tool runs
+  const statusRefreshTimer = isTTY
+    ? setInterval(() => { if (tuiMode === "chat") statusBar(); }, 30_000)
+    : null;
+  if (statusRefreshTimer) statusRefreshTimer.unref(); // don't keep process alive
+
   // Terminal cleanup: restore state on exit
   function cleanupTerminal() {
+    if (statusRefreshTimer) clearInterval(statusRefreshTimer);
+    w.write(`${ESC}r`); // reset scroll region
     w.write("\x1b[?1049l"); // leave alt screen if active
     if (process.stdin.isTTY) {
       try { process.stdin.setRawMode(false); } catch {}
     }
   }
   process.on("exit", cleanupTerminal);
+
+  // Re-establish scroll region on terminal resize.
+  // Node's "resize" event already fires on SIGWINCH — no separate signal handler needed.
+  process.stdout.on("resize", () => {
+    if (tuiMode === "chat") {
+      setScrollRegion();
+      statusBar();
+      prompt(true);
+    }
+  });
 
   // Setup: clear screen, status bar at top, content area clean
   if (isTTY) {
@@ -310,6 +363,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write(`\n  ${info[0]}\n  ${info[1]}  ${info[2]}\n  ${info[4]}\n\n  ${info[6]}\n\n`);
     }
     w.write("\n");
+    setScrollRegion(); // establish scroll region after banner
   }
 
   // Raw stdin for steering
@@ -402,8 +456,77 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       return;
     }
 
-    // Tab — toggle mode (not during agent run or filter)
-    if (key.name === "tab" && !menuFilterActive) {
+    // Tab — completion or toggle mode
+    if (key.name === "tab" && !key.shift && !menuFilterActive) {
+      // Slash command completion in chat mode
+      if (tuiMode === "chat" && inputLine.startsWith("/")) {
+        const SLASH_COMMANDS = [
+          "/help", "/model", "/provider", "/turns", "/clear", "/cost",
+          "/plan", "/undo", "/history", "/compact", "/context", "/mode",
+          "/spawn", "/agents", "/diff", "/git", "/files", "/cwd",
+          "/preset", "/exit",
+        ];
+        const matches = SLASH_COMMANDS.filter((c) => c.startsWith(inputLine));
+        if (matches.length === 1) {
+          inputLine = matches[0];
+          cursorPos = inputLine.length;
+          redrawInput();
+        } else if (matches.length > 1) {
+          // Show matches in scroll area, then redraw prompt
+          cursorToScrollEnd();
+          w.write(`\n${s.dim("  " + matches.join("  "))}\n`);
+          prompt(true);
+          w.write(inputLine);
+          const back = inputLine.length - cursorPos;
+          if (back > 0) w.write(`${ESC}${back}D`);
+        }
+        return;
+      }
+      // File path completion in bash mode
+      if (tuiMode === "chat" && bashMode && inputLine.length > 0) {
+        // Complete the last whitespace-delimited token as a path
+        const lastSpace = inputLine.lastIndexOf(" ");
+        const prefix = lastSpace === -1 ? "" : inputLine.slice(0, lastSpace + 1);
+        const partial = lastSpace === -1 ? inputLine : inputLine.slice(lastSpace + 1);
+        const expandedPartial = partial.replace(/^~/, os.homedir());
+        const dir = path.dirname(expandedPartial);
+        const base = path.basename(expandedPartial);
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          const matches = entries.filter((e) => e.name.startsWith(base));
+          if (matches.length === 1) {
+            const completed = matches[0];
+            const fullPath = partial.startsWith("~")
+              ? "~/" + path.relative(os.homedir(), path.join(dir, completed.name))
+              : path.join(dir, completed.name);
+            inputLine = prefix + fullPath + (completed.isDirectory() ? "/" : "");
+            cursorPos = inputLine.length;
+            redrawInput();
+          } else if (matches.length > 1) {
+            const names = matches.map((e) => e.name + (e.isDirectory() ? "/" : ""));
+            cursorToScrollEnd();
+            w.write(`\n${s.dim("  " + names.join("  "))}\n`);
+            // Find longest common prefix for partial completion
+            let common = matches[0].name;
+            for (const m of matches) {
+              while (!m.name.startsWith(common)) common = common.slice(0, -1);
+            }
+            if (common.length > base.length) {
+              const fullPath = partial.startsWith("~")
+                ? "~/" + path.relative(os.homedir(), path.join(dir, common))
+                : path.join(dir, common);
+              inputLine = prefix + fullPath;
+              cursorPos = inputLine.length;
+            }
+            prompt(true);
+            w.write(inputLine);
+            const back = inputLine.length - cursorPos;
+            if (back > 0) w.write(`${ESC}${back}D`);
+          }
+        } catch { /* dir doesn't exist or unreadable */ }
+        return;
+      }
+      // Default: toggle menu mode
       if (tuiMode === "chat" && !running) {
         enterMenuMode();
       } else if (tuiMode === "menu") {
@@ -425,11 +548,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       if (bashMode) {
         bashMode = false;
         inputLine = "";
+        cursorPos = 0;
         prompt(true);
         return;
       }
       if (inputLine) {
         inputLine = "";
+        cursorPos = 0;
         prompt(true);
         return;
       }
@@ -447,6 +572,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       if (bashMode) {
         bashMode = false;
         inputLine = "";
+        cursorPos = 0;
         prompt(true);
         ctrlCCount = 0;
         return;
@@ -454,6 +580,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       if (inputLine) {
         // Clear input
         inputLine = "";
+        cursorPos = 0;
         prompt(true);
         ctrlCCount = 0;
         return;
@@ -467,7 +594,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         setTimeout(() => { ctrlCCount = 0; }, 2000);
       } else {
         // Actually quit
-        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        cleanupTerminal();
         w.write(s.dim("\nSession ended.\n"));
         resolve!(session);
       }
@@ -477,10 +604,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     // Enter — submit
     if (key.name === "return") {
       const line = inputLine.trim();
+      cursorPos = 0;
       inputLine = "";
-      // Move to scroll area (above the fixed bottom bar) before writing output
-      const rows = process.stdout.rows || 24;
-      w.write(`${ESC}${rows - 5};1H\n`);
+      // Move to the bottom of the scroll region so new output scrolls naturally
+      cursorToScrollEnd();
+      w.write("\n");
 
       if (!line) { prompt(); return; }
 
@@ -530,13 +658,19 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         return;
       }
 
-      if (handleCommand(line, {
+      const cmdResult = handleCommand(line, {
         session,
         contextLimit,
         undoStack: [],
         providerName: config.provider.name,
         currentModel: (config.provider as { model?: string }).model,
+        provider: config.provider,
+        systemPrompt: config.systemPrompt,
         spawner,
+        sessionId: config.sessionId,
+        startTime,
+        phrenPath: config.phrenCtx?.phrenPath,
+        phrenCtx: config.phrenCtx,
         onModelChange: (result) => {
           // Live model switch — re-resolve provider with new model
           try {
@@ -553,8 +687,13 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
             statusBar();
           } catch { /* keep current provider on error */ }
         },
-      })) {
+      });
+      if (cmdResult === true) {
         prompt();
+        return;
+      }
+      if (typeof cmdResult === "object" && cmdResult instanceof Promise) {
+        cmdResult.then(() => { prompt(); });
         return;
       }
 
@@ -581,9 +720,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         historyIndex--;
       }
       inputLine = inputHistory[historyIndex];
-      w.write(`${ESC}2K\r`);
-      prompt(true);
-      w.write(inputLine);
+      cursorPos = inputLine.length;
+      redrawInput();
       return;
     }
 
@@ -597,22 +735,120 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         historyIndex = -1;
         inputLine = savedInput;
       }
-      w.write(`${ESC}2K\r`);
-      prompt(true);
-      w.write(inputLine);
+      cursorPos = inputLine.length;
+      redrawInput();
       return;
     }
 
-    // Backspace
-    if (key.name === "backspace") {
-      if (inputLine.length > 0) {
-        inputLine = inputLine.slice(0, -1);
-        w.write("\b \b");
+    // Ctrl+A — move cursor to start of line
+    if (key.ctrl && key.name === "a") {
+      cursorPos = 0;
+      redrawInput();
+      return;
+    }
+
+    // Ctrl+E — move cursor to end of line
+    if (key.ctrl && key.name === "e") {
+      cursorPos = inputLine.length;
+      redrawInput();
+      return;
+    }
+
+    // Ctrl+U — kill entire line
+    if (key.ctrl && key.name === "u") {
+      inputLine = "";
+      cursorPos = 0;
+      redrawInput();
+      return;
+    }
+
+    // Ctrl+K — kill from cursor to end of line
+    if (key.ctrl && key.name === "k") {
+      inputLine = inputLine.slice(0, cursorPos);
+      redrawInput();
+      return;
+    }
+
+    // Left arrow — move cursor left one character
+    if (key.name === "left" && !key.meta && !key.ctrl) {
+      if (cursorPos > 0) {
+        cursorPos--;
+        w.write(`${ESC}D`);
       }
       return;
     }
 
-    // Regular character
+    // Right arrow — move cursor right one character
+    if (key.name === "right" && !key.meta && !key.ctrl) {
+      if (cursorPos < inputLine.length) {
+        cursorPos++;
+        w.write(`${ESC}C`);
+      }
+      return;
+    }
+
+    // Alt+Left — move cursor left by one word
+    if (key.name === "left" && (key.meta || key.ctrl)) {
+      if (cursorPos > 0) {
+        // Skip spaces, then skip non-spaces
+        let p = cursorPos;
+        while (p > 0 && inputLine[p - 1] === " ") p--;
+        while (p > 0 && inputLine[p - 1] !== " ") p--;
+        cursorPos = p;
+        redrawInput();
+      }
+      return;
+    }
+
+    // Alt+Right — move cursor right by one word
+    if (key.name === "right" && (key.meta || key.ctrl)) {
+      if (cursorPos < inputLine.length) {
+        let p = cursorPos;
+        while (p < inputLine.length && inputLine[p] !== " ") p++;
+        while (p < inputLine.length && inputLine[p] === " ") p++;
+        cursorPos = p;
+        redrawInput();
+      }
+      return;
+    }
+
+    // Word-delete: Alt+Backspace, Ctrl+Backspace, Ctrl+W
+    if (
+      ((key.meta || key.ctrl) && key.name === "backspace") ||
+      (key.ctrl && key.name === "w")
+    ) {
+      if (cursorPos > 0) {
+        // Find word boundary before cursor
+        let p = cursorPos;
+        while (p > 0 && inputLine[p - 1] === " ") p--;
+        while (p > 0 && inputLine[p - 1] !== " ") p--;
+        inputLine = inputLine.slice(0, p) + inputLine.slice(cursorPos);
+        cursorPos = p;
+        redrawInput();
+      }
+      return;
+    }
+
+    // Backspace — delete character before cursor
+    if (key.name === "backspace") {
+      if (cursorPos > 0) {
+        inputLine = inputLine.slice(0, cursorPos - 1) + inputLine.slice(cursorPos);
+        cursorPos--;
+        redrawInput();
+      }
+      return;
+    }
+
+    // Delete — delete character at cursor
+    if (key.name === "delete") {
+      if (cursorPos < inputLine.length) {
+        inputLine = inputLine.slice(0, cursorPos) + inputLine.slice(cursorPos + 1);
+        redrawInput();
+      }
+      return;
+    }
+
+    // Regular character — insert at cursor position
     if (key.sequence && !key.ctrl && !key.meta) {
       // ! at start of empty input toggles bash mode
       if (key.sequence === "!" && inputLine === "" && !bashMode) {
@@ -620,8 +856,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         prompt(true);
         return;
       }
-      inputLine += key.sequence;
-      w.write(key.sequence);
+      inputLine = inputLine.slice(0, cursorPos) + key.sequence + inputLine.slice(cursorPos);
+      cursorPos += key.sequence.length;
+      redrawInput();
     }
   });
 
@@ -681,6 +918,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
+    cursorToScrollEnd(); // ensure all turn output stays within scroll region
     const thinkStart = Date.now();
     // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;

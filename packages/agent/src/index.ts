@@ -175,6 +175,7 @@ export async function runAgentCli(raw: string[]) {
     costTracker,
     plan: args.plan,
     lintTestConfig,
+    sessionId,
   };
 
   // Multi-agent TUI mode
