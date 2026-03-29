@@ -6,19 +6,17 @@ import React from "react";
 import { render } from "ink";
 import type { AgentConfig } from "../agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "../agent-loop.js";
-import { handleCommand } from "../commands.js";
 import type { InputMode } from "../repl.js";
+import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import type { AgentSpawner } from "../multi/spawner.js";
-import { renderMarkdown } from "../multi/markdown.js";
-import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "../multi/diff-renderer.js";
+import { decodeDiffPayload, DIFF_MARKER } from "../multi/diff-renderer.js";
 import * as os from "os";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { loadInputMode, saveInputMode, savePermissionMode } from "../settings.js";
 import { nextPermissionMode } from "./ansi.js";
-import { formatToolInput, renderToolCall } from "./tool-render.js";
-import { App, type AppState, type AppProps } from "./components/App.js";
-import type { ChatMessageProps, ToolCallEntry } from "./components/ChatMessage.js";
+import { App, type AppState, type CompletedMessage } from "./components/App.js";
+import type { ToolCallProps } from "./components/ToolCall.js";
 import { createRequire } from "node:module";
 
 const _require = createRequire(import.meta.url);
@@ -32,15 +30,17 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let inputMode: InputMode = loadInputMode();
   let pendingInput: string | null = null;
   const steerQueueBuf: string[] = [];
+  const inputHistory: string[] = [];
   let running = false;
   let msgCounter = 0;
 
-  // Mutable render state — updated then pushed to React via re-render
-  const completedMessages: ChatMessageProps[] = [];
+  // Mutable render state — updated then pushed to React via rerender()
+  const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
   let thinking = false;
   let thinkStartTime = 0;
-  let currentToolCalls: ToolCallEntry[] = [];
+  let thinkElapsed: string | null = null;
+  let currentToolCalls: ToolCallProps[] = [];
 
   function nextId(): string {
     return `msg-${++msgCounter}`;
@@ -54,6 +54,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       cost: "",
       permMode: config.registry.permissionConfig.mode,
       agentCount: spawner?.listAgents().length ?? 0,
+      version: AGENT_VERSION,
     };
   }
 
@@ -67,12 +68,17 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         state={getAppState()}
         completedMessages={[...completedMessages]}
         streamingText={streamingText}
+        completedToolCalls={[...currentToolCalls]}
         thinking={thinking}
         thinkStartTime={thinkStartTime}
+        thinkElapsed={thinkElapsed}
         steerQueue={[...steerQueueBuf]}
         running={running}
+        showBanner={true}
+        inputHistory={[...inputHistory]}
         onSubmit={handleSubmit}
         onPermissionCycle={handlePermissionCycle}
+        onCancelTurn={handleCancelTurn}
         onExit={handleExit}
       />
     );
@@ -91,39 +97,16 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (resolveSession) resolveSession(session);
   }
 
-  function handleSubmit(input: string) {
-    const line = input.trim();
-    if (!line) return;
+  function handleCancelTurn() {
+    // Signal cancellation — the running turn will see this via steering
+    pendingInput = null;
+    steerQueueBuf.length = 0;
+    update();
+  }
 
-    // Bash mode: ! prefix
-    if (line.startsWith("!")) {
-      const cmd = line.slice(1).trim();
-      if (cmd) {
-        const cdMatch = cmd.match(/^cd\s+(.*)/);
-        if (cdMatch) {
-          try {
-            const target = cdMatch[1].trim().replace(/^~/, os.homedir());
-            process.chdir(path.resolve(process.cwd(), target));
-          } catch { /* ignore */ }
-        } else {
-          try {
-            execSync(cmd, { encoding: "utf-8", timeout: 30_000, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
-          } catch { /* ignore */ }
-        }
-      }
-      update();
-      return;
-    }
-
-    // Slash commands
-    if (line === "/mode") {
-      inputMode = inputMode === "steering" ? "queue" : "steering";
-      saveInputMode(inputMode);
-      update();
-      return;
-    }
-
-    const cmdResult = handleCommand(line, {
+  // Slash command handler — captures stderr and displays as status messages
+  const slashCommands = useSlashCommands({
+    commandContext: {
       session,
       contextLimit,
       undoStack: [],
@@ -150,13 +133,69 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
           update();
         } catch { /* keep current provider */ }
       },
-    });
-    if (cmdResult === true || (typeof cmdResult === "object" && cmdResult instanceof Promise)) {
+    },
+    onOutput: (text) => {
+      completedMessages.push({ id: nextId(), kind: "status", text });
+    },
+  });
+
+  function handleSubmit(input: string) {
+    const line = input.trim();
+    if (!line) return;
+
+    // Track input history (skip duplicates of the last entry)
+    if (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== line) {
+      inputHistory.push(line);
+    }
+
+    // Bash mode: ! prefix
+    if (line.startsWith("!")) {
+      const cmd = line.slice(1).trim();
+      let output = "";
+      if (cmd) {
+        const cdMatch = cmd.match(/^cd\s+(.*)/);
+        if (cdMatch) {
+          try {
+            const target = cdMatch[1].trim().replace(/^~/, os.homedir());
+            process.chdir(path.resolve(process.cwd(), target));
+            output = process.cwd();
+          } catch (err: unknown) {
+            output = (err as Error).message;
+          }
+        } else {
+          try {
+            output = execSync(cmd, { encoding: "utf-8", timeout: 30_000, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+          } catch (err: unknown) {
+            const e = err as { stderr?: string; message?: string };
+            output = e.stderr || e.message || "Command failed";
+          }
+        }
+      }
+      if (output) {
+        completedMessages.push({ id: nextId(), kind: "status", text: output.replace(/\n$/, "") });
+      }
       update();
       return;
     }
 
-    // If agent running, queue input
+    // Slash commands
+    if (line === "/mode") {
+      inputMode = inputMode === "steering" ? "queue" : "steering";
+      saveInputMode(inputMode);
+      completedMessages.push({ id: nextId(), kind: "status", text: `Input mode: ${inputMode}` });
+      update();
+      return;
+    }
+
+    // Slash commands — capture stderr output and display as status message
+    if (line.startsWith("/")) {
+      if (slashCommands.tryHandleCommand(line)) {
+        update();
+        return;
+      }
+    }
+
+    // If agent running, queue input for steering
     if (running) {
       if (inputMode === "steering") {
         steerQueueBuf.push(line);
@@ -167,8 +206,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       return;
     }
 
-    // Normal user message — add to history and run agent
-    completedMessages.push({ id: nextId(), role: "user", text: line });
+    // Normal user message — add to completed history and run agent turn
+    completedMessages.push({ id: nextId(), kind: "user", text: line });
     update();
     runAgentTurn(line);
   }
@@ -181,14 +220,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       update();
     },
     onTextDone: () => {
-      // streaming complete — move to completed
+      // streaming complete — finalized in runAgentTurn
     },
     onTextBlock: (text) => {
       thinking = false;
       streamingText += text;
       update();
     },
-    onToolStart: (name, input, count) => {
+    onToolStart: (_name, _input, _count) => {
       thinking = false;
       update();
     },
@@ -216,6 +255,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     running = true;
     thinking = true;
     thinkStartTime = Date.now();
+    thinkElapsed = null;
     streamingText = "";
     currentToolCalls = [];
     update();
@@ -227,12 +267,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       streamingText += `\nError: ${msg}`;
     }
 
-    // Finalize: move streaming content to completed messages
+    // Compute elapsed time
+    const elapsed = ((Date.now() - thinkStartTime) / 1000).toFixed(1);
+
+    // Finalize: move streaming content + tool calls to completed messages
     thinking = false;
     if (streamingText || currentToolCalls.length > 0) {
       completedMessages.push({
         id: nextId(),
-        role: "assistant",
+        kind: "assistant",
         text: streamingText,
         toolCalls: currentToolCalls.length > 0 ? [...currentToolCalls] : undefined,
       });
@@ -240,35 +283,47 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     streamingText = "";
     currentToolCalls = [];
     running = false;
+    thinkElapsed = elapsed;
     update();
 
-    // Process queued input
+    // Clear elapsed indicator after a brief display
+    setTimeout(() => {
+      thinkElapsed = null;
+      update();
+    }, 2000);
+
+    // Process queued input — steer queue first, then pending
     if (steerQueueBuf.length > 0) {
       const queued = steerQueueBuf.shift()!;
-      completedMessages.push({ id: nextId(), role: "user", text: queued });
+      completedMessages.push({ id: nextId(), kind: "user", text: queued });
       update();
       runAgentTurn(queued);
     } else if (pendingInput) {
       const queued = pendingInput;
       pendingInput = null;
-      completedMessages.push({ id: nextId(), role: "user", text: queued });
+      completedMessages.push({ id: nextId(), kind: "user", text: queued });
       update();
       runAgentTurn(queued);
     }
   }
 
-  // Render the Ink app
+  // Initial render
   const app = render(
     <App
       state={getAppState()}
       completedMessages={[]}
       streamingText=""
+      completedToolCalls={[]}
       thinking={false}
       thinkStartTime={0}
+      thinkElapsed={null}
       steerQueue={[]}
       running={false}
+      showBanner={true}
+      inputHistory={[]}
       onSubmit={handleSubmit}
       onPermissionCycle={handlePermissionCycle}
+      onCancelTurn={handleCancelTurn}
       onExit={handleExit}
     />,
     { exitOnCtrlC: false },

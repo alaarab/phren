@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import { PERMISSION_LABELS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
 
@@ -13,12 +13,14 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({ provider, project, turns, cost, permMode, agentCount }: StatusBarProps) {
+  const { stdout } = useStdout();
+  const width = stdout?.columns || 80;
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
   const agentTag = agentCount && agentCount > 0 ? `A${agentCount}` : "";
 
-  const leftParts = [" ◆ phren", provider];
+  const leftParts = [" \u25c6 phren", provider];
   if (project) leftParts.push(project);
-  const left = leftParts.join(" · ");
+  const left = leftParts.join(" \u00b7 ");
 
   const rightParts: string[] = [];
   if (modeLabel) rightParts.push(modeLabel);
@@ -27,11 +29,8 @@ export function StatusBar({ provider, project, turns, cost, permMode, agentCount
   rightParts.push(`T${turns}`);
   const right = rightParts.join("  ") + " ";
 
-  return (
-    <Box width="100%">
-      <Text inverse>{left}</Text>
-      <Text inverse><Box flexGrow={1}><Text inverse> </Text></Box></Text>
-      <Text inverse>{right}</Text>
-    </Box>
-  );
+  const pad = Math.max(0, width - left.length - right.length);
+  const fullLine = left + " ".repeat(pad) + right;
+
+  return <Text inverse>{fullLine}</Text>;
 }
