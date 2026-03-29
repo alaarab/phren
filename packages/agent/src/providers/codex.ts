@@ -122,10 +122,12 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
 export class CodexProvider implements LlmProvider {
   name = "codex";
   contextWindow = 128_000;
+  maxOutputTokens: number;
   private model: string;
 
-  constructor(model?: string) {
+  constructor(model?: string, maxOutputTokens?: number) {
     this.model = model ?? "gpt-5.2-codex";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
@@ -135,6 +137,7 @@ export class CodexProvider implements LlmProvider {
       model: this.model,
       instructions: system,
       input: toResponsesInput(system, messages),
+      max_output_tokens: this.maxOutputTokens,
       store: false,
       stream: true,
     };
@@ -198,6 +201,7 @@ export class CodexProvider implements LlmProvider {
       model: this.model,
       instructions: system,
       input: toResponsesInput(system, messages),
+      max_output_tokens: this.maxOutputTokens,
       store: false,
       stream: true,
       include: ["reasoning.encrypted_content"],
