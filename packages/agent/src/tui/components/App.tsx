@@ -1,9 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { Static, Box, Text, useApp } from "ink";
-import { StatusBar } from "./StatusBar.js";
 import { Banner } from "./Banner.js";
-import { UserMessage } from "./UserMessage.js";
-import { StreamingText } from "./StreamingText.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
@@ -12,6 +9,11 @@ import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
+
+export interface BannerMsg {
+  id: string;
+  kind: "banner";
+}
 
 export interface UserMsg {
   id: string;
@@ -33,6 +35,7 @@ export interface StatusMsg {
 }
 
 export type CompletedMessage = UserMsg | AssistantMsg | StatusMsg;
+type StaticItem = BannerMsg | CompletedMessage;
 
 // ── App state and props ──────────────────────────────────────────────────────
 
@@ -62,24 +65,6 @@ export interface AppProps {
   onPermissionCycle: () => void;
   onCancelTurn: () => void;
   onExit: () => void;
-}
-
-function CompletedItem({ msg }: { msg: CompletedMessage }) {
-  switch (msg.kind) {
-    case "user":
-      return <UserMessage text={msg.text} />;
-    case "assistant":
-      return (
-        <Box flexDirection="column">
-          {msg.text ? <StreamingText text={msg.text} /> : null}
-          {msg.toolCalls?.map((tc, i) => (
-            <ToolCall key={i} {...tc} />
-          ))}
-        </Box>
-      );
-    case "status":
-      return <Text dimColor>{msg.text}</Text>;
-  }
 }
 
 export function App({
@@ -136,8 +121,8 @@ export function App({
     onCancelTurn,
   });
 
-  // Build the Static items — banner first if shown, then completed messages
-  const staticItems: Array<{ id: string; kind: string }> = [];
+  // Build Static items — banner first, then completed messages
+  const staticItems: StaticItem[] = [];
   if (showBanner) {
     staticItems.push({ id: "banner", kind: "banner" });
   }
@@ -147,35 +132,60 @@ export function App({
 
   return (
     <>
-      {/* No status bar — clean interface */}
-
-      {/* Banner and completed messages — rendered once, leave React tree */}
+      {/* Completed messages — rendered once, scroll up in terminal */}
       <Static items={staticItems}>
         {(item) => {
           if (item.kind === "banner") {
             return (
-              <Box key="banner">
+              <Box key="banner" flexDirection="column">
                 <Banner version={state.version} />
               </Box>
             );
           }
-          return (
-            <Box key={item.id} flexDirection="column">
-              <CompletedItem msg={item as CompletedMessage} />
-            </Box>
-          );
+          if (item.kind === "user") {
+            return (
+              <Box key={item.id} flexDirection="column" marginTop={1}>
+                <Text bold>{"\u276f"} {(item as UserMsg).text}</Text>
+              </Box>
+            );
+          }
+          if (item.kind === "assistant") {
+            const aMsg = item as AssistantMsg;
+            return (
+              <Box key={item.id} flexDirection="column" marginTop={1} paddingLeft={2}>
+                {aMsg.text ? (
+                  <Box>
+                    <Text color="magenta">{"\u25c6"} </Text>
+                    <Text>{aMsg.text}</Text>
+                  </Box>
+                ) : null}
+                {aMsg.toolCalls?.map((tc, i) => (
+                  <ToolCall key={i} {...tc} />
+                ))}
+              </Box>
+            );
+          }
+          if (item.kind === "status") {
+            return <Text key={item.id} dimColor>{(item as StatusMsg).text}</Text>;
+          }
+          return null;
         }}
       </Static>
 
-      {/* Dynamic area: active turn content + prompt */}
+      {/* Dynamic area — only active turn content + input */}
       <Box flexDirection="column">
-        {/* Completed tool calls in current turn (not yet finalized) */}
+        {/* In-progress tool calls (not yet finalized) */}
         {completedToolCalls.map((tc, i) => (
           <ToolCall key={`tc-${i}`} {...tc} />
         ))}
 
-        {/* Active streaming text */}
-        {streamingText !== "" && <StreamingText text={streamingText} />}
+        {/* Active streaming text with diamond prefix */}
+        {streamingText !== "" && (
+          <Box paddingLeft={2}>
+            <Text color="magenta">{"\u25c6"} </Text>
+            <Text>{streamingText}</Text>
+          </Box>
+        )}
 
         {/* Thinking animation */}
         {thinking && <ThinkingIndicator startTime={thinkStartTime} />}
