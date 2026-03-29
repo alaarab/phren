@@ -18,7 +18,7 @@ function toResponsesTools(tools: AgentToolDef[]) {
 }
 
 /** Convert our messages to Responses API input format. */
-function toResponsesInput(system: string, messages: LlmMessage[]) {
+function toResponsesInput(messages: LlmMessage[]) {
   const input: Record<string, unknown>[] = [];
 
   for (const msg of messages) {
@@ -96,11 +96,13 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
         }
       } else if (item.type === "function_call") {
         hasToolUse = true;
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(item.arguments as string); } catch { /* malformed arguments */ }
         content.push({
           type: "tool_use",
           id: item.call_id as string,
           name: item.name as string,
-          input: JSON.parse(item.arguments as string),
+          input,
         });
       }
     }
@@ -136,7 +138,7 @@ export class CodexProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(system, messages),
+      input: toResponsesInput(messages),
       store: false,
       stream: true,
     };
@@ -199,7 +201,7 @@ export class CodexProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(system, messages),
+      input: toResponsesInput(messages),
       store: false,
       stream: true,
       include: ["reasoning.encrypted_content"],

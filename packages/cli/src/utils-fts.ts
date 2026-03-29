@@ -91,7 +91,7 @@ export function extractKeywords(text: string): string {
   return extractKeywordEntries(text).join(" ");
 }
 
-// Base synonym map for fuzzy search expansion — source of truth is mcp/src/synonyms.json
+// Base synonym map for fuzzy search expansion — source of truth is src/synonyms.json
 const BASE_SYNONYMS: Record<string, string[]> = _baseSynonymsJson;
 const LEARNED_SYNONYMS_FILE = "learned-synonyms.json";
 
