@@ -8,7 +8,6 @@ import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
 import type { InputMode } from "./repl.js";
-import type { PermissionMode } from "./permissions/types.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import { renderMarkdown } from "./multi/markdown.js";
 import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
@@ -19,66 +18,26 @@ import { execSync } from "node:child_process";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 import { createRequire } from "node:module";
 
+import {
+  ESC, s, cols, stripAnsi,
+  PERMISSION_COLORS, PERMISSION_ICONS, PERMISSION_LABELS,
+  nextPermissionMode, permTag,
+  formatToolInput, renderToolCall,
+} from "./tui/index.js";
+import {
+  loadMenuModule, renderMenu as renderMenuFrame,
+  enterMenuMode as enterMenu, exitMenuMode as exitMenu,
+  handleMenuKeypress as handleMenuKey,
+} from "./tui/index.js";
+import type { MenuState, MenuContext } from "./tui/index.js";
+
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../package.json") as { version: string }).version;
 
 type TuiMode = "chat" | "menu";
 
-// ── ANSI helpers ─────────────────────────────────────────────────────────────
-const ESC = "\x1b[";
-const s = {
-  reset: `${ESC}0m`,
-  bold: (t: string) => `${ESC}1m${t}${ESC}0m`,
-  dim: (t: string) => `${ESC}2m${t}${ESC}0m`,
-  italic: (t: string) => `${ESC}3m${t}${ESC}0m`,
-  cyan: (t: string) => `${ESC}36m${t}${ESC}0m`,
-  green: (t: string) => `${ESC}32m${t}${ESC}0m`,
-  yellow: (t: string) => `${ESC}33m${t}${ESC}0m`,
-  red: (t: string) => `${ESC}31m${t}${ESC}0m`,
-  blue: (t: string) => `${ESC}34m${t}${ESC}0m`,
-  magenta: (t: string) => `${ESC}35m${t}${ESC}0m`,
-  gray: (t: string) => `${ESC}90m${t}${ESC}0m`,
-  invert: (t: string) => `${ESC}7m${t}${ESC}0m`,
-  // Gradient-style brand text
-  brand: (t: string) => `${ESC}1;35m${t}${ESC}0m`,
-};
-
-function cols(): number {
-  return process.stdout.columns || 80;
-}
-
-// ── Permission mode helpers ─────────────────────────────────────────────────
-const PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
-
-function nextPermissionMode(current: PermissionMode): PermissionMode {
-  const idx = PERMISSION_MODES.indexOf(current);
-  return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
-}
-
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  "suggest": "suggest",
-  "auto-confirm": "auto",
-  "full-auto": "full-auto",
-};
-
-const PERMISSION_ICONS: Record<PermissionMode, string> = {
-  "suggest": "○",
-  "auto-confirm": "◐",
-  "full-auto": "●",
-};
-
-const PERMISSION_COLORS: Record<PermissionMode, (t: string) => string> = {
-  "suggest": s.cyan,
-  "auto-confirm": s.green,
-  "full-auto": s.yellow,
-};
-
-function permTag(mode: PermissionMode): string {
-  return PERMISSION_COLORS[mode](`${PERMISSION_ICONS[mode]} ${mode}`);
-}
-
 // ── Status bar ───────────────────────────────────────────────────────────────
-function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
+function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: import("./permissions/types.js").PermissionMode, agentCount?: number): string {
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
   const agentTag = agentCount && agentCount > 0 ? ` A${agentCount}` : "";
 
@@ -100,62 +59,6 @@ function renderStatusBar(provider: string, project: string | null, turns: number
   return s.invert(left + " ".repeat(pad) + right);
 }
 
-function stripAnsi(t: string): string {
-  return t.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-}
-
-// ── Tool call rendering ──────────────────────────────────────────────────────
-const COMPACT_LINES = 3;
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const mins = Math.floor(ms / 60_000);
-  const secs = Math.round((ms % 60_000) / 1000);
-  return `${mins}m ${secs}s`;
-}
-
-function formatToolInput(name: string, input: Record<string, unknown>): string {
-  switch (name) {
-    case "read_file":
-    case "write_file":
-    case "edit_file": return input.file_path as string ?? "";
-    case "shell": return (input.command as string ?? "").slice(0, 60);
-    case "glob": return input.pattern as string ?? "";
-    case "grep": return `/${input.pattern ?? ""}/ ${input.path ?? ""}`;
-    case "git_commit": return (input.message as string ?? "").slice(0, 50);
-    case "phren_search": return input.query as string ?? "";
-    case "phren_add_finding": return (input.finding as string ?? "").slice(0, 50);
-    default: return JSON.stringify(input).slice(0, 60);
-  }
-}
-
-function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
-  const preview = formatToolInput(name, input);
-  const dur = formatDuration(durationMs);
-  const icon = isError ? s.red("✗") : s.green("→");
-  const header = `  ${icon} ${s.bold(name)} ${s.gray(preview)}  ${s.dim(dur)}`;
-
-  // Compact: show first 3 lines only, with overflow count
-  const allLines = output.split("\n").filter(Boolean);
-  if (allLines.length === 0) return header;
-  const shown = allLines.slice(0, COMPACT_LINES);
-  const body = shown.map((l) => s.dim(`    ${l.slice(0, cols() - 6)}`)).join("\n");
-  const overflow = allLines.length - COMPACT_LINES;
-  const more = overflow > 0 ? `\n${s.dim(`    ... +${overflow} lines`)}` : "";
-
-  return `${header}\n${body}${more}`;
-}
-
-// ── Menu mode helpers ────────────────────────────────────────────────────────
-let menuMod: typeof import("@phren/cli/shell/render-api") | null = null;
-async function loadMenuModule() {
-  if (!menuMod) {
-    try { menuMod = await import("@phren/cli/shell/render-api"); } catch { menuMod = null; }
-  }
-  return menuMod;
-}
-
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
@@ -174,7 +77,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   // ── Dual-mode state ─────────────────────────────────────────────────────
   let tuiMode: TuiMode = "chat";
-  type MenuState = import("@phren/cli/shell/render-api").MenuState;
   let menuState: MenuState = {
     view: "Projects",
     project: config.phrenCtx?.project ?? undefined,
@@ -191,38 +93,31 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   let historyIndex = -1;
   let savedInput = "";
 
-  // ── Menu rendering ─────────────────────────────────────────────────────
-  async function renderMenu() {
-    const mod = await loadMenuModule();
-    if (!mod || !config.phrenCtx) return;
-    const result = await mod.renderMenuFrame(
-      config.phrenCtx.phrenPath,
-      config.phrenCtx.profile,
+  // ── Menu context bridge ─────────────────────────────────────────────────
+  function getMenuCtx(): MenuContext {
+    return {
+      phrenCtx: config.phrenCtx ? {
+        phrenPath: config.phrenCtx.phrenPath,
+        profile: config.phrenCtx.profile,
+        project: config.phrenCtx.project ?? undefined,
+      } : undefined,
+      w,
       menuState,
-    );
-    menuListCount = result.listCount;
-    // Full-screen write: single write to avoid flicker
-    w.write(`${ESC}?25l${ESC}H${ESC}2J${result.output}${ESC}?25h`);
-  }
-
-  function enterMenuMode() {
-    if (!config.phrenCtx) {
-      w.write(s.yellow("  phren not configured — menu unavailable\n"));
-      return;
-    }
-    tuiMode = "menu";
-    menuState.project = config.phrenCtx.project ?? menuState.project;
-    w.write("\x1b[?1049h"); // enter alternate screen
-    renderMenu();
-  }
-
-  function exitMenuMode() {
-    tuiMode = "chat";
-    menuFilterActive = false;
-    menuFilterBuf = "";
-    w.write("\x1b[?1049l"); // leave alternate screen (restores chat)
-    statusBar();
-    prompt();
+      menuListCount,
+      menuFilterActive,
+      menuFilterBuf,
+      onExit: () => {
+        tuiMode = "chat";
+        statusBar();
+        prompt();
+      },
+      onStateChange: (st, lc, fa, fb) => {
+        menuState = st;
+        menuListCount = lc;
+        menuFilterActive = fa;
+        menuFilterBuf = fb;
+      },
+    };
   }
 
   // Print status bar
@@ -345,64 +240,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   let resolve: ((session: AgentSession) => void) | null = null;
   const done = new Promise<AgentSession>((r) => { resolve = r; });
 
-  // ── Menu keypress handler ───────────────────────────────────────────────
-  async function handleMenuKeypress(key: readline.Key) {
-    // Filter input mode: capture text for / search
-    if (menuFilterActive) {
-      if (key.name === "escape") {
-        menuFilterActive = false;
-        menuFilterBuf = "";
-        menuState = { ...menuState, filter: undefined, cursor: 0, scroll: 0 };
-        renderMenu();
-        return;
-      }
-      if (key.name === "return") {
-        menuFilterActive = false;
-        menuState = { ...menuState, filter: menuFilterBuf || undefined, cursor: 0, scroll: 0 };
-        menuFilterBuf = "";
-        renderMenu();
-        return;
-      }
-      if (key.name === "backspace") {
-        menuFilterBuf = menuFilterBuf.slice(0, -1);
-        menuState = { ...menuState, filter: menuFilterBuf || undefined, cursor: 0 };
-        renderMenu();
-        return;
-      }
-      if (key.sequence && !key.ctrl && !key.meta) {
-        menuFilterBuf += key.sequence;
-        menuState = { ...menuState, filter: menuFilterBuf, cursor: 0 };
-        renderMenu();
-      }
-      return;
-    }
-
-    // "/" starts filter input
-    if (key.sequence === "/") {
-      menuFilterActive = true;
-      menuFilterBuf = "";
-      return;
-    }
-
-    const mod = await loadMenuModule();
-    if (!mod) { exitMenuMode(); return; }
-
-    const newState = mod.handleMenuKey(
-      menuState,
-      key.name ?? "",
-      menuListCount,
-      config.phrenCtx?.phrenPath,
-      config.phrenCtx?.profile,
-    );
-
-    if (newState === null) {
-      exitMenuMode();
-    } else {
-      menuState = newState;
-      renderMenu();
-    }
-  }
-
   // ── Keypress router ────────────────────────────────────────────────────
   process.stdin.on("keypress", (_ch, key) => {
     if (!key) return;
@@ -502,16 +339,17 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       }
       // Default: toggle menu mode
       if (tuiMode === "chat" && !running) {
-        enterMenuMode();
+        tuiMode = "menu";
+        enterMenu(getMenuCtx());
       } else if (tuiMode === "menu") {
-        exitMenuMode();
+        exitMenu(getMenuCtx());
       }
       return;
     }
 
     // Route to mode-specific handler
     if (tuiMode === "menu") {
-      handleMenuKeypress(key);
+      handleMenuKey(key, getMenuCtx());
       return;
     }
 
@@ -686,7 +524,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write(`\r${ESC}2K`); // clear input line
       // Scroll up: move to line above prompt area, write content, redraw prompt
       w.write(`${ESC}${PROMPT_LINES}A`); // move up past the prompt area
-      w.write(`\n${s.bold("You:")} ${line}\n`);
+      w.write(`${s.bold("You:")} ${line}\n`);
       prompt(); // redraw prompt below
       runAgentTurn(line);
       return;
@@ -917,16 +755,6 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     },
   };
 
-  // Write content above the prompt area: move up past prompt, write, redraw prompt
-  function writeAbovePrompt(text: string) {
-    w.write(`${ESC}s`); // save cursor
-    // Move to the line just above the prompt area
-    const rows = process.stdout.rows || 24;
-    w.write(`${ESC}${rows - PROMPT_LINES};1H`); // position above prompt
-    w.write(`\n${text}`); // newline pushes prompt down, write content
-    w.write(`${ESC}u`); // restore cursor (now in pushed-down prompt)
-  }
-
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
@@ -963,15 +791,14 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     // Process queued input — steer queue first, then pending
     if (steerQueue.length > 0) {
       const queued = steerQueue.shift()!;
-      w.write(`\n${s.bold("You:")} ${queued}\n\n`);
+      w.write(`${s.bold("You:")} ${queued}\n`);
       runAgentTurn(queued);
     } else if (pendingInput) {
       const queued = pendingInput;
       pendingInput = null;
-      w.write(`\n${s.bold("You:")} ${queued}\n\n`);
+      w.write(`${s.bold("You:")} ${queued}\n`);
       runAgentTurn(queued);
     } else {
-      w.write("\n");
       prompt();
     }
   }

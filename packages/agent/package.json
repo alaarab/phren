@@ -17,7 +17,11 @@
     "test": "echo 'Run tests from repo root: pnpm -w test'"
   },
   "dependencies": {
-    "@phren/cli": "workspace:*"
+    "@phren/cli": "workspace:*",
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.4"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -35,5 +39,8 @@
     "type": "git",
     "url": "git+https://github.com/alaarab/phren.git",
     "directory": "packages/agent"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }
