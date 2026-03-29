@@ -137,7 +137,6 @@ export class CodexProvider implements LlmProvider {
       model: this.model,
       instructions: system,
       input: toResponsesInput(system, messages),
-      max_output_tokens: this.maxOutputTokens,
       store: false,
       stream: true,
     };
@@ -201,7 +200,6 @@ export class CodexProvider implements LlmProvider {
       model: this.model,
       instructions: system,
       input: toResponsesInput(system, messages),
-      max_output_tokens: this.maxOutputTokens,
       store: false,
       stream: true,
       include: ["reasoning.encrypted_content"],
