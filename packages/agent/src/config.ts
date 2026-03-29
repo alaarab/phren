@@ -7,6 +7,7 @@ export interface CliArgs {
   project?: string;
   permissions: PermissionMode;
   maxTurns: number;
+  maxOutput?: number;
   budget: number | null;
   plan: boolean;
   dryRun: boolean;
@@ -33,6 +34,7 @@ Options:
   --model <model>      Override LLM model
   --project <name>     Force phren project context
   --max-turns <n>      Max tool-use turns (default: 50)
+  --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
   --permissions <mode> Permission mode: suggest, auto-confirm, full-auto (default: auto-confirm)
@@ -106,6 +108,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
+    else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];

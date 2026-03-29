@@ -4,21 +4,23 @@ import { toOpenAiTools, toOpenAiMessages, parseOpenAiResponse, parseOpenAiStream
 export class OpenRouterProvider implements LlmProvider {
   name = "openrouter";
   contextWindow = 200_000;
+  maxOutputTokens: number;
   private apiKey: string;
   private model: string;
   private baseUrl: string;
 
-  constructor(apiKey: string, model?: string, baseUrl?: string) {
+  constructor(apiKey: string, model?: string, baseUrl?: string, maxOutputTokens?: number) {
     this.apiKey = apiKey;
     this.model = model ?? "anthropic/claude-sonnet-4-20250514";
     this.baseUrl = baseUrl ?? "https://openrouter.ai/api/v1";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
     };
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
@@ -45,7 +47,7 @@ export class OpenRouterProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },
     };
@@ -75,21 +77,23 @@ export class OpenRouterProvider implements LlmProvider {
 export class OpenAiProvider implements LlmProvider {
   name = "openai";
   contextWindow = 128_000;
+  maxOutputTokens: number;
   private apiKey: string;
   private model: string;
   private baseUrl: string;
 
-  constructor(apiKey: string, model?: string, baseUrl?: string) {
+  constructor(apiKey: string, model?: string, baseUrl?: string, maxOutputTokens?: number) {
     this.apiKey = apiKey;
     this.model = model ?? "gpt-4o";
     this.baseUrl = baseUrl ?? "https://api.openai.com/v1";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
     };
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
@@ -111,7 +115,7 @@ export class OpenAiProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },
     };

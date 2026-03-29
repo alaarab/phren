@@ -85,7 +85,7 @@ function summarizeBackupChanges(before: Map<string, number>, projects: string[])
 
 // ── Governance handlers ──────────────────────────────────────────────────────
 
-interface GovernanceSummary {
+export interface GovernanceSummary {
   projects: number;
   staleCount: number;
   conflictCount: number;

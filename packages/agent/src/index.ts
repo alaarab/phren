@@ -57,7 +57,7 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
-    provider = resolveProvider(args.provider, args.model);
+    provider = resolveProvider(args.provider, args.model, args.maxOutput);
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);

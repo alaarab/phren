@@ -33,6 +33,43 @@ const PRICING: [string, ModelPricing][] = [
 
 PRICING.sort((a, b) => b[0].length - a[0].length); // longest prefix first
 
+// Max output token limits per model — prefix match (most specific wins)
+const OUTPUT_LIMITS: [string, number][] = [
+  // Anthropic
+  ["claude-opus-4",       32768],
+  ["claude-sonnet-4",     16384],
+  ["claude-haiku-4",      8192],
+  ["claude-3-5-sonnet",   8192],
+  ["claude-3-5-haiku",    8192],
+  ["claude-3-opus",       4096],
+  // OpenAI
+  ["gpt-5",              16384],
+  ["gpt-4.1",            32768],
+  ["gpt-4o",             16384],
+  ["gpt-4-turbo",        4096],
+  ["o3",                 100000],
+  ["o4-mini",            100000],
+  // OpenRouter prefixed
+  ["anthropic/claude-opus-4",     32768],
+  ["anthropic/claude-sonnet-4",   16384],
+  ["anthropic/claude-haiku-4",    8192],
+  ["openai/gpt-4o",               16384],
+  // Codex
+  ["gpt-5.2-codex",     16384],
+  // Local
+  ["qwen",              8192],
+];
+
+OUTPUT_LIMITS.sort((a, b) => b[0].length - a[0].length); // longest prefix first
+
+export function lookupMaxOutputTokens(model: string): number {
+  const lower = model.toLowerCase();
+  for (const [prefix, limit] of OUTPUT_LIMITS) {
+    if (lower.startsWith(prefix)) return limit;
+  }
+  return 8192; // default
+}
+
 function lookupPricing(model: string): ModelPricing {
   const lower = model.toLowerCase();
   for (const [prefix, pricing] of PRICING) {
