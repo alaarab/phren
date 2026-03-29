@@ -24,6 +24,15 @@ const DANGEROUS_PATTERNS: DangerousPattern[] = [
   { pattern: /\bdisown\b/i, reason: "Detached process may outlive session", severity: "block" },
   { pattern: /\bsetsid\b/i, reason: "Detached process may outlive session", severity: "block" },
 
+  // Block: Windows-specific destructive commands
+  { pattern: /\bformat\s+[a-z]:/i, reason: "Disk format command", severity: "block" },
+  { pattern: /\bdel\s+\/[sq]/i, reason: "Recursive or quiet delete", severity: "block" },
+  { pattern: /\brd\s+\/s/i, reason: "Recursive directory removal", severity: "block" },
+  { pattern: /\brmdir\s+\/s/i, reason: "Recursive directory removal", severity: "block" },
+  { pattern: /\breg\s+delete\b/i, reason: "Registry deletion", severity: "block" },
+  { pattern: /\bpowershell\b.*\b-enc\b/i, reason: "Encoded PowerShell command (obfuscation)", severity: "block" },
+  { pattern: /\bcmd\b.*\/c.*\bdel\s+\/[sq]/i, reason: "Recursive or quiet delete via cmd", severity: "block" },
+
   // Warn: potentially dangerous
   { pattern: /\beval\b/i, reason: "Dynamic code execution via eval", severity: "warn" },
   { pattern: /\$\(.*\)/, reason: "Command substitution", severity: "warn" },

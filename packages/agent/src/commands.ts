@@ -2,7 +2,7 @@
  * Slash command dispatch for the REPL.
  */
 import type { AgentSession } from "./agent-loop.js";
-import type { LlmMessage } from "./providers/types.js";
+import type { LlmMessage, LlmProvider } from "./providers/types.js";
 import { estimateMessageTokens } from "./context/token-counter.js";
 import { pruneMessages } from "./context/pruner.js";
 import type { AgentSpawner } from "./multi/spawner.js";
@@ -10,6 +10,17 @@ import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from 
 import { renderMarkdown } from "./multi/markdown.js";
 import { showModelPicker, type PickerResult } from "./multi/model-picker.js";
 import { formatProviderList, formatModelAddHelp, addCustomModel, removeCustomModel, type ReasoningLevel } from "./multi/provider-manager.js";
+import { execSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import { saveSessionMessages } from "./memory/session.js";
+import type { PhrenContext } from "./memory/context.js";
+import { buildIndex } from "@phren/cli/shared";
+import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
+import { readFindings } from "@phren/cli/data/access";
+import { readTasks } from "@phren/cli/data/tasks";
+import { addFinding } from "@phren/cli/core/finding";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -33,6 +44,18 @@ export interface CommandContext {
   currentModel?: string;
   /** Callback when model/reasoning changes */
   onModelChange?: (result: PickerResult) => void;
+  /** LLM provider for /ask side-channel queries */
+  provider?: LlmProvider;
+  /** System prompt for /ask queries */
+  systemPrompt?: string;
+  /** Session ID for /session commands */
+  sessionId?: string | null;
+  /** Session start time (epoch ms) */
+  startTime?: number;
+  /** Phren data directory for session save/export */
+  phrenPath?: string | null;
+  /** Full phren context for /mem commands */
+  phrenCtx?: PhrenContext | null;
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -41,6 +64,16 @@ export function createCommandContext(session: AgentSession, contextLimit: number
     contextLimit,
     undoStack: [],
   };
+}
+
+/** Format elapsed milliseconds as human-readable duration. */
+function formatElapsed(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ${secs % 60}s`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
 }
 
 /** Truncate text to N lines, appending [+M lines] if overflow. */
@@ -53,8 +86,9 @@ function truncateText(text: string, maxLines: number): string {
 
 /**
  * Try to handle a slash command. Returns true if the input was a command.
+ * Returns a Promise<boolean> for async commands like /ask.
  */
-export function handleCommand(input: string, ctx: CommandContext): boolean {
+export function handleCommand(input: string, ctx: CommandContext): boolean | Promise<boolean> {
   const parts = input.trim().split(/\s+/);
   const name = parts[0];
 
@@ -67,15 +101,28 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
   /model remove <id>  Remove a custom model
   /provider   Show configured providers + auth status
   /turns      Show turn and tool call counts
-  /clear      Clear conversation history
+  /clear      Clear conversation history and terminal screen
+  /cwd        Show current working directory
+  /files      Quick file tree (max depth 2, first 30 files)
   /cost       Show token usage and estimated cost
   /plan       Show conversation plan (tool calls so far)
   /undo       Undo last user message and response
   /history [n|full]  Show last N messages (default 10) with rich formatting
   /compact    Compact conversation to save context space
+  /context    Show context window usage and provider info
   /mode       Toggle input mode (steering ↔ queue)
   /spawn <name> <task>  Spawn a background agent
   /agents     List running agents
+  /session    Show session info (id, duration, stats)
+  /session save  Save conversation checkpoint
+  /session export  Export conversation as JSON
+  /diff [--staged]  Show git diff with syntax highlighting
+  /git <cmd>  Run common git commands (status, log, stash, stash pop)
+  /ask <question>  Quick LLM query (no tools, not added to session)
+  /mem search <query>  Search phren memory directly
+  /mem findings [project]  Show recent findings
+  /mem tasks [project]  Show tasks
+  /mem add <finding>  Quick-add a finding
   /preset [name|save|delete|list]  Config presets
   /exit       Exit the REPL${RESET}\n`);
       return true;
@@ -159,8 +206,38 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
       ctx.session.turns = 0;
       ctx.session.toolCalls = 0;
       ctx.undoStack.length = 0;
+      process.stdout.write("\x1b[2J\x1b[H"); // clear terminal screen
       process.stderr.write(`${DIM}Conversation cleared.${RESET}\n`);
       return true;
+
+    case "/cwd":
+      process.stderr.write(`${DIM}${process.cwd()}${RESET}\n`);
+      return true;
+
+    case "/files": {
+      try {
+        const countRaw = execSync(
+          "find . -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' | wc -l",
+          { encoding: "utf-8", timeout: 5_000, cwd: process.cwd() },
+        ).trim();
+        const total = parseInt(countRaw, 10) || 0;
+        const listRaw = execSync(
+          "find . -maxdepth 2 -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' | sort | head -30",
+          { encoding: "utf-8", timeout: 5_000, cwd: process.cwd() },
+        ).trim();
+        if (!listRaw) {
+          process.stderr.write(`${DIM}No files found.${RESET}\n`);
+        } else {
+          const lines = listRaw.split("\n");
+          const label = total > lines.length ? `${total} files (showing first ${lines.length})` : `${total} files`;
+          process.stderr.write(`${DIM}${label}\n${listRaw}${RESET}\n`);
+        }
+      } catch (err: unknown) {
+        const e = err as { stderr?: string; message?: string };
+        process.stderr.write(`${RED}${e.stderr || e.message || "find failed"}${RESET}\n`);
+      }
+      return true;
+    }
 
     case "/cost": {
       const ct = ctx.costTracker;
@@ -265,10 +342,40 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
     }
 
     case "/compact": {
-      const before = ctx.session.messages.length;
+      const beforeCount = ctx.session.messages.length;
+      const beforeTokens = estimateMessageTokens(ctx.session.messages);
       ctx.session.messages = pruneMessages(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
-      const after = ctx.session.messages.length;
-      process.stderr.write(`${DIM}Compacted: ${before} → ${after} messages.${RESET}\n`);
+      const afterCount = ctx.session.messages.length;
+      const afterTokens = estimateMessageTokens(ctx.session.messages);
+      const reduction = beforeTokens > 0 ? ((1 - afterTokens / beforeTokens) * 100).toFixed(0) : "0";
+      const fmtBefore = beforeTokens >= 1000 ? `${(beforeTokens / 1000).toFixed(1)}k` : String(beforeTokens);
+      const fmtAfter = afterTokens >= 1000 ? `${(afterTokens / 1000).toFixed(1)}k` : String(afterTokens);
+      process.stderr.write(`${DIM}Compacted: ${beforeCount} → ${afterCount} messages (~${fmtBefore} → ~${fmtAfter} tokens, ${reduction}% reduction)${RESET}\n`);
+      return true;
+    }
+
+    case "/context": {
+      const ctxTokens = estimateMessageTokens(ctx.session.messages);
+      const ctxPct = ctx.contextLimit > 0 ? (ctxTokens / ctx.contextLimit) * 100 : 0;
+      const ctxPctStr = ctxPct.toFixed(1);
+      const ctxWindowK = ctx.contextLimit >= 1000 ? `${(ctx.contextLimit / 1000).toFixed(0)}k` : String(ctx.contextLimit);
+      const ctxTokensStr = ctxTokens >= 1000 ? `~${(ctxTokens / 1000).toFixed(1)}k` : `~${ctxTokens}`;
+
+      // Progress bar: 10 chars wide
+      const filled = Math.round(ctxPct / 10);
+      const bar = "█".repeat(Math.min(filled, 10)) + "░".repeat(Math.max(10 - filled, 0));
+      const barColor = ctxPct > 80 ? RED : ctxPct > 50 ? YELLOW : GREEN;
+
+      const providerLabel = ctx.providerName ?? "unknown";
+      const modelLabel = ctx.currentModel ?? "default";
+
+      process.stderr.write(
+        `${DIM}  Messages: ${ctx.session.messages.length}\n` +
+        `  Tokens: ${ctxTokensStr} / ${ctxWindowK} (${ctxPctStr}%)\n` +
+        `  Provider: ${providerLabel} (${modelLabel})\n` +
+        `  Context window: ${ctxWindowK}\n` +
+        `  ${barColor}[${bar}]${RESET}${DIM} ${ctxPctStr}%${RESET}\n`
+      );
       return true;
     }
 
@@ -372,6 +479,268 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
         process.stderr.write(`${DIM}${formatPreset(sub, preset, isBuiltin)}\nUse: phren-agent --preset ${sub} <task>${RESET}\n`);
       }
       return true;
+    }
+
+    case "/session": {
+      const sub = parts[1]?.toLowerCase();
+
+      if (sub === "save") {
+        if (!ctx.phrenPath || !ctx.sessionId) {
+          process.stderr.write(`${DIM}No active phren session to save.${RESET}\n`);
+          return true;
+        }
+        try {
+          saveSessionMessages(ctx.phrenPath, ctx.sessionId, ctx.session.messages);
+          process.stderr.write(`${GREEN}→ Checkpoint saved (${ctx.session.messages.length} messages)${RESET}\n`);
+        } catch (err: unknown) {
+          process.stderr.write(`${RED}${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+        }
+        return true;
+      }
+
+      if (sub === "export") {
+        const exportDir = path.join(os.homedir(), ".phren-agent", "exports");
+        fs.mkdirSync(exportDir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        const exportFile = path.join(exportDir, `session-${ts}.json`);
+        try {
+          fs.writeFileSync(exportFile, JSON.stringify(ctx.session.messages, null, 2) + "\n");
+          process.stderr.write(`${GREEN}→ Exported to ${exportFile}${RESET}\n`);
+        } catch (err: unknown) {
+          process.stderr.write(`${RED}${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+        }
+        return true;
+      }
+
+      // Default: show session info
+      const duration = ctx.startTime ? formatElapsed(Date.now() - ctx.startTime) : "unknown";
+      const lines: string[] = [];
+      if (ctx.sessionId) lines.push(`  Session:  ${ctx.sessionId}`);
+      lines.push(`  Turns:    ${ctx.session.turns}`);
+      lines.push(`  Tools:    ${ctx.session.toolCalls}`);
+      lines.push(`  Messages: ${ctx.session.messages.length}`);
+      lines.push(`  Duration: ${duration}`);
+
+      // Read session state file for findings/tasks counters
+      if (ctx.phrenPath && ctx.sessionId) {
+        try {
+          const stateFile = path.join(ctx.phrenPath, ".runtime", "sessions", `session-${ctx.sessionId}.json`);
+          const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+          lines.push(`  Findings: ${state.findingsAdded ?? 0}`);
+          lines.push(`  Tasks:    ${state.tasksCompleted ?? 0}`);
+        } catch { /* session file may not exist */ }
+      }
+
+      process.stderr.write(`${DIM}${lines.join("\n")}${RESET}\n`);
+      return true;
+    }
+
+    case "/diff": {
+      const staged = parts.includes("--staged") || parts.includes("--cached");
+      const cmd = staged ? "git diff --staged" : "git diff";
+      try {
+        const raw = execSync(cmd, { encoding: "utf-8", timeout: 10_000, cwd: process.cwd() });
+        if (!raw.trim()) {
+          process.stderr.write(`${DIM}No ${staged ? "staged " : ""}changes.${RESET}\n`);
+        } else {
+          const colored = raw.split("\n").map((line) => {
+            if (line.startsWith("diff --git")) return `${BOLD}${line}${RESET}`;
+            if (line.startsWith("@@")) return `${CYAN}${line}${RESET}`;
+            if (line.startsWith("+")) return `${GREEN}${line}${RESET}`;
+            if (line.startsWith("-")) return `${RED}${line}${RESET}`;
+            return line;
+          }).join("\n");
+          process.stderr.write(colored + "\n");
+        }
+      } catch (err: unknown) {
+        const e = err as { stderr?: string; message?: string };
+        process.stderr.write(`${RED}${e.stderr || e.message || "git diff failed"}${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/git": {
+      const sub = parts.slice(1).join(" ").trim();
+      if (!sub) {
+        process.stderr.write(`${DIM}Usage: /git <status|log|stash|stash pop>${RESET}\n`);
+        return true;
+      }
+      const allowed: Record<string, string> = {
+        "status": "git status",
+        "log": "git log --oneline -5",
+        "stash": "git stash",
+        "stash pop": "git stash pop",
+      };
+      const gitCmd = allowed[sub];
+      if (!gitCmd) {
+        process.stderr.write(`${DIM}Supported: /git status, /git log, /git stash, /git stash pop${RESET}\n`);
+        return true;
+      }
+      try {
+        const output = execSync(gitCmd, { encoding: "utf-8", timeout: 10_000, cwd: process.cwd() });
+        if (output.trim()) process.stderr.write(output.endsWith("\n") ? output : output + "\n");
+        else process.stderr.write(`${DIM}(no output)${RESET}\n`);
+      } catch (err: unknown) {
+        const e = err as { stderr?: string; message?: string };
+        process.stderr.write(`${RED}${e.stderr || e.message || "git command failed"}${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/mem": {
+      const sub = parts[1]?.toLowerCase();
+      if (!ctx.phrenCtx) {
+        process.stderr.write(`${DIM}No phren context available.${RESET}\n`);
+        return true;
+      }
+      const pCtx = ctx.phrenCtx;
+
+      if (!sub || sub === "help") {
+        process.stderr.write(`${DIM}Usage:
+  /mem search <query>     Search phren memory
+  /mem findings [project] Show recent findings
+  /mem tasks [project]    Show tasks
+  /mem add <finding>      Quick-add a finding${RESET}\n`);
+        return true;
+      }
+
+      if (sub === "search") {
+        const query = parts.slice(2).join(" ").trim();
+        if (!query) {
+          process.stderr.write(`${DIM}Usage: /mem search <query>${RESET}\n`);
+          return true;
+        }
+        return (async () => {
+          try {
+            const db = await buildIndex(pCtx.phrenPath, pCtx.profile);
+            const result = await searchKnowledgeRows(db, {
+              query,
+              maxResults: 10,
+              filterProject: pCtx.project || null,
+              filterType: null,
+              phrenPath: pCtx.phrenPath,
+            });
+            const ranked = rankResults(result.rows ?? [], query, null, pCtx.project || null, pCtx.phrenPath, db);
+            if (ranked.length === 0) {
+              process.stderr.write(`${DIM}No results found.${RESET}\n`);
+            } else {
+              const lines = ranked.slice(0, 10).map((r: { project: string; filename: string; content?: string }, i: number) => {
+                const snippet = r.content?.slice(0, 200) ?? "";
+                return `  ${CYAN}${i + 1}.${RESET} ${DIM}[${r.project}/${r.filename}]${RESET} ${snippet}`;
+              });
+              process.stderr.write(lines.join("\n") + "\n");
+            }
+          } catch (err: unknown) {
+            process.stderr.write(`${RED}Search failed: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+          }
+          return true;
+        })();
+      }
+
+      if (sub === "findings") {
+        const project = parts[2] || pCtx.project;
+        if (!project) {
+          process.stderr.write(`${DIM}Usage: /mem findings <project>${RESET}\n`);
+          return true;
+        }
+        const result = readFindings(pCtx.phrenPath, project);
+        if (!result.ok) {
+          process.stderr.write(`${RED}${result.error}${RESET}\n`);
+          return true;
+        }
+        const items = result.data ?? [];
+        if (items.length === 0) {
+          process.stderr.write(`${DIM}No findings for ${project}.${RESET}\n`);
+          return true;
+        }
+        const recent = items.slice(-15);
+        const lines = recent.map((f: { id: string; date: string; text: string }) =>
+          `  ${DIM}${f.date}${RESET} ${f.text.slice(0, 120)}${f.text.length > 120 ? "..." : ""}`
+        );
+        process.stderr.write(`${DIM}── Findings (${items.length} total, showing last ${recent.length}) ──${RESET}\n`);
+        process.stderr.write(lines.join("\n") + "\n");
+        return true;
+      }
+
+      if (sub === "tasks") {
+        const project = parts[2] || pCtx.project;
+        if (!project) {
+          process.stderr.write(`${DIM}Usage: /mem tasks <project>${RESET}\n`);
+          return true;
+        }
+        const result = readTasks(pCtx.phrenPath, project);
+        if (!result.ok) {
+          process.stderr.write(`${RED}${result.error}${RESET}\n`);
+          return true;
+        }
+        const sections: string[] = [];
+        for (const [section, items] of Object.entries(result.data!.items)) {
+          if (section === "Done") continue;
+          if (items.length === 0) continue;
+          const lines = items.map((t: { checked: boolean; line: string }) => {
+            const icon = t.checked ? `${GREEN}✓${RESET}` : `${DIM}○${RESET}`;
+            return `  ${icon} ${t.line}`;
+          });
+          sections.push(`${BOLD}${section}${RESET}\n${lines.join("\n")}`);
+        }
+        if (sections.length === 0) {
+          process.stderr.write(`${DIM}No active tasks for ${project}.${RESET}\n`);
+        } else {
+          process.stderr.write(sections.join("\n") + "\n");
+        }
+        return true;
+      }
+
+      if (sub === "add") {
+        const finding = parts.slice(2).join(" ").trim();
+        if (!finding) {
+          process.stderr.write(`${DIM}Usage: /mem add <finding text>${RESET}\n`);
+          return true;
+        }
+        const project = pCtx.project;
+        if (!project) {
+          process.stderr.write(`${DIM}No project context. Cannot add finding without a project.${RESET}\n`);
+          return true;
+        }
+        const result = addFinding(pCtx.phrenPath, project, finding);
+        if (result.ok) {
+          process.stderr.write(`${GREEN}→ Finding saved to ${project}.${RESET}\n`);
+        } else {
+          process.stderr.write(`${RED}${result.message ?? "Failed to save finding."}${RESET}\n`);
+        }
+        return true;
+      }
+
+      process.stderr.write(`${DIM}Unknown /mem subcommand: ${sub}. Try /mem help${RESET}\n`);
+      return true;
+    }
+
+    case "/ask": {
+      const question = parts.slice(1).join(" ").trim();
+      if (!question) {
+        process.stderr.write(`${DIM}Usage: /ask <question>${RESET}\n`);
+        return true;
+      }
+      if (!ctx.provider) {
+        process.stderr.write(`${DIM}Provider not available for /ask.${RESET}\n`);
+        return true;
+      }
+      const provider = ctx.provider;
+      const sysPrompt = ctx.systemPrompt ?? "You are a helpful assistant.";
+      return (async () => {
+        process.stderr.write(`${DIM}◆ quick answer (no tools):${RESET}\n`);
+        try {
+          const response = await provider.chat(sysPrompt, [{ role: "user", content: question }], []);
+          for (const block of response.content) {
+            if (block.type === "text") {
+              process.stderr.write(renderMarkdown(block.text) + "\n");
+            }
+          }
+        } catch (err: unknown) {
+          process.stderr.write(`${RED}${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+        }
+        return true;
+      })();
     }
 
     case "/exit":

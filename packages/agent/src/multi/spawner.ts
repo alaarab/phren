@@ -68,6 +68,7 @@ const ENV_FORWARD_KEYS = [
   "PHREN_PROFILE",
   "PHREN_DEBUG",
   "HOME",
+  "USERPROFILE",
   "PATH",
   "NODE_EXTRA_CA_CERTS",
 ];
@@ -216,7 +217,7 @@ export class AgentSpawner extends EventEmitter {
     // Give it a moment to clean up, then force kill
     setTimeout(() => {
       if (this.processes.has(agentId)) {
-        child.kill("SIGTERM");
+        child.kill();
       }
     }, 5000);
 
@@ -269,7 +270,7 @@ export class AgentSpawner extends EventEmitter {
         setTimeout(() => {
           // Force kill remaining
           for (const [id, child] of this.processes) {
-            child.kill("SIGKILL");
+            child.kill();
             this.processes.delete(id);
           }
           resolve();

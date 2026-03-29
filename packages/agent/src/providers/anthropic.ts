@@ -6,30 +6,17 @@ export class AnthropicProvider implements LlmProvider {
   maxOutputTokens: number;
   private apiKey: string;
   private model: string;
+  private cacheEnabled: boolean;
 
-  constructor(apiKey: string, model?: string, maxOutputTokens?: number) {
+  constructor(apiKey: string, model?: string, maxOutputTokens?: number, cacheEnabled = true) {
     this.apiKey = apiKey;
     this.model = model ?? "claude-sonnet-4-20250514";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
+    this.cacheEnabled = cacheEnabled;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
-    const body: Record<string, unknown> = {
-      model: this.model,
-      system,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      max_tokens: this.maxOutputTokens,
-    };
-    if (tools.length > 0) {
-      body.tools = tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.input_schema,
-      }));
-    }
+    const body = this.buildRequestBody(system, messages, tools);
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -53,6 +40,7 @@ export class AnthropicProvider implements LlmProvider {
       : "end_turn";
 
     const usage = data.usage as Record<string, number> | undefined;
+    logCacheUsage(usage);
     return {
       content,
       stop_reason: stop_reason as LlmResponse["stop_reason"],
@@ -61,20 +49,8 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
-    const body: Record<string, unknown> = {
-      model: this.model,
-      system,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      max_tokens: this.maxOutputTokens,
-      stream: true,
-    };
-    if (tools.length > 0) {
-      body.tools = tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: t.input_schema,
-      }));
-    }
+    const body = this.buildRequestBody(system, messages, tools);
+    body.stream = true;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -136,6 +112,7 @@ export class AnthropicProvider implements LlmProvider {
       } else if (type === "message_start") {
         const u = (data.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
         if (u) {
+          logCacheUsage(u);
           usage = {
             input_tokens: u.input_tokens ?? 0,
             output_tokens: u.output_tokens ?? 0,
@@ -145,6 +122,73 @@ export class AnthropicProvider implements LlmProvider {
     }
 
     yield { type: "done", stop_reason: stopReason, usage };
+  }
+
+  /** Build the request body with optional prompt caching breakpoints. */
+  private buildRequestBody(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Record<string, unknown> {
+    const cache = { cache_control: { type: "ephemeral" } };
+
+    // System prompt: use content array format with cache_control on the text block
+    const systemValue = this.cacheEnabled
+      ? [{ type: "text", text: system, ...cache }]
+      : system;
+
+    const mappedMessages = messages.map((m) => ({ role: m.role, content: m.content }));
+
+    // Mark the last 2 user messages with cache_control for recent-context caching
+    if (this.cacheEnabled) {
+      let marked = 0;
+      for (let i = mappedMessages.length - 1; i >= 0 && marked < 2; i--) {
+        if (mappedMessages[i].role !== "user") continue;
+        const c = mappedMessages[i].content;
+        if (typeof c === "string") {
+          mappedMessages[i] = {
+            role: "user",
+            content: [{ type: "text", text: c, ...cache }],
+          };
+        } else if (Array.isArray(c) && c.length > 0) {
+          // Add cache_control to the last block of the content array
+          const blocks = [...c];
+          blocks[blocks.length - 1] = { ...blocks[blocks.length - 1], ...cache };
+          mappedMessages[i] = { role: "user", content: blocks };
+        }
+        marked++;
+      }
+    }
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      system: systemValue,
+      messages: mappedMessages,
+      max_tokens: this.maxOutputTokens,
+    };
+
+    if (tools.length > 0) {
+      const mappedTools = tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.input_schema,
+      }));
+      // Cache the last tool definition — Anthropic uses it as the breakpoint for the entire tools block
+      if (this.cacheEnabled) {
+        mappedTools[mappedTools.length - 1] = { ...mappedTools[mappedTools.length - 1], ...cache };
+      }
+      body.tools = mappedTools;
+    }
+
+    return body;
+  }
+}
+
+/** Log cache hit/creation stats to stderr (visible in verbose mode). */
+function logCacheUsage(usage: Record<string, number> | undefined): void {
+  if (!usage) return;
+  const created = usage.cache_creation_input_tokens;
+  const read = usage.cache_read_input_tokens;
+  if (created || read) {
+    process.stderr.write(
+      `[cache] created=${created ?? 0} read=${read ?? 0} input=${usage.input_tokens ?? 0}\n`,
+    );
   }
 }
 
