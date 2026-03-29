@@ -8,7 +8,7 @@
  * 5. Sends a final "done" message with the result
  */
 
-import type { SpawnPayload, CancelMessage, ChildMessage, ParentMessage } from "./types.js";
+import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
 import type { TurnHooks } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";

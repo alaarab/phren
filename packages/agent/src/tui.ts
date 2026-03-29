@@ -59,6 +59,22 @@ const PERMISSION_LABELS: Record<PermissionMode, string> = {
   "full-auto": "full-auto",
 };
 
+const PERMISSION_ICONS: Record<PermissionMode, string> = {
+  "suggest": "○",
+  "auto-confirm": "◐",
+  "full-auto": "●",
+};
+
+const PERMISSION_COLORS: Record<PermissionMode, (t: string) => string> = {
+  "suggest": s.cyan,
+  "auto-confirm": s.green,
+  "full-auto": s.yellow,
+};
+
+function permTag(mode: PermissionMode): string {
+  return PERMISSION_COLORS[mode](`${PERMISSION_ICONS[mode]} ${mode}`);
+}
+
 // ── Status bar ───────────────────────────────────────────────────────────────
 function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
@@ -98,10 +114,9 @@ function formatDuration(ms: number): string {
 }
 
 function formatToolInput(name: string, input: Record<string, unknown>): string {
-  // Show the most relevant input field for each tool type
   switch (name) {
-    case "read_file": return input.file_path as string ?? "";
-    case "write_file": return input.file_path as string ?? "";
+    case "read_file":
+    case "write_file":
     case "edit_file": return input.file_path as string ?? "";
     case "shell": return (input.command as string ?? "").slice(0, 60);
     case "glob": return input.pattern as string ?? "";
@@ -220,23 +235,16 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   function prompt(skipNewline = false) {
     if (!isTTY) return;
     const mode = config.registry.permissionConfig.mode;
-    const modeIcon = mode === "full-auto" ? "●" : mode === "auto-confirm" ? "◐" : "○";
-    const modeColor = mode === "full-auto" ? s.yellow : mode === "auto-confirm" ? s.green : s.cyan;
+    const color = PERMISSION_COLORS[mode];
+    const icon = PERMISSION_ICONS[mode];
     const rows = process.stdout.rows || 24;
     const c = cols();
     if (!skipNewline) w.write("\n");
-    // Separator line + prompt on last 2 rows
-    const permLabel = PERMISSION_LABELS[mode];
-    // 3 bottom rows: separator, permission line, input
     const sepLine = s.dim("─".repeat(c));
-    const permLine = `  ${modeColor(`${modeIcon} ${permLabel} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
+    const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
     w.write(`${ESC}${rows - 2};1H${ESC}2K${sepLine}`);
     w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
-    if (bashMode) {
-      w.write(`${ESC}${rows};1H${ESC}2K${s.yellow("!")} `);
-    } else {
-      w.write(`${ESC}${rows};1H${ESC}2K${modeColor(modeIcon)} ${s.dim("▸")} `);
-    }
+    w.write(`${ESC}${rows};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${color(icon)} ${s.dim("▸")} `}`);
   }
 
   // Terminal cleanup: restore state on exit
@@ -258,27 +266,25 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     const project = config.phrenCtx?.project;
     const cwd = process.cwd().replace(os.homedir(), "~");
     const permMode = config.registry.permissionConfig.mode;
-    const modeColor = permMode === "full-auto" ? s.yellow : permMode === "auto-confirm" ? s.green : s.cyan;
 
-    // Try to show the phren character art alongside info
     let artLines: string[] = [];
     try {
       const { PHREN_ART } = await import("@phren/cli/phren-art" as string);
       artLines = (PHREN_ART as string[]).filter((l: string) => l.trim());
     } catch { /* art not available */ }
 
+    const info = [
+      `${s.brand("◆ phren agent")}  ${s.dim(`v${AGENT_VERSION}`)}`,
+      `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
+      `${s.dim(cwd)}`,
+      ``,
+      `${permTag(permMode)} ${s.dim("permissions (shift+tab to cycle)")}`,
+      ``,
+      `${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit`,
+    ];
+
     if (artLines.length > 0) {
-      // Art on left, info on right
-      const info = [
-        `${s.brand("◆ phren agent")}  ${s.dim(`v${AGENT_VERSION}`)}`,
-        `${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}`,
-        `${s.dim(cwd)}`,
-        ``,
-        `${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}`,
-        ``,
-        `${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit`,
-      ];
-      const maxArtWidth = 26; // phren art is ~24 chars wide
+      const maxArtWidth = 26;
       for (let i = 0; i < Math.max(artLines.length, info.length); i++) {
         const artPart = i < artLines.length ? artLines[i] : "";
         const infoPart = i < info.length ? info[i] : "";
@@ -286,11 +292,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         w.write(`${artPadded}${infoPart}\n`);
       }
     } else {
-      // Fallback: text-only banner
-      w.write(`\n  ${s.brand("◆ phren agent")}  ${s.dim(`v${AGENT_VERSION}`)}\n`);
-      w.write(`  ${s.dim(config.provider.name)}${project ? s.dim(` · ${project}`) : ""}  ${s.dim(cwd)}\n`);
-      w.write(`  ${modeColor(`${permMode === "full-auto" ? "●" : permMode === "auto-confirm" ? "◐" : "○"} ${permMode}`)} ${s.dim("permissions (shift+tab to cycle)")}\n\n`);
-      w.write(`  ${s.dim("Tab")} memory  ${s.dim("Shift+Tab")} perms  ${s.dim("/help")} cmds  ${s.dim("Ctrl+D")} exit\n\n`);
+      w.write(`\n  ${info[0]}\n  ${info[1]}  ${info[2]}\n  ${info[4]}\n\n  ${info[6]}\n\n`);
     }
     w.write("\n");
   }
@@ -377,13 +379,10 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
     // Shift+Tab — cycle permission mode (works in chat mode, not during filter)
     if (key.shift && key.name === "tab" && !menuFilterActive && tuiMode === "chat") {
-      const current = config.registry.permissionConfig.mode;
-      const next = nextPermissionMode(current);
+      const next = nextPermissionMode(config.registry.permissionConfig.mode);
       config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
       savePermissionMode(next);
-      const modeColor = next === "full-auto" ? s.yellow : next === "auto-confirm" ? s.green : s.cyan;
-      const modeIcon = next === "full-auto" ? "●" : next === "auto-confirm" ? "◐" : "○";
-      w.write(`  ${modeColor(`${modeIcon} ${next}`)}\n`);
+      w.write(`  ${permTag(next)}\n`);
       statusBar();
       if (!running) prompt();
       return;
@@ -636,4 +635,3 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   return done;
 }
-

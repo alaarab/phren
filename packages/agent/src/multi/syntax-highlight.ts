@@ -7,7 +7,6 @@
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
-const DIM = `${ESC}2m`;
 const MAGENTA = `${ESC}35m`;
 const GREEN = `${ESC}32m`;
 const YELLOW = `${ESC}33m`;

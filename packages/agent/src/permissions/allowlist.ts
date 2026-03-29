@@ -76,7 +76,3 @@ export function clearAllowlist(): void {
   sessionAllowlist.length = 0;
 }
 
-/** Get a snapshot of the current allowlist (for display). */
-export function getAllowlist(): ReadonlyArray<Readonly<AllowEntry>> {
-  return sessionAllowlist;
-}

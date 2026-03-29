@@ -50,7 +50,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-0.0.57
+0.1.1
 
 ## MCP Tools (53)
 
