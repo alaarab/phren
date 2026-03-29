@@ -126,7 +126,7 @@ export class CodexProvider implements LlmProvider {
   private model: string;
 
   constructor(model?: string, maxOutputTokens?: number) {
-    this.model = model ?? "gpt-5.2-codex";
+    this.model = model ?? "gpt-5.3-codex";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 

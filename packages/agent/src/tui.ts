@@ -423,7 +423,14 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         return;
       }
 
-      if (handleCommand(line, { session, contextLimit, undoStack: [] })) {
+      if (handleCommand(line, {
+        session,
+        contextLimit,
+        undoStack: [],
+        providerName: config.provider.name,
+        currentModel: (config.provider as { model?: string }).model,
+        spawner,
+      })) {
         prompt();
         return;
       }
