@@ -321,8 +321,21 @@ export async function runTurn(
       continue;
     }
 
-    // If no tool use, we're done
-    if (stopReason !== "tool_use") break;
+    // If no tool use, check Stop hooks (exit code 2 = keep going)
+    if (stopReason !== "tool_use") {
+      if (config.hookManager?.hasHooks("Stop")) {
+        try {
+          const stopResult = await config.hookManager.runHooks({ event: "Stop" });
+          if (stopResult.preventStop && stopResult.output) {
+            // Inject hook feedback as user message and continue
+            session.messages.push({ role: "user", content: stopResult.output });
+            if (verbose) status(`[Stop hook: continuing — ${stopResult.output.slice(0, 80)}]\n`);
+            continue;
+          }
+        } catch { /* best effort */ }
+      }
+      break;
+    }
 
     // Execute tool calls with concurrency
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");

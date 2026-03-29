@@ -7,6 +7,8 @@ import { isAllowed } from "./allowlist.js";
 const ALWAYS_SAFE_TOOLS = new Set([
   "phren_search",
   "phren_get_tasks",
+  "ask_user",
+  "cron_list",
 ]);
 
 /** Tools that access file paths and need sensitive-path checks. */

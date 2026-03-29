@@ -17,6 +17,9 @@ import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { lspTool, shutdownLspServers } from "./tools/lsp.js";
 import { createSubagentTool } from "./tools/subagent.js";
+import { notebookEditTool } from "./tools/notebook-edit.js";
+import { askUserTool } from "./tools/ask-user.js";
+import { cronCreateTool, cronListTool, cronDeleteTool, cancelAllCronTasks } from "./tools/cron.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionMessages } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -164,6 +167,17 @@ export async function runAgentCli(raw: string[]) {
   registry.register(createWebFetchTool());
   registry.register(createWebSearchTool());
 
+  // Interaction tools
+  registry.register(askUserTool);
+
+  // Notebook editing
+  registry.register(notebookEditTool);
+
+  // Scheduled tasks
+  registry.register(cronCreateTool);
+  registry.register(cronListTool);
+  registry.register(cronDeleteTool);
+
   // Git tools
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
@@ -248,6 +262,7 @@ export async function runAgentCli(raw: string[]) {
   const cleanup = () => {
     mcpCleanup?.();
     shutdownLspServers();
+    cancelAllCronTasks();
   };
 
   // Multi-agent TUI mode
