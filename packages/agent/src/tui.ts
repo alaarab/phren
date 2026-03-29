@@ -690,7 +690,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       }
 
       // Echo user input into chat history, then run turn
-      w.write(`\n${s.bold("You:")} ${line}\n\n`);
+      w.write(`\n${s.bold("You:")} ${line}\n`);
       runAgentTurn(line);
       return;
     }
@@ -923,6 +923,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   async function runAgentTurn(userInput: string) {
     running = true;
     firstDelta = true;
+    // Show initial thinking state immediately (no gap)
+    w.write(`  ${s.dim("◆ thinking...")}\r`);
     const thinkStart = Date.now();
     // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
     let thinkFrame = 0;
