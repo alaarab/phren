@@ -91,7 +91,10 @@ export async function runAgentCli(raw: string[]) {
     }
   }
 
-  const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary);
+  const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary, {
+    name: provider.name,
+    model: (provider as { model?: string }).model,
+  });
 
   // Dry run: print system prompt and exit
   if (args.dryRun) {
