@@ -48,6 +48,8 @@ const KEY_PATTERNS = [
   "DATABASE_URL",
   "KUBECONFIG",
   "DOCKER_AUTH_CONFIG",
+  "PGPASSWORD",
+  "MYSQL_PWD",
 ];
 
 /** Suffix patterns that also match connection strings and auth configs. */

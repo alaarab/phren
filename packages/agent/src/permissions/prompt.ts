@@ -11,6 +11,10 @@
 import * as readline from "node:readline";
 import { addAllow } from "./allowlist.js";
 
+// ── Prompt serialization lock ───────────────────────────────────────────
+// Prevents concurrent askUser() calls from interleaving their prompts.
+let promptQueue: Promise<void> = Promise.resolve();
+
 // ── ANSI colors ─────────────────────────────────────────────────────────
 
 const RESET = "\x1b[0m";
@@ -114,35 +118,46 @@ export async function askUser(
   input: Record<string, unknown>,
   reason: string,
 ): Promise<boolean> {
-  const risk = classifyRisk(toolName);
-  const color = riskColor(risk);
-  const label = riskLabel(risk);
-  const summary = summarizeCall(toolName, input);
+  // Serialize: wait for any prior prompt to finish before showing ours
+  let resolve!: () => void;
+  const gate = new Promise<void>((r) => { resolve = r; });
+  const previous = promptQueue;
+  promptQueue = gate;
+  await previous;
 
-  // Header
-  process.stderr.write(`\n${color}${BOLD}[${label}]${RESET} ${BOLD}${toolName}${RESET}\n`);
-  process.stderr.write(`${DIM}  ${reason}${RESET}\n`);
-  process.stderr.write(`${CYAN}  ${summary}${RESET}\n`);
+  try {
+    const risk = classifyRisk(toolName);
+    const color = riskColor(risk);
+    const label = riskLabel(risk);
+    const summary = summarizeCall(toolName, input);
 
-  // Show full input for shell commands or when details matter
-  if (toolName === "shell") {
-    const cmd = (input.command as string) || "";
-    if (cmd.length > 120) {
-      process.stderr.write(`${DIM}  Full command:${RESET}\n`);
-      process.stderr.write(`${DIM}  ${cmd}${RESET}\n`);
+    // Header
+    process.stderr.write(`\n${color}${BOLD}[${label}]${RESET} ${BOLD}${toolName}${RESET}\n`);
+    process.stderr.write(`${DIM}  ${reason}${RESET}\n`);
+    process.stderr.write(`${CYAN}  ${summary}${RESET}\n`);
+
+    // Show full input for shell commands or when details matter
+    if (toolName === "shell") {
+      const cmd = (input.command as string) || "";
+      if (cmd.length > 120) {
+        process.stderr.write(`${DIM}  Full command:${RESET}\n`);
+        process.stderr.write(`${DIM}  ${cmd}${RESET}\n`);
+      }
     }
+
+    const result = await promptKey();
+
+    // Persist allowlist entries for session/tool scopes
+    if (result === "allow-session") {
+      addAllow(toolName, input, "session");
+    } else if (result === "allow-tool") {
+      addAllow(toolName, input, "tool");
+    }
+
+    return result !== "deny";
+  } finally {
+    resolve();
   }
-
-  const result = await promptKey();
-
-  // Persist allowlist entries for session/tool scopes
-  if (result === "allow-session") {
-    addAllow(toolName, input, "session");
-  } else if (result === "allow-tool") {
-    addAllow(toolName, input, "tool");
-  }
-
-  return result !== "deny";
 }
 
 /**

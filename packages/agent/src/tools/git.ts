@@ -1,5 +1,6 @@
 import { execFileSync } from "child_process";
 import type { AgentTool } from "./types.js";
+import { validatePath } from "../permissions/sandbox.js";
 
 function git(args: string[], cwd: string): string {
   return execFileSync("git", args, {
@@ -23,6 +24,10 @@ export const gitStatusTool: AgentTool = {
   },
   async execute(input) {
     const cwd = (input.cwd as string) || process.cwd();
+    const cwdCheck = validatePath(cwd, process.cwd(), []);
+    if (!cwdCheck.ok) {
+      return { output: `Git cwd outside sandbox: ${cwdCheck.error}`, is_error: true };
+    }
     try {
       const output = git(["status", "--short"], cwd);
       return { output: output || "(working tree clean)" };
@@ -46,6 +51,10 @@ export const gitDiffTool: AgentTool = {
   },
   async execute(input) {
     const cwd = (input.cwd as string) || process.cwd();
+    const cwdCheck = validatePath(cwd, process.cwd(), []);
+    if (!cwdCheck.ok) {
+      return { output: `Git cwd outside sandbox: ${cwdCheck.error}`, is_error: true };
+    }
     const args = ["diff"];
     if (input.cached) args.push("--cached");
     if (input.path) args.push("--", input.path as string);
@@ -76,6 +85,10 @@ export const gitCommitTool: AgentTool = {
   },
   async execute(input) {
     const cwd = (input.cwd as string) || process.cwd();
+    const cwdCheck = validatePath(cwd, process.cwd(), []);
+    if (!cwdCheck.ok) {
+      return { output: `Git cwd outside sandbox: ${cwdCheck.error}`, is_error: true };
+    }
     const message = input.message as string;
     const files = (input.files as string[]) || [];
 

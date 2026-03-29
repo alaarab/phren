@@ -8,10 +8,10 @@ import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
 import type { PermissionMode } from "./permissions/types.js";
+import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
 const HISTORY_FILE = path.join(HISTORY_DIR, "repl-history.txt");
-const SETTINGS_FILE = path.join(HISTORY_DIR, "settings.json");
 const MAX_HISTORY = 500;
 
 const CYAN = "\x1b[36m";
@@ -35,34 +35,6 @@ function saveHistory(lines: string[]): void {
   try {
     fs.mkdirSync(HISTORY_DIR, { recursive: true });
     fs.writeFileSync(HISTORY_FILE, lines.slice(-MAX_HISTORY).join("\n") + "\n");
-  } catch { /* ignore */ }
-}
-
-function loadInputMode(): InputMode {
-  try {
-    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-    if (data.inputMode === "queue") return "queue";
-  } catch { /* ignore */ }
-  return "steering";
-}
-
-function saveInputMode(mode: InputMode): void {
-  try {
-    fs.mkdirSync(HISTORY_DIR, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch { /* fresh */ }
-    data.inputMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
-  } catch { /* ignore */ }
-}
-
-function savePermissionMode(mode: PermissionMode): void {
-  try {
-    fs.mkdirSync(HISTORY_DIR, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch { /* fresh */ }
-    data.permissionMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
   } catch { /* ignore */ }
 }
 

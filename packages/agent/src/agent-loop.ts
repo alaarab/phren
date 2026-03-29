@@ -27,6 +27,7 @@ export interface AgentConfig {
   costTracker?: CostTracker | null;
   plan?: boolean;
   lintTestConfig?: LintTestConfig;
+  hooks?: TurnHooks;
 }
 
 export interface AgentResult {
@@ -421,7 +422,7 @@ export async function runTurn(
 export async function runAgent(task: string, config: AgentConfig): Promise<AgentResult> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
   const session = createSession(contextLimit);
-  const result = await runTurn(task, session, config);
+  const result = await runTurn(task, session, config, config.hooks);
   return {
     finalText: result.text,
     turns: result.turns,

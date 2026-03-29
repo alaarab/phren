@@ -57,7 +57,10 @@ export function addAllow(
 ): void {
   if (scope === "once") return; // "once" approvals don't persist
 
-  const pattern = scope === "tool" ? "*" : extractPattern(toolName, input);
+  // For shell commands, never allow "*" — always scope to the binary name
+  const pattern = scope === "tool" && toolName !== "shell"
+    ? "*"
+    : extractPattern(toolName, input);
 
   // Avoid duplicates
   const exists = sessionAllowlist.some(

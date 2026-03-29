@@ -24,7 +24,7 @@ interface TokenSet {
 
 function tokenPath(): string {
   const dir = path.join(os.homedir(), ".phren-agent");
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return path.join(dir, "codex-token.json");
 }
 
