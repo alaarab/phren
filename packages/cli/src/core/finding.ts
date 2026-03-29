@@ -6,6 +6,7 @@ import {
   removeFinding as removeFindingStore,
 } from "../data/access.js";
 import { MAX_FINDING_LENGTH } from "../content/validate.js";
+import { checkFindingIntegrity } from "../content/integrity.js";
 
 interface FindingResult {
   ok: boolean;
@@ -31,12 +32,24 @@ export function addFinding(
     return { ok: false, message: `Finding text exceeds ${MAX_FINDING_LENGTH} character limit.` };
   }
 
+  // Integrity: reject findings with prompt injection, dangerous commands, etc.
+  const integrity = checkFindingIntegrity(finding);
+  if (integrity.risk === "high") {
+    return {
+      ok: false,
+      message: `Finding rejected: integrity check failed (${integrity.flags.join(", ")}). This finding contains patterns that could compromise AI safety.`,
+    };
+  }
+
   const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
   const result = addFindingToFile(phrenPath, project, taggedFinding, citation);
   if (!result.ok) {
     return { ok: false, message: result.error };
   }
-  return { ok: true, message: result.data.message, data: { project, finding: taggedFinding } };
+  const integrityWarning = integrity.risk !== "none"
+    ? ` [integrity: ${integrity.risk} risk — ${integrity.flags.join(", ")}]`
+    : "";
+  return { ok: true, message: result.data.message + integrityWarning, data: { project, finding: taggedFinding } };
 }
 
 

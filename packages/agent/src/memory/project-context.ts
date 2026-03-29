@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { PhrenContext } from "./context.js";
 import type { LlmProvider, LlmMessage } from "../providers/types.js";
+import { checkFindingIntegrity } from "../permissions/privacy.js";
 
 const CONTEXT_FILE = "agent-context.md";
 const MAX_DATE_SECTIONS = 3;
@@ -81,6 +82,11 @@ export async function evolveProjectContext(
       .trim();
 
     if (!reflection || reflection.length < 10) return;
+
+    // Integrity check: LLM reflection could be poisoned via adversarial conversation content.
+    // Check each line individually since the reflection is multi-line bullet points.
+    const integrity = checkFindingIntegrity(reflection);
+    if (!integrity.safe) return;
 
     const date = new Date().toISOString().slice(0, 10);
     const entry = `\n## ${date}\n\n${reflection}\n`;

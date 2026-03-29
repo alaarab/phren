@@ -4,6 +4,7 @@
  */
 import type { PhrenContext } from "./context.js";
 import { addFinding } from "@phren/cli/core/finding";
+import { checkFindingIntegrity } from "../permissions/privacy.js";
 
 interface ToolAttempt {
   name: string;
@@ -74,7 +75,12 @@ export class AntiPatternTracker {
     let saved = 0;
     try {
       for (const p of patterns) {
-        const finding = `[anti-pattern] ${p.tool}: failed with ${p.failedInput.slice(0, 100)} (${p.failedOutput.slice(0, 80)}), succeeded with ${p.succeededInput.slice(0, 100)}`;
+        const finding = `[anti-pattern] ${p.tool}: failed with ${p.failedInput.slice(0, 100)} (${p.failedOutput.slice(0, 80)}), succeeded with ${p.succeededInput.slice(0, 100)} <!-- source:auto_capture -->`;
+
+        // Integrity check: tool outputs could be crafted to poison anti-pattern findings
+        const integrity = checkFindingIntegrity(finding);
+        if (!integrity.safe) continue;
+
         await addFinding(ctx.phrenPath, ctx.project, finding);
         saved++;
       }
