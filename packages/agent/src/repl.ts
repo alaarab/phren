@@ -98,7 +98,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       continue;
     }
 
-    if (handleCommand(trimmed, { session, contextLimit, undoStack: [] })) {
+    if (handleCommand(trimmed, { session, contextLimit, undoStack: [], phrenCtx: config.phrenCtx })) {
       rl.prompt();
       continue;
     }
@@ -137,7 +137,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
           saveInputMode(inputMode);
           process.stderr.write(`${YELLOW}Input mode: ${inputMode}${RESET}\n`);
         } else {
-          handleCommand(queued, { session, contextLimit, undoStack: [] });
+          handleCommand(queued, { session, contextLimit, undoStack: [], phrenCtx: config.phrenCtx });
         }
         break;
       }

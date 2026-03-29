@@ -5,6 +5,7 @@ import { ToolRegistry } from "./tools/registry.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "./spinner.js";
 import { searchErrorRecovery } from "./memory/error-recovery.js";
 import { shouldPrune, pruneMessages } from "./context/pruner.js";
+import { estimateMessageTokens } from "./context/token-counter.js";
 import { withRetry } from "./providers/retry.js";
 import { createCaptureState, analyzeAndCapture, type CaptureState } from "./memory/auto-capture.js";
 import { AntiPatternTracker } from "./memory/anti-patterns.js";
@@ -26,6 +27,8 @@ export interface AgentConfig {
   plan?: boolean;
   lintTestConfig?: LintTestConfig;
   hooks?: TurnHooks;
+  /** Session ID for /session commands */
+  sessionId?: string | null;
 }
 
 export interface AgentResult {
@@ -215,8 +218,15 @@ export async function runTurn(
 
     // Prune context if approaching limit
     if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
+      const preCount = session.messages.length;
+      const preTokens = estimateMessageTokens(session.messages);
       session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
-      if (verbose) status("[context pruned]\n");
+      const postCount = session.messages.length;
+      const postTokens = estimateMessageTokens(session.messages);
+      const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
+      const fmtPre = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}k` : String(preTokens);
+      const fmtPost = postTokens >= 1000 ? `${(postTokens / 1000).toFixed(1)}k` : String(postTokens);
+      status(`\x1b[2m[context pruned: ${preCount} → ${postCount} messages, ~${fmtPre} → ~${fmtPost} tokens, ${reduction}% reduction]\x1b[0m\n`);
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any

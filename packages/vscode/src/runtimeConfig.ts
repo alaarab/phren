@@ -59,7 +59,8 @@ function detectMcpServerPath(): string | undefined {
     }
   }
 
-  const phrenBinaryPath = runCommand("which", ["phren"]) ?? runCommand("which", ["phren"]);
+  const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+  const phrenBinaryPath = runCommand(whichCmd, ["phren"]);
   if (phrenBinaryPath) {
     const resolvedBinaryPath = safeRealpath(phrenBinaryPath);
     const prefixPath = path.resolve(path.dirname(resolvedBinaryPath), "..");
@@ -75,6 +76,7 @@ function detectMcpServerPath(): string | undefined {
     path.join(os.homedir(), ".claude", "settings.json"),
     path.join(os.homedir(), ".claude.json"),
     path.join(os.homedir(), ".vscode-server", "data", "User", "mcp.json"),
+    path.join(os.homedir(), "AppData", "Roaming", "Code", "User", "mcp.json"),
   ];
   for (const configFile of mcpConfigFiles) {
     const mcpPath = extractPhrenPathFromMcpConfig(configFile);

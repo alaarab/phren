@@ -209,69 +209,117 @@ export class CodexProvider implements LlmProvider {
       body.tool_choice = "auto";
     }
 
-    const res = await fetch(CODEX_API, {
-      method: "POST",
+    // Use WebSocket for true token-by-token streaming (matches Codex CLI behavior).
+    // The HTTP SSE endpoint batches the entire response before flushing.
+    yield* this.chatStreamWs(accessToken, body);
+  }
+
+  /** WebSocket streaming — sends request, yields deltas as they arrive. */
+  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>): AsyncIterable<StreamDelta> {
+    const wsUrl = CODEX_API.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+
+    // Queue for events received from the WebSocket before the consumer pulls them
+    const queue: Array<StreamDelta | Error> = [];
+    let resolve: (() => void) | null = null;
+    let done = false;
+
+    const push = (item: StreamDelta | Error) => {
+      queue.push(item);
+      if (resolve) { resolve(); resolve = null; }
+    };
+
+    // Node.js (undici) WebSocket accepts headers in the second argument object,
+    // but the DOM typings only allow string | string[]. Cast to bypass.
+    const ws = new WebSocket(wsUrl, {
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(body),
-    });
+    } as unknown as string[]);
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Codex API error ${res.status}: ${text}`);
-    }
-
-    // Parse SSE stream
-    if (!res.body) throw new Error("Provider returned empty response body");
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
     let activeToolCallId = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    ws.addEventListener("open", () => {
+      // Wrap the request body in a response.create envelope (Codex WS protocol)
+      const wsRequest = { type: "response.create", ...body };
+      ws.send(JSON.stringify(wsRequest));
+    });
 
-      const lines = buffer.split("\n");
-      buffer = lines.pop()!;
+    ws.addEventListener("message", (evt: MessageEvent) => {
+      const data = typeof evt.data === "string" ? evt.data : String(evt.data);
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") return;
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(data); } catch { return; }
 
-        let event: Record<string, unknown>;
-        try { event = JSON.parse(data); } catch { continue; }
+      const type = event.type as string;
 
-        const type = event.type as string;
+      // Handle server-side errors
+      if (type === "error") {
+        const err = event.error as Record<string, string> | undefined;
+        const msg = err?.message ?? "Codex WebSocket error";
+        const status = event.status as number | undefined;
+        push(new Error(`Codex WS error${status ? ` ${status}` : ""}: ${msg}`));
+        done = true;
+        try { ws.close(); } catch { /* ignore */ }
+        return;
+      }
 
-        if (type === "response.output_text.delta") {
-          const delta = event.delta as string;
-          if (delta) yield { type: "text_delta", text: delta };
-        } else if (type === "response.output_item.added") {
-          if ((event.item as Record<string, unknown>)?.type === "function_call") {
-            const item = event.item as Record<string, unknown>;
-            activeToolCallId = item.call_id as string;
-            yield { type: "tool_use_start", id: activeToolCallId, name: item.name as string };
-          }
-        } else if (type === "response.function_call_arguments.delta") {
-          yield { type: "tool_use_delta", id: activeToolCallId, json: event.delta as string };
-        } else if (type === "response.function_call_arguments.done") {
-          yield { type: "tool_use_end", id: activeToolCallId };
-        } else if (type === "response.completed") {
-          const response = event.response as Record<string, unknown> | undefined;
-          const usage = response?.usage as Record<string, number> | undefined;
-          const output = response?.output as Record<string, unknown>[] | undefined;
-          const hasToolCalls = output?.some((o) => o.type === "function_call");
-          yield {
-            type: "done",
-            stop_reason: hasToolCalls ? "tool_use" : "end_turn",
-            usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
-          };
+      if (type === "response.output_text.delta") {
+        const delta = event.delta as string;
+        if (delta) push({ type: "text_delta", text: delta });
+      } else if (type === "response.output_item.added") {
+        if ((event.item as Record<string, unknown>)?.type === "function_call") {
+          const item = event.item as Record<string, unknown>;
+          activeToolCallId = item.call_id as string;
+          push({ type: "tool_use_start", id: activeToolCallId, name: item.name as string });
         }
+      } else if (type === "response.function_call_arguments.delta") {
+        push({ type: "tool_use_delta", id: activeToolCallId, json: event.delta as string });
+      } else if (type === "response.function_call_arguments.done") {
+        push({ type: "tool_use_end", id: activeToolCallId });
+      } else if (type === "response.completed") {
+        const response = event.response as Record<string, unknown> | undefined;
+        const usage = response?.usage as Record<string, number> | undefined;
+        const output = response?.output as Record<string, unknown>[] | undefined;
+        const hasToolCalls = output?.some((o) => o.type === "function_call");
+        push({
+          type: "done",
+          stop_reason: hasToolCalls ? "tool_use" : "end_turn",
+          usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
+        });
+        done = true;
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      if (!done) {
+        push(new Error("Codex WebSocket connection error"));
+        done = true;
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      if (!done) {
+        push(new Error("Codex WebSocket closed before response.completed"));
+        done = true;
+      }
+    });
+
+    // Async iteration: drain the queue, wait for new events
+    try {
+      while (true) {
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          if (item instanceof Error) throw item;
+          yield item;
+          if (item.type === "done") return;
+        }
+        if (done) return;
+        await new Promise<void>((r) => { resolve = r; });
+      }
+    } finally {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        try { ws.close(); } catch { /* ignore */ }
       }
     }
   }

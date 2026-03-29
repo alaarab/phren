@@ -162,15 +162,58 @@ function withHookToolLifecycleCommands(
 }
 
 function installSessionWrapper(tool: string, phrenPath: string): boolean {
+  const isWindows = process.platform === "win32";
   const realBinary = resolveToolBinary(tool);
   if (!realBinary) return false;
 
   const entry = resolveCliEntryScript();
 
   const localBinDir = homePath(".local", "bin");
-  const wrapperPath = path.join(localBinDir, tool);
+  const wrapperPath = path.join(localBinDir, isWindows ? `${tool}.cmd` : tool);
 
   const packageSpec = phrenPackageSpec();
+
+  if (isWindows) {
+    const sessionStartCmd = entry
+      ? `node "${entry}" hook-session-start`
+      : `npx -y ${packageSpec} hook-session-start`;
+    const stopCmd = entry
+      ? `node "${entry}" hook-stop`
+      : `npx -y ${packageSpec} hook-stop`;
+    const content = `@echo off\r
+setlocal\r
+set "REAL_BIN=${realBinary}"\r
+if not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r
+set "PHREN_HOOK_TOOL=${tool}"\r
+\r
+if "%~1"=="-h" goto :passthrough\r
+if "%~1"=="--help" goto :passthrough\r
+if "%~1"=="help" goto :passthrough\r
+if "%~1"=="-V" goto :passthrough\r
+if "%~1"=="--version" goto :passthrough\r
+if "%~1"=="version" goto :passthrough\r
+if "%~1"=="completion" goto :passthrough\r
+\r
+${sessionStartCmd} >nul 2>&1\r
+"%REAL_BIN%" %*\r
+set "EXIT_STATUS=%ERRORLEVEL%"\r
+${stopCmd} >nul 2>&1\r
+exit /b %EXIT_STATUS%\r
+\r
+:passthrough\r
+"%REAL_BIN%" %*\r
+`;
+
+    try {
+      fs.mkdirSync(localBinDir, { recursive: true });
+      atomicWriteText(wrapperPath, content);
+      return true;
+    } catch (err: unknown) {
+      debugLog(`installSessionWrapper: failed for ${tool}: ${errorMessage(err)}`);
+      return false;
+    }
+  }
+
   const sessionStartCmd = entry
     ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-session-start`
     : `env PHREN_PATH="$PHREN_PATH" npx -y ${packageSpec} hook-session-start`;
@@ -236,11 +279,12 @@ exit $status
  * `node <entry_script> "$@"`.
  */
 export function installPhrenCliWrapper(phrenPath: string): boolean {
+  const isWindows = process.platform === "win32";
   const entry = resolveCliEntryScript();
   if (!entry) return false;
 
   const localBinDir = homePath(".local", "bin");
-  const wrapperPath = path.join(localBinDir, "phren");
+  const wrapperPath = path.join(localBinDir, isWindows ? "phren.cmd" : "phren");
 
   // Don't overwrite a real global install — only our own wrapper
   if (fs.existsSync(wrapperPath)) {
@@ -253,7 +297,9 @@ export function installPhrenCliWrapper(phrenPath: string): boolean {
     }
   }
 
-  const content = `#!/bin/sh
+  const content = isWindows
+    ? `@echo off\r\nrem PHREN_CLI_WRAPPER — managed by phren init; safe to delete\r\nif not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r\nnode "${entry}" %*\r\n`
+    : `#!/bin/sh
 # PHREN_CLI_WRAPPER — managed by phren init; safe to delete
 set -u
 PHREN_PATH="\${PHREN_PATH:-${phrenPath}}"
@@ -264,7 +310,7 @@ exec node ${shellEscape(entry)} "$@"
   try {
     fs.mkdirSync(localBinDir, { recursive: true });
     atomicWriteText(wrapperPath, content);
-    fs.chmodSync(wrapperPath, 0o755);
+    if (!isWindows) fs.chmodSync(wrapperPath, 0o755);
     return true;
   } catch (err: unknown) {
     debugLog(`installPhrenCliWrapper: failed: ${errorMessage(err)}`);

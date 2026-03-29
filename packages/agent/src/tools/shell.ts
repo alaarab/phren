@@ -8,7 +8,7 @@ const MAX_OUTPUT_BYTES = 100_000;
 
 export const shellTool: AgentTool = {
   name: "shell",
-  description: "Run a shell command via bash -c and return stdout + stderr. Use for: running tests, linters, build commands, git operations, and exploring the environment. Prefer specific tools (read_file, glob, grep) over shell equivalents when available.",
+  description: "Run a shell command and return stdout + stderr. Uses bash on Unix, cmd.exe on Windows. Use for: running tests, linters, build commands, git operations, and exploring the environment. Prefer specific tools (read_file, glob, grep) over shell equivalents when available.",
   input_schema: {
     type: "object",
     properties: {
@@ -29,8 +29,12 @@ export const shellTool: AgentTool = {
       return { output: `Blocked: ${safety.reason}`, is_error: true };
     }
 
+    const isWindows = process.platform === "win32";
+    const shell = isWindows ? "cmd" : "bash";
+    const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+
     try {
-      const output = execFileSync("bash", ["-c", command], {
+      const output = execFileSync(shell, shellArgs, {
         cwd,
         encoding: "utf-8",
         timeout,
