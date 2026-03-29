@@ -525,6 +525,22 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         providerName: config.provider.name,
         currentModel: (config.provider as { model?: string }).model,
         spawner,
+        onModelChange: (result) => {
+          // Live model switch — re-resolve provider with new model
+          try {
+            const { resolveProvider } = require("./providers/resolve.js") as typeof import("./providers/resolve.js");
+            const newProvider = resolveProvider(config.provider.name, result.model);
+            config.provider = newProvider;
+            // Rebuild system prompt with new model info
+            const { buildSystemPrompt } = require("./system-prompt.js") as typeof import("./system-prompt.js");
+            config.systemPrompt = buildSystemPrompt(
+              config.systemPrompt.split("\n## Last session")[0], // preserve context, strip old summary
+              null,
+              { name: newProvider.name, model: result.model },
+            );
+            statusBar();
+          } catch { /* keep current provider on error */ }
+        },
       })) {
         prompt();
         return;
