@@ -5,12 +5,32 @@ import { validatePath } from "../permissions/sandbox.js";
 
 /** Simple glob matching without external dependencies. Supports * and ** patterns. */
 function matchGlob(pattern: string, filePath: string): boolean {
-  const regex = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "{{GLOBSTAR}}")
-    .replace(/\*/g, "[^/]*")
-    .replace(/{{GLOBSTAR}}/g, ".*");
-  return new RegExp(`^${regex}$`).test(filePath);
+  // Normalize path separators
+  const p = pattern.replace(/\\/g, "/");
+  const f = filePath.replace(/\\/g, "/");
+  // Build regex: escape special chars, then convert glob tokens
+  let regex = "";
+  let i = 0;
+  while (i < p.length) {
+    if (p[i] === "*" && p[i + 1] === "*") {
+      // ** matches any depth of directories
+      regex += ".*";
+      i += 2;
+      if (p[i] === "/") i++; // skip trailing /
+    } else if (p[i] === "*") {
+      // * matches anything except /
+      regex += "[^/]*";
+      i++;
+    } else if (p[i] === "?") {
+      regex += "[^/]";
+      i++;
+    } else {
+      // Escape regex special chars
+      regex += p[i].replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      i++;
+    }
+  }
+  return new RegExp(`^${regex}$`).test(f);
 }
 
 function walkDir(dir: string, base: string, results: string[], maxResults: number): void {
