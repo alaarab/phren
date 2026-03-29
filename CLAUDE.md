@@ -389,6 +389,57 @@ Env overrides: `PHREN_AGENT_PROVIDER`, `PHREN_AGENT_MODEL`.
 | `packages/agent/src/memory/project-context.ts` | Evolving project context via LLM reflection |
 | `packages/agent/src/context/pruner.ts` | Conversation pruning to fit context windows |
 | `packages/agent/src/permissions/` | Permission system: modes, sandbox, shell safety, env scrubbing |
+| `packages/agent/src/multi/types.ts` | IPC message types for parent/child agent communication |
+| `packages/agent/src/multi/spawner.ts` | Agent spawner: forks child processes, manages lifecycle, routes IPC |
+| `packages/agent/src/multi/coordinator.ts` | Task-based coordination: shared JSON task list with file locking |
+| `packages/agent/src/multi/child-entry.ts` | Child agent entry point: receives SpawnPayload, runs agent loop, reports via IPC |
+| `packages/agent/src/multi/tui-multi.ts` | Multiplexed TUI: tabbed panes, agent switching, slash commands |
+
+## Multi-Agent
+
+Phren supports spawning and coordinating multiple child agents from a single parent process.
+
+### CLI Usage
+
+```bash
+phren agent --multi                    # launch multi-agent TUI
+phren agent --team myproject "build X" # team mode with task
+```
+
+### CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--multi` | Launch the multiplexed multi-agent TUI |
+| `--team <name>` | Team mode: coordinate agents via a shared task list |
+
+### Slash Commands (Multi-Agent TUI)
+
+| Command | Description |
+|---------|-------------|
+| `/spawn <name> <task>` | Spawn a new child agent |
+| `/agents` or `/list` | List all agents with status |
+| `/kill <name\|index>` | Terminate a running agent |
+| `/broadcast <msg>` | Send a message to all running agents |
+| `/team` | Show team task status |
+
+### Architecture
+
+- **Parent process** manages the TUI, spawns child agent processes via `node:child_process.fork()`, and routes IPC messages
+- **Child processes** run a full agent loop (provider + tools + phren memory) and stream events back via `process.send()`
+- **IPC protocol**: Typed messages with discriminant `type` field. Parent sends `SpawnPayload` and `CancelMessage`; child sends `TextDeltaEvent`, `ToolStartEvent`, `ToolEndEvent`, `StatusEvent`, `DoneEvent`, `ErrorEvent`
+- **Task coordination**: `TeamCoordinator` manages a shared JSON task list at `~/.phren-agent/teams/<team>/tasks.json` with file locking and atomic writes to prevent corruption under concurrent access
+- **Multiplexed TUI**: Full alternate-screen terminal with agent tabs, scrollable per-agent output panes, keyboard navigation (1-9 select, Ctrl+Left/Right cycle), and a command input line
+
+### Permission Modes
+
+| Mode | Behavior |
+|------|----------|
+| `suggest` | Ask for approval on every tool call |
+| `auto-confirm` | Allow safe tools + sandboxed writes (default) |
+| `full-auto` | Allow all tools, warn on dangerous operations |
+
+Shift+Tab cycles between permission modes in the TUI.
 
 ## Hooks (registered by init, live in ~/.claude/settings.json)
 

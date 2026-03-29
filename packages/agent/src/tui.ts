@@ -8,6 +8,10 @@ import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
 import type { InputMode } from "./repl.js";
+import type { PermissionMode } from "./permissions/types.js";
+import type { AgentSpawner } from "./multi/spawner.js";
+import { renderMarkdown } from "./multi/markdown.js";
+import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -32,10 +36,35 @@ function cols(): number {
   return process.stdout.columns || 80;
 }
 
+// ── Permission mode helpers ─────────────────────────────────────────────────
+const PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
+
+function nextPermissionMode(current: PermissionMode): PermissionMode {
+  const idx = PERMISSION_MODES.indexOf(current);
+  return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
+}
+
+const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  "suggest": "suggest",
+  "auto-confirm": "auto",
+  "full-auto": "full-auto",
+};
+
+function formatPermissionMode(mode: PermissionMode): string {
+  const label = PERMISSION_LABELS[mode];
+  switch (mode) {
+    case "suggest": return s.cyan(`[${label}]`);
+    case "auto-confirm": return s.green(`[${label}]`);
+    case "full-auto": return s.yellow(`[${label}]`);
+  }
+}
+
 // ── Status bar ───────────────────────────────────────────────────────────────
-function renderStatusBar(provider: string, project: string | null, turns: number, cost: string): string {
+function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
+  const modeStr = permMode ? ` ${PERMISSION_LABELS[permMode]}` : "";
+  const agentTag = agentCount && agentCount > 0 ? ` ${s.dim(`A${agentCount}`)}` : "";
   const left = ` ${s.bold("phren-agent")} ${s.dim("·")} ${provider}${project ? ` ${s.dim("·")} ${project}` : ""}`;
-  const right = `${cost ? cost + " " : ""}${s.dim(`T${turns}`)} `;
+  const right = `${modeStr}${agentTag} ${cost ? cost + " " : ""}${s.dim(`T${turns}`)} `;
   const w = cols();
   const pad = Math.max(0, w - stripAnsi(left).length - stripAnsi(right).length);
   return s.invert(stripAnsi(left) + " ".repeat(pad) + stripAnsi(right));
@@ -46,18 +75,30 @@ function stripAnsi(t: string): string {
 }
 
 // ── Tool call rendering ──────────────────────────────────────────────────────
+const COMPACT_LINES = 3;
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60_000);
+  const secs = Math.round((ms % 60_000) / 1000);
+  return `${mins}m ${secs}s`;
+}
+
 function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
   const inputPreview = JSON.stringify(input).slice(0, 80);
-  const dur = durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
+  const dur = formatDuration(durationMs);
   const icon = isError ? s.red("✗") : s.green("✓");
   const header = s.dim(`  ${name}(${inputPreview})`) + `  ${icon} ${s.dim(dur)}`;
 
-  // Show a few lines of output
-  const lines = output.split("\n").slice(0, 6);
-  const body = lines.map((l) => s.dim(`  │ ${l.slice(0, cols() - 6)}`)).join("\n");
-  const more = output.split("\n").length > 6 ? s.dim(`  │ ... (${output.split("\n").length} lines)`) : "";
+  // Compact: show first 3 lines only, with overflow count
+  const allLines = output.split("\n").filter(Boolean);
+  const shown = allLines.slice(0, COMPACT_LINES);
+  const body = shown.map((l) => s.dim(`  │ ${l.slice(0, cols() - 6)}`)).join("\n");
+  const overflow = allLines.length - COMPACT_LINES;
+  const more = overflow > 0 ? `\n${s.dim(`  │ [+${overflow} lines]`)}` : "";
 
-  return `${header}\n${body}${more ? "\n" + more : ""}`;
+  return `${header}\n${body}${more}`;
 }
 
 // ── Menu mode helpers ────────────────────────────────────────────────────────
@@ -70,7 +111,7 @@ async function loadMenuModule() {
 }
 
 // ── Main TUI ─────────────────────────────────────────────────────────────────
-export async function startTui(config: AgentConfig): Promise<AgentSession> {
+export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
   const session = createSession(contextLimit);
   const w = process.stdout;
@@ -137,6 +178,8 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
       config.phrenCtx?.project ?? null,
       session.turns,
       costStr,
+      config.registry.permissionConfig.mode,
+      spawner?.listAgents().length,
     );
     w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
   }
@@ -162,7 +205,7 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
     w.write(`${ESC}1;1H`); // move to top
     statusBar();
     w.write(`${ESC}2;1H`); // move below status bar
-    w.write(s.dim("phren-agent TUI. Tab: memory browser  /help: commands  /mode: steering/queue  Ctrl+D: exit\n"));
+    w.write(s.dim("phren-agent TUI. Tab: memory browser  Shift+Tab: permissions  /help: commands  Ctrl+D: exit\n"));
   }
 
   // Raw stdin for steering
@@ -242,6 +285,18 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       w.write(s.dim("\nSession ended.\n"));
       resolve!(session);
+      return;
+    }
+
+    // Shift+Tab — cycle permission mode (works in chat mode, not during filter)
+    if (key.shift && key.name === "tab" && !menuFilterActive && tuiMode === "chat") {
+      const current = config.registry.permissionConfig.mode;
+      const next = nextPermissionMode(current);
+      config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
+      savePermissionMode(next);
+      w.write(s.yellow(`  [mode: ${next}]\n`));
+      statusBar();
+      if (!running) prompt();
       return;
     }
 
@@ -327,14 +382,42 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
     }
   });
 
-  // TUI hooks — render streaming text, tool calls, and status inline
+  // TUI hooks — render streaming text with markdown, compact tool output
+  let textBuffer = "";
+
+  function flushTextBuffer() {
+    if (!textBuffer) return;
+    w.write(renderMarkdown(textBuffer));
+    textBuffer = "";
+  }
+
   const tuiHooks: TurnHooks = {
-    onTextDelta: (text) => w.write(text),
-    onTextBlock: (text) => { w.write(text); if (!text.endsWith("\n")) w.write("\n"); },
-    onToolStart: (name, _input, _count) => { w.write(s.dim(`  ⠋ ${name}...\r`)); },
+    onTextDelta: (text) => {
+      textBuffer += text;
+      // Flush on paragraph boundaries (double newline) or single newline for streaming feel
+      if (textBuffer.includes("\n\n") || textBuffer.endsWith("\n")) {
+        flushTextBuffer();
+      }
+    },
+    onTextDone: () => {
+      flushTextBuffer();
+    },
+    onTextBlock: (text) => {
+      w.write(renderMarkdown(text));
+      if (!text.endsWith("\n")) w.write("\n");
+    },
+    onToolStart: (name, _input, _count) => {
+      flushTextBuffer();
+      w.write(s.dim(`  ⠋ ${name}...\r`));
+    },
     onToolEnd: (name, input, output, isError, dur) => {
       w.write(`${ESC}2K\r`);
-      w.write(renderToolCall(name, input, output, isError, dur) + "\n");
+      const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
+      const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
+      w.write(renderToolCall(name, input, cleanOutput, isError, dur) + "\n");
+      if (diffData) {
+        w.write(renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath) + "\n");
+      }
     },
     onStatus: (msg) => w.write(s.dim(msg)),
     getSteeringInput: () => {
@@ -396,6 +479,17 @@ function saveInputMode(mode: InputMode): void {
     let data: Record<string, unknown> = {};
     try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
     data.inputMode = mode;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
+  } catch {}
+}
+
+function savePermissionMode(mode: PermissionMode): void {
+  try {
+    const dir = path.dirname(SETTINGS_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
+    data.permissionMode = mode;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
   } catch {}
 }

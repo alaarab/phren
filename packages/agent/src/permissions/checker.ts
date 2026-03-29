@@ -1,6 +1,7 @@
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
+import { isAllowed } from "./allowlist.js";
 
 /** Tools that are safe in all modes — read-only, no side effects. */
 const ALWAYS_SAFE_TOOLS = new Set([
@@ -88,6 +89,12 @@ export function checkPermission(
   // Always-safe tools pass in all modes
   if (ALWAYS_SAFE_TOOLS.has(toolName)) {
     return { verdict: "allow", reason: "Read-only tool, always allowed." };
+  }
+
+  // Session allowlist — user previously approved this tool+pattern via (a)llow-tool or (s)ession-allow.
+  // Placed after deny-list, shell-safety blocks, and sensitive-path denials so those are never bypassed.
+  if (isAllowed(toolName, input)) {
+    return { verdict: "allow", reason: "Session allowlist." };
   }
 
   // Mode-specific logic
