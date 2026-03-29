@@ -1,6 +1,7 @@
 /**
  * Terminal UI for phren-agent — streaming chat with inline tool calls.
- * Raw stdin for steering support, ANSI rendering, status bar.
+ * Dual-mode: Chat (LLM conversation) and Menu (navigable memory browser).
+ * Tab toggles between modes. Raw stdin for steering support.
  */
 import * as readline from "node:readline";
 import type { AgentConfig } from "./agent-loop.js";
@@ -14,6 +15,8 @@ import type { InputMode } from "./repl.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+
+type TuiMode = "chat" | "menu";
 
 // ── ANSI helpers ─────────────────────────────────────────────────────────────
 const ESC = "\x1b[";
@@ -61,6 +64,15 @@ function renderToolCall(name: string, input: Record<string, unknown>, output: st
   return `${header}\n${body}${more ? "\n" + more : ""}`;
 }
 
+// ── Menu mode helpers ────────────────────────────────────────────────────────
+let menuMod: typeof import("@phren/cli/shell/render-api") | null = null;
+async function loadMenuModule() {
+  if (!menuMod) {
+    try { menuMod = await import("@phren/cli/shell/render-api"); } catch { menuMod = null; }
+  }
+  return menuMod;
+}
+
 // ── Main TUI ─────────────────────────────────────────────────────────────────
 export async function startTui(config: AgentConfig): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
@@ -73,6 +85,56 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
   let running = false;
   let inputLine = "";
   let costStr = "";
+
+  // ── Dual-mode state ─────────────────────────────────────────────────────
+  let tuiMode: TuiMode = "chat";
+  type MenuState = import("@phren/cli/shell/render-api").MenuState;
+  let menuState: MenuState = {
+    view: "Projects",
+    project: config.phrenCtx?.project ?? undefined,
+    cursor: 0,
+    scroll: 0,
+  };
+  let menuListCount = 0;
+  let menuFilterActive = false;
+  let menuFilterBuf = "";
+
+  // ── Menu rendering ─────────────────────────────────────────────────────
+  async function renderMenu() {
+    const mod = await loadMenuModule();
+    if (!mod || !config.phrenCtx) return;
+    const result = await mod.renderMenuFrame(
+      config.phrenCtx.phrenPath,
+      config.phrenCtx.profile,
+      menuState,
+    );
+    menuListCount = result.listCount;
+    // Full-screen write: clear screen and render
+    w.write(`${ESC}?25l`);  // hide cursor
+    w.write(`${ESC}H${ESC}2J`);  // home + clear
+    w.write(result.output);
+    w.write(`${ESC}?25h`);  // show cursor
+  }
+
+  function enterMenuMode() {
+    if (!config.phrenCtx) {
+      w.write(s.yellow("  phren not configured — menu unavailable\n"));
+      return;
+    }
+    tuiMode = "menu";
+    menuState.project = config.phrenCtx.project ?? menuState.project;
+    w.write("\x1b[?1049h"); // enter alternate screen
+    renderMenu();
+  }
+
+  function exitMenuMode() {
+    tuiMode = "chat";
+    menuFilterActive = false;
+    menuFilterBuf = "";
+    w.write("\x1b[?1049l"); // leave alternate screen (restores chat)
+    statusBar();
+    prompt();
+  }
 
   // Print status bar
   function statusBar() {
@@ -98,7 +160,7 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
     w.write(`${ESC}1;1H`); // move to top
     statusBar();
     w.write(`${ESC}2;1H`); // move below status bar
-    w.write(s.dim("phren-agent TUI. /help for commands, /mode to toggle steering/queue, Ctrl+D to exit.\n"));
+    w.write(s.dim("phren-agent TUI. Tab: memory browser  /help: commands  /mode: steering/queue  Ctrl+D: exit\n"));
   }
 
   // Raw stdin for steering
@@ -110,22 +172,99 @@ export async function startTui(config: AgentConfig): Promise<AgentSession> {
   let resolve: ((session: AgentSession) => void) | null = null;
   const done = new Promise<AgentSession>((r) => { resolve = r; });
 
-  // Input buffer
+  // ── Menu keypress handler ───────────────────────────────────────────────
+  async function handleMenuKeypress(key: readline.Key) {
+    // Filter input mode: capture text for / search
+    if (menuFilterActive) {
+      if (key.name === "escape") {
+        menuFilterActive = false;
+        menuFilterBuf = "";
+        menuState = { ...menuState, filter: undefined, cursor: 0, scroll: 0 };
+        renderMenu();
+        return;
+      }
+      if (key.name === "return") {
+        menuFilterActive = false;
+        menuState = { ...menuState, filter: menuFilterBuf || undefined, cursor: 0, scroll: 0 };
+        menuFilterBuf = "";
+        renderMenu();
+        return;
+      }
+      if (key.name === "backspace") {
+        menuFilterBuf = menuFilterBuf.slice(0, -1);
+        menuState = { ...menuState, filter: menuFilterBuf || undefined, cursor: 0 };
+        renderMenu();
+        return;
+      }
+      if (key.sequence && !key.ctrl && !key.meta) {
+        menuFilterBuf += key.sequence;
+        menuState = { ...menuState, filter: menuFilterBuf, cursor: 0 };
+        renderMenu();
+      }
+      return;
+    }
+
+    // "/" starts filter input
+    if (key.sequence === "/") {
+      menuFilterActive = true;
+      menuFilterBuf = "";
+      return;
+    }
+
+    const mod = await loadMenuModule();
+    if (!mod) { exitMenuMode(); return; }
+
+    const newState = mod.handleMenuKey(
+      menuState,
+      key.name ?? "",
+      menuListCount,
+      config.phrenCtx?.phrenPath,
+      config.phrenCtx?.profile,
+    );
+
+    if (newState === null) {
+      exitMenuMode();
+    } else {
+      menuState = newState;
+      renderMenu();
+    }
+  }
+
+  // ── Keypress router ────────────────────────────────────────────────────
   process.stdin.on("keypress", (_ch, key) => {
     if (!key) return;
 
-    // Ctrl+D — exit
+    // Ctrl+D — always exit
     if (key.ctrl && key.name === "d") {
+      if (tuiMode === "menu") w.write("\x1b[?1049l"); // leave alt screen
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       w.write(s.dim("\nSession ended.\n"));
       resolve!(session);
       return;
     }
 
-    // Ctrl+C — cancel current or exit
+    // Tab — toggle mode (not during agent run or filter)
+    if (key.name === "tab" && !menuFilterActive) {
+      if (tuiMode === "chat" && !running) {
+        enterMenuMode();
+      } else if (tuiMode === "menu") {
+        exitMenuMode();
+      }
+      return;
+    }
+
+    // Route to mode-specific handler
+    if (tuiMode === "menu") {
+      handleMenuKeypress(key);
+      return;
+    }
+
+    // ── Chat mode keys ──────────────────────────────────────────────────
+
+    // Ctrl+C — cancel current or clear line
     if (key.ctrl && key.name === "c") {
       if (running) {
-        pendingInput = null; // cancel any pending
+        pendingInput = null;
         w.write(s.yellow("\n  [interrupted]\n"));
       } else {
         inputLine = "";
