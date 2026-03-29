@@ -10,6 +10,7 @@
  * - Dependency changes
  */
 import type { PhrenContext } from "./context.js";
+import { checkFindingIntegrity } from "../permissions/privacy.js";
 
 interface CapturePattern {
   /** Which tool(s) this pattern matches. */
@@ -138,9 +139,13 @@ export class ToolCaptureTracker {
     const finding = this.checkToolCapture(toolName, input, output, isError);
     if (!finding || !ctx.project) return;
 
+    // Integrity check: reject auto-captured findings that look adversarial
+    const integrity = checkFindingIntegrity(finding);
+    if (!integrity.safe) return;
+
     try {
       const { addFinding } = await import("@phren/cli/core/finding");
-      addFinding(ctx.phrenPath, ctx.project, `${finding} <!-- auto_captured -->`);
+      addFinding(ctx.phrenPath, ctx.project, `${finding} <!-- auto_captured --> <!-- source:auto_capture -->`);
     } catch {
       // Best effort
     }
