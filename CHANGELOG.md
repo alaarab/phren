@@ -3,6 +3,62 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.3] - 2026-03-29
+
+42 commits. Monorepo conversion, full agent TUI rebuild, multi-agent coordination, provider system, and cross-platform fixes.
+
+### Added
+- **pnpm monorepo** — converted to `packages/cli`, `packages/agent`, `packages/vscode` with pnpm workspaces and turbo build pipeline
+- **Dual-mode TUI** — Tab toggles between Chat mode (LLM conversation) and Menu mode (navigable phren memory browser with project/finding/task views)
+- **Multi-agent system** — agent spawner with `/spawn` and `/agents` commands for parallel sub-agent coordination
+- **Rich input editing** — full readline-style keybindings: Ctrl+A/E (home/end), Ctrl+U/K (kill line/forward), Ctrl+W (kill word), Left/Right arrow cursor movement, Alt+Left/Right word jump, Delete key, cursor position tracking within input line
+- **Tab completion** — slash command completion (`/mo` + Tab shows `/model`, `/mode`; `/mod` + Tab completes to `/model`) and file path completion in bash mode with longest-common-prefix partial completion and directory `/` suffix
+- **Input history** — Up/Down arrow recalls previous inputs with saved-input restore
+- **Bash mode** — `!` prefix or `!` at empty prompt enters shell mode; supports `cd`, command execution with 30s timeout, progressive Ctrl+C exit
+- **Interactive model picker** — `/model` command with reasoning level slider (low/medium/high), live model switching that swaps provider and regenerates system prompt mid-session
+- **Provider management** — `/provider` command, `/model add|remove` for custom model registry, Codex provider (gpt-5.3-codex via chatgpt.com API)
+- **Permission UX** — three-tier permissions (suggest/auto-confirm/full-auto) with Shift+Tab cycling, fill-level icons, `--yolo` flag for full-auto
+- **Inline diff preview** — edit_file and write_file tool calls show color-coded inline diffs in the TUI
+- **Thinking animation** — subtle sine-wave color interpolation between phren purple and cyan, elapsed time counter
+- **Syntax highlighting** — code blocks in agent responses rendered with language-aware highlighting
+- **Startup art** — ASCII brand art with version, provider, project, cwd, and permission mode at launch
+- **Web search and fetch tools** — `web_search` and `web_fetch` tools for agent internet access
+- **`phren_add_task` tool** — agent can create phren tasks directly
+- **Privacy scrubbing** — agent scrubs sensitive data before sending to LLM providers
+- **DECSTBM scroll regions** — proper terminal scroll region management so content scrolls naturally above the fixed input bar, with resize handler
+- **Integration test harness** — agent loop integration tests with mock provider
+
+### Changed
+- **TUI architecture** — unified `runTurn` with hooks pattern replaces duplicated agent loop; streaming text rendered immediately instead of buffered until newline
+- **Input layout** — Claude Code-style bordered input bar: separator/input/separator/permissions/blank at bottom of terminal
+- **System prompt** — assertive prompt that tells the LLM permissions are handled by the system; includes model info for self-awareness
+- **Default permissions** — suggest mode by default (was auto-confirm); agent never asks user for permission (system handles it)
+- **Icon set** — fill-level permission icons (empty/half/full circle), arrow tool indicators, hollow spinner for pending operations
+- **Dead code cleanup** — -131 lines removed in simplification sweep
+- **Top 5 tech debt** — architecture assessment and targeted refactoring of worst debt areas
+
+### Fixed
+- **MCP entrypoint path** — `resolveEntryScript()` and VS Code `runtimeConfig.ts` pointed to nonexistent `mcp/dist/index.js`; fixed to `dist/index.js` matching actual package structure. All install scenarios now find the entrypoint directly instead of falling through to slow npx fallback
+- **Windows VS Code onboarding** — `spawn()` in `onboarding.ts` now uses `shell: true` on Windows so `.cmd` executables (npx.cmd) work correctly
+- **Windows npx cache discovery** — VS Code `runtimeConfig.ts` now checks `%APPDATA%/npm-cache/_npx/` and `%LOCALAPPDATA%/npm-cache/_npx/` on Windows instead of hardcoded `~/.npm/_npx/`
+- **35 audit fixes** — security hardening, streaming edge cases, agent loop error handling, TUI rendering glitches, memory context injection
+- **Config test** — default permission mode in test fixtures updated to match new suggest default
+- **Child entry bug** — fixed agent child process entry point resolution
+- **Version interpolation** — dynamic version display from package.json instead of hardcoded string
+- **Tab-back newline** — eliminated spurious newline when returning from menu mode to chat mode
+- **`phren agent --help` crash** — fixed crash when running help outside of TUI context
+- **Prompt pinning** — input prompt stays pinned to bottom of terminal regardless of output volume
+- **`cd` in bash mode** — properly changes process.cwd() with path resolution and `~` expansion
+- **Codex provider** — removed unsupported `max_output_tokens` parameter; default model set to gpt-5.3-codex
+- **Streaming** — text deltas written immediately for real-time feel; thinking timer cleared on first delta
+- **Permission toggle** — Shift+Tab updates bottom bar in-place without scrolling output
+
+### Security
+- **Shell command hardening** — bash mode commands run with explicit timeout, separate stdio pipes, and cwd isolation
+- **Input sanitization** — agent input validated before processing; no raw eval or template injection paths
+- **Privacy scrubbing** — sensitive patterns scrubbed from context before LLM calls
+- **Permission model** — suggest mode default ensures tool calls require explicit approval unless user opts into auto modes
+
 ## [0.0.53] - 2026-03-28
 
 ### Added
