@@ -15,6 +15,7 @@ import { detectLintCommand, detectTestCommand, runPostEditCheck, type LintTestCo
 import { createCheckpoint } from "./checkpoint.js";
 import { autoCaptureTool } from "./memory/tool-capture.js";
 import { scrubToolOutput } from "./permissions/privacy.js";
+import { autoRunDiagnostics } from "./tools/auto-diagnostics.js";
 
 const MAX_TOOL_CONCURRENCY = 5;
 
@@ -417,6 +418,14 @@ export async function runTurn(
           await autoCaptureTool(config.phrenCtx, block.name, block.input, finalOutput, is_error);
         } catch { /* best effort */ }
       }
+
+      // Auto-diagnostics — append lightweight diagnostic notes to tool output
+      try {
+        const diag = autoRunDiagnostics(block.name, block.input, finalOutput);
+        if (diag.hasDiagnostics && diag.summary) {
+          finalOutput += `\n\n${diag.summary}`;
+        }
+      } catch { /* best effort */ }
 
       if (hooks?.onToolEnd) {
         hooks.onToolEnd(block.name, block.input, finalOutput, is_error, 0);
