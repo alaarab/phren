@@ -608,13 +608,20 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
   async function runAgentTurn(userInput: string) {
     running = true;
-    w.write(`${ESC}2K  ${s.dim("◌ thinking...")}\r`);
+    const thinkStart = Date.now();
+    const thinkTimer = setInterval(() => {
+      const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
+      w.write(`${ESC}2K  ${s.dim(`◌ thinking... ${elapsed}s`)}\r`);
+    }, 100);
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
+      clearInterval(thinkTimer);
       statusBar();
     } catch (err: unknown) {
+      clearInterval(thinkTimer);
       const msg = err instanceof Error ? err.message : String(err);
+      w.write(`${ESC}2K\r`);
       w.write(s.red(`  Error: ${msg}\n`));
     }
 
