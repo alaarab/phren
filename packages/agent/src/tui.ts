@@ -680,14 +680,36 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     running = true;
     firstDelta = true;
     const thinkStart = Date.now();
+    // Animated thinking — color-shifting words in phren palette
+    const THINK_WORDS = ["thinking", "reasoning", "analyzing", "processing", "working", "exploring"];
+    const THINK_COLORS = [
+      (t: string) => `${ESC}38;2;155;140;250m${t}${ESC}0m`, // phren purple
+      (t: string) => `${ESC}38;2;40;211;242m${t}${ESC}0m`,  // phren cyan
+      (t: string) => `${ESC}38;2;120;100;250m${t}${ESC}0m`,  // deep purple
+      (t: string) => `${ESC}38;2;80;200;220m${t}${ESC}0m`,   // teal
+      (t: string) => `${ESC}38;2;180;160;255m${t}${ESC}0m`,  // light purple
+      (t: string) => `${ESC}38;2;60;230;200m${t}${ESC}0m`,   // mint
+    ];
+    const THINK_SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let thinkFrame = 0;
     const thinkTimer = setInterval(() => {
-      const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
-      w.write(`${ESC}2K  ${s.dim(`◌ thinking... ${elapsed}s`)}\r`);
-    }, 100);
+      const elapsed = (Date.now() - thinkStart) / 1000;
+      const wordIdx = Math.floor(elapsed / 8) % THINK_WORDS.length;
+      const colorIdx = Math.floor(thinkFrame / 3) % THINK_COLORS.length;
+      const spinner = THINK_SPINNERS[thinkFrame % THINK_SPINNERS.length];
+      const colorFn = THINK_COLORS[colorIdx];
+      const word = THINK_WORDS[wordIdx];
+      const dots = ".".repeat((thinkFrame % 12) < 4 ? 1 : (thinkFrame % 12) < 8 ? 2 : 3);
+      w.write(`${ESC}2K  ${colorFn(`${spinner} ${word}${dots}`)} ${s.dim(`${elapsed.toFixed(1)}s`)}\r`);
+      thinkFrame++;
+    }, 80);
 
     try {
       await runTurn(userInput, session, config, tuiHooks);
       clearInterval(thinkTimer);
+      // Final "thought for Xs" in gray
+      const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
+      w.write(`${ESC}2K  ${s.dim(`· thought for ${elapsed}s`)}\r\n`);
       statusBar();
     } catch (err: unknown) {
       clearInterval(thinkTimer);
