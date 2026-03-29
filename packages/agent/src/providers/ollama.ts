@@ -34,18 +34,21 @@ function toOllamaMessages(system: string, messages: LlmMessage[]) {
 export class OllamaProvider implements LlmProvider {
   name = "ollama";
   contextWindow = 32_000;
+  maxOutputTokens: number;
   private baseUrl: string;
   private model: string;
 
-  constructor(model?: string, baseUrl?: string) {
+  constructor(model?: string, baseUrl?: string, maxOutputTokens?: number) {
     this.baseUrl = baseUrl ?? "http://localhost:11434";
     this.model = model ?? "qwen2.5-coder:14b";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
+      options: { num_predict: this.maxOutputTokens },
       stream: false,
     };
     if (tools.length > 0) body.tools = toOllamaTools(tools);
@@ -90,6 +93,7 @@ export class OllamaProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
+      options: { num_predict: this.maxOutputTokens },
       stream: true,
     };
     if (tools.length > 0) body.tools = toOllamaTools(tools);

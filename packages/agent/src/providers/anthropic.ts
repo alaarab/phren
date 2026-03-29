@@ -3,12 +3,14 @@ import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, 
 export class AnthropicProvider implements LlmProvider {
   name = "anthropic";
   contextWindow = 200_000;
+  maxOutputTokens: number;
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model?: string) {
+  constructor(apiKey: string, model?: string, maxOutputTokens?: number) {
     this.apiKey = apiKey;
     this.model = model ?? "claude-sonnet-4-20250514";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
@@ -19,7 +21,7 @@ export class AnthropicProvider implements LlmProvider {
         role: m.role,
         content: m.content,
       })),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
     };
     if (tools.length > 0) {
       body.tools = tools.map((t) => ({
@@ -63,7 +65,7 @@ export class AnthropicProvider implements LlmProvider {
       model: this.model,
       system,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      max_tokens: 8192,
+      max_tokens: this.maxOutputTokens,
       stream: true,
     };
     if (tools.length > 0) {

@@ -50,6 +50,7 @@ export type StreamDelta =
 export interface LlmProvider {
   name: string;
   contextWindow?: number;
+  maxOutputTokens?: number;
   chat(
     system: string,
     messages: LlmMessage[],

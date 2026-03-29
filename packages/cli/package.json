@@ -7,17 +7,50 @@
     "phren": "dist/index.js"
   },
   "exports": {
-    ".": "./dist/index.js",
-    "./paths": "./dist/phren-paths.js",
-    "./runtime-profile": "./dist/runtime-profile.js",
-    "./shared": "./dist/shared/index.js",
-    "./shared/retrieval": "./dist/shared/retrieval.js",
-    "./data/access": "./dist/data/access.js",
-    "./data/tasks": "./dist/data/tasks.js",
-    "./core/finding": "./dist/core/finding.js",
-    "./session/utils": "./dist/session/utils.js",
-    "./shell/render-api": "./dist/shell/render-api.js",
-    "./phren-art": "./dist/phren-art.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./paths": {
+      "types": "./dist/phren-paths.d.ts",
+      "default": "./dist/phren-paths.js"
+    },
+    "./runtime-profile": {
+      "types": "./dist/runtime-profile.d.ts",
+      "default": "./dist/runtime-profile.js"
+    },
+    "./shared": {
+      "types": "./dist/shared/index.d.ts",
+      "default": "./dist/shared/index.js"
+    },
+    "./shared/retrieval": {
+      "types": "./dist/shared/retrieval.d.ts",
+      "default": "./dist/shared/retrieval.js"
+    },
+    "./data/access": {
+      "types": "./dist/data/access.d.ts",
+      "default": "./dist/data/access.js"
+    },
+    "./data/tasks": {
+      "types": "./dist/data/tasks.d.ts",
+      "default": "./dist/data/tasks.js"
+    },
+    "./core/finding": {
+      "types": "./dist/core/finding.d.ts",
+      "default": "./dist/core/finding.js"
+    },
+    "./session/utils": {
+      "types": "./dist/session/utils.d.ts",
+      "default": "./dist/session/utils.js"
+    },
+    "./shell/render-api": {
+      "types": "./dist/shell/render-api.d.ts",
+      "default": "./dist/shell/render-api.js"
+    },
+    "./phren-art": {
+      "types": "./dist/phren-art.d.ts",
+      "default": "./dist/phren-art.js"
+    }
   },
   "files": [
     "dist",
