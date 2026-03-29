@@ -33,7 +33,7 @@ const ERROR_LINE_PATTERNS = [
   /^\s*SyntaxError:.*/,
   /:\d+:\d+\s*-\s*error\b.*/,  // tsc-style file:line:col - error
   /^\s*Expected\b.*but\b.*received/i,
-  /^\s*AssertionError:.*/,
+  /^\s*Assertion(?:Error)?:.*/,
 ];
 
 /** Known test/lint command substrings that indicate the shell ran a check. */

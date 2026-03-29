@@ -40,13 +40,6 @@ import { loadIgnorePatterns } from "./permissions/ignore.js";
 const VERSION = "0.0.1";
 
 /**
- * Parse a CLI permission pattern string like "Bash(npm run *)" into a PermissionPattern.
- */
-function parsePatternRule(rule: string, verdict: "allow" | "deny"): PermissionPattern | null {
-  return parsePermissionPattern(rule, verdict);
-}
-
-/**
  * Run the agent CLI with the given argv tokens.
  * Called from `phren agent ...` or directly via `phren-agent ...`.
  */
@@ -125,11 +118,11 @@ export async function runAgentCli(raw: string[]) {
   const allowRules: PermissionPattern[] = [];
   const denyRules: PermissionPattern[] = [];
   for (const rule of args.allowRules) {
-    const parsed = parsePatternRule(rule, "allow");
+    const parsed = parsePermissionPattern(rule, "allow");
     if (parsed) allowRules.push(parsed);
   }
   for (const rule of args.denyRules) {
-    const parsed = parsePatternRule(rule, "deny");
+    const parsed = parsePermissionPattern(rule, "deny");
     if (parsed) denyRules.push(parsed);
   }
 

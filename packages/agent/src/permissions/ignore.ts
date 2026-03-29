@@ -76,13 +76,11 @@ function parseIgnoreFile(content: string): RegExp[] {
  * Convert a single gitignore pattern to a RegExp.
  */
 function gitignoreToRegex(pattern: string): RegExp | null {
-  let negate = false;
   let pat = pattern;
 
-  // Handle negation (!)
+  // Negation patterns (!) are not supported — skip them
   if (pat.startsWith("!")) {
-    negate = true;
-    pat = pat.slice(1);
+    return null;
   }
 
   // Handle directory-only patterns (trailing /)
