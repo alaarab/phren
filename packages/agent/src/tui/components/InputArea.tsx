@@ -1,7 +1,7 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { PERMISSION_LABELS, PERMISSION_ICONS, PERMISSION_COLORS } from "../ansi.js";
+import { PERMISSION_LABELS, PERMISSION_ICONS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
 
 export interface InputAreaProps {
@@ -13,7 +13,9 @@ export interface InputAreaProps {
 }
 
 export function InputArea({ value, onChange, onSubmit, bashMode, focus }: InputAreaProps) {
-  const sep = "─".repeat(process.stdout.columns || 80);
+  const { stdout } = useStdout();
+  const columns = stdout?.columns || 80;
+  const sep = "\u2500".repeat(columns);
 
   return (
     <Box flexDirection="column">
@@ -21,7 +23,7 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus }: InputA
       <Box>
         {bashMode
           ? <Text color="yellow">! </Text>
-          : <Text dimColor>▸ </Text>
+          : <Text dimColor>{"\u25b8"} </Text>
         }
         <TextInput
           value={value}
@@ -40,16 +42,21 @@ export interface PermissionsLineProps {
   mode: PermissionMode;
 }
 
+const PERM_COLOR_MAP: Record<PermissionMode, string> = {
+  "suggest": "cyan",
+  "auto-confirm": "green",
+  "full-auto": "yellow",
+};
+
 export function PermissionsLine({ mode }: PermissionsLineProps) {
-  const colorFn = PERMISSION_COLORS[mode];
   const icon = PERMISSION_ICONS[mode];
   const label = PERMISSION_LABELS[mode];
-  // Apply ANSI color to the permission tag text
-  const tag = colorFn(`${icon} ${label} permissions`);
+  const color = PERM_COLOR_MAP[mode];
 
   return (
     <Text>
-      {"  "}<Text>{tag}</Text> <Text dimColor>(shift+tab toggle · esc to interrupt)</Text>
+      {"  "}<Text color={color}>{icon} {label} permissions</Text>{" "}
+      <Text dimColor>(shift+tab toggle {"\u00b7"} esc to interrupt)</Text>
     </Text>
   );
 }
