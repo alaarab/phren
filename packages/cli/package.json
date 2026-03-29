@@ -16,7 +16,8 @@
     "./data/tasks": "./dist/data/tasks.js",
     "./core/finding": "./dist/core/finding.js",
     "./session/utils": "./dist/session/utils.js",
-    "./shell/render-api": "./dist/shell/render-api.js"
+    "./shell/render-api": "./dist/shell/render-api.js",
+    "./phren-art": "./dist/phren-art.js"
   },
   "files": [
     "dist",
