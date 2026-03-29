@@ -1,12 +1,23 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Text } from "ink";
 
 export interface ThinkingIndicatorProps {
   startTime: number;
 }
 
+// Phren's own thinking verbs — memory-oriented, not generic
+const THINKING_VERBS = [
+  "thinking", "reasoning", "recalling", "connecting", "processing",
+];
+
 export function ThinkingIndicator({ startTime }: ThinkingIndicatorProps) {
   const [frame, setFrame] = useState(0);
+
+  // Pick a random verb once per mount
+  const verb = useMemo(
+    () => THINKING_VERBS[Math.floor(Math.random() * THINKING_VERBS.length)],
+    [],
+  );
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -26,7 +37,7 @@ export function ThinkingIndicator({ startTime }: ThinkingIndicatorProps) {
 
   return (
     <Text>
-      {"  "}<Text color={hex}>◆ thinking</Text> <Text dimColor>{elapsed}s</Text>
+      {"  "}<Text color={hex}>{"\u25c6"} {verb}</Text> <Text dimColor>{elapsed}s</Text>
     </Text>
   );
 }

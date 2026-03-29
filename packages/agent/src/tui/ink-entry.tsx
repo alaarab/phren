@@ -140,6 +140,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   });
 
   function handleSubmit(input: string) {
+    console.error(`[BRIDGE] handleSubmit: ${JSON.stringify(input.slice(0, 40))} running=${running}`);
     const line = input.trim();
     if (!line) return;
 
@@ -215,43 +216,53 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   // TurnHooks bridge — updates mutable state, calls update()
   const tuiHooks: TurnHooks = {
     onTextDelta: (text) => {
+      console.error(`[BRIDGE] onTextDelta: ${JSON.stringify(text.slice(0, 40))}`);
       thinking = false;
       streamingText += text;
       update();
     },
     onTextDone: () => {
+      console.error("[BRIDGE] onTextDone");
       // streaming complete — finalized in runAgentTurn
     },
     onTextBlock: (text) => {
+      console.error(`[BRIDGE] onTextBlock: ${JSON.stringify(text.slice(0, 40))}`);
       thinking = false;
       streamingText += text;
       update();
     },
     onToolStart: (_name, _input, _count) => {
+      console.error(`[BRIDGE] onToolStart: ${_name} (${_count} tools)`);
       thinking = false;
       update();
     },
     onToolEnd: (name, input, output, isError, dur) => {
+      console.error(`[BRIDGE] onToolEnd: ${name} isError=${isError} dur=${dur}ms`);
       const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur });
       update();
     },
-    onStatus: () => { update(); },
+    onStatus: (msg) => { console.error(`[BRIDGE] onStatus: ${msg.slice(0, 60)}`); update(); },
     getSteeringInput: () => {
-      if (steerQueueBuf.length > 0 && inputMode === "steering") {
-        return steerQueueBuf.shift()!;
-      }
-      if (pendingInput && inputMode === "steering") {
-        const steer = pendingInput;
-        pendingInput = null;
-        return steer;
-      }
-      return null;
+      const result = (() => {
+        if (steerQueueBuf.length > 0 && inputMode === "steering") {
+          return steerQueueBuf.shift()!;
+        }
+        if (pendingInput && inputMode === "steering") {
+          const steer = pendingInput;
+          pendingInput = null;
+          return steer;
+        }
+        return null;
+      })();
+      if (result) console.error(`[BRIDGE] getSteeringInput: ${JSON.stringify(result.slice(0, 40))}`);
+      return result;
     },
   };
 
   async function runAgentTurn(userInput: string) {
+    console.error(`[BRIDGE] runAgentTurn START: ${JSON.stringify(userInput.slice(0, 40))}`);
     running = true;
     thinking = true;
     thinkStartTime = Date.now();
@@ -264,11 +275,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       await runTurn(userInput, session, config, tuiHooks);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[BRIDGE] runAgentTurn ERROR: ${msg}`);
       streamingText += `\nError: ${msg}`;
     }
 
     // Compute elapsed time
     const elapsed = ((Date.now() - thinkStartTime) / 1000).toFixed(1);
+    console.error(`[BRIDGE] runAgentTurn END: elapsed=${elapsed}s streamingText=${streamingText.length}chars toolCalls=${currentToolCalls.length}`);
 
     // Finalize: move streaming content + tool calls to completed messages
     thinking = false;
@@ -306,6 +319,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       runAgentTurn(queued);
     }
   }
+
+  // Clear screen before initial render — start clean
+  process.stdout.write("\x1b[2J\x1b[H");
 
   // Initial render
   const app = render(
