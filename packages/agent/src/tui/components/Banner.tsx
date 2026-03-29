@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import * as os from "os";
 import type { PermissionMode } from "../../permissions/types.js";
 import { PERMISSION_ICONS, PERMISSION_COLORS } from "../ansi.js";
 
@@ -13,13 +14,14 @@ export interface BannerProps {
 let cachedArt: string[] | null = null;
 let artLoaded = false;
 
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
+
 function getArtLines(): string[] {
   if (artLoaded) return cachedArt ?? [];
   artLoaded = true;
   try {
-    // Dynamic import resolved at build time via bundler moduleResolution
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@phren/cli/phren-art") as { PHREN_ART: string[] };
+    const mod = _require("@phren/cli/phren-art") as { PHREN_ART: string[] };
     cachedArt = mod.PHREN_ART.filter((l: string) => l.trim());
     return cachedArt;
   } catch {
@@ -47,7 +49,7 @@ function PermTag({ mode }: { mode: PermissionMode }) {
 }
 
 export function Banner({ provider, project, version, permissionMode }: BannerProps) {
-  const cwd = process.cwd().replace(require("os").homedir(), "~");
+  const cwd = process.cwd().replace(os.homedir(), "~");
   const artLines = getArtLines();
   const maxArtWidth = 26;
 
