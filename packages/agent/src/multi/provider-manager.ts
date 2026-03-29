@@ -10,7 +10,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { hasCodexToken } from "../providers/codex-auth.js";
-import type { ModelEntry, ReasoningLevel } from "./model-picker.js";
+import type { ReasoningLevel } from "./model-picker.js";
 export type { ReasoningLevel } from "./model-picker.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".phren-agent");
@@ -135,38 +135,12 @@ export function getCustomModels(): CustomModelEntry[] {
   return loadConfig().customModels;
 }
 
-/** Get all models for a provider (built-in + custom). */
-export async function getAllModelsForProvider(provider: string, currentModel?: string): Promise<ModelEntry[]> {
-  // Import dynamically to avoid circular dep
-  const { getAvailableModels } = await import("./model-picker.js") as typeof import("./model-picker.js");
-  const builtIn = getAvailableModels(provider, currentModel);
-
-  // Add custom models for this provider
-  const custom = getCustomModels().filter((m) => m.provider === provider);
-  for (const c of custom) {
-    if (!builtIn.some((b) => b.id === c.id)) {
-      builtIn.push({
-        id: c.id,
-        provider: provider as ModelEntry["provider"],
-        label: c.label + " ★",
-        reasoning: c.reasoning,
-        reasoningRange: c.reasoningRange,
-        contextWindow: c.contextWindow,
-      });
-    }
-  }
-
-  return builtIn;
-}
-
 // ── Format helpers for CLI display ──────────────────────────────────────────
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
-const CYAN = "\x1b[36m";
-const YELLOW = "\x1b[33m";
 const RESET = "\x1b[0m";
 
 export function formatProviderList(): string {

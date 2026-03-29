@@ -1,4 +1,4 @@
-import type { LlmMessage, ContentBlock } from "../providers/types.js";
+import type { LlmMessage } from "../providers/types.js";
 
 /** Rough token estimate: ~4 chars per token. */
 export function estimateTokens(text: string): number {
