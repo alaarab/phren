@@ -13,6 +13,7 @@ import type { AgentSpawner } from "./multi/spawner.js";
 import { renderMarkdown } from "./multi/markdown.js";
 import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
 import * as os from "os";
+import { execSync } from "node:child_process";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 import { createRequire } from "node:module";
 
@@ -163,6 +164,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   let menuListCount = 0;
   let menuFilterActive = false;
   let menuFilterBuf = "";
+  let ctrlCCount = 0;
 
   // ── Menu rendering ─────────────────────────────────────────────────────
   async function renderMenu() {
@@ -212,16 +214,29 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     w.write(`${ESC}s${ESC}H${bar}${ESC}u`); // save cursor, move to top, print, restore
   }
 
-  // Print prompt — always at bottom of terminal
+  // Print prompt — bordered input bar at bottom
+  let bashMode = false;
+
   function prompt(skipNewline = false) {
     if (!isTTY) return;
     const mode = config.registry.permissionConfig.mode;
     const modeIcon = mode === "full-auto" ? "●" : mode === "auto-confirm" ? "◐" : "○";
     const modeColor = mode === "full-auto" ? s.yellow : mode === "auto-confirm" ? s.green : s.cyan;
     const rows = process.stdout.rows || 24;
-    // Move to bottom row, clear it, write prompt
+    const c = cols();
     if (!skipNewline) w.write("\n");
-    w.write(`${ESC}${rows};1H${ESC}2K${modeColor(modeIcon)} ${s.dim("▸")} `);
+    // Separator line + prompt on last 2 rows
+    const permLabel = PERMISSION_LABELS[mode];
+    const separator = s.dim("─".repeat(c));
+    const rightHints = s.dim(`${bashMode ? "! bash" : permLabel} · shift+tab to cycle · esc to interrupt`);
+    const rightLen = stripAnsi(rightHints).length;
+    const sepLine = s.dim("─".repeat(Math.max(1, c - rightLen - 1))) + " " + rightHints;
+    w.write(`${ESC}${rows - 1};1H${ESC}2K${sepLine}`);
+    if (bashMode) {
+      w.write(`${ESC}${rows};1H${ESC}2K${s.yellow("!")} `);
+    } else {
+      w.write(`${ESC}${rows};1H${ESC}2K${modeColor(modeIcon)} ${s.dim("▸")} `);
+    }
   }
 
   // Terminal cleanup: restore state on exit
@@ -233,10 +248,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   }
   process.on("exit", cleanupTerminal);
 
-  // Setup: alternate screen not needed — just reserve top line for status
+  // Setup: clear screen, status bar at top, content area clean
   if (isTTY) {
-    w.write("\n"); // make room for status bar
-    w.write(`${ESC}1;1H`); // move to top
+    w.write(`${ESC}2J${ESC}H`); // clear entire screen + home
     statusBar();
     w.write(`${ESC}2;1H`); // move below status bar
 
@@ -352,11 +366,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   process.stdin.on("keypress", (_ch, key) => {
     if (!key) return;
 
-    // Ctrl+D — always exit
+    // Ctrl+D — clean exit
     if (key.ctrl && key.name === "d") {
-      if (tuiMode === "menu") w.write("\x1b[?1049l"); // leave alt screen
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      w.write(s.dim("\nSession ended.\n"));
+      if (tuiMode === "menu") w.write("\x1b[?1049l");
+      cleanupTerminal();
+      w.write(`\n${s.dim(`${session.turns} turns, ${session.toolCalls} tool calls.`)}\n`);
       resolve!(session);
       return;
     }
@@ -393,15 +407,56 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
     // ── Chat mode keys ──────────────────────────────────────────────────
 
-    // Ctrl+C — cancel current or clear line
+    // Escape — exit bash mode, or clear input
+    if (key.name === "escape") {
+      if (bashMode) {
+        bashMode = false;
+        inputLine = "";
+        prompt(true);
+        return;
+      }
+      if (inputLine) {
+        inputLine = "";
+        prompt(true);
+        return;
+      }
+    }
+
+    // Ctrl+C — progressive: cancel → warn → quit
     if (key.ctrl && key.name === "c") {
       if (running) {
+        // Cancel current agent turn
         pendingInput = null;
         w.write(s.yellow("\n  [interrupted]\n"));
-      } else {
+        ctrlCCount = 0;
+        return;
+      }
+      if (bashMode) {
+        bashMode = false;
         inputLine = "";
-        w.write("\n");
-        prompt();
+        prompt(true);
+        ctrlCCount = 0;
+        return;
+      }
+      if (inputLine) {
+        // Clear input
+        inputLine = "";
+        prompt(true);
+        ctrlCCount = 0;
+        return;
+      }
+      // Nothing to cancel — progressive quit
+      ctrlCCount++;
+      if (ctrlCCount === 1) {
+        w.write(s.dim("\n  Press Ctrl+C again to exit.\n"));
+        prompt(true);
+        // Reset after 2 seconds
+        setTimeout(() => { ctrlCCount = 0; }, 2000);
+      } else {
+        // Actually quit
+        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        w.write(s.dim("\nSession ended.\n"));
+        resolve!(session);
       }
       return;
     }
@@ -413,6 +468,24 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write("\n");
 
       if (!line) { prompt(); return; }
+
+      // Bash mode: ! prefix runs shell directly
+      if (line.startsWith("!") || bashMode) {
+        const cmd = bashMode ? line : line.slice(1).trim();
+        bashMode = false;
+        if (cmd) {
+          try {
+            const output = execSync(cmd, { encoding: "utf-8", timeout: 30_000, cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+            w.write(output);
+            if (!output.endsWith("\n")) w.write("\n");
+          } catch (err: unknown) {
+            const e = err as { stderr?: string; message?: string };
+            w.write(s.red(e.stderr || e.message || "Command failed") + "\n");
+          }
+        }
+        prompt();
+        return;
+      }
 
       // Slash commands
       if (line === "/mode") {
@@ -459,6 +532,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
     // Regular character
     if (key.sequence && !key.ctrl && !key.meta) {
+      // ! at start of empty input toggles bash mode
+      if (key.sequence === "!" && inputLine === "" && !bashMode) {
+        bashMode = true;
+        prompt(true);
+        return;
+      }
       inputLine += key.sequence;
       w.write(key.sequence);
     }
