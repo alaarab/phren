@@ -245,11 +245,21 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     const rows = process.stdout.rows || 24;
     const c = cols();
     if (!skipNewline) w.write("\n");
-    const sepLine = s.dim("─".repeat(c));
+    // Layout (bottom up): blank, permissions, separator, input, separator
+    // Row N   = blank (aesthetic)
+    // Row N-1 = permissions line
+    // Row N-2 = separator ───
+    // Row N-3 = input ▸
+    // Row N-4 = separator ───
+    const sep = s.dim("─".repeat(c));
     const permLine = `  ${color(`${icon} ${PERMISSION_LABELS[mode]} permissions`)} ${s.dim("(shift+tab to cycle)")}`;
-    w.write(`${ESC}${rows - 2};1H${ESC}2K${sepLine}`);
+    w.write(`${ESC}${rows - 4};1H${ESC}2K${sep}`);
+    w.write(`${ESC}${rows - 3};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${s.dim("▸")} `}`);
+    w.write(`${ESC}${rows - 2};1H${ESC}2K${sep}`);
     w.write(`${ESC}${rows - 1};1H${ESC}2K${permLine}`);
-    w.write(`${ESC}${rows};1H${ESC}2K${bashMode ? `${s.yellow("!")} ` : `${color(icon)} ${s.dim("▸")} `}`);
+    w.write(`${ESC}${rows};1H${ESC}2K`); // blank bottom row
+    // Move cursor back to input line
+    w.write(`${ESC}${rows - 3};${bashMode ? 3 : 4}H`);
   }
 
   // Terminal cleanup: restore state on exit
