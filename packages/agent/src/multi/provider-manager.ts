@@ -11,6 +11,7 @@ import * as path from "path";
 import * as os from "os";
 import { hasCodexToken } from "../providers/codex-auth.js";
 import type { ModelEntry, ReasoningLevel } from "./model-picker.js";
+export type { ReasoningLevel } from "./model-picker.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".phren-agent");
 const PROVIDERS_FILE = path.join(CONFIG_DIR, "providers.json");
