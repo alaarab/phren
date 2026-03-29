@@ -524,7 +524,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       w.write(`\r${ESC}2K`); // clear input line
       // Scroll up: move to line above prompt area, write content, redraw prompt
       w.write(`${ESC}${PROMPT_LINES}A`); // move up past the prompt area
-      w.write(`${s.bold("You:")} ${line}\n`);
+      w.write(`${s.bold("❯")} ${line}\n`);
       prompt(); // redraw prompt below
       runAgentTurn(line);
       return;
@@ -791,12 +791,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     // Process queued input — steer queue first, then pending
     if (steerQueue.length > 0) {
       const queued = steerQueue.shift()!;
-      w.write(`${s.bold("You:")} ${queued}\n`);
+      w.write(`${s.bold("❯")} ${queued}\n`);
       runAgentTurn(queued);
     } else if (pendingInput) {
       const queued = pendingInput;
       pendingInput = null;
-      w.write(`${s.bold("You:")} ${queued}\n`);
+      w.write(`${s.bold("❯")} ${queued}\n`);
       runAgentTurn(queued);
     } else {
       prompt();
