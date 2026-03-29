@@ -37,7 +37,8 @@ Options:
   --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
-  --permissions <mode> Permission mode: suggest, auto-confirm, full-auto (default: auto-confirm)
+  --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
+  --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
   --resume             Resume last session's conversation
   --lint-cmd <cmd>     Override auto-detected lint command
@@ -73,7 +74,7 @@ Examples:
 export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     task: "",
-    permissions: "auto-confirm",
+    permissions: "suggest",
     maxTurns: 50,
     budget: null,
     plan: false,
@@ -110,6 +111,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
     else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
+    else if (arg === "--yolo") { args.permissions = "full-auto"; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];
       if (mode === "suggest" || mode === "auto-confirm" || mode === "full-auto") {
