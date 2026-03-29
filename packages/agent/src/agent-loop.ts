@@ -73,8 +73,19 @@ async function runToolsConcurrently(
     const batch = blocks.slice(i, i + MAX_TOOL_CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (block) => {
-        const result = await registry.execute(block.name, block.input);
-        return { block, output: result.output, is_error: !!result.is_error };
+        const TOOL_TIMEOUT_MS = 120_000;
+        try {
+          const result = await Promise.race([
+            registry.execute(block.name, block.input),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Tool '${block.name}' timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS),
+            ),
+          ]);
+          return { block, output: result.output, is_error: !!result.is_error };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { block, output: msg, is_error: true };
+        }
       }),
     );
     results.push(...batchResults);
@@ -113,7 +124,12 @@ async function consumeStream(
       if (tool) {
         const jsonStr = tool.jsonParts.join("");
         let input: Record<string, unknown> = {};
-        try { input = JSON.parse(jsonStr); } catch { /* malformed */ }
+        try {
+          input = JSON.parse(jsonStr);
+        } catch (e) {
+          process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}), skipping block\x1b[0m\n`);
+          continue;
+        }
         content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
       }
     } else if (delta.type === "done") {
@@ -167,18 +183,18 @@ export async function runTurn(
       process.stderr.write(`\n${formatTurnHeader(session.turns + 1, turnToolCalls)}\n`);
     }
 
-    // Prune context if approaching limit
+    // Check if context flush is needed (one-time per session) — must run before pruning
     const contextLimit = provider.contextWindow ?? 200_000;
-    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
-      session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
-      if (verbose) process.stderr.write("[context pruned]\n");
-    }
-
-    // Check if context flush is needed (one-time per session)
     const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
     if (flushPrompt) {
       session.messages.push({ role: "user", content: flushPrompt });
       if (verbose) process.stderr.write("[context flush injected]\n");
+    }
+
+    // Prune context if approaching limit
+    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
+      session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
+      if (verbose) process.stderr.write("[context pruned]\n");
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
@@ -188,8 +204,12 @@ export async function runTurn(
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
 
     if (useStream) {
-      // Streaming path
-      const stream = provider.chatStream!(systemPrompt, session.messages, turnTools);
+      // Streaming path — retry the initial connection (before consuming deltas)
+      const stream = await withRetry(
+        async () => provider.chatStream!(systemPrompt, session.messages, turnTools),
+        undefined,
+        verbose,
+      );
       const result = await consumeStream(stream, costTracker);
       assistantContent = result.content;
       stopReason = result.stop_reason;
@@ -233,14 +253,14 @@ export async function runTurn(
       planPending = false;
       const { approved, feedback } = await requestPlanApproval();
       if (!approved) {
+        // Always restore original system prompt on rejection to prevent plan prompt leaking
+        systemPrompt = config.systemPrompt;
         const msg = feedback
           ? `The user rejected the plan with feedback: ${feedback}\nPlease revise your plan.`
           : "The user rejected the plan. Task aborted.";
         if (feedback) {
           // Let the LLM revise — add feedback as user message and continue
           session.messages.push({ role: "user", content: msg });
-          // Restore original system prompt (without plan suffix) for subsequent turns
-          systemPrompt = config.systemPrompt;
           continue;
         }
         break;
@@ -248,6 +268,13 @@ export async function runTurn(
       // Approved — restore original system prompt and continue with tools enabled
       systemPrompt = config.systemPrompt;
       session.messages.push({ role: "user", content: "Plan approved. Proceed with execution." });
+      continue;
+    }
+
+    // If max_tokens, warn user and inject continuation prompt
+    if (stopReason === "max_tokens") {
+      process.stderr.write("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
+      session.messages.push({ role: "user", content: "Your response was truncated due to length. Please continue where you left off." });
       continue;
     }
 
@@ -311,18 +338,20 @@ export async function runTurn(
       const lintCmd = config.lintTestConfig.lintCmd ?? detectLintCommand(cwd);
       const testCmd = config.lintTestConfig.testCmd ?? detectTestCommand(cwd);
 
+      const lintFailures: string[] = [];
       for (const cmd of [lintCmd, testCmd].filter(Boolean) as string[]) {
         const check = runPostEditCheck(cmd, cwd);
         if (!check.passed) {
           if (verbose) process.stderr.write(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
-          // Inject failure as a tool result so the LLM can fix it
-          toolResults.push({
-            type: "tool_result",
-            tool_use_id: `lint-test-${Date.now()}`,
-            content: `Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`,
-            is_error: true,
-          });
+          lintFailures.push(`Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`);
         }
+      }
+      if (lintFailures.length > 0) {
+        // Inject as plain text in the tool results user message (not as a fabricated tool_result)
+        toolResults.push({
+          type: "text",
+          text: lintFailures.join("\n\n"),
+        } as ContentBlock);
       }
     }
 

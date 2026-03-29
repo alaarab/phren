@@ -7,10 +7,10 @@ function makeConfig(mode: PermissionConfig["mode"], projectRoot = "/tmp/project"
 }
 
 describe("checkPermission", () => {
-  // ── Always-safe tools ───────────────────────────────────────────────
+  // ── Always-safe tools (no path validation needed) ──────────────────
 
   describe("always-safe tools", () => {
-    const safeTools = ["read_file", "glob", "grep", "phren_search", "phren_get_tasks"];
+    const safeTools = ["phren_search", "phren_get_tasks"];
 
     for (const tool of safeTools) {
       it(`allows ${tool} in suggest mode`, () => {
@@ -21,6 +21,39 @@ describe("checkPermission", () => {
       });
       it(`allows ${tool} in full-auto mode`, () => {
         expect(checkPermission(makeConfig("full-auto"), tool, {}).verdict).toBe("allow");
+      });
+    }
+  });
+
+  // ── File tools (read_file, glob, grep) need path checks ────────────
+
+  describe("file tools require permission checks", () => {
+    const fileReadTools = ["read_file", "glob", "grep"];
+
+    for (const tool of fileReadTools) {
+      it(`asks for ${tool} in suggest mode (even with in-sandbox path)`, () => {
+        expect(checkPermission(makeConfig("suggest"), tool, { path: "/tmp/project/foo.ts" }).verdict).toBe("ask");
+      });
+
+      it(`allows ${tool} in auto-confirm mode with in-sandbox path`, () => {
+        // read_file/glob/grep are FILE_TOOLS; with an in-sandbox path they pass path checks,
+        // then fall through to mode logic. In auto-confirm they're not in AUTO_CONFIRM_TOOLS,
+        // so they get "ask" -- unless they don't have a path, in which case path check is skipped.
+        // With a path inside sandbox, the path check passes, then mode logic applies.
+        const result = checkPermission(makeConfig("auto-confirm"), tool, { path: "/tmp/project/foo.ts" });
+        // These are not in AUTO_CONFIRM_TOOLS, so auto-confirm asks
+        expect(result.verdict).toBe("ask");
+      });
+
+      it(`allows ${tool} in full-auto mode with in-sandbox path`, () => {
+        expect(checkPermission(makeConfig("full-auto"), tool, { path: "/tmp/project/foo.ts" }).verdict).toBe("allow");
+      });
+
+      it(`asks for ${tool} with out-of-sandbox path in all modes`, () => {
+        // Out-of-sandbox paths return "ask" regardless of mode
+        expect(checkPermission(makeConfig("full-auto"), tool, { path: "/other/dir/foo.ts" }).verdict).toBe("ask");
+        expect(checkPermission(makeConfig("auto-confirm"), tool, { path: "/other/dir/foo.ts" }).verdict).toBe("ask");
+        expect(checkPermission(makeConfig("suggest"), tool, { path: "/other/dir/foo.ts" }).verdict).toBe("ask");
       });
     }
   });
@@ -109,9 +142,18 @@ describe("checkPermission", () => {
       expect(result.verdict).toBe("ask");
     });
 
-    it("asks for write_file path outside sandbox in full-auto", () => {
+    it("denies write_file to sensitive path even in full-auto", () => {
+      // /etc/passwd matches the sensitive path pattern, so it's denied (not just asked)
       const result = checkPermission(makeConfig("full-auto"), "write_file", {
         path: "/etc/passwd",
+      });
+      expect(result.verdict).toBe("deny");
+    });
+
+    it("asks for write_file path outside sandbox in full-auto", () => {
+      // Use a non-sensitive out-of-sandbox path to test sandbox check returns "ask"
+      const result = checkPermission(makeConfig("full-auto"), "write_file", {
+        path: "/other/dir/file.ts",
       });
       expect(result.verdict).toBe("ask");
     });

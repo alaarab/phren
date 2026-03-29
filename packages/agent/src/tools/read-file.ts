@@ -1,5 +1,7 @@
 import * as fs from "fs";
+import * as path from "path";
 import type { AgentTool } from "./types.js";
+import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 
 export const readFileTool: AgentTool = {
   name: "read_file",
@@ -17,6 +19,19 @@ export const readFileTool: AgentTool = {
     const filePath = input.path as string;
     const offset = Math.max(1, (input.offset as number) || 1);
     const limit = Math.min(5000, (input.limit as number) || 2000);
+
+    // Defense-in-depth: sensitive path check
+    const resolved = path.resolve(filePath);
+    const sensitive = checkSensitivePath(resolved);
+    if (sensitive.sensitive) {
+      return { output: `Access denied: ${sensitive.reason}`, is_error: true };
+    }
+
+    // Defense-in-depth: sandbox check
+    const sandboxResult = validatePath(filePath, process.cwd(), []);
+    if (!sandboxResult.ok) {
+      return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
+    }
 
     if (!fs.existsSync(filePath)) return { output: `File not found: ${filePath}`, is_error: true };
 

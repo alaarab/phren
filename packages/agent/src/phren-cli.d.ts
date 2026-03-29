@@ -11,7 +11,7 @@ declare module "@phren/cli/paths" {
 }
 
 declare module "@phren/cli/runtime-profile" {
-  export function resolveRuntimeProfile(phrenPath: string, requestedProfile?: string): string | null;
+  export function resolveRuntimeProfile(phrenPath: string, requestedProfile?: string): string;
 }
 
 declare module "@phren/cli/shared" {
@@ -21,31 +21,43 @@ declare module "@phren/cli/shared" {
   export function buildIndex(
     phrenPath: string,
     profileFilter?: string,
-  ): Promise<PhrenDb> | PhrenDb;
+  ): Promise<PhrenDb>;
 }
 
 declare module "@phren/cli/shared/retrieval" {
-  interface SearchResult {
-    rows: Array<{ project: string; filename: string; content?: string; [key: string]: unknown }>;
+  interface DocRow {
+    project: string;
+    filename: string;
+    content?: string;
+    [key: string]: unknown;
+  }
+  interface SearchKnowledgeRowsResult {
+    safeQuery: string;
+    rows: DocRow[] | null;
+    usedFallback: boolean;
   }
   export function searchKnowledgeRows(
     db: unknown,
     options: {
       query: string;
-      maxResults?: number;
+      maxResults: number;
+      fetchLimit?: number;
       filterProject?: string | null;
       filterType?: string | null;
-      phrenPath?: string;
+      phrenPath: string;
     },
-  ): Promise<SearchResult> | SearchResult;
+  ): Promise<SearchKnowledgeRowsResult>;
   export function rankResults(
-    rows: unknown[],
-    query: string,
-    type: string | null,
-    project: string | null,
+    rows: DocRow[],
+    intent: string,
+    gitCtx: unknown | null,
+    detectedProject: string | null,
     phrenPath: string,
     db: unknown,
-  ): Array<{ project: string; filename: string; content?: string; [key: string]: unknown }>;
+    cwd?: string,
+    query?: string,
+    opts?: { filterType?: string | null; skipTaskFilter?: boolean },
+  ): DocRow[];
 }
 
 declare module "@phren/cli/data/access" {
@@ -83,7 +95,7 @@ declare module "@phren/cli/data/tasks" {
 declare module "@phren/cli/shell/render-api" {
   export type MenuView =
     | "Projects" | "Tasks" | "Findings" | "Review Queue"
-    | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
+    | "Skills" | "Hooks" | "Health";
 
   export interface MenuState {
     view: MenuView;
@@ -118,7 +130,7 @@ declare module "@phren/cli/core/finding" {
     phrenPath: string,
     project: string,
     finding: string,
-    citation?: Record<string, unknown>,
+    citation?: { file?: string; line?: number; repo?: string; commit?: string; supersedes?: string },
     findingType?: string,
-  ): { ok: boolean; message?: string; error?: string };
+  ): { ok: boolean; message: string; data?: unknown };
 }

@@ -198,6 +198,9 @@ export async function runAgentCli(raw: string[]) {
   // SIGINT handler: offer rollback
   process.on("SIGINT", () => {
     process.stderr.write("\nInterrupted. Use --resume to continue later.\n");
+    if (process.stdin.isTTY) {
+      try { process.stdin.setRawMode(false); } catch {}
+    }
     mcpCleanup?.();
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, "Interrupted by user");

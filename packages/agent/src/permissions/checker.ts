@@ -1,14 +1,20 @@
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
-import { validatePath } from "./sandbox.js";
+import { validatePath, checkSensitivePath } from "./sandbox.js";
 
 /** Tools that are safe in all modes — read-only, no side effects. */
 const ALWAYS_SAFE_TOOLS = new Set([
-  "read_file",
-  "glob",
-  "grep",
   "phren_search",
   "phren_get_tasks",
+]);
+
+/** Tools that access file paths and need sensitive-path checks. */
+const FILE_TOOLS = new Set([
+  "read_file",
+  "write_file",
+  "edit_file",
+  "glob",
+  "grep",
 ]);
 
 /** Tools that auto-confirm mode allows without prompting. */
@@ -61,16 +67,20 @@ export function checkPermission(
     }
   }
 
-  // Path-based tools: validate the path is in sandbox
-  if (toolName === "write_file" || toolName === "edit_file") {
+  // Path-based tools: validate sandbox + sensitive path
+  if (FILE_TOOLS.has(toolName)) {
     const filePath = (input.path as string) || "";
     if (filePath) {
+      // Sensitive path check applies in ALL modes
+      const sensitive = checkSensitivePath(filePath);
+      if (sensitive.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${sensitive.reason}` };
+      }
+
+      // Sandbox check: ask for out-of-sandbox paths in ALL modes (not just full-auto)
       const pathResult = validatePath(filePath, config.projectRoot, config.allowedPaths);
       if (!pathResult.ok) {
-        if (config.mode === "full-auto") {
-          return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
-        }
-        // Other modes already ask for these tools
+        return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
       }
     }
   }

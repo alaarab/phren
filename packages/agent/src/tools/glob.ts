@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
+import { validatePath } from "../permissions/sandbox.js";
 
 /** Simple glob matching without external dependencies. Supports * and ** patterns. */
 function matchGlob(pattern: string, filePath: string): boolean {
@@ -44,6 +45,12 @@ export const globTool: AgentTool = {
     const pattern = input.pattern as string;
     const searchPath = (input.path as string) || process.cwd();
     const maxResults = 500;
+
+    // Defense-in-depth: validate search path against sandbox
+    const pathResult = validatePath(searchPath, process.cwd(), []);
+    if (!pathResult.ok) {
+      return { output: `Path outside sandbox: ${pathResult.error}`, is_error: true };
+    }
 
     const allFiles: string[] = [];
     walkDir(searchPath, searchPath, allFiles, 10000);

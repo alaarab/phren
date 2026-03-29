@@ -160,10 +160,10 @@ export class CodexProvider implements LlmProvider {
     }
 
     // Stream is mandatory for Codex backend — consume it and collect the final response
-    const reader = res.body!.getReader();
+    if (!res.body) throw new Error("Provider returned empty response body");
+    const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const events: string[] = [];
     let finalResponse: Record<string, unknown> | null = null;
 
     while (true) {
@@ -176,7 +176,6 @@ export class CodexProvider implements LlmProvider {
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6).trim();
         if (data === "[DONE]") continue;
-        events.push(data);
         try {
           const event = JSON.parse(data);
           if (event.type === "response.completed" && event.response) {
@@ -186,11 +185,10 @@ export class CodexProvider implements LlmProvider {
       }
     }
 
-    // Dump first 20 events for debugging
     if (finalResponse) return parseResponsesOutput(finalResponse);
 
-    // Fallback: try to extract from accumulated events
-    return { content: [], stop_reason: "end_turn" };
+    // No response.completed event received
+    throw new Error("Codex stream ended without response.completed event");
   }
 
   async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
@@ -224,7 +222,8 @@ export class CodexProvider implements LlmProvider {
     }
 
     // Parse SSE stream
-    const reader = res.body!.getReader();
+    if (!res.body) throw new Error("Provider returned empty response body");
+    const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let activeToolCallId = "";
