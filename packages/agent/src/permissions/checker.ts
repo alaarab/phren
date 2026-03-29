@@ -1,5 +1,5 @@
 import type { PermissionConfig, PermissionRule, PermissionPattern } from "./types.js";
-import { checkShellSafety } from "./shell-safety.js";
+import { checkShellSafety, hasCommandChaining, extractFirstCommand } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 
@@ -69,6 +69,11 @@ function checkPatternRules(
     let value = "";
     if (toolName === "shell") {
       value = (input.command as string) || "";
+      // Security: if command has chaining operators, only match against the first command
+      // to prevent "allowed-cmd && malicious-cmd" from matching "allowed-cmd *" rules
+      if (rule.verdict === "allow" && hasCommandChaining(value)) {
+        value = extractFirstCommand(value);
+      }
     } else if (FILE_TOOLS.has(toolName)) {
       value = (input.path as string) || (input.file_path as string) || "";
     } else if (toolName === "web_fetch" || toolName === "web_search") {

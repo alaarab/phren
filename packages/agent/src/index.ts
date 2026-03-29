@@ -32,6 +32,7 @@ import { parsePermissionPattern } from "./permissions/pattern-parser.js";
 import type { PermissionPattern } from "./permissions/types.js";
 import { tuneEffort } from "./memory/effort-tuner.js";
 import { scrubSummary } from "./permissions/privacy.js";
+import { loadIgnorePatterns } from "./permissions/ignore.js";
 
 const VERSION = "0.0.1";
 
@@ -127,6 +128,12 @@ export async function runAgentCli(raw: string[]) {
   for (const rule of args.denyRules) {
     const parsed = parsePatternRule(rule, "deny");
     if (parsed) denyRules.push(parsed);
+  }
+
+  // Load .phrenignore patterns from project root
+  const hasIgnore = loadIgnorePatterns(process.cwd());
+  if (args.verbose && hasIgnore) {
+    process.stderr.write(`Loaded .phrenignore patterns\n`);
   }
 
   // Register tools

@@ -3,6 +3,7 @@ import type { AgentToolDef } from "../providers/types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkPermission } from "../permissions/checker.js";
 import { askUser } from "../permissions/prompt.js";
+import { isIgnored } from "../permissions/ignore.js";
 
 /**
  * Deferred tool entry — only the schema is loaded initially.
@@ -96,6 +97,15 @@ export class ToolRegistry {
     }
 
     if (!tool) return { output: `Unknown tool: ${name}`, is_error: true };
+
+    // .phrenignore check — blocks file access to ignored paths
+    const FILE_ACCESS_TOOLS = new Set(["read_file", "write_file", "edit_file", "glob", "grep"]);
+    if (FILE_ACCESS_TOOLS.has(name)) {
+      const filePath = (input.path as string) || (input.file_path as string) || "";
+      if (filePath && isIgnored(filePath)) {
+        return { output: `Access blocked by .phrenignore: ${filePath}`, is_error: true };
+      }
+    }
 
     // Permission check — always enforced
     const rule = checkPermission(this.permissionConfig, name, input);
