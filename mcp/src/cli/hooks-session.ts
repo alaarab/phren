@@ -63,6 +63,13 @@ import {
 import type { SelectedSnippet } from "../shared/retrieval.js";
 import { filterTaskByPriority } from "../shared/retrieval.js";
 import { logger } from "../logger.js";
+import * as crypto from "crypto";
+import {
+  type SessionState,
+  sessionFileForId,
+  readSessionStateFile,
+  writeSessionStateFile,
+} from "../session/utils.js";
 
 const SYNC_LOCK_STALE_MS = 10 * 60 * 1000; // 10 minutes
 const MAINTENANCE_LOCK_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -737,6 +744,53 @@ export async function handleHookSessionStart() {
     }
   } catch (err: unknown) {
     debugLog(`session-start onboarding detection failed: ${errorMessage(err)}`);
+  }
+
+  // ── Bridge: create a real session record so session_history tracks hook sessions ──
+  // Uses a file lock to prevent concurrent SessionStart hooks from racing on
+  // the active-hook-session pointer (read previous ID, end it, write new ID).
+  try {
+    const activeSessionFile = runtimeFile(phrenPath, "active-hook-session");
+
+    withFileLock(activeSessionFile, () => {
+      // Retroactively end the previous hook session (if any)
+      try {
+        const prevId = fs.readFileSync(activeSessionFile, "utf-8").trim();
+        if (prevId) {
+          const prevFile = sessionFileForId(phrenPath, prevId);
+          const prevState = readSessionStateFile(prevFile);
+          if (prevState && !prevState.endedAt) {
+            writeSessionStateFile(prevFile, { ...prevState, endedAt: startedAt });
+          }
+        }
+      } catch (err: unknown) {
+        // ENOENT is expected on the very first session — only log other errors
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+          debugLog(`session-bridge end-previous failed: ${errorMessage(err)}`);
+        }
+      }
+
+      // Create new session record
+      const sessionId = crypto.randomUUID();
+      const sessionState: SessionState = {
+        sessionId,
+        project: activeProject || undefined,
+        startedAt,
+        findingsAdded: 0,
+        tasksCompleted: 0,
+        hookCreated: true,
+      };
+      writeSessionStateFile(sessionFileForId(phrenPath, sessionId), sessionState);
+
+      // Write active session ID atomically so other hooks (stop, tool) can reference it.
+      // Plain text format (not JSON) because the reader uses readFileSync + trim.
+      const tmpPath = `${activeSessionFile}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmpPath, sessionId + "\n");
+      fs.renameSync(tmpPath, activeSessionFile);
+      debugLog(`session-bridge created session ${sessionId.slice(0, 8)} for hook-driven session`);
+    });
+  } catch (err: unknown) {
+    debugLog(`session-bridge failed: ${errorMessage(err)}`);
   }
 }
 

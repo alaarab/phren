@@ -13,12 +13,53 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
   fs.renameSync(tmpPath, filePath);
 }
 
+// ── Session state types & helpers (shared between MCP tools and hooks) ───────
+
+export interface SessionState {
+  sessionId: string;
+  project?: string;
+  agentScope?: string;
+  startedAt: string;
+  endedAt?: string;
+  summary?: string;
+  findingsAdded: number;
+  tasksCompleted: number;
+  /** When true, this session was created by a lifecycle hook, not an explicit MCP call. */
+  hookCreated?: boolean;
+}
+
+export function sessionsDir(phrenPath: string): string {
+  const dir = path.join(phrenPath, ".runtime", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function sessionFileForId(phrenPath: string, sessionId: string): string {
+  return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
+}
+
+export function readSessionStateFile(file: string): SessionState | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch (err: unknown) {
+    // ENOENT is expected for missing files — only log other errors
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      debugError("readSessionStateFile", err);
+    }
+    return null;
+  }
+}
+
+export function writeSessionStateFile(file: string, state: SessionState): void {
+  atomicWriteJson(file, state);
+}
+
 /**
  * Log an error to stderr when PHREN_DEBUG is enabled.
  * Centralises the repeated `if (PHREN_DEBUG) stderr.write(...)` pattern.
  */
 export function debugError(scope: string, err: unknown): void {
-  if ((process.env.PHREN_DEBUG)) {
+  if (process.env.PHREN_DEBUG) {
     process.stderr.write(
       `[phren] ${scope}: ${errorMessage(err)}\n`,
     );

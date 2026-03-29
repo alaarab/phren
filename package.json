@@ -1,10 +1,11 @@
 {
   "name": "@phren/cli",
   "version": "0.0.55",
-  "description": "Knowledge layer for AI agents. Phren learns and recalls.",
+  "description": "Knowledge layer for AI agents with a built-in coding agent. Phren learns, recalls, and acts.",
   "type": "module",
   "bin": {
-    "phren": "mcp/dist/index.js"
+    "phren": "mcp/dist/index.js",
+    "phren-agent": "mcp/dist/agent/bin.js"
   },
   "files": [
     "mcp/dist",
@@ -60,7 +61,10 @@
     "claude-code",
     "mcp",
     "memory",
-    "knowledge"
+    "knowledge",
+    "agent",
+    "coding-agent",
+    "tui"
   ],
   "author": "Ala Arab",
   "license": "MIT",
