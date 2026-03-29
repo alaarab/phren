@@ -1,2 +1,0 @@
-/** Permission system types. */
-export {};
