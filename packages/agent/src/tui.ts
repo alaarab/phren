@@ -174,12 +174,8 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   }
   process.on("exit", cleanupTerminal);
 
-  // Refresh status bar on terminal resize.
-  process.stdout.on("resize", () => {
-    if (tuiMode === "chat") {
-      statusBar();
-    }
-  });
+  // Terminal resize: do nothing — scrollback text reflows naturally.
+  // The Ink TUI handles resize via React re-render. Legacy TUI just lets it be.
 
   // Setup: clear screen, status bar at top, content area clean
   if (isTTY) {
@@ -687,9 +683,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   const tuiHooks: TurnHooks = {
     onTextDelta: (text) => {
       if (firstDelta) {
-        // Kill the thinking animation IMMEDIATELY
         if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
-        w.write(`${ESC}2K\r`); // clear thinking line
+        w.write(`${ESC}2K\r`);
+        w.write(`${s.brand("◆")} `); // diamond prefix for phren's response
         firstDelta = false;
       }
       w.write(text);
