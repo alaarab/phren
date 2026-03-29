@@ -97,11 +97,8 @@ interface SerializedMessage {
   content: unknown;
 }
 
-function messagesDir(phrenPath: string): string {
-  const dir = path.join(phrenPath, ".runtime", "sessions");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
+// messagesDir is identical to sessionsDir — reuse it
+const messagesDir = sessionsDir;
 
 /** Save session messages for later resume. */
 export function saveSessionMessages(phrenPath: string, sessionId: string, messages: SerializedMessage[]): void {
@@ -157,6 +154,7 @@ export interface SessionInfo {
   name?: string;
   timestamp: string;
   summary: string;
+  turnCount?: number;
 }
 
 /**
@@ -178,22 +176,23 @@ export function listRecentSessions(phrenPath: string, limit = 10): SessionInfo[]
 
     const results: SessionInfo[] = [];
 
+    // Pre-load last-summary.json once (instead of per-session)
+    let lastSummaryData: Record<string, unknown> | null = null;
+    const summaryFile = path.join(dir, "last-summary.json");
+    if (fs.existsSync(summaryFile)) {
+      try { lastSummaryData = JSON.parse(fs.readFileSync(summaryFile, "utf-8")); } catch { /* ignore */ }
+    }
+
     for (const file of files) {
       try {
         const raw = JSON.parse(fs.readFileSync(file.fullPath, "utf-8"));
         const sessionId: string = raw.sessionId || "";
         if (!sessionId) continue;
 
-        // Try to load the summary from last-summary.json or from the session state
+        // Try to load the summary from cached last-summary.json
         let summary = "";
-        const summaryFile = path.join(dir, "last-summary.json");
-        if (fs.existsSync(summaryFile)) {
-          try {
-            const summaryData = JSON.parse(fs.readFileSync(summaryFile, "utf-8"));
-            if (summaryData.sessionId === sessionId && summaryData.summary) {
-              summary = summaryData.summary;
-            }
-          } catch { /* ignore */ }
+        if (lastSummaryData && lastSummaryData.sessionId === sessionId && lastSummaryData.summary) {
+          summary = lastSummaryData.summary as string;
         }
 
         // Count turns from messages file if available
@@ -227,10 +226,8 @@ export function listRecentSessions(phrenPath: string, limit = 10): SessionInfo[]
           name: raw.sessionName || undefined,
           timestamp: raw.startedAt || new Date(file.mtime).toISOString(),
           summary,
+          turnCount,
         };
-        if (turnCount !== undefined) {
-          (info as unknown as Record<string, unknown>).turnCount = turnCount;
-        }
 
         results.push(info);
       } catch { /* skip malformed session files */ }

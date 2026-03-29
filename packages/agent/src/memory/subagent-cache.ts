@@ -7,12 +7,6 @@
  */
 import type { PhrenContext } from "./context.js";
 
-interface CachedResult {
-  task: string;
-  result: string;
-  timestamp: number;
-}
-
 /**
  * Search phren for a cached subagent result matching the given task.
  * Returns the cached result text if found, or null.

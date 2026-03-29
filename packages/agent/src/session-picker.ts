@@ -32,13 +32,12 @@ function relativeTime(isoTimestamp: string): string {
 }
 
 /** Format a session line for display. */
-function formatSessionLine(index: number, session: SessionInfo & { turnCount?: number }): string {
+function formatSessionLine(index: number, session: SessionInfo): string {
   const timeStr = relativeTime(session.timestamp);
   const nameOrSummary = session.name
     ? `"${session.name}"`
     : session.summary;
-  const turns = (session as unknown as Record<string, unknown>).turnCount;
-  const turnSuffix = typeof turns === "number" ? ` ${DIM}(${turns} turns)${RESET}` : "";
+  const turnSuffix = session.turnCount ? ` ${DIM}(${session.turnCount} turns)${RESET}` : "";
   return `  ${CYAN}[${index + 1}]${RESET} ${DIM}${timeStr}${RESET} -- ${nameOrSummary}${turnSuffix}`;
 }
 

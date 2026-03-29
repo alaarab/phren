@@ -14,6 +14,7 @@ import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { scrubEnv } from "./permissions/shell-safety.js";
 
 export type HookEvent = "PreToolUse" | "PostToolUse" | "PreCompact" | "Stop";
 
@@ -102,12 +103,15 @@ export class HookManager {
   private executeHook(hook: HookDefinition, ctx: HookContext): HookResult {
     const timeout = hook.timeout ?? 5000;
     const env: Record<string, string> = {
-      ...process.env as Record<string, string>,
+      ...scrubEnv() as Record<string, string>,
       PHREN_HOOK_EVENT: ctx.event,
     };
 
     if (ctx.toolName) env.PHREN_HOOK_TOOL_NAME = ctx.toolName;
-    if (ctx.toolInput) env.PHREN_HOOK_TOOL_INPUT = JSON.stringify(ctx.toolInput);
+    if (ctx.toolInput) {
+      const json = JSON.stringify(ctx.toolInput);
+      env.PHREN_HOOK_TOOL_INPUT = json.slice(0, 10_000);
+    }
     if (ctx.toolOutput) env.PHREN_HOOK_TOOL_OUTPUT = ctx.toolOutput.slice(0, 10_000);
     if (ctx.isError !== undefined) env.PHREN_HOOK_IS_ERROR = String(ctx.isError);
     if (ctx.filesModified) env.PHREN_HOOK_FILES_MODIFIED = ctx.filesModified.join(",");
