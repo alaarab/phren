@@ -8,6 +8,7 @@ import { pruneMessages } from "./context/pruner.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from "./multi/presets.js";
 import { renderMarkdown } from "./multi/markdown.js";
+import { showModelPicker, type PickerResult } from "./multi/model-picker.js";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -25,6 +26,12 @@ export interface CommandContext {
   contextLimit: number;
   undoStack: LlmMessage[][];
   spawner?: AgentSpawner;
+  /** Current provider name for /model command */
+  providerName?: string;
+  /** Current model ID for /model command */
+  currentModel?: string;
+  /** Callback when model/reasoning changes */
+  onModelChange?: (result: PickerResult) => void;
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -54,6 +61,7 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
     case "/help":
       process.stderr.write(`${DIM}Commands:
   /help       Show this help
+  /model      Interactive model + reasoning picker
   /turns      Show turn and tool call counts
   /clear      Clear conversation history
   /cost       Show token usage and estimated cost
@@ -67,6 +75,24 @@ export function handleCommand(input: string, ctx: CommandContext): boolean {
   /preset [name|save|delete|list]  Config presets
   /exit       Exit the REPL${RESET}\n`);
       return true;
+
+    case "/model": {
+      if (!ctx.providerName) {
+        process.stderr.write(`${DIM}Provider not configured. Start with --provider to set one.${RESET}\n`);
+        return true;
+      }
+      // Async — show picker inline (works because TUI is already in raw mode)
+      showModelPicker(ctx.providerName, ctx.currentModel, process.stdout).then((result) => {
+        if (result && ctx.onModelChange) {
+          ctx.onModelChange(result);
+          const reasoningLabel = result.reasoning ? ` (reasoning: ${result.reasoning})` : "";
+          process.stderr.write(`${GREEN}→ ${result.model}${reasoningLabel}${RESET}\n`);
+        } else if (result) {
+          process.stderr.write(`${DIM}Model selected: ${result.model} — restart to apply.${RESET}\n`);
+        }
+      });
+      return true;
+    }
 
     case "/turns": {
       const tokens = estimateMessageTokens(ctx.session.messages);
