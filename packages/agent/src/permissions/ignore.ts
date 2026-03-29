@@ -8,49 +8,53 @@
 import * as fs from "fs";
 import * as path from "path";
 
-let ignorePatterns: RegExp[] | null = null;
-let ignoreRoot: string | null = null;
+/** Instance-scoped ignore context for multi-agent safety. */
+export interface IgnoreContext {
+  /** Check if a file path is blocked by .phrenignore patterns. */
+  isIgnored: (filePath: string) => boolean;
+}
 
 /**
  * Load .phrenignore from the given project root.
- * Returns true if patterns were loaded, false if no file exists.
+ * Returns an IgnoreContext with an `isIgnored` method bound to the loaded patterns.
  */
-export function loadIgnorePatterns(projectRoot: string): boolean {
+export function loadIgnorePatterns(projectRoot: string): IgnoreContext {
   const ignorePath = path.join(projectRoot, ".phrenignore");
-  if (!fs.existsSync(ignorePath)) {
-    ignorePatterns = [];
-    ignoreRoot = projectRoot;
-    return false;
+  let patterns: RegExp[] = [];
+
+  if (fs.existsSync(ignorePath)) {
+    const content = fs.readFileSync(ignorePath, "utf-8");
+    patterns = parseIgnoreFile(content);
   }
 
-  const content = fs.readFileSync(ignorePath, "utf-8");
-  ignorePatterns = parseIgnoreFile(content);
-  ignoreRoot = projectRoot;
-  return true;
+  const root = projectRoot;
+
+  return {
+    isIgnored(filePath: string): boolean {
+      if (patterns.length === 0) return false;
+
+      // Make path relative to project root for matching
+      let relative = filePath;
+      if (path.isAbsolute(filePath)) {
+        relative = path.relative(root, filePath);
+      }
+
+      // Normalize separators
+      relative = relative.replace(/\\/g, "/");
+
+      for (const pattern of patterns) {
+        if (pattern.test(relative)) return true;
+      }
+
+      return false;
+    },
+  };
 }
 
-/**
- * Check if a file path is blocked by .phrenignore patterns.
- * Returns true if the path should be blocked.
- */
-export function isIgnored(filePath: string): boolean {
-  if (!ignorePatterns || ignorePatterns.length === 0) return false;
-
-  // Make path relative to project root for matching
-  let relative = filePath;
-  if (ignoreRoot && path.isAbsolute(filePath)) {
-    relative = path.relative(ignoreRoot, filePath);
-  }
-
-  // Normalize separators
-  relative = relative.replace(/\\/g, "/");
-
-  for (const pattern of ignorePatterns) {
-    if (pattern.test(relative)) return true;
-  }
-
-  return false;
-}
+/** Default no-op context (nothing is ignored). */
+export const emptyIgnoreContext: IgnoreContext = {
+  isIgnored: () => false,
+};
 
 /**
  * Parse a gitignore-style file into an array of RegExp patterns.
@@ -121,9 +125,9 @@ function gitignoreToRegex(pattern: string): RegExp | null {
 }
 
 /**
- * Reset loaded patterns (for testing or session restart).
+ * @deprecated Use loadIgnorePatterns() which returns an IgnoreContext instance.
+ * Kept for backward compatibility.
  */
 export function resetIgnorePatterns(): void {
-  ignorePatterns = null;
-  ignoreRoot = null;
+  // No-op — state is now instance-scoped via IgnoreContext
 }

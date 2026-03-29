@@ -126,6 +126,19 @@ export const t = {
   fgBg256,
 };
 
+// ── Raw ANSI constants for template-literal usage ─────────────────────────
+// Use these when code does `${DIM}text${RESET}` instead of `t.dim("text")`.
+
+export const ANSI = {
+  DIM: "\x1b[2m",
+  BOLD: "\x1b[1m",
+  CYAN: "\x1b[36m",
+  GREEN: "\x1b[32m",
+  RED: "\x1b[31m",
+  YELLOW: "\x1b[33m",
+  RESET: "\x1b[0m",
+} as const;
+
 // ── Effort display helpers ─────────────────────────────────────────────────
 
 const EFFORT_ICONS: Record<string, string> = {

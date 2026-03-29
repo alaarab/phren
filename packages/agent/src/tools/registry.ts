@@ -3,7 +3,8 @@ import type { AgentToolDef } from "../providers/types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkPermission } from "../permissions/checker.js";
 import { askUser } from "../permissions/prompt.js";
-import { isIgnored } from "../permissions/ignore.js";
+import type { IgnoreContext } from "../permissions/ignore.js";
+import { emptyIgnoreContext } from "../permissions/ignore.js";
 
 /**
  * Deferred tool entry — only the schema is loaded initially.
@@ -35,6 +36,7 @@ export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
   private deferred = new Map<string, DeferredToolEntry>();
   private _planModeActive = false;
+  private _ignoreCtx: IgnoreContext = emptyIgnoreContext;
   permissionConfig: PermissionConfig = {
     mode: "suggest",
     projectRoot: process.cwd(),
@@ -65,6 +67,11 @@ export class ToolRegistry {
 
   setPermissions(config: PermissionConfig): void {
     this.permissionConfig = config;
+  }
+
+  /** Set the .phrenignore context for this registry instance. */
+  setIgnoreContext(ctx: IgnoreContext): void {
+    this._ignoreCtx = ctx;
   }
 
   /**
@@ -133,7 +140,7 @@ export class ToolRegistry {
     const FILE_ACCESS_TOOLS = new Set(["read_file", "write_file", "edit_file", "glob", "grep"]);
     if (FILE_ACCESS_TOOLS.has(name)) {
       const filePath = (input.path as string) || (input.file_path as string) || "";
-      if (filePath && isIgnored(filePath)) {
+      if (filePath && this._ignoreCtx.isIgnored(filePath)) {
         return { output: `Access blocked by .phrenignore: ${filePath}`, is_error: true };
       }
     }

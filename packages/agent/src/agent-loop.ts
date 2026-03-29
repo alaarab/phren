@@ -13,7 +13,7 @@ import { createFlushConfig, checkFlushNeeded, type FlushConfig } from "./memory/
 import { injectPlanPrompt, requestPlanApproval } from "./plan.js";
 import { detectLintCommand, detectTestCommand, runPostEditCheck, type LintTestConfig } from "./tools/lint-test.js";
 import { createCheckpoint } from "./checkpoint.js";
-import { autoCaptureTool } from "./memory/tool-capture.js";
+import { ToolCaptureTracker } from "./memory/tool-capture.js";
 import { scrubToolOutput } from "./permissions/privacy.js";
 import { autoRunDiagnostics } from "./tools/auto-diagnostics.js";
 
@@ -53,6 +53,7 @@ export interface AgentSession {
   captureState: CaptureState;
   antiPatterns: AntiPatternTracker;
   flushConfig: FlushConfig;
+  toolCaptureTracker: ToolCaptureTracker;
 }
 
 export function createSession(contextLimit?: number): AgentSession {
@@ -63,6 +64,7 @@ export function createSession(contextLimit?: number): AgentSession {
     captureState: createCaptureState(),
     antiPatterns: new AntiPatternTracker(),
     flushConfig: createFlushConfig(contextLimit ?? 200_000),
+    toolCaptureTracker: new ToolCaptureTracker(),
   };
 }
 
@@ -415,7 +417,7 @@ export async function runTurn(
       // PostToolUse auto-capture — save interesting patterns as phren findings
       if (config.phrenCtx) {
         try {
-          await autoCaptureTool(config.phrenCtx, block.name, block.input, finalOutput, is_error);
+          await session.toolCaptureTracker.autoCaptureTool(config.phrenCtx, block.name, block.input, finalOutput, is_error);
         } catch { /* best effort */ }
       }
 

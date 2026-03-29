@@ -77,49 +77,102 @@ const CAPTURE_PATTERNS: CapturePattern[] = [
   },
 ];
 
-/** Tracks what we've already captured this session to avoid duplicates. */
-const capturedHashes = new Set<string>();
-const MAX_CAPTURES_PER_SESSION = 8;
-let captureCount = 0;
-
 /**
- * Check a tool result for patterns worth auto-capturing as findings.
- * Returns the finding text if a pattern matches, or null.
+ * Instance-scoped tracker for tool auto-capture state.
+ * Each agent gets its own tracker to avoid cross-contamination in multi-agent mode.
  */
+export class ToolCaptureTracker {
+  private capturedHashes = new Set<string>();
+  private captureCount = 0;
+  private readonly maxCaptures: number;
+
+  constructor(maxCaptures = 8) {
+    this.maxCaptures = maxCaptures;
+  }
+
+  /**
+   * Check a tool result for patterns worth auto-capturing as findings.
+   * Returns the finding text if a pattern matches, or null.
+   */
+  checkToolCapture(
+    toolName: string,
+    input: Record<string, unknown>,
+    output: string,
+    isError: boolean,
+  ): string | null {
+    // Only capture from errors or long outputs (likely verbose)
+    if (!isError && output.length < 200) return null;
+    if (this.captureCount >= this.maxCaptures) return null;
+
+    for (const pattern of CAPTURE_PATTERNS) {
+      if (!pattern.tools.includes(toolName)) continue;
+      if (pattern.minLength && output.length < pattern.minLength) continue;
+
+      const match = output.match(pattern.pattern);
+      if (!match) continue;
+
+      const finding = pattern.template(match, input);
+
+      // Deduplicate
+      const hash = finding.slice(0, 50);
+      if (this.capturedHashes.has(hash)) continue;
+      this.capturedHashes.add(hash);
+      this.captureCount++;
+
+      return finding;
+    }
+
+    return null;
+  }
+
+  /**
+   * Auto-capture a tool result as a phren finding if it matches known patterns.
+   */
+  async autoCaptureTool(
+    ctx: PhrenContext,
+    toolName: string,
+    input: Record<string, unknown>,
+    output: string,
+    isError: boolean,
+  ): Promise<void> {
+    const finding = this.checkToolCapture(toolName, input, output, isError);
+    if (!finding || !ctx.project) return;
+
+    try {
+      const { addFinding } = await import("@phren/cli/core/finding");
+      addFinding(ctx.phrenPath, ctx.project, `${finding} <!-- auto_captured -->`);
+    } catch {
+      // Best effort
+    }
+  }
+
+  /** Reset capture state for a new session. */
+  reset(): void {
+    this.capturedHashes.clear();
+    this.captureCount = 0;
+  }
+}
+
+/** Factory function to create a new tracker instance. */
+export function createToolCaptureTracker(maxCaptures?: number): ToolCaptureTracker {
+  return new ToolCaptureTracker(maxCaptures);
+}
+
+// ── Backward-compatible module-level API ──────────────────────────────────────
+// Delegates to a default instance. Prefer using ToolCaptureTracker directly.
+const _defaultTracker = new ToolCaptureTracker();
+
+/** @deprecated Use ToolCaptureTracker instance method instead. */
 export function checkToolCapture(
   toolName: string,
   input: Record<string, unknown>,
   output: string,
   isError: boolean,
 ): string | null {
-  // Only capture from errors or long outputs (likely verbose)
-  if (!isError && output.length < 200) return null;
-  if (captureCount >= MAX_CAPTURES_PER_SESSION) return null;
-
-  for (const pattern of CAPTURE_PATTERNS) {
-    if (!pattern.tools.includes(toolName)) continue;
-    if (pattern.minLength && output.length < pattern.minLength) continue;
-
-    const match = output.match(pattern.pattern);
-    if (!match) continue;
-
-    const finding = pattern.template(match, input);
-
-    // Deduplicate
-    const hash = finding.slice(0, 50);
-    if (capturedHashes.has(hash)) continue;
-    capturedHashes.add(hash);
-    captureCount++;
-
-    return finding;
-  }
-
-  return null;
+  return _defaultTracker.checkToolCapture(toolName, input, output, isError);
 }
 
-/**
- * Auto-capture a tool result as a phren finding if it matches known patterns.
- */
+/** @deprecated Use ToolCaptureTracker instance method instead. */
 export async function autoCaptureTool(
   ctx: PhrenContext,
   toolName: string,
@@ -127,19 +180,10 @@ export async function autoCaptureTool(
   output: string,
   isError: boolean,
 ): Promise<void> {
-  const finding = checkToolCapture(toolName, input, output, isError);
-  if (!finding || !ctx.project) return;
-
-  try {
-    const { addFinding } = await import("@phren/cli/core/finding");
-    addFinding(ctx.phrenPath, ctx.project, `${finding} <!-- auto_captured -->`);
-  } catch {
-    // Best effort
-  }
+  return _defaultTracker.autoCaptureTool(ctx, toolName, input, output, isError);
 }
 
-/** Reset capture state for a new session. */
+/** @deprecated Use ToolCaptureTracker instance method instead. */
 export function resetToolCapture(): void {
-  capturedHashes.clear();
-  captureCount = 0;
+  _defaultTracker.reset();
 }

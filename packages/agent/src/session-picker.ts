@@ -7,11 +7,9 @@
 
 import * as readline from "node:readline/promises";
 import { listRecentSessions, type SessionInfo } from "./memory/session.js";
+import { ANSI } from "./theme.js";
 
-const DIM = "\x1b[2m";
-const CYAN = "\x1b[36m";
-const YELLOW = "\x1b[33m";
-const RESET = "\x1b[0m";
+const { DIM, CYAN, YELLOW, RESET } = ANSI;
 
 /** Format a relative time string like "2h ago" or "3d ago". */
 function relativeTime(isoTimestamp: string): string {
