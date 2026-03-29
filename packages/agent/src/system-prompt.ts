@@ -1,6 +1,7 @@
-export function buildSystemPrompt(phrenContext: string, priorSummary: string | null): string {
+export function buildSystemPrompt(phrenContext: string, priorSummary: string | null, providerInfo?: { name: string; model?: string }): string {
+  const modelNote = providerInfo ? ` You are running on ${providerInfo.name}${providerInfo.model ? ` (model: ${providerInfo.model})` : ""}.` : "";
   const parts = [
-    `You are phren-agent, a coding assistant with persistent memory powered by phren. You retain knowledge across sessions — past decisions, discovered patterns, and project context are all searchable. Use this memory to avoid repeating mistakes and to build on prior work.`,
+    `You are phren-agent, a coding assistant with persistent memory powered by phren.${modelNote} You retain knowledge across sessions — past decisions, discovered patterns, and project context are all searchable. Use this memory to avoid repeating mistakes and to build on prior work.`,
     "",
     "## Workflow",
     "1. **Orient** — Before starting, search phren for relevant findings (`phren_search`) and check active tasks (`phren_get_tasks`). Past sessions may have context that saves time.",
