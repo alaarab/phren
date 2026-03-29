@@ -9,10 +9,14 @@ import { shellTool } from "./tools/shell.js";
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
+import { createWebSearchTool } from "./tools/web-search.js";
 import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
+import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
+import { lspTool, shutdownLspServers } from "./tools/lsp.js";
+import { createSubagentTool } from "./tools/subagent.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionMessages } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -23,8 +27,18 @@ import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
 import { connectMcpServers, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { HookManager } from "./hooks.js";
+import { parsePermissionPattern } from "./permissions/pattern-parser.js";
+import type { PermissionPattern } from "./permissions/types.js";
 
 const VERSION = "0.0.1";
+
+/**
+ * Parse a CLI permission pattern string like "Bash(npm run *)" into a PermissionPattern.
+ */
+function parsePatternRule(rule: string, verdict: "allow" | "deny"): PermissionPattern | null {
+  return parsePermissionPattern(rule, verdict);
+}
 
 /**
  * Run the agent CLI with the given argv tokens.
@@ -66,6 +80,7 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.verbose) {
     process.stderr.write(`Provider: ${provider.name}\n`);
+    process.stderr.write(`Effort: ${args.effort}\n`);
   }
 
   // Build phren context
@@ -100,12 +115,26 @@ export async function runAgentCli(raw: string[]) {
     process.exit(0);
   }
 
+  // Parse permission patterns
+  const allowRules: PermissionPattern[] = [];
+  const denyRules: PermissionPattern[] = [];
+  for (const rule of args.allowRules) {
+    const parsed = parsePatternRule(rule, "allow");
+    if (parsed) allowRules.push(parsed);
+  }
+  for (const rule of args.denyRules) {
+    const parsed = parsePatternRule(rule, "deny");
+    if (parsed) denyRules.push(parsed);
+  }
+
   // Register tools
   const registry = new ToolRegistry();
   registry.setPermissions({
     mode: args.permissions,
     allowedPaths: [],
     projectRoot: process.cwd(),
+    allowRules: allowRules.length > 0 ? allowRules : undefined,
+    denyRules: denyRules.length > 0 ? denyRules : undefined,
   });
   registry.register(readFileTool);
   registry.register(writeFileTool);
@@ -119,13 +148,25 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createPhrenFindingTool(phrenCtx, sessionId));
     registry.register(createPhrenGetTasksTool(phrenCtx));
     registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
   }
 
-  // Web + Git tools
+  // Web tools
   registry.register(createWebFetchTool());
+  registry.register(createWebSearchTool());
+
+  // Git tools
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+
+  // LSP tool — registered as deferred (loaded on first use since it spawns processes)
+  registry.registerDeferred({
+    name: lspTool.name,
+    description: lspTool.description,
+    input_schema: lspTool.input_schema,
+    resolve: async () => lspTool,
+  });
 
   // MCP server connections
   let mcpCleanup: (() => void) | undefined;
@@ -158,6 +199,12 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
+  // Load hook manager
+  const hookManager = HookManager.fromConfigFile(args.hooksConfig);
+  if (args.verbose && hookManager.getHooks().length > 0) {
+    process.stderr.write(`Hooks: ${hookManager.getHooks().length} registered\n`);
+  }
+
   const agentConfig = {
     provider,
     registry,
@@ -168,16 +215,68 @@ export async function runAgentCli(raw: string[]) {
     costTracker,
     plan: args.plan,
     lintTestConfig,
+    effort: args.effort,
+    hookManager,
+    compactionInstructions: args.compactionInstructions,
+  };
+
+  // Register subagent tool (needs agentConfig reference)
+  registry.register(createSubagentTool({ parentConfig: agentConfig }));
+
+  // Cleanup helper
+  const cleanup = () => {
+    mcpCleanup?.();
+    shutdownLspServers();
   };
 
   // Multi-agent TUI mode
   if (args.multi || args.team) {
     const { AgentSpawner } = await import("./multi/spawner.js");
+
+    if (args.team) {
+      // Team mode — run TeamAgent with coordination
+      const { TeamCoordinator } = await import("./multi/coordinator.js");
+      const { runTeamAgent } = await import("./multi/team-agent.js");
+      const spawner = new AgentSpawner();
+      const coordinator = new TeamCoordinator(args.team);
+
+      process.on("SIGINT", async () => {
+        await spawner.shutdown();
+        cleanup();
+        process.exit(130);
+      });
+
+      try {
+        const result = await runTeamAgent(args.task, {
+          agentConfig,
+          spawner,
+          coordinator,
+          verbose: args.verbose,
+        });
+
+        if (args.verbose) {
+          process.stderr.write(
+            `\nTeam done: ${result.agentsUsed} agents, ${result.tasksCompleted} tasks completed, ` +
+            `${result.tasksFailed} failed, ${result.totalTurns} turns\n`,
+          );
+        }
+      } finally {
+        await spawner.shutdown();
+        if (phrenCtx && sessionId) {
+          endSession(phrenCtx, sessionId, "Team session ended");
+        }
+        cleanup();
+      }
+      return;
+    }
+
+    // Multi TUI mode (no team coordination)
     const { startMultiTui } = await import("./multi/tui-multi.js");
     const spawner = new AgentSpawner();
 
     process.on("SIGINT", async () => {
       await spawner.shutdown();
+      cleanup();
       process.exit(130);
     });
 
@@ -186,7 +285,7 @@ export async function runAgentCli(raw: string[]) {
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, "Multi-agent session ended");
     }
-    mcpCleanup?.();
+    cleanup();
     return;
   }
 
@@ -207,7 +306,7 @@ export async function runAgentCli(raw: string[]) {
       const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
       endSession(phrenCtx, sessionId, lastText);
     }
-    mcpCleanup?.();
+    cleanup();
     return;
   }
 
@@ -223,7 +322,7 @@ export async function runAgentCli(raw: string[]) {
     if (process.stdin.isTTY) {
       try { process.stdin.setRawMode(false); } catch {}
     }
-    mcpCleanup?.();
+    cleanup();
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, "Interrupted by user");
     }
@@ -264,6 +363,13 @@ export async function runAgentCli(raw: string[]) {
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
 
+    // Run Stop hooks
+    if (agentConfig.hookManager?.hasHooks("Stop")) {
+      try {
+        await agentConfig.hookManager.runHooks({ event: "Stop" });
+      } catch { /* best effort */ }
+    }
+
     // End session with summary + memory intelligence
     if (phrenCtx && sessionId) {
       const summary = result.finalText.slice(0, 500);
@@ -280,11 +386,11 @@ export async function runAgentCli(raw: string[]) {
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     }
-    mcpCleanup?.();
+    cleanup();
     process.exit(1);
   }
 
-  mcpCleanup?.();
+  cleanup();
 }
 
 // When run directly (phren-agent binary), parse from process.argv

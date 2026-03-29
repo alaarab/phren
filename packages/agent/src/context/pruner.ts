@@ -4,6 +4,15 @@ import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 export interface PruneConfig {
   contextLimit: number;
   keepRecentTurns: number;
+  /**
+   * Custom compaction instructions — user-defined rules for what to preserve
+   * during context compaction. Loaded from CLAUDE.md "Summary instructions" section.
+   *
+   * Example:
+   *   "Always preserve: database schema decisions, API contract changes.
+   *    Never summarize: test file paths, error stack traces."
+   */
+  compactionInstructions?: string;
 }
 
 const DEFAULT_CONFIG: PruneConfig = {
@@ -35,20 +44,28 @@ interface ExtractedFacts {
   errors: string[];
   keyActions: string[];
   searches: string[];
+  /** Preserved content matching custom compaction instructions. */
+  preserved: string[];
 }
 
 /** Extract key facts from messages about to be pruned. Fast regex-only scan. */
-export function extractFacts(messages: LlmMessage[]): ExtractedFacts {
+export function extractFacts(messages: LlmMessage[], compactionInstructions?: string): ExtractedFacts {
   const filesSet = new Set<string>();
   const errorsSet = new Set<string>();
   const actionsSet = new Set<string>();
   const searchesSet = new Set<string>();
+  const preservedSet = new Set<string>();
+
+  // Parse "Always preserve:" patterns from compaction instructions
+  const preservePatterns = parsePreservePatterns(compactionInstructions);
+  const skipPatterns = parseSkipPatterns(compactionInstructions);
 
   for (const msg of messages) {
     if (typeof msg.content === "string") {
       // Scan assistant text messages for key decisions
       if (msg.role === "assistant") {
-        extractDecisions(msg.content, actionsSet);
+        extractDecisions(msg.content, actionsSet, skipPatterns);
+        extractPreserved(msg.content, preservePatterns, preservedSet);
       }
       continue;
     }
@@ -59,7 +76,8 @@ export function extractFacts(messages: LlmMessage[]): ExtractedFacts {
       } else if (block.type === "tool_result" && block.is_error) {
         extractError(block, errorsSet);
       } else if (block.type === "text" && msg.role === "assistant") {
-        extractDecisions(block.text, actionsSet);
+        extractDecisions(block.text, actionsSet, skipPatterns);
+        extractPreserved(block.text, preservePatterns, preservedSet);
       }
     }
   }
@@ -69,7 +87,83 @@ export function extractFacts(messages: LlmMessage[]): ExtractedFacts {
     errors: [...errorsSet],
     keyActions: [...actionsSet],
     searches: [...searchesSet],
+    preserved: [...preservedSet],
   };
+}
+
+/**
+ * Parse "Always preserve:" patterns from compaction instructions.
+ * Returns regex patterns that match content to preserve.
+ */
+function parsePreservePatterns(instructions?: string): RegExp[] {
+  if (!instructions) return [];
+  const patterns: RegExp[] = [];
+
+  const preserveMatch = instructions.match(/always preserve[:\s]+(.*?)(?:\.|$)/gi);
+  if (preserveMatch) {
+    for (const match of preserveMatch) {
+      const items = match.replace(/always preserve[:\s]+/i, "").split(",");
+      for (const item of items) {
+        const trimmed = item.trim().replace(/\.$/, "");
+        if (trimmed) {
+          try {
+            patterns.push(new RegExp(escapeRegex(trimmed), "i"));
+          } catch { /* skip invalid patterns */ }
+        }
+      }
+    }
+  }
+
+  return patterns;
+}
+
+/**
+ * Parse "Never summarize:" patterns from compaction instructions.
+ * Returns regex patterns for content to skip during extraction.
+ */
+function parseSkipPatterns(instructions?: string): RegExp[] {
+  if (!instructions) return [];
+  const patterns: RegExp[] = [];
+
+  const skipMatch = instructions.match(/never summarize[:\s]+(.*?)(?:\.|$)/gi);
+  if (skipMatch) {
+    for (const match of skipMatch) {
+      const items = match.replace(/never summarize[:\s]+/i, "").split(",");
+      for (const item of items) {
+        const trimmed = item.trim().replace(/\.$/, "");
+        if (trimmed) {
+          try {
+            patterns.push(new RegExp(escapeRegex(trimmed), "i"));
+          } catch { /* skip invalid patterns */ }
+        }
+      }
+    }
+  }
+
+  return patterns;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Extract preserved content matching custom patterns. */
+function extractPreserved(text: string, patterns: RegExp[], preservedSet: Set<string>): void {
+  if (patterns.length === 0 || preservedSet.size >= 10) return;
+
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    for (const pattern of patterns) {
+      if (pattern.test(trimmed)) {
+        const capped = trimmed.length > 150 ? trimmed.slice(0, 150) + "..." : trimmed;
+        preservedSet.add(capped);
+        if (preservedSet.size >= 10) return;
+        break; // one match per line is enough
+      }
+    }
+  }
 }
 
 function extractFromToolUse(
@@ -101,11 +195,14 @@ function extractError(block: ToolResultBlock, errorsSet: Set<string>): void {
 
 const MAX_KEY_ACTIONS = 5;
 
-function extractDecisions(text: string, actionsSet: Set<string>): void {
+function extractDecisions(text: string, actionsSet: Set<string>, skipPatterns: RegExp[] = []): void {
   if (actionsSet.size >= MAX_KEY_ACTIONS) return;
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (trimmed && DECISION_RE.test(trimmed)) {
+      // Skip content matching "never summarize" patterns
+      if (skipPatterns.some(p => p.test(trimmed))) continue;
+
       const capped = trimmed.length > 100 ? trimmed.slice(0, 100) + "..." : trimmed;
       actionsSet.add(capped);
       if (actionsSet.size >= MAX_KEY_ACTIONS) return;
@@ -115,8 +212,8 @@ function extractDecisions(text: string, actionsSet: Set<string>): void {
 
 // ── Summary formatting ──────────────────────────────────────────────────────
 
-function formatFactSummary(middle: LlmMessage[], toolsUsed: Set<string>): string {
-  const facts = extractFacts(middle);
+function formatFactSummary(middle: LlmMessage[], toolsUsed: Set<string>, compactionInstructions?: string): string {
+  const facts = extractFacts(middle, compactionInstructions);
 
   const lines: string[] = [
     `[Context compacted: ${middle.length} messages removed]`,
@@ -136,6 +233,9 @@ function formatFactSummary(middle: LlmMessage[], toolsUsed: Set<string>): string
   }
   if (facts.searches.length > 0) {
     lines.push(`Searches: ${facts.searches.map(q => `"${q}"`).join(", ")}`);
+  }
+  if (facts.preserved.length > 0) {
+    lines.push(`Preserved (per project instructions):\n${facts.preserved.map(p => `  - ${p}`).join("\n")}`);
   }
 
   return lines.join("\n");
@@ -189,7 +289,7 @@ export function pruneMessages(
 
   const summaryMessage: LlmMessage = {
     role: "user",
-    content: formatFactSummary(middle, toolsUsed),
+    content: formatFactSummary(middle, toolsUsed, config?.compactionInstructions),
   };
 
   return [first, summaryMessage, ...tail];

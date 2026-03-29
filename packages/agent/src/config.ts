@@ -1,4 +1,5 @@
 import type { PermissionMode } from "./permissions/types.js";
+import type { EffortLevel } from "./providers/types.js";
 
 export interface CliArgs {
   task: string;
@@ -20,6 +21,16 @@ export interface CliArgs {
   mcpConfig?: string;
   team?: string;
   multi: boolean;
+  /** Reasoning effort level. */
+  effort: EffortLevel;
+  /** Path to hooks config file. */
+  hooksConfig?: string;
+  /** Granular permission allow rules (e.g., "Bash(npm run *)"). */
+  allowRules: string[];
+  /** Granular permission deny rules (e.g., "Bash(rm *)"). */
+  denyRules: string[];
+  /** Custom compaction instructions. */
+  compactionInstructions?: string;
   help: boolean;
   version: boolean;
 }
@@ -36,20 +47,36 @@ Options:
   --max-turns <n>      Max tool-use turns (default: 50)
   --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
+  --effort <level>     Reasoning effort: low, medium, high, max (default: high)
   --plan               Plan mode: show plan before executing tools
   --permissions <mode> Permission mode: suggest, auto-confirm, full-auto (default: auto-confirm)
+  --allow <pattern>    Allow a tool pattern (e.g., "Bash(npm run *)", "Read(/src/**)")
+  --deny <pattern>     Deny a tool pattern (e.g., "Bash(rm *)")
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
   --resume             Resume last session's conversation
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
   --mcp-config <path>  Load MCP server config from JSON file
+  --hooks-config <p>   Load agent hooks config from JSON file
   --team <name>        Start in team mode with named team coordination
   --multi              Start in multi-agent TUI mode
   --dry-run            Show system prompt and exit
   --verbose            Show tool calls as they execute
   --version            Show version
   --help               Show this help
+
+Permission patterns:
+  --allow "Bash(npm run *)"      Allow bash commands matching glob
+  --allow "Read(/src/**)"        Allow reading files under /src
+  --allow "WebFetch(domain:x.com)" Allow fetching from a domain
+  --deny "Bash(rm *)"            Block bash commands matching glob
+
+Effort levels:
+  low     Minimal reasoning — file lookups, simple questions ($)
+  medium  Balanced — routine edits, standard tasks ($$)
+  high    Thorough — refactoring, debugging ($$$) [default]
+  max     Maximum depth — complex multi-step problems ($$$$)
 
 Providers (auto-detected from env, or use --provider):
   openrouter           OPENROUTER_API_KEY — routes to any model (default)
@@ -66,7 +93,8 @@ Environment:
 
 Examples:
   phren-agent "fix the login bug"
-  phren-agent --provider codex "add input validation"
+  phren-agent --effort low "what does this function do?"
+  phren-agent --allow "Bash(npm *)" --provider codex "add validation"
   phren-agent --provider anthropic --verbose "refactor the database layer"
 `.trim();
 
@@ -83,6 +111,9 @@ export function parseArgs(argv: string[]): CliArgs {
     resume: false,
     mcp: [],
     multi: false,
+    effort: "high",
+    allowRules: [],
+    denyRules: [],
     help: false,
     version: false,
   };
@@ -102,8 +133,17 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
+    else if (arg === "--hooks-config" && argv[i + 1]) { args.hooksConfig = argv[++i]; }
     else if (arg === "--team" && argv[i + 1]) { args.team = argv[++i]; }
     else if (arg === "--multi") { args.multi = true; }
+    else if (arg === "--effort" && argv[i + 1]) {
+      const level = argv[++i];
+      if (level === "low" || level === "medium" || level === "high" || level === "max") {
+        args.effort = level;
+      }
+    }
+    else if (arg === "--allow" && argv[i + 1]) { args.allowRules.push(argv[++i]); }
+    else if (arg === "--deny" && argv[i + 1]) { args.denyRules.push(argv[++i]); }
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }
