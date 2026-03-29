@@ -41,9 +41,9 @@ function renderStatusBar(provider: string, project: string | null, turns: number
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
   const agentTag = agentCount && agentCount > 0 ? ` A${agentCount}` : "";
 
-  // Left: brand + provider + project
+  // Left: brand + provider (skip project if it matches "phren" to avoid "phren · codex · phren")
   const parts = [" ◆ phren", provider];
-  if (project) parts.push(project);
+  if (project && project !== "phren") parts.push(project);
   const left = parts.join(" · ");
 
   // Right: mode + agents + cost + turns
