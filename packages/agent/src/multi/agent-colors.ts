@@ -53,8 +53,3 @@ export function formatAgentName(name: string, index: number): string {
   return color(`${icon} ${name}`);
 }
 
-/** Prefix a line with the agent's icon in its color. */
-export function prefixLine(line: string, index: number): string {
-  const { color, icon } = getAgentStyle(index);
-  return `${color(icon)} ${line}`;
-}

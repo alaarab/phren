@@ -9,9 +9,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/alaarab/phren.git",
-    "directory": "vscode-extension"
+    "directory": "packages/vscode"
   },
-  "homepage": "https://github.com/alaarab/phren/tree/main/vscode-extension",
+  "homepage": "https://github.com/alaarab/phren/tree/main/packages/vscode",
   "bugs": {
     "url": "https://github.com/alaarab/phren/issues"
   },

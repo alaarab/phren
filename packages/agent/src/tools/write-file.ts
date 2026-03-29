@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
+import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 
 export const writeFileTool: AgentTool = {
   name: "write_file",
@@ -17,6 +18,19 @@ export const writeFileTool: AgentTool = {
   async execute(input) {
     const filePath = input.path as string;
     const content = input.content as string;
+
+    // Defense-in-depth: sensitive path check
+    const resolved = path.resolve(filePath);
+    const sensitive = checkSensitivePath(resolved);
+    if (sensitive.sensitive) {
+      return { output: `Access denied: ${sensitive.reason}`, is_error: true };
+    }
+
+    // Defense-in-depth: sandbox check
+    const sandboxResult = validatePath(filePath, process.cwd(), []);
+    if (!sandboxResult.ok) {
+      return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
+    }
 
     const oldContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
     fs.mkdirSync(path.dirname(filePath), { recursive: true });

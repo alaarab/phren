@@ -1,6 +1,8 @@
 import * as fs from "fs";
+import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
+import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 
 export const editFileTool: AgentTool = {
   name: "edit_file",
@@ -18,6 +20,19 @@ export const editFileTool: AgentTool = {
     const filePath = input.path as string;
     const oldStr = input.old_string as string;
     const newStr = input.new_string as string;
+
+    // Defense-in-depth: sensitive path check
+    const resolved = path.resolve(filePath);
+    const sensitive = checkSensitivePath(resolved);
+    if (sensitive.sensitive) {
+      return { output: `Access denied: ${sensitive.reason}`, is_error: true };
+    }
+
+    // Defense-in-depth: sandbox check
+    const sandboxResult = validatePath(filePath, process.cwd(), []);
+    if (!sandboxResult.ok) {
+      return { output: `Path outside sandbox: ${sandboxResult.error}`, is_error: true };
+    }
 
     if (!fs.existsSync(filePath)) return { output: `File not found: ${filePath}`, is_error: true };
 

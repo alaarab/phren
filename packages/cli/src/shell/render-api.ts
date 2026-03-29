@@ -7,7 +7,7 @@
  */
 import type { ShellState } from "./state-store.js";
 import { listProjectCards } from "../data/access.js";
-import { renderShell, type ViewContext, type SubsectionsCache } from "./view.js";
+import { renderShell, type ViewContext } from "./view.js";
 import { getListItems } from "./input.js";
 import type { DoctorResultLike } from "./types.js";
 
