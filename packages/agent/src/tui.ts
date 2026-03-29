@@ -759,17 +759,18 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
     running = true;
     firstDelta = true;
     const thinkStart = Date.now();
-    // Phren thinking — subtle purple/cyan breath, no spinner gimmicks
+    // Phren thinking — subtle purple/cyan breath with rotating verbs
+    const THINK_VERBS = ["thinking", "reasoning", "recalling", "connecting", "processing"];
     let thinkFrame = 0;
     activeThinkTimer = setInterval(() => {
       const elapsed = (Date.now() - thinkStart) / 1000;
-      // Gentle sine-wave interpolation between phren purple and cyan
-      const t = (Math.sin(thinkFrame * 0.08) + 1) / 2; // 0..1, slow oscillation
+      const verb = THINK_VERBS[Math.floor(elapsed / 6) % THINK_VERBS.length];
+      const t = (Math.sin(thinkFrame * 0.08) + 1) / 2;
       const r = Math.round(155 * (1 - t) + 40 * t);
       const g = Math.round(140 * (1 - t) + 211 * t);
       const b = Math.round(250 * (1 - t) + 242 * t);
       const color = `${ESC}38;2;${r};${g};${b}m`;
-      w.write(`${ESC}2K  ${color}◆ thinking${ESC}0m ${s.dim(`${elapsed.toFixed(1)}s`)}\r`);
+      w.write(`${ESC}2K${color}◆ ${verb}${ESC}0m ${s.dim(`${elapsed.toFixed(1)}s`)}\r`);
       thinkFrame++;
     }, 50);
 
@@ -777,7 +778,9 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
       await runTurn(userInput, session, config, tuiHooks);
       if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
       const elapsed = ((Date.now() - thinkStart) / 1000).toFixed(1);
-      w.write(`${ESC}2K  ${s.dim(`◆ thought for ${elapsed}s`)}\n`);
+      const DONE_VERBS = ["◆ recalled", "◆ processed", "◆ connected", "◆ resolved"];
+      const doneVerb = DONE_VERBS[session.turns % DONE_VERBS.length];
+      w.write(`${ESC}2K${s.dim(`${doneVerb} in ${elapsed}s`)}\n\n`);
       statusBar();
     } catch (err: unknown) {
       if (activeThinkTimer) { clearInterval(activeThinkTimer); activeThinkTimer = null; }
