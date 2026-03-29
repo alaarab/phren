@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { looksLikeSecretsFile, scrubToolOutput } from "../permissions/privacy.js";
 
 export const readFileTool: AgentTool = {
   name: "read_file",
@@ -36,6 +37,18 @@ export const readFileTool: AgentTool = {
     if (!fs.existsSync(filePath)) return { output: `File not found: ${filePath}`, is_error: true };
 
     const content = fs.readFileSync(filePath, "utf-8");
+
+    // Privacy: detect secrets files and scrub their content
+    if (looksLikeSecretsFile(content)) {
+      const scrubbed = scrubToolOutput("read_file", content);
+      const lines = scrubbed.split("\n");
+      const selected = lines.slice(offset - 1, offset - 1 + limit);
+      const numbered = selected.map((line, i) => `${offset + i}\t${line}`).join("\n");
+      return {
+        output: `⚠️ Sensitive file detected — secrets redacted:\n${numbered}`,
+      };
+    }
+
     const lines = content.split("\n");
     const selected = lines.slice(offset - 1, offset - 1 + limit);
     const numbered = selected.map((line, i) => `${offset + i}\t${line}`).join("\n");

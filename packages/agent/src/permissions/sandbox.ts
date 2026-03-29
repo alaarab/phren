@@ -7,6 +7,10 @@ const SENSITIVE_PATTERNS = [
   "/.ssh/",
   "/.aws/",
   ".env",
+  ".env.local",
+  ".env.production",
+  ".env.development",
+  ".env.staging",
   "codex-token.json",
   "id_rsa",
   "id_ed25519",
@@ -15,16 +19,27 @@ const SENSITIVE_PATTERNS = [
   "credentials.json",
   "secrets.json",
   "secrets.yaml",
+  "secrets.yml",
   ".npmrc",
   ".netrc",
   ".docker/config.json",
   ".kube/config",
   "/.gnupg/",
   ".pypirc",
+  "token.json",
+  "gcloud/credentials",
+  ".config/gh/hosts.yml",
+  "serviceAccountKey.json",
+  "firebase-adminsdk",
+  ".htpasswd",
+  "master.key",
+  "credentials.yml.enc",
+  ".vault-token",
+  "vault.json",
 ];
 
 /** File extensions that are always sensitive. */
-const SENSITIVE_EXTENSIONS = [".pem", ".p12", ".pfx", ".key", ".keystore", ".jks"];
+const SENSITIVE_EXTENSIONS = [".pem", ".p12", ".pfx", ".key", ".keystore", ".jks", ".cer", ".crt"];
 
 export type PathValidation =
   | { ok: true; resolved: string }

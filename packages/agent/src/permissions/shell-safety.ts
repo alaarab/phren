@@ -57,6 +57,28 @@ const SECRET_SUFFIX_PATTERNS = ["_URI", "_DSN"];
 
 const SECRET_SUFFIXES = ["_SECRET", "_TOKEN", "_PASSWORD", "_KEY"];
 
+/** Patterns for accessing sensitive files via shell commands. */
+const SENSITIVE_ACCESS_PATTERNS: RegExp[] = [
+  /\bcat\b.*\.ssh\//i,
+  /\bcat\b.*\.aws\//i,
+  /\bcat\b.*\.env\b/i,
+  /\bcat\b.*id_rsa/i,
+  /\bcat\b.*id_ed25519/i,
+  /\bcat\b.*credentials\.json/i,
+  /\bcat\b.*secrets\.(json|yaml)/i,
+  /\bcat\b.*\.pem\b/i,
+  /\bcat\b.*\.key\b/i,
+  /\bcat\b.*\.netrc/i,
+  /\bcat\b.*\.npmrc/i,
+  /\bless\b.*\.ssh\//i,
+  /\bhead\b.*\.ssh\//i,
+  /\btail\b.*\.ssh\//i,
+  /\bbase64\b.*\.ssh\//i,
+  /\bxxd\b.*\.ssh\//i,
+  /\bcp\b.*\.ssh\//i,
+  /\bscp\b.*\.ssh\//i,
+];
+
 /**
  * Check a shell command for dangerous patterns.
  */
@@ -66,7 +88,44 @@ export function checkShellSafety(command: string): ShellSafetyResult {
       return { safe: false, reason: dp.reason, severity: dp.severity };
     }
   }
+
+  // Check for sensitive file access via shell
+  for (const pat of SENSITIVE_ACCESS_PATTERNS) {
+    if (pat.test(command)) {
+      return { safe: false, reason: "Accessing sensitive file via shell", severity: "block" };
+    }
+  }
+
   return { safe: true, reason: "", severity: "ok" };
+}
+
+/**
+ * Check if a shell command contains chaining operators that could bypass allow rules.
+ * Returns true if the command has multiple chained commands.
+ */
+export function hasCommandChaining(command: string): boolean {
+  // Strip quoted strings to avoid false positives
+  const stripped = command
+    .replace(/"[^"]*"/g, '""')
+    .replace(/'[^']*'/g, "''")
+    .replace(/\$\([^)]*\)/g, '$()');
+
+  // Check for chaining operators outside quotes
+  return /[;&|]{1,2}/.test(stripped) || /\|\s*\w/.test(stripped);
+}
+
+/**
+ * Extract the first command from a potentially chained command string.
+ * Used to check if an allow-rule match is valid (only matches the first command).
+ */
+export function extractFirstCommand(command: string): string {
+  const stripped = command
+    .replace(/"[^"]*"/g, '""')
+    .replace(/'[^']*'/g, "''");
+
+  // Split on chaining operators
+  const match = stripped.match(/^([^;&|]+)/);
+  return match ? command.slice(0, match[1].length).trim() : command;
 }
 
 /**
