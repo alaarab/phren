@@ -3,12 +3,15 @@
 
 # Dependencies
 node_modules/
-mcp/node_modules/
 
 # Build output
-mcp/dist/
-vscode-extension/out/
+packages/cli/dist/
+packages/agent/dist/
+packages/vscode/out/
 *.vsix
+
+# Turbo
+.turbo/
 
 # Test & benchmarks
 coverage/

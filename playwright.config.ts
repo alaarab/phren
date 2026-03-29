@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: "./mcp/e2e",
+  testDir: "./packages/cli/e2e",
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,

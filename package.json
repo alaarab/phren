@@ -1,78 +1,34 @@
 {
-  "name": "@phren/cli",
+  "name": "phren",
   "version": "0.0.55",
-  "description": "Knowledge layer for AI agents with a built-in coding agent. Phren learns, recalls, and acts.",
+  "private": true,
+  "description": "Knowledge layer for AI agents with a built-in coding agent",
   "type": "module",
-  "bin": {
-    "phren": "mcp/dist/index.js",
-    "phren-agent": "mcp/dist/agent/bin.js"
-  },
-  "files": [
-    "mcp/dist",
-    "icon.svg",
-    "starter",
-    "skills",
-    "scripts/preuninstall.mjs"
-  ],
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
-    "chalk": "^5.6.2",
-    "glob": "^13.0.6",
-    "graphology": "^0.26.0",
-    "graphology-layout-forceatlas2": "^0.10.1",
-    "inquirer": "^13.3.2",
-    "js-yaml": "^4.1.1",
-    "sigma": "^3.0.2",
-    "sql.js-fts5": "^1.4.0",
-    "zod": "^4.3.6"
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "vitest run",
+    "test:e2e": "pnpm --filter @phren/cli run build && playwright test",
+    "validate-docs": "bash scripts/validate-docs.sh",
+    "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.1.0",
     "@playwright/test": "^1.58.2",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.5.0",
-    "@biomejs/biome": "^2.1.0",
     "@vitest/coverage-v8": "^4.1.2",
     "esbuild": "^0.27.4",
     "tsx": "^4.21.0",
+    "turbo": "^2.5.4",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
-  },
-  "scripts": {
-    "build": "node scripts/build.mjs",
-    "dev": "tsx mcp/src/index.ts",
-    "lint": "biome lint mcp/src/",
-    "validate-docs": "bash scripts/validate-docs.sh",
-    "pretest": "npm run build",
-    "test": "vitest run",
-    "test:e2e": "npm run build && playwright test",
-    "test:e2e:install": "playwright install chromium",
-    "bench": "tsx mcp/bench/locomo-runner.ts --sessions 3",
-    "bench:retrieval": "tsx scripts/bench-retrieval-modes.ts",
-    "bench:retrieval:synthetic": "tsx scripts/bench-retrieval-synthetic.ts",
-    "preuninstall": "node scripts/preuninstall.mjs",
-    "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
-    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20.0.0"
   },
-  "keywords": [
-    "claude",
-    "claude-code",
-    "mcp",
-    "memory",
-    "knowledge",
-    "agent",
-    "coding-agent",
-    "tui"
-  ],
-  "author": "Ala Arab",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/alaarab/phren.git"
-  },
-  "homepage": "https://github.com/alaarab/phren#readme",
+  "packageManager": "pnpm@10.30.1",
   "overrides": {
     "flatted": "^3.4.2",
     "undici": "^7.10.0"
