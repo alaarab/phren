@@ -36,6 +36,8 @@ import type { PermissionPattern } from "./permissions/types.js";
 import { tuneEffort } from "./memory/effort-tuner.js";
 import { scrubSummary } from "./permissions/privacy.js";
 import { loadIgnorePatterns } from "./permissions/ignore.js";
+import { resetReadCache } from "./tools/read-file.js";
+import { clearAllowlist } from "./permissions/allowlist.js";
 
 const VERSION = "0.0.1";
 
@@ -95,6 +97,10 @@ export async function runAgentCli(raw: string[]) {
     contextSnippet = await buildContextSnippet(phrenCtx, args.task);
     priorSummary = getPriorSummary(phrenCtx);
     sessionId = startSession(phrenCtx, args.sessionName);
+
+    // Reset per-session module-level state for multi-agent safety
+    resetReadCache();
+    clearAllowlist();
 
     // Load evolved project context for warm start
     const projectCtx = loadProjectContext(phrenCtx);
