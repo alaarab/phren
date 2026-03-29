@@ -37,7 +37,7 @@ function walkDir(dir: string, results: string[], maxFiles: number): void {
 
 export const grepTool: AgentTool = {
   name: "grep",
-  description: "Search file contents for a regex pattern. Returns matching lines with context.",
+  description: "Search file contents by regex pattern. Use to find function definitions, imports, error messages, or any text across the codebase. Returns matching lines with surrounding context. Use glob param to limit to specific file types.",
   input_schema: {
     type: "object",
     properties: {

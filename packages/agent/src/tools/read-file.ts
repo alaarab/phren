@@ -5,7 +5,7 @@ import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 
 export const readFileTool: AgentTool = {
   name: "read_file",
-  description: "Read the contents of a file. Returns numbered lines. Use offset and limit for large files.",
+  description: "Read file contents with numbered lines. Always read a file before editing it. Use offset/limit for large files to avoid overwhelming context.",
   input_schema: {
     type: "object",
     properties: {

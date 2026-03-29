@@ -6,7 +6,7 @@ import { incrementSessionCounter } from "../memory/session.js";
 export function createPhrenFindingTool(ctx: PhrenContext, sessionId?: string | null): AgentTool {
   return {
     name: "phren_add_finding",
-    description: "Save a non-obvious finding to phren memory. Use for patterns, decisions, pitfalls, bugs, or tradeoffs worth remembering next session.",
+    description: "Save a finding to phren memory for future sessions. Good: architecture decisions with rationale, non-obvious bug causes, workarounds, gotchas, tradeoffs. Bad: obvious facts, narration of steps taken, secrets/PII. Keep findings concise and actionable.",
     input_schema: {
       type: "object",
       properties: {

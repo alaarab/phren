@@ -6,7 +6,7 @@ import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
 export function createPhrenSearchTool(ctx: PhrenContext): AgentTool {
   return {
     name: "phren_search",
-    description: "Search phren knowledge base for relevant findings, tasks, and reference docs. Use this to recall past decisions, patterns, and context.",
+    description: "Search phren knowledge base for past findings, tasks, and reference docs. Use BEFORE starting work to check for relevant context, error resolutions, or architecture notes from prior sessions. Also use when you encounter an unfamiliar pattern or error.",
     input_schema: {
       type: "object",
       properties: {

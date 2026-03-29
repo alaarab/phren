@@ -32,7 +32,7 @@ function walkDir(dir: string, base: string, results: string[], maxResults: numbe
 
 export const globTool: AgentTool = {
   name: "glob",
-  description: "Find files matching a glob pattern (e.g. '**/*.ts', 'src/**/*.test.js'). Returns matching file paths.",
+  description: "Find files by glob pattern. Use to discover project structure, locate files by extension or name. Examples: '**/*.ts', 'src/**/*.test.js', '**/config.*'. Skips node_modules and dotfiles.",
   input_schema: {
     type: "object",
     properties: {

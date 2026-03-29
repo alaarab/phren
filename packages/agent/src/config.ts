@@ -17,6 +17,8 @@ export interface CliArgs {
   testCmd?: string;
   mcp: string[];
   mcpConfig?: string;
+  team?: string;
+  multi: boolean;
   help: boolean;
   version: boolean;
 }
@@ -40,6 +42,8 @@ Options:
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
   --mcp-config <path>  Load MCP server config from JSON file
+  --team <name>        Start in team mode with named team coordination
+  --multi              Start in multi-agent TUI mode
   --dry-run            Show system prompt and exit
   --verbose            Show tool calls as they execute
   --version            Show version
@@ -76,6 +80,7 @@ export function parseArgs(argv: string[]): CliArgs {
     interactive: false,
     resume: false,
     mcp: [],
+    multi: false,
     help: false,
     version: false,
   };
@@ -95,6 +100,8 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
+    else if (arg === "--team" && argv[i + 1]) { args.team = argv[++i]; }
+    else if (arg === "--multi") { args.multi = true; }
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }

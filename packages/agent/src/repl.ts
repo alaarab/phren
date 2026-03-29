@@ -7,6 +7,7 @@ import * as os from "node:os";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
+import type { PermissionMode } from "./permissions/types.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
 const HISTORY_FILE = path.join(HISTORY_DIR, "repl-history.txt");
@@ -55,6 +56,16 @@ function saveInputMode(mode: InputMode): void {
   } catch { /* ignore */ }
 }
 
+function savePermissionMode(mode: PermissionMode): void {
+  try {
+    fs.mkdirSync(HISTORY_DIR, { recursive: true });
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch { /* fresh */ }
+    data.permissionMode = mode;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
+  } catch { /* ignore */ }
+}
+
 export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
   const session = createSession(contextLimit);
@@ -95,6 +106,22 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       inputMode = newMode;
       saveInputMode(newMode);
       process.stderr.write(`${YELLOW}Input mode: ${newMode}${RESET}\n`);
+      rl.prompt();
+      continue;
+    }
+
+    if (trimmed.startsWith("/permissions")) {
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
+      const arg = trimmed.split(/\s+/)[1] as PermissionMode | undefined;
+      if (!arg || !VALID_MODES.includes(arg)) {
+        const current = config.registry.permissionConfig.mode;
+        process.stderr.write(`${DIM}Permission mode: ${current}${RESET}\n`);
+        process.stderr.write(`${DIM}Usage: /permissions <suggest|auto-confirm|full-auto>${RESET}\n`);
+      } else {
+        config.registry.setPermissions({ ...config.registry.permissionConfig, mode: arg });
+        savePermissionMode(arg);
+        process.stderr.write(`${YELLOW}Permission mode: ${arg}${RESET}\n`);
+      }
       rl.prompt();
       continue;
     }

@@ -49,7 +49,7 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
-  if (!args.task && !args.interactive) {
+  if (!args.task && !args.interactive && !args.multi && !args.team) {
     console.error("Usage: phren-agent <task>\nRun phren-agent --help for more info.");
     process.exit(1);
   }
@@ -167,6 +167,26 @@ export async function runAgentCli(raw: string[]) {
     plan: args.plan,
     lintTestConfig,
   };
+
+  // Multi-agent TUI mode
+  if (args.multi || args.team) {
+    const { AgentSpawner } = await import("./multi/spawner.js");
+    const { startMultiTui } = await import("./multi/tui-multi.js");
+    const spawner = new AgentSpawner();
+
+    process.on("SIGINT", async () => {
+      await spawner.shutdown();
+      process.exit(130);
+    });
+
+    await startMultiTui(spawner, agentConfig);
+    await spawner.shutdown();
+    if (phrenCtx && sessionId) {
+      endSession(phrenCtx, sessionId, "Multi-agent session ended");
+    }
+    mcpCleanup?.();
+    return;
+  }
 
   // Interactive mode — TUI if terminal, fallback to REPL if not
   if (args.interactive) {
