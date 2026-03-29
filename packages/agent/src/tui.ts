@@ -181,6 +181,11 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   let menuFilterBuf = "";
   let ctrlCCount = 0;
 
+  // Input history
+  const inputHistory: string[] = [];
+  let historyIndex = -1;
+  let savedInput = "";
+
   // ── Menu rendering ─────────────────────────────────────────────────────
   async function renderMenu() {
     const mod = await loadMenuModule();
@@ -468,6 +473,12 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
       if (!line) { prompt(); return; }
 
+      // Push to history
+      if (inputHistory[inputHistory.length - 1] !== line) {
+        inputHistory.push(line);
+      }
+      historyIndex = -1;
+
       // Bash mode: ! prefix runs shell directly
       if (line.startsWith("!") || bashMode) {
         const cmd = bashMode ? line : line.slice(1).trim();
@@ -530,6 +541,38 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
 
       // Run agent turn
       runAgentTurn(line);
+      return;
+    }
+
+    // Up arrow — previous history
+    if (key.name === "up" && !running && tuiMode === "chat") {
+      if (inputHistory.length === 0) return;
+      if (historyIndex === -1) {
+        savedInput = inputLine;
+        historyIndex = inputHistory.length - 1;
+      } else if (historyIndex > 0) {
+        historyIndex--;
+      }
+      inputLine = inputHistory[historyIndex];
+      w.write(`${ESC}2K\r`);
+      prompt(true);
+      w.write(inputLine);
+      return;
+    }
+
+    // Down arrow — next history or restore saved
+    if (key.name === "down" && !running && tuiMode === "chat") {
+      if (historyIndex === -1) return;
+      if (historyIndex < inputHistory.length - 1) {
+        historyIndex++;
+        inputLine = inputHistory[historyIndex];
+      } else {
+        historyIndex = -1;
+        inputLine = savedInput;
+      }
+      w.write(`${ESC}2K\r`);
+      prompt(true);
+      w.write(inputLine);
       return;
     }
 
