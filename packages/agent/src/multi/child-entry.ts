@@ -29,8 +29,6 @@ import { buildSystemPrompt } from "../system-prompt.js";
 import { runAgent } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
 
-let cancelled = false;
-
 /** Send a typed message to the parent process. */
 function send(msg: ChildMessage): void {
   if (process.send) {
@@ -135,6 +133,7 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
     phrenCtx,
     costTracker,
     plan,
+    hooks: createIpcHooks(agentId),
   };
 
   // Run the agent
@@ -182,7 +181,6 @@ process.on("message", (msg: ParentMessage) => {
       process.exit(1);
     });
   } else if (msg.type === "cancel") {
-    cancelled = true;
     process.exit(130);
   }
 });

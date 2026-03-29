@@ -136,9 +136,9 @@ export function getCustomModels(): CustomModelEntry[] {
 }
 
 /** Get all models for a provider (built-in + custom). */
-export function getAllModelsForProvider(provider: string, currentModel?: string): ModelEntry[] {
+export async function getAllModelsForProvider(provider: string, currentModel?: string): Promise<ModelEntry[]> {
   // Import dynamically to avoid circular dep
-  const { getAvailableModels } = require("./model-picker.js") as typeof import("./model-picker.js");
+  const { getAvailableModels } = await import("./model-picker.js") as typeof import("./model-picker.js");
   const builtIn = getAvailableModels(provider, currentModel);
 
   // Add custom models for this provider

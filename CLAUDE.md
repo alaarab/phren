@@ -50,7 +50,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-0.0.55
+0.0.57
 
 ## MCP Tools (53)
 
@@ -369,13 +369,13 @@ Env overrides: `PHREN_AGENT_PROVIDER`, `PHREN_AGENT_MODEL`.
 | `packages/agent/src/system-prompt.ts` | System prompt builder with phren context injection |
 | `packages/agent/src/tui.ts` | Terminal UI: status bar, streaming, raw stdin steering |
 | `packages/agent/src/repl.ts` | REPL fallback: readline with history, steering/queue modes |
+| `packages/agent/src/settings.ts` | Shared settings persistence: input mode, permission mode |
 | `packages/agent/src/commands.ts` | Slash command dispatch for interactive modes |
 | `packages/agent/src/cost.ts` | Cost tracking with per-model pricing table |
 | `packages/agent/src/plan.ts` | Plan mode: prompt injection and approval flow |
 | `packages/agent/src/checkpoint.ts` | Git checkpoint creation for rollback on one-shot runs |
 | `packages/agent/src/mcp-client.ts` | MCP client: stdio transport, JSON-RPC, tool wrapping |
 | `packages/agent/src/spinner.ts` | TTY spinner and formatting helpers |
-| `packages/agent/src/phren-imports.ts` | Typed dynamic imports from packages/cli/dist/ |
 | `packages/agent/src/providers/` | LLM providers: openrouter, anthropic, openai, codex, ollama |
 | `packages/agent/src/providers/retry.ts` | Exponential backoff retry wrapper |
 | `packages/agent/src/providers/codex-auth.ts` | Codex OAuth PKCE login/logout flow |

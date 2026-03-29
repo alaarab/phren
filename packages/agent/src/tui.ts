@@ -12,9 +12,8 @@ import type { PermissionMode } from "./permissions/types.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import { renderMarkdown } from "./multi/markdown.js";
 import { decodeDiffPayload, renderInlineDiff, DIFF_MARKER } from "./multi/diff-renderer.js";
-import * as fs from "fs";
-import * as path from "path";
 import * as os from "os";
+import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 
 type TuiMode = "chat" | "menu";
 
@@ -54,15 +53,6 @@ const PERMISSION_LABELS: Record<PermissionMode, string> = {
   "auto-confirm": "auto",
   "full-auto": "full-auto",
 };
-
-function formatPermissionMode(mode: PermissionMode): string {
-  const label = PERMISSION_LABELS[mode];
-  switch (mode) {
-    case "suggest": return s.cyan(`[${label}]`);
-    case "auto-confirm": return s.green(`[${label}]`);
-    case "full-auto": return s.yellow(`[${label}]`);
-  }
-}
 
 // ── Status bar ───────────────────────────────────────────────────────────────
 function renderStatusBar(provider: string, project: string | null, turns: number, cost: string, permMode?: PermissionMode, agentCount?: number): string {
@@ -540,35 +530,3 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
   return done;
 }
 
-// ── Settings persistence ─────────────────────────────────────────────────────
-const SETTINGS_FILE = path.join(os.homedir(), ".phren-agent", "settings.json");
-
-function loadInputMode(): InputMode {
-  try {
-    const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-    if (data.inputMode === "queue") return "queue";
-  } catch {}
-  return "steering";
-}
-
-function saveInputMode(mode: InputMode): void {
-  try {
-    const dir = path.dirname(SETTINGS_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
-    data.inputMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
-  } catch {}
-}
-
-function savePermissionMode(mode: PermissionMode): void {
-  try {
-    const dir = path.dirname(SETTINGS_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    let data: Record<string, unknown> = {};
-    try { data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")); } catch {}
-    data.permissionMode = mode;
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2) + "\n");
-  } catch {}
-}

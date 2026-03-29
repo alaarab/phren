@@ -113,15 +113,6 @@ function statusColor(status: AgentStatus): (t: string) => string {
   }
 }
 
-function statusBg(status: AgentStatus, selected: boolean): (t: string) => string {
-  if (selected) return s.invert;
-  switch (status) {
-    case "running": return s.bgGreen;
-    case "error": return s.bgRed;
-    default: return s.bgGray;
-  }
-}
-
 // ── Tool call formatting ─────────────────────────────────────────────────────
 
 function formatToolStart(toolName: string, input: Record<string, unknown>): string {
