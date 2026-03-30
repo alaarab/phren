@@ -21,6 +21,8 @@ export interface KeyboardShortcutOpts {
   onExit: () => void;
   onCyclePermissions: () => void;
   onCancelTurn: () => void;
+  /** Callback when user presses a number key to switch agent tabs */
+  onSelectAgentByIndex?: (index: number) => void;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -28,6 +30,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Reset Ctrl+C count on any non-Ctrl+C keypress
     if (!(input === "c" && key.ctrl)) {
       if (opts.ctrlCCount > 0) opts.onSetCtrlCCount(0);
+    }
+
+    // Number keys 1-9 — switch agent tabs (only when input is empty)
+    if (!key.ctrl && !key.meta && !key.shift && opts.inputValue === "" && opts.onSelectAgentByIndex && /^[1-9]$/.test(input)) {
+      opts.onSelectAgentByIndex(parseInt(input, 10) - 1);
+      return;
     }
 
     // Ctrl+D -- exit cleanly

@@ -18,6 +18,7 @@ import { loadInputMode, saveInputMode, savePermissionMode } from "../settings.js
 import { nextPermissionMode } from "./ansi.js";
 import { App, type AppState, type ActiveToolInfo, type CompletedMessage } from "./components/App.js";
 import type { ToolCallProps } from "./components/ToolCall.js";
+import type { AgentTab } from "./components/InputArea.js";
 import { createRequire } from "node:module";
 import { getTheme, type Theme } from "./themes.js";
 
@@ -68,19 +69,29 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
   function update() {
     if (!rerender) return;
+
+    // If an agent tab is selected, show that agent's conversation
+    const agentConvo = selectedAgentId ? agentConvos.get(selectedAgentId) : null;
+    const displayMessages = agentConvo ? [...agentConvo.messages] : [...completedMessages];
+    const displayStreaming = agentConvo ? agentConvo.streamingText : streamingText;
+    const displayToolCalls = agentConvo ? [...agentConvo.toolCalls] : [...currentToolCalls];
+    const displayActiveTool = agentConvo ? agentConvo.activeTool : activeTool;
+    const displayThinking = agentConvo ? false : thinking;
+    const displayRunning = agentConvo ? false : running;
+
     rerender(
       <App
         state={getAppState()}
-        completedMessages={[...completedMessages]}
-        streamingText={streamingText}
-        completedToolCalls={[...currentToolCalls]}
-        activeTool={activeTool}
-        thinking={thinking}
+        completedMessages={displayMessages}
+        streamingText={displayStreaming}
+        completedToolCalls={displayToolCalls}
+        activeTool={displayActiveTool}
+        thinking={displayThinking}
         thinkStartTime={thinkStartTime}
-        thinkElapsed={thinkElapsed}
-        steerQueue={[...steerQueueBuf]}
-        running={running}
-        showBanner={true}
+        thinkElapsed={agentConvo ? null : thinkElapsed}
+        steerQueue={agentConvo ? [] : [...steerQueueBuf]}
+        running={displayRunning}
+        showBanner={!selectedAgentId}
         inputHistory={[...inputHistory]}
         verbose={verbose}
         theme={theme}
@@ -88,6 +99,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onPermissionCycle={handlePermissionCycle}
         onCancelTurn={handleCancelTurn}
         onExit={handleExit}
+        agents={agentTabs.length > 0 ? [{ id: "__main__", name: "phren", status: running ? "running" : "idle" }, ...agentTabs] : undefined}
+        selectedAgentId={selectedAgentId ?? (agentTabs.length > 0 ? "__main__" : undefined)}
+        onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
       />
     );
   }
@@ -345,6 +359,112 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
   }
 
+  // ── Multi-agent state ──────────────────────────────────────────────────
+  // Per-agent conversation threads. null key = main orchestrator.
+  interface AgentConvo {
+    messages: CompletedMessage[];
+    streamingText: string;
+    toolCalls: ToolCallProps[];
+    activeTool: ActiveToolInfo | null;
+  }
+  const agentConvos = new Map<string, AgentConvo>();
+  let selectedAgentId: string | null = null; // null = main thread
+  let agentTabs: AgentTab[] = [];
+
+  function getOrCreateConvo(agentId: string): AgentConvo {
+    let convo = agentConvos.get(agentId);
+    if (!convo) {
+      convo = { messages: [], streamingText: "", toolCalls: [], activeTool: null };
+      agentConvos.set(agentId, convo);
+    }
+    return convo;
+  }
+
+  function rebuildAgentTabs() {
+    if (!spawner) { agentTabs = []; return; }
+    agentTabs = spawner.listAgents().map((a) => ({
+      id: a.id,
+      name: a.task.slice(0, 20),
+      status: a.status as AgentTab["status"],
+    }));
+  }
+
+  function handleSelectAgent(agentId: string | null) {
+    selectedAgentId = agentId;
+    update();
+  }
+
+  // Wire spawner events to per-agent conversations
+  if (spawner) {
+    spawner.on("text_delta", (agentId: string, text: string) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText += text;
+      rebuildAgentTabs();
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("text_block", (agentId: string, text: string) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText += text;
+      rebuildAgentTabs();
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("tool_start", (agentId: string, toolName: string, input: Record<string, unknown>) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.activeTool = { name: toolName, preview: formatToolInput(toolName, input) };
+      rebuildAgentTabs();
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.activeTool = null;
+      convo.toolCalls.push({ name: toolName, input, output, isError, durationMs });
+      rebuildAgentTabs();
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("done", (agentId: string, result: { finalText: string; turns: number; toolCalls: number; totalCost?: string }) => {
+      const convo = getOrCreateConvo(agentId);
+      // Finalize streaming into completed message
+      if (convo.streamingText || convo.toolCalls.length > 0) {
+        convo.messages.push({
+          id: nextId(),
+          kind: "assistant",
+          text: convo.streamingText || result.finalText,
+          toolCalls: convo.toolCalls.length > 0 ? [...convo.toolCalls] : undefined,
+        });
+      }
+      convo.streamingText = "";
+      convo.toolCalls = [];
+      convo.activeTool = null;
+      rebuildAgentTabs();
+      update();
+    });
+
+    spawner.on("error", (agentId: string, error: string) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.messages.push({ id: nextId(), kind: "status", text: `Error: ${error}` });
+      convo.streamingText = "";
+      convo.activeTool = null;
+      rebuildAgentTabs();
+      update();
+    });
+
+    spawner.on("idle", (agentId: string, reason: string) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.messages.push({ id: nextId(), kind: "status", text: `Agent idle (${reason})` });
+      rebuildAgentTabs();
+      update();
+    });
+
+    spawner.on("exit", () => {
+      rebuildAgentTabs();
+      update();
+    });
+  }
+
   // Clear screen before initial render — start clean
   process.stdout.write("\x1b[2J\x1b[H");
   const projectName = config.phrenCtx?.project ?? "phren";
@@ -372,6 +492,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onPermissionCycle={handlePermissionCycle}
       onCancelTurn={handleCancelTurn}
       onExit={handleExit}
+      agents={undefined}
+      selectedAgentId={undefined}
+      onSelectAgent={handleSelectAgent}
     />,
     { exitOnCtrlC: false },
   );
