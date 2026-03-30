@@ -31,6 +31,7 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /compact    Compact conversation to save context space
   /context    Show context window usage and provider info
   /mode       Toggle input mode (steering ↔ queue)
+  /verbose    Toggle verbose tool output (show first 5 lines)
   /spawn <name> <task>  Spawn a background agent
   /agents     List running agents
   /session    Show session info (id, duration, stats)

@@ -276,6 +276,8 @@ export async function runAgentCli(raw: string[]) {
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
 
+    process.stdout.write("\x07"); // bell on completion
+
     // End session with summary + memory intelligence
     if (phrenCtx && sessionId) {
       const summary = result.finalText.slice(0, 500);
