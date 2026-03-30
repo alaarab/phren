@@ -196,6 +196,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       return;
     }
 
+    // /clear — also wipe Ink completed messages and clear screen
+    if (line === "/clear") {
+      completedMessages.length = 0;
+      process.stdout.write("\x1b[2J\x1b[H");
+      slashCommands.tryHandleCommand(line);
+      update();
+      return;
+    }
+
     // Slash commands — capture stderr output and display as status message
     if (line.startsWith("/")) {
       if (slashCommands.tryHandleCommand(line)) {
@@ -318,9 +327,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
   }
 
-  // Enable bracketed paste
-  process.stdout.write("\x1b[?2004h");
-
   // Clear screen before initial render — start clean
   process.stdout.write("\x1b[2J\x1b[H");
   const projectName = config.phrenCtx?.project ?? "phren";
@@ -354,7 +360,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const done = new Promise<AgentSession>((r) => { resolveSession = r; });
 
   app.waitUntilExit().then(() => {
-    process.stdout.write("\x1b[?2004l"); // disable bracketed paste
     if (resolveSession) resolveSession(session);
   });
 

@@ -155,15 +155,15 @@ export function App({
             const aMsg = item as AssistantMsg;
             return (
               <Box key={item.id} flexDirection="column" marginTop={1}>
-                {aMsg.text ? (
-                  <Box>
-                    <Text color="magenta">{"\u25c6"} </Text>
-                    <Text>{aMsg.text}</Text>
-                  </Box>
-                ) : null}
                 {aMsg.toolCalls?.map((tc, i) => (
                   <ToolCall key={i} {...tc} verbose={verbose} />
                 ))}
+                {aMsg.text ? (
+                  <Box>
+                    <Text color="magenta" wrap="truncate">{"\u25c6"} </Text>
+                    <Text wrap="wrap">{aMsg.text}</Text>
+                  </Box>
+                ) : null}
               </Box>
             );
           }
@@ -184,8 +184,8 @@ export function App({
         {/* Active streaming text with diamond prefix */}
         {streamingText !== "" && (
           <Box>
-            <Text color="magenta">{"\u25c6"} </Text>
-            <Text>{streamingText}</Text>
+            <Text color="magenta" wrap="truncate">{"\u25c6"} </Text>
+            <Text wrap="wrap">{streamingText}</Text>
           </Box>
         )}
 
