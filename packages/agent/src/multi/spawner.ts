@@ -21,6 +21,7 @@ import type {
   DoneEvent,
 } from "./types.js";
 import type { PermissionMode } from "../permissions/types.js";
+import { createWorktree, hasWorktreeChanges, removeWorktree, type WorktreeInfo } from "./worktree.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,6 +43,10 @@ export interface SpawnOptions {
   verbose?: boolean;
   /** Extra env vars to forward (API keys are auto-forwarded). */
   env?: Record<string, string>;
+  /** Agent type name (e.g. "explore", "plan", "general") for tool/prompt restrictions. */
+  agentType?: string;
+  /** Isolate the agent in a git worktree so it doesn't touch the main working tree. */
+  isolation?: "worktree";
 }
 
 export interface AgentSpawnerEvents {
@@ -54,6 +59,8 @@ export interface AgentSpawnerEvents {
   error: (agentId: string, error: string) => void;
   exit: (agentId: string, code: number | null) => void;
   message: (from: string, to: string, content: string) => void;
+  idle: (agentId: string, reason: string, dmSummaries?: Array<{ from: string; content: string; timestamp: string }>) => void;
+  shutdown_approved: (agentId: string) => void;
 }
 
 /** Keys forwarded from the parent env into child processes. */
@@ -124,6 +131,18 @@ export class AgentSpawner extends EventEmitter {
     entry.pid = child.pid;
     entry.status = "running";
 
+    // If worktree isolation requested, create a worktree and redirect cwd
+    if (opts.isolation === "worktree") {
+      try {
+        const wt = createWorktree(payload.cwd, agentId);
+        entry.worktree = wt;
+        payload.cwd = wt.path;
+        payload.worktreePath = wt.path;
+      } catch (err) {
+        this.emit("status", agentId, `Worktree creation failed: ${err}`);
+      }
+    }
+
     // Send the spawn payload
     child.send(payload);
 
@@ -140,6 +159,16 @@ export class AgentSpawner extends EventEmitter {
         agent.finishedAt = Date.now();
         if (code !== 0 && !agent.error) {
           agent.error = `Process exited with code ${code}`;
+        }
+      }
+      // Clean up worktree if no uncommitted changes remain
+      if (agent?.worktree) {
+        const wt = agent.worktree;
+        if (!hasWorktreeChanges(wt.path)) {
+          removeWorktree(opts.cwd ?? process.cwd(), wt.path, wt.branch);
+          agent.worktree = undefined;
+        } else {
+          this.emit("status", agentId, `Worktree preserved with changes: ${wt.path} (branch: ${wt.branch})`);
         }
       }
       this.processes.delete(agentId);
@@ -184,19 +213,29 @@ export class AgentSpawner extends EventEmitter {
         break;
       case "done":
         if (agent) {
-          agent.status = "done";
-          agent.finishedAt = Date.now();
+          // Don't mark as "done" status — child stays alive and will go idle
           agent.result = msg.result;
         }
         this.emit("done", msg.agentId, msg.result);
         break;
       case "error":
         if (agent) {
-          agent.status = "error";
-          agent.finishedAt = Date.now();
           agent.error = msg.error;
         }
         this.emit("error", msg.agentId, msg.error);
+        break;
+      case "idle":
+        if (agent) {
+          agent.status = "idle";
+        }
+        this.emit("idle", msg.agentId, msg.idleReason, msg.dmSummaries);
+        break;
+      case "shutdown_approved":
+        if (agent) {
+          agent.status = "done";
+          agent.finishedAt = Date.now();
+        }
+        this.emit("shutdown_approved", msg.agentId);
         break;
     }
   }
@@ -238,6 +277,45 @@ export class AgentSpawner extends EventEmitter {
     return true;
   }
 
+  /** Wake an idle agent with a new task or message. */
+  wakeAgent(agentId: string, opts?: { task?: string; message?: string; from?: string }): boolean {
+    const child = this.processes.get(agentId);
+    const agent = this.agents.get(agentId);
+    if (!child || !agent || agent.status !== "idle") return false;
+    agent.status = "running";
+    child.send({ type: "wake", task: opts?.task, message: opts?.message, from: opts?.from });
+    return true;
+  }
+
+  /** Request graceful shutdown — waits for ShutdownApproved or force kills after timeout. */
+  requestShutdown(agentId: string, timeoutMs = 10_000): Promise<boolean> {
+    const child = this.processes.get(agentId);
+    if (!child) return Promise.resolve(false);
+
+    child.send({ type: "shutdown_request" });
+
+    return new Promise<boolean>((resolve) => {
+      const onApproved = (id: string) => {
+        if (id === agentId) {
+          clearTimeout(timer);
+          this.removeListener("shutdown_approved", onApproved);
+          resolve(true);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        this.removeListener("shutdown_approved", onApproved);
+        // Force kill
+        if (this.processes.has(agentId)) {
+          child.kill();
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      this.on("shutdown_approved", onApproved);
+    });
+  }
+
   /** Get the current state of an agent. */
   getAgent(agentId: string): AgentEntry | undefined {
     return this.agents.get(agentId);
@@ -253,12 +331,20 @@ export class AgentSpawner extends EventEmitter {
     return [...this.agents.values()].filter((a) => a.status === status);
   }
 
-  /** Shut down all running agents and wait for exit. */
+  /** Shut down all running and idle agents gracefully, then force-kill stragglers. */
   async shutdown(): Promise<void> {
+    // Request graceful shutdown for idle agents (they can exit cleanly)
+    const idle = this.getAgentsByStatus("idle");
+    const shutdownPromises = idle.map((a) => this.requestShutdown(a.id, 5_000));
+
+    // Cancel running agents (they're mid-task, can't wait)
     const running = this.getAgentsByStatus("running");
     for (const agent of running) {
       this.cancel(agent.id);
     }
+
+    // Wait for graceful shutdowns
+    await Promise.all(shutdownPromises);
 
     // Wait for all processes to exit (max 10s)
     if (this.processes.size > 0) {
@@ -269,10 +355,10 @@ export class AgentSpawner extends EventEmitter {
         };
         setTimeout(() => {
           // Force kill remaining
-          for (const [id, child] of this.processes) {
+          for (const [, child] of this.processes) {
             child.kill();
-            this.processes.delete(id);
           }
+          this.processes.clear();
           resolve();
         }, 10_000);
         check();

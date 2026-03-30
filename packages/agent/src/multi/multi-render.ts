@@ -41,6 +41,7 @@ export function statusColor(status: AgentStatus): (t: string) => string {
   switch (status) {
     case "starting": return s.yellow;
     case "running": return s.green;
+    case "idle": return s.cyan;
     case "done": return s.gray;
     case "error": return s.red;
     case "cancelled": return s.gray;

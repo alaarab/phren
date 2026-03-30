@@ -209,7 +209,7 @@ describe("AgentSpawner", () => {
       expect(handler).toHaveBeenCalledWith(id, "read_file", { path: "/tmp/test" }, "file contents", false, 42);
     });
 
-    it("updates agent status on done message", () => {
+    it("stores result on done message but keeps agent alive", () => {
       const id = spawner.spawn({ task: "finish" });
       const handler = vi.fn();
       spawner.on("done", handler);
@@ -230,12 +230,12 @@ describe("AgentSpawner", () => {
       expect(handler).toHaveBeenCalledWith(id, result);
 
       const agent = spawner.getAgent(id);
-      expect(agent!.status).toBe("done");
+      // Agent stays running — will go idle after done (persistent process)
+      expect(agent!.status).toBe("running");
       expect(agent!.result).toEqual(result);
-      expect(agent!.finishedAt).toBeGreaterThan(0);
     });
 
-    it("updates agent status on error message", () => {
+    it("stores error on error message but keeps agent alive", () => {
       const id = spawner.spawn({ task: "fail" });
       const handler = vi.fn();
       spawner.on("error", handler);
@@ -249,8 +249,40 @@ describe("AgentSpawner", () => {
       expect(handler).toHaveBeenCalledWith(id, "something broke");
 
       const agent = spawner.getAgent(id);
-      expect(agent!.status).toBe("error");
+      // Agent stays running — will go idle (persistent process)
+      expect(agent!.status).toBe("running");
       expect(agent!.error).toBe("something broke");
+    });
+
+    it("transitions to idle on idle notification", () => {
+      const id = spawner.spawn({ task: "idle me" });
+      const handler = vi.fn();
+      spawner.on("idle", handler);
+
+      fakeChildren[0].emit("message", {
+        type: "idle",
+        agentId: id,
+        idleReason: "task_complete",
+      });
+
+      expect(handler).toHaveBeenCalledWith(id, "task_complete", undefined);
+      expect(spawner.getAgent(id)!.status).toBe("idle");
+    });
+
+    it("transitions to done on shutdown_approved", () => {
+      const id = spawner.spawn({ task: "shutdown me" });
+      const handler = vi.fn();
+      spawner.on("shutdown_approved", handler);
+
+      fakeChildren[0].emit("message", {
+        type: "shutdown_approved",
+        agentId: id,
+      });
+
+      expect(handler).toHaveBeenCalledWith(id);
+      const agent = spawner.getAgent(id);
+      expect(agent!.status).toBe("done");
+      expect(agent!.finishedAt).toBeGreaterThan(0);
     });
 
     it("emits status events", () => {
