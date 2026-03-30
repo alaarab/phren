@@ -74,11 +74,11 @@ export class OllamaProvider implements LlmProvider {
 
     const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined;
     if (toolCalls) {
-      for (const tc of toolCalls) {
-        const fn = tc.function as Record<string, unknown>;
+      for (let i = 0; i < toolCalls.length; i++) {
+        const fn = toolCalls[i].function as Record<string, unknown>;
         content.push({
           type: "tool_use",
-          id: `ollama-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          id: `call_${i}`,
           name: fn.name as string,
           input: typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : fn.arguments as Record<string, unknown>,
         });
@@ -114,6 +114,7 @@ export class OllamaProvider implements LlmProvider {
     const decoder = new TextDecoder();
     let buf = "";
     let stopReason: LlmResponse["stop_reason"] = "end_turn";
+    let toolCallIndex = 0;
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -139,7 +140,7 @@ export class OllamaProvider implements LlmProvider {
           stopReason = "tool_use";
           for (const tc of tcalls) {
             const fn = tc.function as Record<string, unknown>;
-            const id = `ollama-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const id = `call_${toolCallIndex++}`;
             yield { type: "tool_use_start", id, name: fn.name as string };
             yield { type: "tool_use_delta", id, json: JSON.stringify(typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : fn.arguments) };
             yield { type: "tool_use_end", id };

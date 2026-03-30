@@ -2,11 +2,13 @@ import React from "react";
 import { Box, Text } from "ink";
 import * as os from "os";
 import { createRequire } from "module";
+import type { Theme } from "../themes.js";
 
 const _require = createRequire(import.meta.url);
 
 export interface BannerProps {
   version: string;
+  theme?: Theme;
 }
 
 let cachedArt: string[] | null = null;
@@ -28,15 +30,19 @@ function stripAnsi(t: string): string {
   return t.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
 }
 
-export function Banner({ version }: BannerProps) {
+export function Banner({ version, theme }: BannerProps) {
   const cwd = process.cwd().replace(os.homedir(), "~");
   const artLines = getArtLines();
   const maxArtWidth = 26;
 
+  const logoColor = theme?.banner.logo ?? "magenta";
+  const versionColor = theme?.banner.version ?? "gray";
+  const cwdColor = theme?.banner.cwd ?? "cyan";
+
   const infoLines = [
-    { key: "title", node: <Text bold color="magenta">{"◆ phren"}</Text> },
-    { key: "version", node: <Text dimColor>{"  v" + version}</Text> },
-    { key: "cwd", node: <Text dimColor>{cwd}</Text> },
+    { key: "title", node: <Text bold color={logoColor}>{"◆ phren"}</Text> },
+    { key: "version", node: <Text color={versionColor} dimColor>{"  v" + version}</Text> },
+    { key: "cwd", node: <Text color={cwdColor} dimColor>{cwd}</Text> },
   ];
 
   if (artLines.length > 0) {

@@ -79,43 +79,71 @@ function toResponsesInput(messages: LlmMessage[]) {
   return input;
 }
 
+const DEBUG = process.env.PHREN_DEBUG === "1";
+
+function debugLog(label: string, data: unknown): void {
+  if (!DEBUG) return;
+  process.stderr.write(`[codex:debug] ${label}: ${JSON.stringify(data, null, 2)}\n`);
+}
+
 /** Parse non-streaming Responses API output into our ContentBlock format. */
 function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
-  const output = data.output as Record<string, unknown>[] | undefined;
+  debugLog("parseResponsesOutput input", data);
+
+  // The Responses API may return output at top-level or nested under a "response" key.
+  // Handle both shapes defensively.
+  const root = (data.output !== undefined ? data : (data.response as Record<string, unknown> | undefined) ?? data) as Record<string, unknown>;
+  const output = root.output as Record<string, unknown>[] | undefined;
   const content: ContentBlock[] = [];
   let hasToolUse = false;
 
   if (output) {
     for (const item of output) {
+      debugLog("output item", item);
       if (item.type === "message") {
-        const msgContent = item.content as Array<{ type: string; text?: string }> | undefined;
-        if (msgContent) {
-          for (const c of msgContent) {
-            if (c.type === "output_text" && c.text) {
+        // Content may be an array of blocks or a plain string
+        const msgContent = item.content;
+        if (Array.isArray(msgContent)) {
+          for (const c of msgContent as Array<{ type: string; text?: string }>) {
+            if ((c.type === "output_text" || c.type === "text") && c.text) {
               content.push({ type: "text", text: c.text });
             }
           }
+        } else if (typeof msgContent === "string" && msgContent) {
+          content.push({ type: "text", text: msgContent });
         }
       } else if (item.type === "function_call") {
         hasToolUse = true;
         let input: Record<string, unknown> = {};
-        try { input = JSON.parse(item.arguments as string); } catch { /* malformed arguments */ }
+        const rawArgs = item.arguments as string | undefined;
+        if (rawArgs) {
+          try { input = JSON.parse(rawArgs); } catch { /* malformed arguments */ }
+        }
+        const callId = (item.call_id ?? item.id) as string;
         content.push({
           type: "tool_use",
-          id: item.call_id as string,
+          id: callId,
           name: item.name as string,
           input,
         });
+      } else if (item.type === "reasoning") {
+        // Reasoning items are informational — skip them, they don't map to content blocks
+        debugLog("skipping reasoning item", { id: item.id });
       }
     }
+  } else {
+    debugLog("no output array found in response", { keys: Object.keys(data) });
   }
 
-  const status = data.status as string;
+  const status = (root.status ?? data.status) as string | undefined;
   const stop_reason = hasToolUse ? "tool_use"
     : status === "incomplete" ? "max_tokens"
     : "end_turn";
 
-  const usage = data.usage as Record<string, number> | undefined;
+  const usage = (root.usage ?? data.usage) as Record<string, number> | undefined;
+
+  debugLog("parseResponsesOutput result", { content, stop_reason, usage });
+
   return {
     content,
     stop_reason,
@@ -215,6 +243,7 @@ export class CodexProvider implements LlmProvider {
     const decoder = new TextDecoder();
     let buffer = "";
     let finalResponse: Record<string, unknown> | null = null;
+    const seenEventTypes = new Set<string>();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -227,12 +256,28 @@ export class CodexProvider implements LlmProvider {
         const data = line.slice(6).trim();
         if (data === "[DONE]") continue;
         try {
-          const event = JSON.parse(data);
-          if (event.type === "response.completed" && event.response) {
-            finalResponse = event.response;
+          const event = JSON.parse(data) as Record<string, unknown>;
+          const evType = event.type as string | undefined;
+          if (evType) seenEventTypes.add(evType);
+          debugLog("SSE event", { type: evType });
+          // Accept response.completed or response.done (API may use either)
+          if (
+            (evType === "response.completed" || evType === "response.done") &&
+            event.response
+          ) {
+            finalResponse = event.response as Record<string, unknown>;
+          } else if (evType === "response.completed" || evType === "response.done") {
+            // Response data at the top level (no nested .response key)
+            if (event.output !== undefined || event.status !== undefined) {
+              finalResponse = event;
+            }
           }
         } catch { /* skip malformed events */ }
       }
+    }
+
+    if (!finalResponse) {
+      debugLog("no finalResponse found, seenEventTypes", [...seenEventTypes]);
     }
 
     if (!finalResponse) {

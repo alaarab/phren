@@ -1,15 +1,17 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Static, Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
+import { StatusBar } from "./StatusBar.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
 import { renderMarkdown } from "../../multi/markdown.js";
+import { useSearch, highlightMatches } from "../hooks/useSearch.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
 
@@ -122,6 +124,66 @@ export function App({
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
 
+  // ── Ctrl+F content search ────────────────────────────────────────────────
+  const search = useSearch();
+
+  // When the query changes, recompute total match count across all completed messages
+  useEffect(() => {
+    if (!search.state.active || !search.state.query) {
+      search.setMatchInfo(0, 0);
+      return;
+    }
+    let total = 0;
+    for (const msg of completedMessages) {
+      if (msg.kind === "user" || msg.kind === "status") {
+        const { count } = highlightMatches(msg.text, search.state.query);
+        total += count;
+      } else if (msg.kind === "assistant") {
+        const { count } = highlightMatches(msg.text, search.state.query);
+        total += count;
+      }
+    }
+    search.setMatchInfo(total, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.state.query, search.state.active, completedMessages]);
+
+  // Handle keypresses while search mode is active
+  useInput((input, key) => {
+    if (!search.state.active) return;
+
+    // Escape: deactivate search
+    if (key.escape) {
+      search.deactivate();
+      return;
+    }
+
+    // Enter or n: next match
+    if (key.return || input === "n") {
+      search.nextMatch();
+      return;
+    }
+
+    // N (shift+n): previous match
+    if (input === "N") {
+      search.prevMatch();
+      return;
+    }
+
+    // Backspace: remove last char from query
+    if (key.backspace || key.delete) {
+      search.setQuery(search.state.query.slice(0, -1));
+      return;
+    }
+
+    // Skip ctrl/meta combinations
+    if (key.ctrl || key.meta) return;
+
+    // Regular character: append to query
+    if (input.length > 0 && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow && !key.tab) {
+      search.setQuery(search.state.query + input);
+    }
+  }, { isActive: search.state.active });
+
   // History search: compute matches from current query
   const historyMatches = historySearchMode
     ? inputHistory.filter((h) => h.toLowerCase().includes(historySearchQuery.toLowerCase()))
@@ -193,6 +255,8 @@ export function App({
     setBashMode(false);
   }, [bashMode, onSubmit]);
 
+  const isAnyModeActive = search.state.active || historySearchMode;
+
   useKeyboardShortcuts({
     isRunning: running,
     inputValue,
@@ -212,6 +276,9 @@ export function App({
       setHistorySearchMode(true);
       setHistorySearchQuery("");
       setHistorySearchIndex(0);
+    },
+    onContentSearch: () => {
+      search.activate();
     },
     onOpenEditor: () => {
       // Write input to temp file, open $EDITOR, read back
@@ -243,6 +310,14 @@ export function App({
     },
   });
 
+  // Helper: apply search highlighting to a text string (ANSI only works in
+  // non-Ink raw text mode). Since Ink's <Text> will escape ANSI we pass raw
+  // strings to renderMarkdown which outputs ANSI directly.
+  const applySearch = useCallback((text: string): string => {
+    if (!search.state.active || !search.state.query) return text;
+    return highlightMatches(text, search.state.query).highlighted;
+  }, [search.state.active, search.state.query]);
+
   // Build Static items — banner first, then completed messages
   const staticItems: StaticItem[] = [];
   if (showBanner) {
@@ -260,35 +335,38 @@ export function App({
           if (item.kind === "banner") {
             return (
               <Box key="banner" flexDirection="column">
-                <Banner version={state.version} />
+                <Banner version={state.version} theme={theme} />
               </Box>
             );
           }
           if (item.kind === "user") {
             return (
               <Box key={item.id} flexDirection="column">
-                <Text bold color={theme.user.color}>{theme.user.label} {(item as UserMsg).text}</Text>
+                <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((item as UserMsg).text)}</Text>
               </Box>
             );
           }
           if (item.kind === "assistant") {
             const aMsg = item as AssistantMsg;
+            const renderedText = aMsg.text
+              ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
+              : "";
             return (
               <Box key={item.id} flexDirection="column" marginTop={1}>
                 {aMsg.toolCalls?.map((tc, i) => (
                   <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
                 ))}
-                {aMsg.text ? (
+                {renderedText ? (
                   <Box>
                     <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-                    <Text wrap="wrap">{renderMarkdown(aMsg.text)}</Text>
+                    <Text wrap="wrap">{renderedText}</Text>
                   </Box>
                 ) : null}
               </Box>
             );
           }
           if (item.kind === "status") {
-            return <Text key={item.id} dimColor>{(item as StatusMsg).text}</Text>;
+            return <Text key={item.id} color={theme.system.color} dimColor>{applySearch((item as StatusMsg).text)}</Text>;
           }
           return null;
         }}
@@ -304,9 +382,9 @@ export function App({
         {/* Currently executing tool — animated spinner */}
         {activeTool && (
           <Box paddingLeft={2}>
-            <ToolSpinner />
-            <Text bold>{activeTool.name}</Text>
-            {activeTool.preview ? <Text color={theme.separator}> {activeTool.preview}</Text> : null}
+            <ToolSpinner theme={theme} />
+            <Text bold color={theme.tool.name}>{activeTool.name}</Text>
+            {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
           </Box>
         )}
 
@@ -319,11 +397,11 @@ export function App({
         )}
 
         {/* Thinking animation */}
-        {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} /></Box>}
+        {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} theme={theme} /></Box>}
 
         {/* "thought for Xs" after turn completes */}
         {thinkElapsed !== null && (
-          <Text dimColor>{"  "}{"\u25c6"} thought for {thinkElapsed}s</Text>
+          <Text color={theme.dim} dimColor>{"  "}{"\u25c6"} thought for {thinkElapsed}s</Text>
         )}
 
         {/* Ctrl+C warning */}
@@ -332,16 +410,29 @@ export function App({
         )}
 
         {/* Steer queue display */}
-        <SteerQueue items={steerQueue} />
+        <SteerQueue items={steerQueue} theme={theme} />
+
+        {/* Content search bar (Ctrl+F) */}
+        {search.state.active && (
+          <Box>
+            <Text color={theme.search?.prompt ?? "cyan"}>{"  "}find: {search.state.query}<Text inverse> </Text></Text>
+            {search.state.matchCount > 0
+              ? <Text dimColor color={theme.search?.match ?? undefined}> ({search.state.currentMatch + 1} of {search.state.matchCount})</Text>
+              : search.state.query.length > 0
+                ? <Text dimColor color={theme.search?.noMatch ?? "red"}> (no matches)</Text>
+                : <Text dimColor> (type to search)</Text>
+            }
+          </Box>
+        )}
 
         {/* History search indicator */}
         {historySearchMode && (
           <Box>
-            <Text color="cyan">{"  "}search: {historySearchQuery}<Text inverse> </Text></Text>
+            <Text color={theme.search?.prompt ?? "cyan"}>{"  "}search: {historySearchQuery}<Text inverse> </Text></Text>
             {historyMatches.length > 0
-              ? <Text dimColor> (match {(historySearchIndex % historyMatches.length) + 1} of {historyMatches.length})</Text>
+              ? <Text dimColor color={theme.search?.match ?? undefined}> (match {(historySearchIndex % historyMatches.length) + 1} of {historyMatches.length})</Text>
               : historySearchQuery.length > 0
-                ? <Text dimColor color="red"> (no matches)</Text>
+                ? <Text dimColor color={theme.search?.noMatch ?? "red"}> (no matches)</Text>
                 : <Text dimColor> (type to search history)</Text>
             }
           </Box>
@@ -358,8 +449,9 @@ export function App({
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!historySearchMode}
+          focus={!isAnyModeActive}
           separatorColor={theme.separator}
+          theme={theme}
         />
         <PermissionsLine
           mode={state.permMode}
@@ -369,6 +461,7 @@ export function App({
           highlightedTabId={agents?.[highlightedTabIndex]?.id ?? null}
           tabFocused={tabFocused}
         />
+        {/* StatusBar is now rendered outside Ink via TerminalControl (DECSTBM scroll region) */}
       </Box>
     </>
   );

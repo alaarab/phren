@@ -30,6 +30,7 @@ import { loadProjectContext } from "../memory/project-context.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { runAgent, createSession } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
+import { getAgentType, applyAgentType } from "./agent-types.js";
 import type { LlmProvider } from "../providers/types.js";
 import type { PhrenContext } from "../memory/context.js";
 import type { CostTracker } from "../cost.js";
@@ -142,6 +143,14 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+
+  // Apply agent type restrictions (tool allow/disallow lists, prompt prefix)
+  if (payload.agentType) {
+    const typeDef = getAgentType(payload.agentType);
+    if (typeDef) {
+      applyAgentType(registry, typeDef);
+    }
+  }
 
   // Cost tracker
   const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
