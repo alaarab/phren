@@ -183,14 +183,14 @@ export function App({
 
         {/* Active streaming text with diamond prefix */}
         {streamingText !== "" && (
-          <Box>
+          <Box marginTop={1}>
             <Text color="magenta" wrap="truncate">{"\u25c6"} </Text>
             <Text wrap="wrap">{streamingText}</Text>
           </Box>
         )}
 
         {/* Thinking animation */}
-        {thinking && <ThinkingIndicator startTime={thinkStartTime} />}
+        {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} /></Box>}
 
         {/* "thought for Xs" after turn completes */}
         {thinkElapsed !== null && (
