@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as readline from "readline";
 import type { AgentTool, AgentToolResult } from "./tools/types.js";
 import { VERSION } from "./package-metadata.js";
+import { scrubEnv } from "./permissions/shell-safety.js";
 
 /** JSON-RPC 2.0 message types for MCP protocol. */
 interface JsonRpcRequest {
@@ -45,7 +46,7 @@ class McpConnection {
 
   constructor(name: string, config: McpServerConfig) {
     this.name = name;
-    const env = { ...process.env, ...config.env };
+    const env = { ...scrubEnv(), ...config.env };
     this.proc = spawn(config.command, config.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env,

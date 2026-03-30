@@ -72,6 +72,18 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
+      // Heuristic paste detection for terminals without bracketed paste
+      if (input.length > 10 && !input.startsWith("\x1b")) {
+        const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        const before = value.slice(0, cursor);
+        const after = value.slice(cursor);
+        const newValue = before + normalized + after;
+        const newCursor = cursor + normalized.length;
+        onChange(newValue);
+        setCursor(newCursor);
+        return;
+      }
+
       // Shift+Enter — insert newline (multi-line input)
       if (key.return && key.shift) {
         const next = value.slice(0, cursor) + "\n" + value.slice(cursor);

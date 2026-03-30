@@ -9,7 +9,7 @@ import { createSession, runTurn, type AgentSession, type TurnHooks } from "../ag
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import type { AgentSpawner } from "../multi/spawner.js";
-import { decodeDiffPayload, DIFF_MARKER } from "../multi/diff-renderer.js";
+import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
 import * as os from "os";
 import { execSync } from "node:child_process";
@@ -20,7 +20,9 @@ import { App, type AppState, type ActiveToolInfo, type CompletedMessage } from "
 import type { ToolCallProps } from "./components/ToolCall.js";
 import type { AgentTab } from "./components/InputArea.js";
 import { createRequire } from "node:module";
-import { getTheme, type Theme } from "./themes.js";
+import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
+import { TerminalControl } from "./terminal-control.js";
+import { enableMouse, disableMouse, parseMouseEvent } from "./mouse.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -38,6 +40,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let verbose = false;
   let theme: Theme = getTheme();
   let msgCounter = 0;
+
+  const terminalControl = new TerminalControl();
+
+  // Mouse handler ref — assigned after agentTabs/handleSelectAgent are defined.
+  // Stored here so handleExit (defined before the handler) can call .off on it.
+  let mouseHandler: ((data: Buffer) => void) = () => {};
 
   // Permission prompt state — when set, input field captures y/n/a/s
   let permissionResolve: ((allowed: boolean) => void) | null = null;
@@ -93,8 +101,33 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     };
   }
 
+  function renderFixedStatus() {
+    if (!terminalControl.isEnabled) return;
+    const s = getAppState();
+    const cols = process.stdout.columns || 80;
+    const left = `  \u25c6 phren \u00b7 ${s.provider}${s.project ? ` \u00b7 ${s.project}` : ""}`;
+    const right = `${s.permMode}  T:${s.turns}${s.agentCount > 0 ? `  A:${s.agentCount}` : ""}  `;
+    const pad = Math.max(0, cols - left.length - right.length);
+    const line = `\x1b[7m${left}${" ".repeat(pad)}${right}\x1b[0m`;
+    terminalControl.renderStatusBar(process.stdout, line);
+  }
+
   // Re-render the Ink app with current state
   let rerender: ((node: React.ReactElement) => void) | null = null;
+
+  // Ink app instance — set after render(), used by closures for clear()
+  let appInstance: { clear: () => void } | null = null;
+
+  // Batched update for high-frequency events (streaming deltas)
+  let updateScheduled = false;
+  function scheduleUpdate() {
+    if (updateScheduled) return;
+    updateScheduled = true;
+    queueMicrotask(() => {
+      updateScheduled = false;
+      update();
+    });
+  }
 
   function update() {
     if (!rerender) return;
@@ -140,6 +173,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
       />
     );
+    renderFixedStatus();
   }
 
   function handlePermissionCycle() {
@@ -152,6 +186,11 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let resolveSession: ((session: AgentSession) => void) | null = null;
 
   function handleExit() {
+    disableMouse(process.stdout);
+    if (process.stdin.isTTY) {
+      process.stdin.off("data", mouseHandler);
+    }
+    terminalControl.disable(process.stdout);
     if (resolveSession) resolveSession(session);
   }
 
@@ -308,8 +347,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
 
     if (line === "/theme") {
-      theme = getTheme(theme.name === "dark" ? "light" : "dark");
-      completedMessages.push({ id: nextId(), kind: "status", text: `Theme: ${theme.name}` });
+      const idx = THEME_NAMES.indexOf(theme.name);
+      const next = THEME_NAMES[(idx + 1) % THEME_NAMES.length];
+      theme = getTheme(next);
+      completedMessages.push({ id: nextId(), kind: "status", text: `Theme: ${theme.name} (${THEME_NAMES.join(", ")})` });
       update();
       return;
     }
@@ -317,7 +358,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     // /clear — also wipe Ink completed messages and clear screen
     if (line === "/clear") {
       completedMessages.length = 0;
-      process.stdout.write("\x1b[2J\x1b[H");
+      if (appInstance) appInstance.clear();
+      else process.stdout.write("\x1b[2J\x1b[H");
       slashCommands.tryHandleCommand(line);
       update();
       return;
@@ -368,7 +410,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     onTextDelta: (text) => {
       thinking = false;
       streamingText += text;
-      update();
+      scheduleUpdate();
     },
     onTextDone: () => {
       // streaming complete — finalized in runAgentTurn
@@ -376,7 +418,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     onTextBlock: (text) => {
       thinking = false;
       streamingText += text;
-      update();
+      scheduleUpdate();
     },
     onToolStart: (name, input, _count) => {
       thinking = false;
@@ -387,7 +429,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       activeTool = null;
       const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
-      currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur });
+      const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
+      currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur, diffRendered });
       update();
     },
     getSteeringInput: () => {
@@ -507,7 +550,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     selectedAgentId = agentId;
     viewSwitchCounter++;
     // Clear screen so Ink's <Static> re-renders with fresh items
-    process.stdout.write("\x1b[2J\x1b[H");
+    if (appInstance) appInstance.clear();
+    else process.stdout.write("\x1b[2J\x1b[H");
     update();
   }
 
@@ -530,7 +574,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     spawner.on("text_delta", (agentId: string, text: string) => {
       const convo = getOrCreateConvo(agentId);
       convo.streamingText += text;
-      rebuildAgentTabs();
       // Only update if this agent is currently selected
       if (selectedAgentId === agentId) update();
     });
@@ -538,7 +581,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     spawner.on("text_block", (agentId: string, text: string) => {
       const convo = getOrCreateConvo(agentId);
       convo.streamingText += text;
-      rebuildAgentTabs();
       if (selectedAgentId === agentId) update();
     });
 
@@ -552,7 +594,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
       const convo = getOrCreateConvo(agentId);
       convo.activeTool = null;
-      convo.toolCalls.push({ name: toolName, input, output, isError, durationMs });
+      const diffData = (toolName === "edit_file" || toolName === "write_file") ? decodeDiffPayload(output) : null;
+      const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
+      const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
+      convo.toolCalls.push({ name: toolName, input, output: cleanOutput, isError, durationMs, diffRendered });
       rebuildAgentTabs();
       if (selectedAgentId === agentId) update();
     });
@@ -598,14 +643,30 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       update();
     });
 
+    spawner.on("status", (agentId: string, message: string) => {
+      const convo = getOrCreateConvo(agentId);
+      convo.messages.push({ id: nextId(), kind: "status", text: message });
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("message", (from: string, to: string, content: string) => {
+      // Show DM notification in main stream
+      const preview = content.length > 80 ? content.slice(0, 80) + "..." : content;
+      completedMessages.push({
+        id: nextId(),
+        kind: "status",
+        text: `\x1b[2m${from} → ${to}: ${preview}\x1b[0m`,
+      });
+      update();
+    });
+
     spawner.on("exit", () => {
       rebuildAgentTabs();
       update();
     });
   }
 
-  // Clear screen before initial render — start clean
-  process.stdout.write("\x1b[2J\x1b[H");
+  // Set terminal title
   const projectName = config.phrenCtx?.project ?? "phren";
   process.title = "phren";
   process.stdout.write(`\x1b]0;phren \xb7 ${projectName}\x07`); // set terminal window title
@@ -636,13 +697,60 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
     />,
-    { exitOnCtrlC: false },
+    { exitOnCtrlC: false, incrementalRendering: true, maxFps: 30 },
   );
   rerender = app.rerender;
+  appInstance = app;
+  terminalControl.enable(process.stdout);
+  enableMouse(process.stdout);
+
+  // Mouse event handling — raw stdin listener catches SGR mouse events that
+  // Ink doesn't parse, enabling click-to-focus on agent tabs.
+  mouseHandler = (data: Buffer) => {
+    const str = data.toString();
+    const evt = parseMouseEvent(str);
+    if (!evt || evt.type !== "press" || evt.button !== "left") return;
+
+    // Check if click is in the agent tab row (row above the fixed status bar)
+    const rows = process.stdout.rows || 24;
+    const tabRow = rows - 1;
+
+    if (evt.y === tabRow && agentTabs.length > 0) {
+      // Determine which tab was clicked based on x position.
+      // Tab layout mirrors what InputArea renders: "phren●  name● ..."
+      let xPos = 2; // initial padding offset
+
+      // First slot is always the "phren" (main) tab
+      const mainTabWidth = "phren●".length + 2;
+      if (evt.x >= xPos && evt.x < xPos + mainTabWidth) {
+        handleSelectAgent(null);
+        return;
+      }
+      xPos += mainTabWidth;
+
+      for (const tab of agentTabs) {
+        const tabWidth = tab.name.length + 3; // "name● "
+        if (evt.x >= xPos && evt.x < xPos + tabWidth) {
+          handleSelectAgent(tab.id);
+          return;
+        }
+        xPos += tabWidth;
+      }
+    }
+  };
+
+  if (process.stdin.isTTY) {
+    process.stdin.on("data", mouseHandler);
+  }
 
   const done = new Promise<AgentSession>((r) => { resolveSession = r; });
 
   app.waitUntilExit().then(() => {
+    disableMouse(process.stdout);
+    if (process.stdin.isTTY) {
+      process.stdin.off("data", mouseHandler);
+    }
+    terminalControl.disable(process.stdout);
     if (resolveSession) resolveSession(session);
   });
 

@@ -112,6 +112,7 @@ export class AgentSpawner extends EventEmitter {
       plan: opts.plan ?? false,
       verbose: opts.verbose ?? false,
       env: childEnv,
+      agentType: opts.agentType,
     };
 
     const entry: AgentEntry = {

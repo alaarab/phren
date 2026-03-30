@@ -7,11 +7,33 @@
 
 // ── ANSI helpers ─────────────────────────────────────────────────────────────
 
+import { hostname } from "os";
+
 const ESC = "\x1b[";
 const red = (t: string) => `${ESC}31m${t}${ESC}0m`;
 const green = (t: string) => `${ESC}32m${t}${ESC}0m`;
 const dim = (t: string) => `${ESC}2m${t}${ESC}0m`;
 const cyan = (t: string) => `${ESC}36m${t}${ESC}0m`;
+
+/**
+ * Wrap an absolute file path in an OSC 8 file:// hyperlink.
+ * Returns the path unchanged when it is not absolute.
+ */
+function fileHyperlink(filePath: string): string {
+  if (!filePath.startsWith("/")) return filePath;
+  const host = hostname();
+  return `\x1b]8;;file://${host}${filePath}\x07${filePath}\x1b]8;;\x07`;
+}
+
+export type DiffColors = {
+  added: string;
+  removed: string;
+  context: string;
+  lineNumber: string;
+  header: string;
+  separator: string;
+  reset: string;
+};
 
 // ── Line diff (Myers-like, simple O(ND) for small inputs) ────────────────────
 
@@ -85,12 +107,17 @@ const SBS_MIN_WIDTH = 70;
  * Capped at 30 output lines. If the diff is larger, shows the first 20
  * lines plus a "... (N more changes)" trailer.
  */
-export function renderInlineDiff(oldContent: string, newContent: string, filePath: string): string {
+export function renderInlineDiff(
+  oldContent: string,
+  newContent: string,
+  filePath?: string,
+  colors?: DiffColors,
+): string {
   const termWidth = process.stdout.columns || 80;
   if (termWidth >= SBS_MIN_WIDTH) {
-    return renderSideBySideDiff(oldContent, newContent, filePath, termWidth);
+    return renderSideBySideDiff(oldContent, newContent, filePath ?? "", termWidth, colors);
   }
-  return renderInlineDiffCore(oldContent, newContent, filePath);
+  return renderInlineDiffCore(oldContent, newContent, filePath ?? "", colors);
 }
 
 // ── Side-by-side renderer ───────────────────────────────────────────────────
@@ -113,10 +140,11 @@ export function renderSideBySideDiff(
   newContent: string,
   filePath: string,
   termWidth?: number,
+  colors?: DiffColors,
 ): string {
   const width = termWidth ?? process.stdout.columns ?? 80;
   if (width < SBS_MIN_WIDTH) {
-    return renderInlineDiffCore(oldContent, newContent, filePath);
+    return renderInlineDiffCore(oldContent, newContent, filePath, colors);
   }
 
   const oldLines = oldContent.split("\n");
@@ -186,6 +214,15 @@ export function renderSideBySideDiff(
     return s + " ".repeat(pad);
   };
 
+  // Color helpers — use theme values when provided, else fall back to module-level functions
+  const rst = colors?.reset ?? `${ESC}0m`;
+  const applyAdded   = (t: string) => colors ? `${colors.added}${t}${rst}` : green(t);
+  const applyRemoved = (t: string) => colors ? `${colors.removed}${t}${rst}` : red(t);
+  const applyContext = (t: string) => colors ? `${colors.context}${t}${rst}` : dim(t);
+  const applySep     = (t: string) => colors ? `${colors.separator}${t}${rst}` : dim(t);
+  const applyHeader  = (t: string) => colors ? `${colors.header}${t}${rst}` : cyan(t);
+  const applyLineNo  = (t: string) => colors ? `${colors.lineNumber}${t}${rst}` : dim(t);
+
   const formatHalf = (
     lineNo: number | undefined,
     text: string | undefined,
@@ -197,8 +234,8 @@ export function renderSideBySideDiff(
     }
     const ln = lineNo !== undefined ? String(lineNo).padStart(lineNoWidth) : " ".repeat(lineNoWidth);
     const content = text !== undefined ? truncStr(text, cWidth) : "";
-    const colored = colorFn ? colorFn(content) : dim(content);
-    return padRight(`${dim(ln)} ${colored}`, halfWidth);
+    const colored = colorFn ? colorFn(content) : applyContext(content);
+    return padRight(`${applyLineNo(ln)} ${colored}`, halfWidth);
   };
 
   const rows: OutputRow[] = [];
@@ -241,12 +278,12 @@ export function renderSideBySideDiff(
       flushEqualRun();
       rows.push({
         type: "line",
-        left: formatHalf(pair.leftLineNo, pair.leftText, contentWidth, pair.leftText !== undefined ? red : undefined),
+        left: formatHalf(pair.leftLineNo, pair.leftText, contentWidth, pair.leftText !== undefined ? applyRemoved : undefined),
         right: formatHalf(
           pair.rightLineNo,
           pair.rightText,
           contentWidth,
-          pair.rightText !== undefined ? green : undefined,
+          pair.rightText !== undefined ? applyAdded : undefined,
         ),
       });
     }
@@ -260,20 +297,21 @@ export function renderSideBySideDiff(
   for (const row of rows) {
     if (outputLines.length >= SBS_MAX_OUTPUT_LINES) {
       const remaining = rows.length - rows.indexOf(row);
-      outputLines.push(dim(`  ... (${remaining} more rows) ...`));
+      outputLines.push(applyContext(`  ... (${remaining} more rows) ...`));
       break;
     }
     if (row.type === "collapse") {
-      const msg = dim(`... (${row.collapseCount} unchanged) ...`);
-      outputLines.push(`${padRight(msg, halfWidth)} ${dim(sep)} ${msg}`);
+      const msg = applyContext(`... (${row.collapseCount} unchanged) ...`);
+      outputLines.push(`${padRight(msg, halfWidth)} ${applySep(sep)} ${msg}`);
     } else {
-      outputLines.push(`${row.left} ${dim(sep)} ${row.right}`);
+      outputLines.push(`${row.left} ${applySep(sep)} ${row.right}`);
     }
   }
 
   if (outputLines.length === 0) return "";
 
-  const header = cyan(`─── ${filePath} ───`);
+  const linkedPath = fileHyperlink(filePath);
+  const header = applyHeader(`─── ${linkedPath} ───`);
   return `${header}\n${outputLines.join("\n")}`;
 }
 
@@ -281,7 +319,14 @@ export function renderSideBySideDiff(
  * Core inline diff logic (always inline, no side-by-side switch).
  * Used as the fallback when the terminal is too narrow.
  */
-function renderInlineDiffCore(oldContent: string, newContent: string, filePath: string): string {
+function renderInlineDiffCore(oldContent: string, newContent: string, filePath: string, colors?: DiffColors): string {
+  const rst = colors?.reset ?? `${ESC}0m`;
+  const applyAdded   = (t: string) => colors ? `${colors.added}${t}${rst}` : green(t);
+  const applyRemoved = (t: string) => colors ? `${colors.removed}${t}${rst}` : red(t);
+  const applyContext = (t: string) => colors ? `${colors.context}${t}${rst}` : dim(t);
+  const applyHeader  = (t: string) => colors ? `${colors.header}${t}${rst}` : cyan(t);
+  const applyLineNo  = (t: string) => colors ? `${colors.lineNumber}${t}${rst}` : dim(t);
+
   const oldLines = oldContent.split("\n");
   const newLines = newContent.split("\n");
   const diff = computeLineDiff(oldLines, newLines);
@@ -312,30 +357,30 @@ function renderInlineDiffCore(oldContent: string, newContent: string, filePath: 
     }
 
     if (inCollapsed) {
-      outputLines.push(dim(`  ... (${collapsedCount} unchanged lines) ...`));
+      outputLines.push(applyContext(`  ... (${collapsedCount} unchanged lines) ...`));
       inCollapsed = false;
       collapsedCount = 0;
     }
 
     const d = diff[i];
     const lineNo = d.oldLineNo ?? d.newLineNo ?? 0;
-    const lineNoStr = dim(String(lineNo).padStart(4) + " ");
+    const lineNoStr = applyLineNo(String(lineNo).padStart(4) + " ");
 
     switch (d.op) {
       case "equal":
-        outputLines.push(lineNoStr + dim(d.line));
+        outputLines.push(lineNoStr + applyContext(d.line));
         break;
       case "delete":
-        outputLines.push(lineNoStr + red(`- ${d.line}`));
+        outputLines.push(lineNoStr + applyRemoved(`- ${d.line}`));
         break;
       case "insert":
-        outputLines.push(lineNoStr + green(`+ ${d.line}`));
+        outputLines.push(lineNoStr + applyAdded(`+ ${d.line}`));
         break;
     }
   }
 
   if (inCollapsed) {
-    outputLines.push(dim(`  ... (${collapsedCount} unchanged lines) ...`));
+    outputLines.push(applyContext(`  ... (${collapsedCount} unchanged lines) ...`));
   }
 
   if (outputLines.length === 0) return "";
@@ -344,13 +389,14 @@ function renderInlineDiffCore(oldContent: string, newContent: string, filePath: 
   if (outputLines.length > MAX_OUTPUT_LINES) {
     const truncated = outputLines.slice(0, MAX_FIRST_CHUNK);
     const remaining = outputLines.length - MAX_FIRST_CHUNK;
-    truncated.push(dim(`  ... (${remaining} more lines) ...`));
+    truncated.push(applyContext(`  ... (${remaining} more lines) ...`));
     body = truncated.join("\n");
   } else {
     body = outputLines.join("\n");
   }
 
-  const header = cyan(`─── ${filePath} ───`);
+  const linkedPath = fileHyperlink(filePath);
+  const header = applyHeader(`─── ${linkedPath} ───`);
   return `${header}\n${body}`;
 }
 
