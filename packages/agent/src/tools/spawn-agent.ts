@@ -93,21 +93,29 @@ export function createListAgentsTool(spawner: AgentSpawner): AgentTool {
 export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
   return {
     name: "spawn_agent",
-    description: `Spawn a child agent to work on a task in parallel. The agent runs autonomously with its own LLM session and tool access. Use this when the user asks you to spawn agents, create a team, or delegate work. You can spawn multiple agents by calling this tool multiple times. If the user says "spawn on idle" or "spawn without a task", set idle to true — the agent will start but wait for instructions.`,
+    description: `Spawn a child agent. Two modes:
+
+**Subagent** (background=false, default): Runs the task and waits for the result. Output appears inline in your conversation. Use for quick parallel work like "search 3 files", "run tests", "check dependencies". The tool call blocks until the agent finishes and returns its response.
+
+**TeamAgent** (background=true or idle=true): Spawns a persistent agent with its own conversation. Shows up in the tab bar. The user can switch to its chat and talk to it directly. Use when the user says "spawn a team", "create agents on idle", "spin up workers".`,
     input_schema: {
       type: "object",
       properties: {
         name: {
           type: "string",
-          description: "Short descriptive name for the agent (e.g. 'fixer', 'explorer', 'tester', 'reviewer')",
+          description: "Short descriptive name for the agent (e.g. 'fixer', 'explorer', 'tester')",
         },
         task: {
           type: "string",
-          description: "The task for the agent to work on. If idle is true, this is optional — the agent will wait for instructions.",
+          description: "The task for the agent to work on.",
+        },
+        background: {
+          type: "boolean",
+          description: "If true, creates a TeamAgent (persistent, own chat, shows in tab bar). If false (default), creates a subagent that runs inline and returns the result.",
         },
         idle: {
           type: "boolean",
-          description: "If true, spawn the agent but don't give it a task yet — it starts idle and waits for messages. Default: false.",
+          description: "If true, spawn as TeamAgent on idle (no task yet, waits for instructions). Implies background=true.",
         },
       },
       required: ["name"],
@@ -117,13 +125,14 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
       const name = input.name as string;
       const task = (input.task as string) || "";
       const idle = input.idle as boolean;
+      const background = (input.background as boolean) || idle;
 
       if (!name) {
         return { output: "Agent name is required.", is_error: true };
       }
 
       const agentTask = idle
-        ? `You are agent "${name}". You have been spawned on idle. Wait for instructions from the user or other agents. When you receive a message, work on it and report back.`
+        ? `You are agent "${name}". You have been spawned on idle. Wait for instructions.`
         : task || `You are agent "${name}". Work on any tasks assigned to you.`;
 
       const agentId = spawner.spawn({
@@ -133,10 +142,40 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
         verbose: false,
       });
 
-      const status = idle ? "idle (waiting for instructions)" : "running";
-      return {
-        output: `Spawned agent "${name}" (${agentId}) — ${status}${task ? `: ${task}` : ""}`,
-      };
+      // TeamAgent (background): return immediately, agent lives in tab bar
+      if (background) {
+        const status = idle ? "idle (waiting for instructions)" : "running in background";
+        return {
+          output: `Spawned TeamAgent "${name}" (${agentId}) — ${status}${task ? `: ${task}` : ""}`,
+        };
+      }
+
+      // Subagent (foreground): wait for completion, return result inline
+      return new Promise<AgentToolResult>((resolve) => {
+        const onDone = (doneId: string, result: { finalText: string; turns: number; toolCalls: number }) => {
+          if (doneId !== agentId) return;
+          spawner.removeListener("done", onDone);
+          spawner.removeListener("error", onError);
+          resolve({
+            output: result.finalText || `Agent "${name}" completed (${result.turns} turns, ${result.toolCalls} tool calls)`,
+          });
+        };
+        const onError = (errId: string, error: string) => {
+          if (errId !== agentId) return;
+          spawner.removeListener("done", onDone);
+          spawner.removeListener("error", onError);
+          resolve({ output: `Agent "${name}" failed: ${error}`, is_error: true });
+        };
+        spawner.on("done", onDone);
+        spawner.on("error", onError);
+
+        // Timeout after 5 minutes
+        setTimeout(() => {
+          spawner.removeListener("done", onDone);
+          spawner.removeListener("error", onError);
+          resolve({ output: `Agent "${name}" timed out after 5 minutes`, is_error: true });
+        }, 300_000);
+      });
     },
   };
 }
