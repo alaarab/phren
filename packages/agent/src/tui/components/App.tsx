@@ -156,7 +156,7 @@ export function App({
           const id = agents[highlightedTabIndex].id;
           onSelectAgent?.(id === "__main__" ? null : id);
         }
-        setTabFocused(false);
+        // Stay in tab bar — user presses Up to go back to chat
       },
     } : undefined,
   });
