@@ -4,6 +4,8 @@
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
+import type { ReasoningEffort } from "../models.js";
+import { lookupMaxOutputTokens } from "../models.js";
 
 const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
 
@@ -122,14 +124,16 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
 }
 
 export class CodexProvider implements LlmProvider {
-  name = "codex";
-  contextWindow = 128_000;
+  name = "openai-codex";
+  contextWindow = 1_050_000;
   maxOutputTokens: number;
-  private model: string;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
 
-  constructor(model?: string, maxOutputTokens?: number) {
-    this.model = model ?? "gpt-5.3-codex";
-    this.maxOutputTokens = maxOutputTokens ?? 8192;
+  constructor(model?: string, maxOutputTokens?: number, reasoningEffort?: ReasoningEffort) {
+    this.model = model ?? "gpt-5.4";
+    this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
+    this.reasoningEffort = reasoningEffort;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
@@ -142,20 +146,63 @@ export class CodexProvider implements LlmProvider {
       store: false,
       stream: true,
     };
+    if (this.reasoningEffort) {
+      body.reasoning = { effort: this.reasoningEffort };
+    }
+    if (tools.length > 0) {
+      body.tools = toResponsesTools(tools);
+      body.tool_choice = "auto";
+    }
+    return parseResponsesOutput(await this.requestResponse(accessToken, body));
+  }
+
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+    const { accessToken } = await getAccessToken();
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      instructions: system,
+      input: toResponsesInput(messages),
+      store: false,
+      stream: true,
+      include: ["reasoning.encrypted_content"],
+    };
+    if (this.reasoningEffort) {
+      body.reasoning = { effort: this.reasoningEffort };
+    }
     if (tools.length > 0) {
       body.tools = toResponsesTools(tools);
       body.tool_choice = "auto";
     }
 
-    const bodyStr = JSON.stringify(body);
+    // OpenClaw treats transport as auto: try WebSocket first, then fall back to the
+    // HTTP responses stream if the WS path is unavailable.
+    try {
+      yield* this.chatStreamWs(accessToken, body);
+    } catch {
+      const response = await this.requestResponse(accessToken, body);
+      const parsed = parseResponsesOutput(response);
+      for (const block of parsed.content) {
+        if (block.type === "text") {
+          yield { type: "text_delta", text: block.text };
+        } else if (block.type === "tool_use") {
+          yield { type: "tool_use_start", id: block.id, name: block.name };
+          yield { type: "tool_use_delta", id: block.id, json: JSON.stringify(block.input) };
+          yield { type: "tool_use_end", id: block.id };
+        }
+      }
+      yield { type: "done", stop_reason: parsed.stop_reason, usage: parsed.usage };
+    }
+  }
 
+  private async requestResponse(accessToken: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const res = await fetch(CODEX_API, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: bodyStr,
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -163,7 +210,6 @@ export class CodexProvider implements LlmProvider {
       throw new Error(`Codex API error ${res.status}: ${text}`);
     }
 
-    // Stream is mandatory for Codex backend — consume it and collect the final response
     if (!res.body) throw new Error("Provider returned empty response body");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -185,35 +231,15 @@ export class CodexProvider implements LlmProvider {
           if (event.type === "response.completed" && event.response) {
             finalResponse = event.response;
           }
-        } catch { /* skip */ }
+        } catch { /* skip malformed events */ }
       }
     }
 
-    if (finalResponse) return parseResponsesOutput(finalResponse);
-
-    // No response.completed event received
-    throw new Error("Codex stream ended without response.completed event");
-  }
-
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
-    const { accessToken } = await getAccessToken();
-
-    const body: Record<string, unknown> = {
-      model: this.model,
-      instructions: system,
-      input: toResponsesInput(messages),
-      store: false,
-      stream: true,
-      include: ["reasoning.encrypted_content"],
-    };
-    if (tools.length > 0) {
-      body.tools = toResponsesTools(tools);
-      body.tool_choice = "auto";
+    if (!finalResponse) {
+      throw new Error("Codex stream ended without response.completed event");
     }
 
-    // Use WebSocket for true token-by-token streaming (matches Codex CLI behavior).
-    // The HTTP SSE endpoint batches the entire response before flushing.
-    yield* this.chatStreamWs(accessToken, body);
+    return finalResponse;
   }
 
   /** WebSocket streaming — sends request, yields deltas as they arrive. */

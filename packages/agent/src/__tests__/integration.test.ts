@@ -25,12 +25,12 @@ import type { AgentConfig } from "../agent-loop.js";
  * Mirrors the setup in index.ts but without CLI arg parsing.
  */
 async function buildTestConfig(overrides?: Partial<AgentConfig>): Promise<AgentConfig> {
-  const provider = resolveProvider("codex");
+  const provider = resolveProvider("openai-codex");
 
   const phrenCtx = await buildPhrenContext("phren");
   const systemPrompt = buildSystemPrompt("", null, {
     name: provider.name,
-    model: "codex",
+    model: (provider as { model?: string }).model,
   });
 
   const registry = new ToolRegistry();

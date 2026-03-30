@@ -48,7 +48,7 @@ export function sessionCommand(parts: string[], ctx: CommandContext): boolean {
       return true;
     }
     try {
-      saveSessionMessages(ctx.phrenPath, ctx.sessionId, ctx.session.messages);
+      saveSessionMessages(ctx.phrenPath, ctx.sessionId, ctx.session.messages, ctx.phrenCtx?.project ?? undefined);
       process.stderr.write(`${GREEN}-> Checkpoint saved (${ctx.session.messages.length} messages)${RESET}\n`);
     } catch (err: unknown) {
       process.stderr.write(`${RED}${err instanceof Error ? err.message : String(err)}${RESET}\n`);

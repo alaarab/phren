@@ -114,6 +114,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       undoStack: [],
       providerName: config.provider.name,
       currentModel: (config.provider as { model?: string }).model,
+      currentReasoning: config.provider.reasoningEffort ?? null,
       provider: config.provider,
       systemPrompt: config.systemPrompt,
       spawner,
@@ -124,7 +125,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onModelChange: async (result) => {
         try {
           const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
-          const newProvider = resolveProvider(config.provider.name, result.model);
+          const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
           config.provider = newProvider;
           const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
           config.systemPrompt = buildSystemPrompt(

@@ -11,6 +11,7 @@
  * Up/Down to navigate, Left/Right to adjust reasoning, Enter to select, Esc to cancel.
  */
 import * as readline from "node:readline";
+import { getBuiltinModels, normalizeProviderId, REASONING_LEVELS, type ReasoningEffort } from "../models.js";
 
 const ESC = "\x1b[";
 const s = {
@@ -25,67 +26,28 @@ const s = {
 
 // ── Model catalog ───────────────────────────────────────────────────────────
 
-export type ReasoningLevel = "low" | "medium" | "high" | "max" | null;
+export type ReasoningLevel = ReasoningEffort | null;
 
 export interface ModelEntry {
   id: string;
-  provider: "openrouter" | "anthropic" | "openai" | "codex" | "ollama";
+  provider: "openrouter" | "anthropic" | "openai" | "openai-codex" | "ollama";
   label: string;
   reasoning: ReasoningLevel;       // current reasoning level
   reasoningRange: ReasoningLevel[]; // available levels (empty = no reasoning control)
   contextWindow: number;
 }
 
-const REASONING_LEVELS: ReasoningLevel[] = ["low", "medium", "high", "max"];
-
 /** Models available per provider. Extend as needed. */
 export function getAvailableModels(provider: string, currentModel?: string): ModelEntry[] {
-  const models: ModelEntry[] = [];
-
-  switch (provider) {
-    case "anthropic":
-      models.push(
-        { id: "claude-sonnet-4-20250514", provider: "anthropic", label: "Sonnet 4", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 200_000 },
-        { id: "claude-opus-4-20250514", provider: "anthropic", label: "Opus 4", reasoning: "high", reasoningRange: ["low", "medium", "high", "max"], contextWindow: 200_000 },
-        { id: "claude-haiku-4-5-20251001", provider: "anthropic", label: "Haiku 4.5", reasoning: null, reasoningRange: [], contextWindow: 200_000 },
-      );
-      break;
-
-    case "openrouter":
-      models.push(
-        { id: "anthropic/claude-sonnet-4-20250514", provider: "openrouter", label: "Sonnet 4", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 200_000 },
-        { id: "anthropic/claude-opus-4-20250514", provider: "openrouter", label: "Opus 4", reasoning: "high", reasoningRange: ["low", "medium", "high", "max"], contextWindow: 200_000 },
-        { id: "openai/gpt-4o", provider: "openrouter", label: "GPT-4o", reasoning: null, reasoningRange: [], contextWindow: 128_000 },
-        { id: "openai/o4-mini", provider: "openrouter", label: "o4-mini", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 128_000 },
-        { id: "google/gemini-2.5-pro", provider: "openrouter", label: "Gemini 2.5 Pro", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 1_000_000 },
-        { id: "deepseek/deepseek-r1", provider: "openrouter", label: "DeepSeek R1", reasoning: "high", reasoningRange: ["medium", "high"], contextWindow: 128_000 },
-      );
-      break;
-
-    case "openai":
-      models.push(
-        { id: "gpt-4o", provider: "openai", label: "GPT-4o", reasoning: null, reasoningRange: [], contextWindow: 128_000 },
-        { id: "o4-mini", provider: "openai", label: "o4-mini", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 128_000 },
-        { id: "o3", provider: "openai", label: "o3", reasoning: "high", reasoningRange: ["low", "medium", "high", "max"], contextWindow: 200_000 },
-      );
-      break;
-
-    case "codex":
-      models.push(
-        { id: "gpt-4o", provider: "codex", label: "GPT-4o", reasoning: null, reasoningRange: [], contextWindow: 128_000 },
-        { id: "o4-mini", provider: "codex", label: "o4-mini", reasoning: "medium", reasoningRange: ["low", "medium", "high"], contextWindow: 128_000 },
-        { id: "o3", provider: "codex", label: "o3", reasoning: "high", reasoningRange: ["low", "medium", "high", "max"], contextWindow: 200_000 },
-      );
-      break;
-
-    case "ollama":
-      models.push(
-        { id: "qwen2.5-coder:14b", provider: "ollama", label: "Qwen 2.5 Coder 14B", reasoning: null, reasoningRange: [], contextWindow: 32_000 },
-        { id: "llama3.2", provider: "ollama", label: "Llama 3.2", reasoning: null, reasoningRange: [], contextWindow: 128_000 },
-        { id: "deepseek-r1:14b", provider: "ollama", label: "DeepSeek R1 14B", reasoning: "medium", reasoningRange: ["medium", "high"], contextWindow: 128_000 },
-      );
-      break;
-  }
+  const normalizedProvider = normalizeProviderId(provider) ?? "openrouter";
+  const models: ModelEntry[] = getBuiltinModels(normalizedProvider).map((model) => ({
+    id: model.id,
+    provider: model.provider,
+    label: model.label,
+    reasoning: model.reasoningDefault,
+    reasoningRange: [...model.reasoningRange],
+    contextWindow: model.contextWindow,
+  }));
 
   // If user has a custom model not in the list, add it
   if (currentModel && !models.some((m) => m.id === currentModel)) {
@@ -135,6 +97,7 @@ export interface PickerResult {
 export function showModelPicker(
   provider: string,
   currentModel: string | undefined,
+  currentReasoning: ReasoningLevel | undefined,
   w: NodeJS.WriteStream,
 ): Promise<PickerResult | null> {
   const models = getAvailableModels(provider, currentModel);
@@ -147,7 +110,7 @@ export function showModelPicker(
   if (cursor < 0) cursor = 0;
 
   // Clone reasoning levels so we can adjust them
-  const reasoningState = models.map((m) => m.reasoning);
+  const reasoningState = models.map((m) => m.id === currentModel ? currentReasoning ?? m.reasoning : m.reasoning);
 
   function render() {
     // Clear previous render (move up by model count + header + footer + blank)

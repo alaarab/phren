@@ -1,4 +1,5 @@
 /** LLM provider types — Anthropic content-block format internally. */
+import type { ReasoningEffort } from "../models.js";
 
 export interface TextBlock {
   type: "text";
@@ -49,6 +50,8 @@ export type StreamDelta =
 
 export interface LlmProvider {
   name: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   contextWindow?: number;
   maxOutputTokens?: number;
   chat(

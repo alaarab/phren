@@ -36,7 +36,7 @@ export class OllamaProvider implements LlmProvider {
   contextWindow = 32_000;
   maxOutputTokens: number;
   private baseUrl: string;
-  private model: string;
+  model: string;
 
   constructor(model?: string, baseUrl?: string, maxOutputTokens?: number) {
     this.baseUrl = baseUrl ?? "http://localhost:11434";

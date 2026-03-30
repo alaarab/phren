@@ -4,6 +4,7 @@ export interface CliArgs {
   task: string;
   provider?: string;
   model?: string;
+  reasoning?: "low" | "medium" | "high" | "xhigh";
   project?: string;
   permissions: PermissionMode;
   maxTurns: number;
@@ -25,13 +26,14 @@ export interface CliArgs {
 }
 
 const HELP = `
-phren-agent — coding agent with persistent memory
+phren — coding agent with persistent memory
 
-Usage: phren-agent [options] <task>
+Usage: phren [options] <task>
 
 Options:
-  --provider <name>    Force provider: openrouter, anthropic, openai, codex, ollama
+  --provider <name>    Force provider: openrouter, anthropic, openai, openai-codex, ollama
   --model <model>      Override LLM model
+  --reasoning <level>  Reasoning effort: low, medium, high, xhigh
   --project <name>     Force phren project context
   --max-turns <n>      Max tool-use turns (default: 50)
   --max-output <n>     Max output tokens per response (default: auto per model)
@@ -53,22 +55,25 @@ Options:
   --help               Show this help
 
 Providers (auto-detected from env, or use --provider):
-  openrouter           OPENROUTER_API_KEY — routes to any model (default)
-  anthropic            ANTHROPIC_API_KEY — Claude direct
-  openai               OPENAI_API_KEY — OpenAI direct
-  codex                Uses your ChatGPT/Codex subscription directly
+  openai-codex         Uses your ChatGPT/Codex subscription directly (preferred default)
                        (no API key needed, flat rate via your subscription)
-                       Setup: phren-agent auth login
+                       Setup: phren auth login
+                       Legacy alias: codex
+  openai               OPENAI_API_KEY — OpenAI direct (defaults to gpt-5.4)
+  openrouter           OPENROUTER_API_KEY — routes to any model
+  anthropic            ANTHROPIC_API_KEY — Claude direct
   ollama               PHREN_OLLAMA_URL — local models (default: localhost:11434)
 
 Environment:
   PHREN_AGENT_PROVIDER Force provider via env
   PHREN_AGENT_MODEL    Override model via env
+  PHREN_AGENT_REASONING Override reasoning effort via env
 
 Examples:
-  phren-agent "fix the login bug"
-  phren-agent --provider codex "add input validation"
-  phren-agent --provider anthropic --verbose "refactor the database layer"
+  phren "fix the login bug"
+  phren --provider openai-codex "add input validation"
+  phren --model openai-codex/gpt-5.4 --reasoning high "add input validation"
+  phren --provider anthropic --verbose "refactor the database layer"
 `.trim();
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -107,6 +112,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--multi") { args.multi = true; }
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
+    else if (arg === "--reasoning" && argv[i + 1]) {
+      const value = argv[++i]?.toLowerCase();
+      if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
+        args.reasoning = value === "max" ? "xhigh" : value;
+      }
+    }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
     else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
@@ -126,6 +137,12 @@ export function parseArgs(argv: string[]): CliArgs {
   // Also check env for model override
   if (!args.model && process.env.PHREN_AGENT_MODEL) {
     args.model = process.env.PHREN_AGENT_MODEL;
+  }
+  if (!args.reasoning && process.env.PHREN_AGENT_REASONING) {
+    const value = process.env.PHREN_AGENT_REASONING.toLowerCase();
+    if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
+      args.reasoning = value === "max" ? "xhigh" : value;
+    }
   }
 
   return args;
