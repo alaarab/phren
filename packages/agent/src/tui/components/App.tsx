@@ -209,7 +209,7 @@ export function App({
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!running}
+          focus={true}
         />
         <PermissionsLine mode={state.permMode} />
       </Box>
