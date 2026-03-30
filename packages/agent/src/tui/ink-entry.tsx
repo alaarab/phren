@@ -10,12 +10,13 @@ import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER } from "../multi/diff-renderer.js";
+import { formatToolInput } from "./tool-render.js";
 import * as os from "os";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { loadInputMode, saveInputMode, savePermissionMode } from "../settings.js";
 import { nextPermissionMode } from "./ansi.js";
-import { App, type AppState, type CompletedMessage } from "./components/App.js";
+import { App, type AppState, type ActiveToolInfo, type CompletedMessage } from "./components/App.js";
 import type { ToolCallProps } from "./components/ToolCall.js";
 import { createRequire } from "node:module";
 import { getTheme, type Theme } from "./themes.js";
@@ -44,6 +45,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let thinkStartTime = 0;
   let thinkElapsed: string | null = null;
   let currentToolCalls: ToolCallProps[] = [];
+  let activeTool: ActiveToolInfo | null = null;
 
   function nextId(): string {
     return `msg-${++msgCounter}`;
@@ -72,6 +74,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         completedMessages={[...completedMessages]}
         streamingText={streamingText}
         completedToolCalls={[...currentToolCalls]}
+        activeTool={activeTool}
         thinking={thinking}
         thinkStartTime={thinkStartTime}
         thinkElapsed={thinkElapsed}
@@ -80,6 +83,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         showBanner={true}
         inputHistory={[...inputHistory]}
         verbose={verbose}
+        theme={theme}
         onSubmit={handleSubmit}
         onPermissionCycle={handlePermissionCycle}
         onCancelTurn={handleCancelTurn}
@@ -255,11 +259,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       streamingText += text;
       update();
     },
-    onToolStart: (_name, _input, _count) => {
+    onToolStart: (name, input, _count) => {
       thinking = false;
+      activeTool = { name, preview: formatToolInput(name, input) };
       update();
     },
     onToolEnd: (name, input, output, isError, dur) => {
+      activeTool = null;
       const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur });
@@ -288,6 +294,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     thinkElapsed = null;
     streamingText = "";
     currentToolCalls = [];
+    activeTool = null;
     update();
 
     try {
@@ -312,6 +319,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
     streamingText = "";
     currentToolCalls = [];
+    activeTool = null;
     running = false;
     thinkElapsed = elapsed;
     update();
@@ -350,6 +358,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       completedMessages={[]}
       streamingText=""
       completedToolCalls={[]}
+      activeTool={null}
       thinking={false}
       thinkStartTime={0}
       thinkElapsed={null}
@@ -358,6 +367,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       showBanner={true}
       inputHistory={[]}
       verbose={verbose}
+      theme={theme}
       onSubmit={handleSubmit}
       onPermissionCycle={handlePermissionCycle}
       onCancelTurn={handleCancelTurn}
