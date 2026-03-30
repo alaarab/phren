@@ -112,6 +112,8 @@ export function App({
   const [bashMode, setBashMode] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [ctrlCCount, setCtrlCCount] = useState(0);
+  const [tabFocused, setTabFocused] = useState(false);
+  const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
 
   const handleSubmit = useCallback((value: string) => {
     setInputValue("");
@@ -142,13 +144,20 @@ export function App({
     onExit: () => { onExit(); exit(); },
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
-    onSelectAgentByIndex: agents && agents.length > 0 ? (index) => {
-      if (index === 0) {
-        // Index 0 = main orchestrator (null)
-        onSelectAgent?.(null);
-      } else if (agents && index - 1 < agents.length) {
-        onSelectAgent?.(agents[index - 1].id);
-      }
+    // Tab navigation: down enters tab bar, left/right cycles, enter selects, up exits
+    tabFocused,
+    onTabNavigate: agents && agents.length > 0 ? {
+      onEnterTabBar: () => { setTabFocused(true); setHighlightedTabIndex(0); },
+      onExitTabBar: () => { setTabFocused(false); },
+      onLeft: () => { setHighlightedTabIndex((prev) => Math.max(0, prev - 1)); },
+      onRight: () => { setHighlightedTabIndex((prev) => Math.min((agents?.length ?? 1) - 1, prev + 1)); },
+      onSelect: () => {
+        if (agents && agents[highlightedTabIndex]) {
+          const id = agents[highlightedTabIndex].id;
+          onSelectAgent?.(id === "__main__" ? null : id);
+        }
+        setTabFocused(false);
+      },
     } : undefined,
   });
 
@@ -252,7 +261,14 @@ export function App({
           focus={true}
           separatorColor={theme.separator}
         />
-        <PermissionsLine mode={state.permMode} theme={theme} agents={agents} selectedAgentId={selectedAgentId} />
+        <PermissionsLine
+          mode={state.permMode}
+          theme={theme}
+          agents={agents}
+          selectedAgentId={selectedAgentId}
+          highlightedTabId={agents && agents[highlightedTabIndex] ? agents[highlightedTabIndex].id : null}
+          tabFocused={tabFocused}
+        />
       </Box>
     </>
   );
