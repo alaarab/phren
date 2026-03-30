@@ -8,6 +8,7 @@ import { SteerQueue } from "./SteerQueue.js";
 import { InputArea, PermissionsLine } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import type { Theme } from "../themes.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
 
@@ -69,6 +70,7 @@ export interface AppProps {
   showBanner: boolean;
   inputHistory: string[];
   verbose: boolean;
+  theme: Theme;
   onSubmit: (input: string) => void;
   onPermissionCycle: () => void;
   onCancelTurn: () => void;
@@ -89,6 +91,7 @@ export function App({
   showBanner,
   inputHistory,
   verbose,
+  theme,
   onSubmit,
   onPermissionCycle,
   onCancelTurn,
@@ -155,7 +158,7 @@ export function App({
           if (item.kind === "user") {
             return (
               <Box key={item.id} flexDirection="column">
-                <Text bold>{"\u276f"} {(item as UserMsg).text}</Text>
+                <Text bold color={theme.user.color}>{theme.user.label} {(item as UserMsg).text}</Text>
               </Box>
             );
           }
@@ -164,11 +167,11 @@ export function App({
             return (
               <Box key={item.id} flexDirection="column" marginTop={1}>
                 {aMsg.toolCalls?.map((tc, i) => (
-                  <ToolCall key={i} {...tc} verbose={verbose} />
+                  <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
                 ))}
                 {aMsg.text ? (
                   <Box>
-                    <Text color="magenta" wrap="truncate">{"\u25c6"} </Text>
+                    <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
                     <Text wrap="wrap">{aMsg.text}</Text>
                   </Box>
                 ) : null}
@@ -186,7 +189,7 @@ export function App({
       <Box flexDirection="column">
         {/* In-progress tool calls (not yet finalized) */}
         {completedToolCalls.map((tc, i) => (
-          <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} />
+          <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} />
         ))}
 
         {/* Currently executing tool — animated spinner */}
@@ -194,14 +197,14 @@ export function App({
           <Box paddingLeft={2}>
             <ToolSpinner />
             <Text bold>{activeTool.name}</Text>
-            {activeTool.preview ? <Text color="gray"> {activeTool.preview}</Text> : null}
+            {activeTool.preview ? <Text color={theme.separator}> {activeTool.preview}</Text> : null}
           </Box>
         )}
 
         {/* Active streaming text with diamond prefix */}
         {streamingText !== "" && (
           <Box marginTop={1}>
-            <Text color="magenta" wrap="truncate">{"\u25c6"} </Text>
+            <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
             <Text wrap="wrap">{streamingText}</Text>
           </Box>
         )}
@@ -229,8 +232,9 @@ export function App({
           onSubmit={handleSubmit}
           bashMode={bashMode}
           focus={true}
+          separatorColor={theme.separator}
         />
-        <PermissionsLine mode={state.permMode} />
+        <PermissionsLine mode={state.permMode} theme={theme} />
       </Box>
     </>
   );
