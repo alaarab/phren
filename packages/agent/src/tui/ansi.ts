@@ -40,24 +40,24 @@ export function nextPermissionMode(current: PermissionMode): PermissionMode {
 }
 
 export const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  "suggest": "ask",
+  "suggest": "",
   "auto-confirm": "auto edits",
   "plan": "plan",
   "full-auto": "autopilot",
 };
 
 export const PERMISSION_ICONS: Record<PermissionMode, string> = {
-  "suggest": "\u25cb",       // ○
+  "suggest": "",
   "auto-confirm": "\u25d0",  // ◐
   "plan": "\u25d1",          // ◑
   "full-auto": "\u25cf",     // ●
 };
 
 export const PERMISSION_COLORS: Record<PermissionMode, (t: string) => string> = {
-  "suggest": s.cyan,
-  "auto-confirm": s.green,
-  "plan": s.blue,
-  "full-auto": s.yellow,
+  "suggest": (t: string) => t,  // invisible / no color
+  "auto-confirm": s.yellow,     // orange-ish (ANSI yellow)
+  "plan": s.magenta,            // purple
+  "full-auto": s.green,         // green
 };
 
 export function permTag(mode: PermissionMode): string {

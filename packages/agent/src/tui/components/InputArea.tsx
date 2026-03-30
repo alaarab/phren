@@ -62,10 +62,10 @@ export interface PermissionsLineProps {
 }
 
 const PERM_COLOR_MAP: Record<PermissionMode, string> = {
-  "suggest": "cyan",
-  "auto-confirm": "green",
-  "plan": "blue",
-  "full-auto": "yellow",
+  "suggest": "",
+  "auto-confirm": "yellow",
+  "plan": "magenta",
+  "full-auto": "green",
 };
 
 const STATUS_ICON: Record<AgentTab["status"], string> = {
@@ -82,16 +82,21 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
   const label = PERMISSION_LABELS[mode];
   const permColors = theme?.permission;
   const color = permColors
-    ? (mode === "suggest" ? permColors.suggest : mode === "auto-confirm" ? permColors.auto : permColors.fullAuto)
+    ? (mode === "suggest" ? permColors.suggest : mode === "auto-confirm" ? permColors.auto : mode === "plan" ? (permColors as Record<string, string>).plan ?? "magenta" : permColors.fullAuto)
     : PERM_COLOR_MAP[mode];
 
   const hasAgents = agents && agents.length > 0;
+  const showPerm = mode !== "suggest"; // ask mode shows nothing
 
   return (
     <Box>
-      <Text>
-        {"  "}<Text color={color}>{icon} {label}</Text>
-      </Text>
+      {showPerm ? (
+        <Text>
+          {"  "}<Text color={color}>{icon} {label}</Text>
+        </Text>
+      ) : (
+        <Text>{"  "}</Text>
+      )}
       {hasAgents ? (
         <Text>
           {"  \u2502 "}
