@@ -144,7 +144,7 @@ export function App({
           }
           if (item.kind === "user") {
             return (
-              <Box key={item.id} flexDirection="column" marginTop={1}>
+              <Box key={item.id} flexDirection="column">
                 <Text bold>{"\u276f"} {(item as UserMsg).text}</Text>
               </Box>
             );
