@@ -18,6 +18,7 @@ import { nextPermissionMode } from "./ansi.js";
 import { App, type AppState, type CompletedMessage } from "./components/App.js";
 import type { ToolCallProps } from "./components/ToolCall.js";
 import { createRequire } from "node:module";
+import { getTheme, type Theme } from "./themes.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -33,6 +34,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const inputHistory: string[] = [];
   let running = false;
   let verbose = false;
+  let theme: Theme = getTheme();
   let msgCounter = 0;
 
   // Mutable render state — updated then pushed to React via rerender()
@@ -193,6 +195,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (line === "/verbose") {
       verbose = !verbose;
       completedMessages.push({ id: nextId(), kind: "status", text: `Verbose: ${verbose ? "on" : "off"}` });
+      update();
+      return;
+    }
+
+    if (line === "/theme") {
+      theme = getTheme(theme.name === "dark" ? "light" : "dark");
+      completedMessages.push({ id: nextId(), kind: "status", text: `Theme: ${theme.name}` });
       update();
       return;
     }
