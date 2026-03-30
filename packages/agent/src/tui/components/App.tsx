@@ -5,7 +5,7 @@ import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
-import { InputArea, PermissionsLine } from "./InputArea.js";
+import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
@@ -76,6 +76,12 @@ export interface AppProps {
   onPermissionCycle: () => void;
   onCancelTurn: () => void;
   onExit: () => void;
+  /** Agent tabs for multi-agent mode */
+  agents?: AgentTab[];
+  /** Currently selected agent ID (null = main orchestrator) */
+  selectedAgentId?: string | null;
+  /** Callback when user selects a different agent tab */
+  onSelectAgent?: (agentId: string | null) => void;
 }
 
 export function App({
@@ -97,6 +103,9 @@ export function App({
   onPermissionCycle,
   onCancelTurn,
   onExit,
+  agents,
+  selectedAgentId,
+  onSelectAgent,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -133,6 +142,14 @@ export function App({
     onExit: () => { onExit(); exit(); },
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
+    onSelectAgentByIndex: agents && agents.length > 0 ? (index) => {
+      if (index === 0) {
+        // Index 0 = main orchestrator (null)
+        onSelectAgent?.(null);
+      } else if (agents && index - 1 < agents.length) {
+        onSelectAgent?.(agents[index - 1].id);
+      }
+    } : undefined,
   });
 
   // Build Static items — banner first, then completed messages
@@ -235,7 +252,7 @@ export function App({
           focus={true}
           separatorColor={theme.separator}
         />
-        <PermissionsLine mode={state.permMode} theme={theme} />
+        <PermissionsLine mode={state.permMode} theme={theme} agents={agents} selectedAgentId={selectedAgentId} />
       </Box>
     </>
   );
