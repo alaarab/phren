@@ -672,7 +672,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
     />,
-    { exitOnCtrlC: false, incrementalRendering: true, maxFps: 30 },
+    { exitOnCtrlC: false },
   );
   rerender = app.rerender;
   appInstance = app;
