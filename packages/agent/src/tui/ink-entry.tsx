@@ -39,6 +39,35 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let theme: Theme = getTheme();
   let msgCounter = 0;
 
+  // Permission prompt state — when set, input field captures y/n/a/s
+  let permissionResolve: ((allowed: boolean) => void) | null = null;
+
+  // Ink-compatible askUser: shows prompt in chat, waits for y/n in input
+  config.registry.askUser = async (toolName, input, reason) => {
+    const { addAllow } = await import("../permissions/allowlist.js");
+    const summary = Object.keys(input).length > 0
+      ? `${toolName}(${Object.entries(input).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 40)}`).join(", ")})`
+      : toolName;
+
+    completedMessages.push({
+      id: nextId(),
+      kind: "status",
+      text: `\x1b[1m\x1b[33m[PERMISSION]\x1b[0m ${toolName}\n  ${reason}\n  ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow-tool  [s]ession-allow\x1b[0m`,
+    });
+    update();
+
+    return new Promise<boolean>((resolve) => {
+      permissionResolve = (allowed) => {
+        permissionResolve = null;
+        resolve(allowed);
+      };
+      // Store the addAllow function for a/s responses
+      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).toolName = toolName;
+      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).input = input;
+      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).addAllow = addAllow;
+    });
+  };
+
   // Mutable render state — updated then pushed to React via rerender()
   const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
@@ -155,6 +184,29 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   function handleSubmit(input: string) {
     const line = input.trim();
     if (!line) return;
+
+    // Permission prompt active — intercept y/n/a/s
+    if (permissionResolve) {
+      const key = line.toLowerCase();
+      const meta = permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: (t: string, i: Record<string, unknown>, s: string) => void };
+      if (key === "y" || key === "yes") {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed\x1b[0m" });
+        permissionResolve(true);
+      } else if (key === "a") {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed (tool for session)\x1b[0m" });
+        meta.addAllow(meta.toolName, meta.input, "tool");
+        permissionResolve(true);
+      } else if (key === "s") {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed (session)\x1b[0m" });
+        meta.addAllow(meta.toolName, meta.input, "session");
+        permissionResolve(true);
+      } else {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[31m✗ Denied\x1b[0m" });
+        permissionResolve(false);
+      }
+      update();
+      return;
+    }
 
     // Track input history (skip duplicates of the last entry)
     if (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== line) {
