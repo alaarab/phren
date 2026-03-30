@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text, useStdout } from "ink";
 import { PERMISSION_LABELS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
+import type { Theme } from "../themes.js";
 
 export interface StatusBarProps {
   provider: string;
@@ -10,9 +11,10 @@ export interface StatusBarProps {
   cost: string;
   permMode?: PermissionMode;
   agentCount?: number;
+  theme?: Theme;
 }
 
-export function StatusBar({ provider, project, turns, cost, permMode, agentCount }: StatusBarProps) {
+export function StatusBar({ provider, project, turns, cost, permMode, agentCount, theme }: StatusBarProps) {
   const { stdout } = useStdout();
   const width = stdout?.columns || 80;
   const modeLabel = permMode ? PERMISSION_LABELS[permMode] : "";
@@ -31,6 +33,9 @@ export function StatusBar({ provider, project, turns, cost, permMode, agentCount
 
   const pad = Math.max(0, width - left.length - right.length);
   const fullLine = left + " ".repeat(pad) + right;
+
+  // theme.statusBar.accent is available for future use (e.g. highlighted segments)
+  const _accent = theme?.statusBar.accent;
 
   return <Text inverse>{fullLine}</Text>;
 }

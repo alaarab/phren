@@ -387,7 +387,7 @@ function syncSettingsToPreferences(storePath: string, config: ConfigSource): voi
       governancePatch.proactivityFindings = proactivityFindings;
     }
     if (proactivityTasks && ["high", "medium", "low"].includes(proactivityTasks)) {
-      governancePatch.proactivityTask = proactivityTasks;
+      governancePatch.proactivityTasks = proactivityTasks;
     }
     if (Object.keys(governancePatch).length > 0) {
       patchJsonFile(governancePrefsPath, governancePatch);

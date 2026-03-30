@@ -1,11 +1,5 @@
 import { useInput } from "ink";
-
-const SLASH_COMMANDS = [
-  "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
-  "/context", "/model", "/provider", "/preset", "/session", "/history",
-  "/compact", "/diff", "/git", "/mem", "/ask", "/spawn", "/agents",
-  "/mode", "/verbose", "/theme", "/exit", "/quit",
-];
+import { COMMAND_NAMES } from "../../commands.js";
 
 export interface KeyboardShortcutOpts {
   isRunning: boolean;
@@ -31,6 +25,8 @@ export interface KeyboardShortcutOpts {
   onUnstash?: () => string | null;
   /** Ctrl+R history search */
   onHistorySearch?: () => void;
+  /** Ctrl+F content search */
+  onContentSearch?: () => void;
   /** Tab bar navigation */
   tabFocused?: boolean;
   onEnterTabBar?: () => void;
@@ -85,6 +81,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Ctrl+R -- history search
     if (key.ctrl && input === "r") {
       opts.onHistorySearch?.();
+      return;
+    }
+
+    // Ctrl+F -- content search
+    if (key.ctrl && input === "f") {
+      opts.onContentSearch?.();
       return;
     }
 
@@ -167,7 +169,7 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     if (key.tab && !key.shift && !opts.isRunning) {
       const val = opts.inputValue;
       if (val.startsWith("/") && val.length > 1) {
-        const matches = SLASH_COMMANDS.filter(c => c.startsWith(val));
+        const matches = COMMAND_NAMES.filter(c => c.startsWith(val));
         if (matches.length === 1) {
           opts.onSetInput(matches[0]);
         }

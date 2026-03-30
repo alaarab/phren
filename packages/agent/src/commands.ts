@@ -13,6 +13,8 @@ import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, cost
 import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { modelCommand, providerCommand, presetCommand } from "./commands/model.js";
+import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
+import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -43,6 +45,8 @@ export interface CommandContext {
   phrenPath?: string | null;
   /** Full phren context for /mem commands */
   phrenCtx?: PhrenContext | null;
+  /** Tool registry for /permissions command */
+  registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -52,6 +56,18 @@ export function createCommandContext(session: AgentSession, contextLimit: number
     undoStack: [],
   };
 }
+
+/**
+ * All slash commands available in the agent, including TUI-only commands.
+ * Used for tab completion in the TUI.
+ */
+export const COMMAND_NAMES: readonly string[] = [
+  "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
+  "/context", "/model", "/provider", "/preset", "/session", "/history",
+  "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/spawn", "/agents",
+  "/mode", "/permissions", "/verbose", "/theme", "/agent",
+  "/exit", "/quit", "/q",
+];
 
 /**
  * Try to handle a slash command. Returns true if the input was a command.
@@ -82,6 +98,29 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/mem":      return memCommand(parts, ctx);
     case "/ask":      return askCommand(parts, ctx);
     case "/resume":   return resumeCommand(parts, ctx);
+
+    case "/mode": {
+      const current = loadInputMode();
+      const newMode = current === "steering" ? "queue" : "steering";
+      saveInputMode(newMode);
+      process.stderr.write(`${DIM}Input mode: ${newMode}${RESET}\n`);
+      return true;
+    }
+
+    case "/permissions": {
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
+      const arg = parts[1] as PermissionMode | undefined;
+      if (!ctx.registry || !arg || !VALID_MODES.includes(arg)) {
+        const current = ctx.registry?.permissionConfig.mode ?? "unknown";
+        process.stderr.write(`${DIM}Permission mode: ${current}${RESET}\n`);
+        process.stderr.write(`${DIM}Usage: /permissions <suggest|auto-confirm|full-auto>${RESET}\n`);
+      } else {
+        ctx.registry.setPermissions({ ...ctx.registry.permissionConfig, mode: arg });
+        savePermissionMode(arg);
+        process.stderr.write(`${DIM}Permission mode: ${arg}${RESET}\n`);
+      }
+      return true;
+    }
 
     case "/spawn": {
       if (!ctx.spawner) {

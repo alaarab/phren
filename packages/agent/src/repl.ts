@@ -7,9 +7,8 @@ import * as os from "node:os";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
-import type { PermissionMode } from "./permissions/types.js";
 import { resolveProvider } from "./providers/resolve.js";
-import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { loadInputMode } from "./settings.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
 const HISTORY_FILE = path.join(HISTORY_DIR, "repl-history.txt");
@@ -73,6 +72,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     currentReasoning: config.provider.reasoningEffort ?? null,
     provider: config.provider,
     systemPrompt: config.systemPrompt,
+    registry: config.registry,
     onModelChange: (result: import("./multi/model-picker.js").PickerResult) => {
       config.provider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
     },
@@ -88,31 +88,6 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     allHistory.push(trimmed);
 
     // Handle slash commands
-    if (trimmed === "/mode") {
-      const newMode: InputMode = inputMode === "steering" ? "queue" : "steering";
-      inputMode = newMode;
-      saveInputMode(newMode);
-      process.stderr.write(`${YELLOW}Input mode: ${newMode}${RESET}\n`);
-      rl.prompt();
-      continue;
-    }
-
-    if (trimmed.startsWith("/permissions")) {
-      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
-      const arg = trimmed.split(/\s+/)[1] as PermissionMode | undefined;
-      if (!arg || !VALID_MODES.includes(arg)) {
-        const current = config.registry.permissionConfig.mode;
-        process.stderr.write(`${DIM}Permission mode: ${current}${RESET}\n`);
-        process.stderr.write(`${DIM}Usage: /permissions <suggest|auto-confirm|full-auto>${RESET}\n`);
-      } else {
-        config.registry.setPermissions({ ...config.registry.permissionConfig, mode: arg });
-        savePermissionMode(arg);
-        process.stderr.write(`${YELLOW}Permission mode: ${arg}${RESET}\n`);
-      }
-      rl.prompt();
-      continue;
-    }
-
     if (handleCommand(trimmed, buildCommandContext())) {
       rl.prompt();
       continue;
@@ -147,13 +122,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       allHistory.push(queued);
 
       if (queued.startsWith("/")) {
-        if (queued === "/mode") {
-          inputMode = inputMode === "steering" ? "queue" : "steering";
-          saveInputMode(inputMode);
-          process.stderr.write(`${YELLOW}Input mode: ${inputMode}${RESET}\n`);
-        } else {
-          handleCommand(queued, buildCommandContext());
-        }
+        handleCommand(queued, buildCommandContext());
         break;
       }
 

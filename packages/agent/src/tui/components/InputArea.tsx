@@ -12,21 +12,24 @@ export interface InputAreaProps {
   bashMode: boolean;
   focus: boolean;
   separatorColor?: string;
+  theme?: Theme;
 }
 
-export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor }: InputAreaProps) {
+export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme }: InputAreaProps) {
   const { stdout } = useStdout();
   const columns = stdout?.columns || 80;
   const sep = "\u2500".repeat(columns);
-  const sepColor = separatorColor ?? "gray";
+  const sepColor = theme?.input.separator ?? separatorColor ?? "gray";
+  const promptColor = theme?.input.prompt ?? undefined;
+  const bashPromptColor = theme?.input.bashPrompt ?? "yellow";
 
   return (
     <Box flexDirection="column">
       <Text color={sepColor} dimColor>{sep}</Text>
       <Box>
         {bashMode
-          ? <Text color="yellow">! </Text>
-          : <Text dimColor>{"\u25b8"} </Text>
+          ? <Text color={bashPromptColor}>! </Text>
+          : <Text color={promptColor} dimColor>{"\u25b8"} </Text>
         }
         <PhrenInput
           value={value}
@@ -56,13 +59,6 @@ export interface PermissionsLineProps {
   tabFocused?: boolean;
 }
 
-const PERM_COLOR_MAP: Record<PermissionMode, string> = {
-  "suggest": "",
-  "auto-confirm": "yellow",
-  "plan": "magenta",
-  "full-auto": "green",
-};
-
 const STATUS_ICON: Record<AgentTab["status"], string> = {
   running: "\u25cf",   // ●
   idle: "\u25cb",      // ○
@@ -76,12 +72,28 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
   const icon = PERMISSION_ICONS[mode];
   const label = PERMISSION_LABELS[mode];
   const permColors = theme?.permission;
-  const color = permColors
-    ? (mode === "suggest" ? permColors.suggest : mode === "auto-confirm" ? permColors.auto : mode === "plan" ? (permColors as Record<string, string>).plan ?? "magenta" : permColors.fullAuto)
-    : PERM_COLOR_MAP[mode];
+  const color = mode === "suggest"
+    ? (permColors?.suggest ?? "")
+    : mode === "auto-confirm"
+      ? (permColors?.auto ?? "yellow")
+      : mode === "plan"
+        ? ((permColors as Record<string, string> | undefined)?.plan ?? "magenta")
+        : (permColors?.fullAuto ?? "green");
 
   const showPerm = mode !== "suggest";
   const hasAgents = agents && agents.length > 0;
+
+  // Agent tab status → theme color
+  const tabColors = theme?.agentTab;
+  function agentTabColor(agent: AgentTab): string {
+    if (tabColors) {
+      if (agent.status === "running") return tabColors.running;
+      if (agent.status === "idle") return tabColors.idle;
+      if (agent.status === "done") return tabColors.done;
+      if (agent.status === "error") return tabColors.error;
+    }
+    return agent.color;
+  }
 
   return (
     <Box>
@@ -97,14 +109,15 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
             const isActive = agent.id === selectedAgentId;
             const isHighlighted = tabFocused && agent.id === highlightedTabId;
             const statusIcon = STATUS_ICON[agent.status];
+            const resolvedColor = agentTabColor(agent);
             return (
               <Text key={agent.id}>
                 {i > 0 ? " " : ""}
                 {isHighlighted
-                  ? <Text bold inverse color={agent.color}>{` ${statusIcon} ${agent.name} `}</Text>
+                  ? <Text bold inverse color={resolvedColor}>{` ${statusIcon} ${agent.name} `}</Text>
                   : isActive
-                    ? <Text bold underline color={agent.color}>{statusIcon} {agent.name}</Text>
-                    : <Text color={agent.color} dimColor={agent.status === "idle" || agent.status === "done"}>{statusIcon} {agent.name}</Text>
+                    ? <Text bold underline color={resolvedColor}>{statusIcon} {agent.name}</Text>
+                    : <Text color={resolvedColor} dimColor={agent.status === "idle" || agent.status === "done"}>{statusIcon} {agent.name}</Text>
                 }
               </Text>
             );

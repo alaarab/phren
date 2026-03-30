@@ -23,31 +23,27 @@ export function useSlashCommands(opts: SlashCommandOpts) {
         return true;
       }) as typeof process.stderr.write;
 
+      let result: boolean | Promise<boolean>;
       try {
-        const result = handleCommand(input, opts.commandContext);
-
-        if (result instanceof Promise) {
-          // Async command — restore stderr, then capture async output
-          process.stderr.write = origWrite;
-          result.then(() => {
-            // For async commands, stderr was already restored so output went to real stderr.
-            // Future improvement: capture async output too.
-          });
-          flush();
-          return true;
-        }
-
-        if (result === true) {
-          flush();
-          return true;
-        }
-
-        // Not a recognized command (result === false)
-        flush();
-        return true; // Still starts with /, so don't send to agent
-      } finally {
+        result = handleCommand(input, opts.commandContext);
+      } catch {
         process.stderr.write = origWrite;
+        return true;
       }
+
+      if (result instanceof Promise) {
+        result.then(() => {
+          process.stderr.write = origWrite;
+          flush();
+        }).catch(() => {
+          process.stderr.write = origWrite;
+        });
+        return true;
+      }
+
+      process.stderr.write = origWrite;
+      flush();
+      return true;
 
       function flush() {
         if (captured.length > 0) {

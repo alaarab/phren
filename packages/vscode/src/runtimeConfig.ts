@@ -47,7 +47,7 @@ export function pathExists(targetPath: string | undefined): boolean {
 
 function detectMcpServerPath(): string | undefined {
   const candidates = new Set<string>();
-  const envCandidate = normalizeConfiguredPath(process.env.PHREN_MCP_SERVER_PATH ?? process.env.PHREN_MCP_SERVER_PATH);
+  const envCandidate = normalizeConfiguredPath(process.env.PHREN_MCP_SERVER_PATH ?? process.env.PHREN_MCP_PATH);
   if (envCandidate) {
     candidates.add(envCandidate);
   }

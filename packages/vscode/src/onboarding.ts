@@ -261,9 +261,8 @@ export async function handleWalkthroughChecks(
     return false;
   }
 
-  const pathModule = require("path");
   if (!pathExists(runtimeConfig.mcpServerPath)) {
-    const basename = pathModule.basename(runtimeConfig.mcpServerPath);
+    const basename = path.basename(runtimeConfig.mcpServerPath!);
     const choice = await vscode.window.showErrorMessage(
       `Phren entrypoint not found: ${basename}. Try re-running init.`,
       "Re-run Init",
@@ -295,21 +294,25 @@ export async function handleWalkthroughChecks(
 // ── Internal helpers ────────────────────────────────────────────────────────
 
 export function hasPhrenMcpEntry(outputChannel?: vscode.OutputChannel): boolean {
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
-  if (!fs.existsSync(settingsPath)) {
-    return false;
-  }
+  const configFiles = [
+    path.join(os.homedir(), ".claude", "settings.json"),
+    path.join(os.homedir(), ".claude.json"),
+    path.join(os.homedir(), ".vscode-server", "data", "User", "mcp.json"),
+  ];
 
-  try {
-    const raw = fs.readFileSync(settingsPath, "utf8");
-    const json = safeParseJson(raw);
-    const mcpServers = asRecord(json?.mcpServers);
-    const servers = asRecord(json?.servers);
-    return Boolean(mcpServers?.phren || servers?.phren);
-  } catch (error) {
-    outputChannel?.appendLine(`Failed to read ${settingsPath}: ${toErrorMessage(error)}`);
-    return false;
+  for (const configFile of configFiles) {
+    if (!fs.existsSync(configFile)) continue;
+    try {
+      const raw = fs.readFileSync(configFile, "utf8");
+      const json = safeParseJson(raw);
+      const mcpServers = asRecord(json?.mcpServers);
+      const servers = asRecord(json?.servers);
+      if (mcpServers?.phren || servers?.phren) return true;
+    } catch (error) {
+      outputChannel?.appendLine(`Failed to read ${configFile}: ${toErrorMessage(error)}`);
+    }
   }
+  return false;
 }
 
 async function promptForCloneUrl(): Promise<{ url?: string; cancelled: boolean }> {

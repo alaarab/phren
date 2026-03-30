@@ -36,6 +36,8 @@ export interface SpawnPayload {
   verbose: boolean;
   /** Env vars to forward (API keys, etc). */
   env: Record<string, string>;
+  /** Agent type name (e.g. "explore", "plan", "general") for tool/prompt restrictions. */
+  agentType?: string;
   /** Path to a git worktree used for isolation. */
   worktreePath?: string;
 }

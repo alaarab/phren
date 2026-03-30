@@ -9,26 +9,33 @@ export interface ToolCallProps {
   output: string;
   isError: boolean;
   durationMs: number;
+  diffRendered?: string;
 }
 
 const VERBOSE_LINES = 5;
 
-export function ToolCall({ name, input, output, isError, durationMs, verbose, theme }: ToolCallProps & { verbose?: boolean; theme?: Theme }) {
+export function ToolCall({ name, input, output, isError, durationMs, diffRendered, verbose, theme }: ToolCallProps & { verbose?: boolean; theme?: Theme }) {
   const rawPreview = formatToolInput(name, input);
   const preview = isFileToolPreview(name) && rawPreview ? fileLink(rawPreview) : rawPreview;
   const dur = formatDuration(durationMs);
   const statusColor = isError ? (theme?.tool.error ?? "red") : (theme?.tool.success ?? "green");
-  const previewColor = theme?.separator ?? "gray";
+  const nameColor = theme?.tool.name ?? undefined;
+  const previewColor = theme?.tool.preview ?? theme?.separator ?? "gray";
+  const durationColor = theme?.tool.duration ?? undefined;
+  const outputColor = theme?.tool.output ?? undefined;
 
   if (!verbose) {
     return (
       <Box flexDirection="column" paddingLeft={2}>
         <Box>
           <Text color={statusColor}>{isError ? "\u2717" : "\u2192"} </Text>
-          <Text bold>{name}</Text>
+          <Text bold color={nameColor}>{name}</Text>
           <Text color={previewColor}> {preview}</Text>
-          <Text dimColor>  {dur}</Text>
+          <Text color={durationColor} dimColor>  {dur}</Text>
         </Box>
+        {diffRendered && (
+          <Text>{diffRendered}</Text>
+        )}
       </Box>
     );
   }
@@ -41,15 +48,21 @@ export function ToolCall({ name, input, output, isError, durationMs, verbose, th
     <Box flexDirection="column" paddingLeft={2}>
       <Box>
         <Text color={statusColor}>{isError ? "\u2717" : "\u2192"} </Text>
-        <Text bold>{name}</Text>
+        <Text bold color={nameColor}>{name}</Text>
         <Text color={previewColor}> {preview}</Text>
-        <Text dimColor>  {dur}</Text>
+        <Text color={durationColor} dimColor>  {dur}</Text>
       </Box>
-      {shown.map((line, i) => (
-        <Text key={i} dimColor>{"    " + line.slice(0, 120)}</Text>
-      ))}
-      {overflow > 0 && (
-        <Text dimColor>{"    ... +" + overflow + " lines"}</Text>
+      {diffRendered ? (
+        <Text>{diffRendered}</Text>
+      ) : (
+        <>
+          {shown.map((line, i) => (
+            <Text key={i} color={outputColor} dimColor>{"    " + line.slice(0, 120)}</Text>
+          ))}
+          {overflow > 0 && (
+            <Text color={outputColor} dimColor>{"    ... +" + overflow + " lines"}</Text>
+          )}
+        </>
       )}
     </Box>
   );
