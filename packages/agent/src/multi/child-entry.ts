@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * Child agent entry point — standalone process that:
+ * Child agent entry point — persistent process that:
  * 1. Receives SpawnPayload via IPC from parent
- * 2. Resolves the LLM provider
- * 3. Registers the standard tool set
- * 4. Runs the agent loop with TurnHooks that serialize events back via process.send()
- * 5. Sends a final "done" message with the result
+ * 2. Resolves the LLM provider and registers tools
+ * 3. Runs the agent loop
+ * 4. Goes idle after task completion — stays alive waiting for messages
+ * 5. Wakes on WakeMessage or DeliverMessage to continue
+ * 6. Shuts down gracefully on ShutdownRequest
  */
 
 import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
-import type { TurnHooks } from "../agent-loop.js";
+import type { TurnHooks, AgentSession } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
@@ -26,8 +27,11 @@ import { buildPhrenContext, buildContextSnippet } from "../memory/context.js";
 import { startSession, endSession, getPriorSummary } from "../memory/session.js";
 import { loadProjectContext } from "../memory/project-context.js";
 import { buildSystemPrompt } from "../system-prompt.js";
-import { runAgent } from "../agent-loop.js";
+import { runAgent, createSession } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
+import type { LlmProvider } from "../providers/types.js";
+import type { PhrenContext } from "../memory/context.js";
+import type { CostTracker } from "../cost.js";
 
 /** Send a typed message to the parent process. */
 function send(msg: ChildMessage): void {
@@ -60,21 +64,35 @@ function createIpcHooks(agentId: string): TurnHooks {
   };
 }
 
-/** Run the agent with the given spawn payload. */
-async function runChildAgent(payload: SpawnPayload): Promise<void> {
-  const { agentId, task, cwd, provider: providerName, model, project, permissions, maxTurns, budget, plan, verbose } = payload;
+// ── Persistent agent state (survives across idle/wake cycles) ──────────────
 
-  // Set cwd
-  process.chdir(cwd);
+interface AgentState {
+  agentId: string;
+  provider: LlmProvider;
+  registry: ToolRegistry;
+  systemPrompt: string;
+  phrenCtx: PhrenContext | null;
+  sessionId: string | null;
+  costTracker: CostTracker;
+  maxTurns: number;
+  verbose: boolean;
+  plan: boolean;
+  hooks: TurnHooks;
+  /** Accumulated DM summaries while running, flushed on idle. */
+  pendingDms: Array<{ from: string; content: string; timestamp: string }>;
+  /** Track whether we've completed at least one task. */
+  taskCount: number;
+}
+
+/** Initialize the persistent agent state from the spawn payload. */
+async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
+  const { agentId, task: _task, cwd, provider: providerName, model, project, permissions, maxTurns, budget, plan, verbose } = payload;
+
+  // Set cwd (use worktree path if provided)
+  process.chdir(payload.worktreePath ?? cwd);
 
   // Resolve LLM provider
-  let provider;
-  try {
-    provider = resolveProvider(providerName, model);
-  } catch (err: unknown) {
-    send({ type: "error", agentId, error: err instanceof Error ? err.message : String(err) });
-    process.exit(1);
-  }
+  const provider = resolveProvider(providerName, model);
 
   // Build phren context
   const phrenCtx = await buildPhrenContext(project);
@@ -83,7 +101,7 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
   let sessionId: string | null = null;
 
   if (phrenCtx) {
-    contextSnippet = await buildContextSnippet(phrenCtx, task);
+    contextSnippet = await buildContextSnippet(phrenCtx, _task);
     priorSummary = getPriorSummary(phrenCtx);
     sessionId = startSession(phrenCtx);
 
@@ -100,7 +118,7 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
   registry.setPermissions({
     mode: permissions,
     allowedPaths: [],
-    projectRoot: cwd,
+    projectRoot: payload.worktreePath ?? cwd,
   });
   registry.register(readFileTool);
   registry.register(writeFileTool);
@@ -124,65 +142,242 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
   const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
   const costTracker = createCostTracker(modelName, budget, provider.name);
 
-  const config = {
+  return {
+    agentId,
     provider,
     registry,
     systemPrompt,
+    phrenCtx,
+    sessionId,
+    costTracker,
     maxTurns,
     verbose,
-    phrenCtx,
-    costTracker,
     plan,
     hooks: createIpcHooks(agentId),
+    pendingDms: [],
+    taskCount: 0,
+  };
+}
+
+/** Run a single task. Returns the result. */
+async function runTask(state: AgentState, task: string): Promise<{ finalText: string; turns: number; toolCalls: number; totalCost?: string }> {
+  const config = {
+    provider: state.provider,
+    registry: state.registry,
+    systemPrompt: state.systemPrompt,
+    maxTurns: state.maxTurns,
+    verbose: state.verbose,
+    phrenCtx: state.phrenCtx,
+    costTracker: state.costTracker,
+    plan: state.plan && state.taskCount === 0, // Plan mode only on first task
+    hooks: state.hooks,
   };
 
-  // Run the agent
-  try {
-    const result = await runAgent(task, config);
+  const result = await runAgent(task, config);
+  state.taskCount++;
 
-    // End phren session
-    if (phrenCtx && sessionId) {
-      const summary = result.finalText.slice(0, 500);
-      endSession(phrenCtx, sessionId, summary);
+  return {
+    finalText: result.finalText,
+    turns: result.turns,
+    toolCalls: result.toolCalls,
+    totalCost: result.totalCost,
+  };
+}
+
+/** Enter idle state — notify parent, wait for wake/shutdown/message. */
+function goIdle(state: AgentState, reason: "task_complete" | "awaiting_input" | "available"): void {
+  // Flush pending DM summaries
+  const dmSummaries = state.pendingDms.length > 0 ? [...state.pendingDms] : undefined;
+  state.pendingDms = [];
+
+  send({
+    type: "idle",
+    agentId: state.agentId,
+    idleReason: reason,
+    dmSummaries,
+  });
+}
+
+/** Clean up and exit. */
+function shutdown(state: AgentState): void {
+  // End phren session
+  if (state.phrenCtx && state.sessionId) {
+    endSession(state.phrenCtx, state.sessionId, `Agent shut down after ${state.taskCount} tasks`);
+  }
+
+  send({ type: "shutdown_approved", agentId: state.agentId });
+  process.exit(0);
+}
+
+// ── Main: persistent event loop ────────────────────────────────────────────
+
+let agentState: AgentState | null = null;
+let isRunning = false;
+
+/** Queue of messages received while the agent was busy running a task. */
+const messageQueue: ParentMessage[] = [];
+
+async function handleMessage(msg: ParentMessage): Promise<void> {
+  if (msg.type === "spawn") {
+    // Initial spawn — initialize state and run first task
+    try {
+      agentState = await initAgentState(msg);
+    } catch (err: unknown) {
+      send({ type: "error", agentId: msg.agentId, error: err instanceof Error ? err.message : String(err) });
+      process.exit(1);
     }
 
-    send({
-      type: "done",
-      agentId,
-      result: {
-        finalText: result.finalText,
-        turns: result.turns,
-        toolCalls: result.toolCalls,
-        totalCost: result.totalCost,
-      },
-    });
-  } catch (err: unknown) {
-    if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
+    isRunning = true;
+    try {
+      const result = await runTask(agentState, msg.task);
+
+      // Send done event (task completed, but process stays alive)
+      send({
+        type: "done",
+        agentId: agentState.agentId,
+        result,
+      });
+
+      isRunning = false;
+
+      // Process any queued messages before going idle
+      await drainQueue();
+
+      // Go idle if not already running another task
+      if (!isRunning) {
+        goIdle(agentState, "task_complete");
+      }
+    } catch (err: unknown) {
+      isRunning = false;
+      if (agentState.phrenCtx && agentState.sessionId) {
+        endSession(agentState.phrenCtx, agentState.sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      send({
+        type: "error",
+        agentId: agentState.agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Don't exit on error — go idle so parent can send new work or shutdown
+      goIdle(agentState, "available");
     }
-    send({
-      type: "error",
-      agentId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    process.exit(1);
+    return;
+  }
+
+  if (!agentState) {
+    // Not initialized yet — ignore
+    return;
+  }
+
+  switch (msg.type) {
+    case "wake": {
+      if (isRunning) {
+        messageQueue.push(msg);
+        return;
+      }
+      isRunning = true;
+      const task = msg.task ?? msg.message ?? "Continue working";
+      try {
+        const result = await runTask(agentState, task);
+        send({ type: "done", agentId: agentState.agentId, result });
+        isRunning = false;
+        await drainQueue();
+        if (!isRunning) goIdle(agentState, "task_complete");
+      } catch (err: unknown) {
+        isRunning = false;
+        send({ type: "error", agentId: agentState.agentId, error: err instanceof Error ? err.message : String(err) });
+        goIdle(agentState, "available");
+      }
+      break;
+    }
+
+    case "deliver_message": {
+      if (isRunning) {
+        // Record DM for later idle notification
+        agentState.pendingDms.push({
+          from: msg.from,
+          content: msg.content,
+          timestamp: new Date().toISOString(),
+        });
+        // Also queue it as a wake message for when current task finishes
+        messageQueue.push({ type: "wake", message: `Message from ${msg.from}: ${msg.content}`, from: msg.from });
+        return;
+      }
+      // Not running — treat as a wake message
+      isRunning = true;
+      const wakeTask = `Message from ${msg.from}: ${msg.content}`;
+      try {
+        const result = await runTask(agentState, wakeTask);
+        send({ type: "done", agentId: agentState.agentId, result });
+        isRunning = false;
+        await drainQueue();
+        if (!isRunning) goIdle(agentState, "task_complete");
+      } catch (err: unknown) {
+        isRunning = false;
+        send({ type: "error", agentId: agentState.agentId, error: err instanceof Error ? err.message : String(err) });
+        goIdle(agentState, "available");
+      }
+      break;
+    }
+
+    case "cancel": {
+      // Hard cancel — exit immediately
+      if (agentState.phrenCtx && agentState.sessionId) {
+        endSession(agentState.phrenCtx, agentState.sessionId, "Cancelled by parent");
+      }
+      process.exit(130);
+      break;
+    }
+
+    case "shutdown_request": {
+      if (isRunning) {
+        // Queue shutdown for after current task
+        messageQueue.push(msg);
+        return;
+      }
+      shutdown(agentState);
+      break;
+    }
   }
 }
 
-// ── Main: wait for spawn payload from parent ────────────────────────────────
+/** Drain queued messages (received while running). Shutdown takes priority. */
+async function drainQueue(): Promise<void> {
+  // Check for shutdown first
+  const shutdownIdx = messageQueue.findIndex((m) => m.type === "shutdown_request");
+  if (shutdownIdx !== -1) {
+    messageQueue.length = 0;
+    if (agentState) shutdown(agentState);
+    return;
+  }
+
+  // Process remaining messages
+  while (messageQueue.length > 0) {
+    const next = messageQueue.shift()!;
+    await handleMessage(next);
+    if (!agentState) return; // shutdown happened
+  }
+}
+
+// ── Message listener ───────────────────────────────────────────────────────
 
 process.on("message", (msg: ParentMessage) => {
-  if (msg.type === "spawn") {
-    runChildAgent(msg).then(() => {
-      process.exit(0);
-    }).catch((err) => {
-      const agentId = msg.agentId;
-      send({ type: "error", agentId, error: err instanceof Error ? err.message : String(err) });
-      process.exit(1);
-    });
-  } else if (msg.type === "cancel") {
-    process.exit(130);
+  if (isRunning && msg.type !== "cancel" && msg.type !== "shutdown_request") {
+    // Queue non-urgent messages while running
+    if (msg.type === "deliver_message" && agentState) {
+      agentState.pendingDms.push({
+        from: msg.from,
+        content: msg.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    messageQueue.push(msg);
+    return;
   }
+
+  handleMessage(msg).catch((err) => {
+    const agentId = agentState?.agentId ?? "unknown";
+    send({ type: "error", agentId, error: err instanceof Error ? err.message : String(err) });
+  });
 });
 
 // If no IPC channel (run directly), exit with error

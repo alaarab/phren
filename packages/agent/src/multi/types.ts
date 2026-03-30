@@ -36,6 +36,8 @@ export interface SpawnPayload {
   verbose: boolean;
   /** Env vars to forward (API keys, etc). */
   env: Record<string, string>;
+  /** Path to a git worktree used for isolation. */
+  worktreePath?: string;
 }
 
 /** Parent can send a cancellation signal. */
@@ -52,7 +54,23 @@ export interface DeliverMessage {
   content: string;
 }
 
-export type ParentMessage = SpawnPayload | CancelMessage | DeliverMessage;
+/** Parent requests graceful shutdown — child should clean up and confirm. */
+export interface ShutdownRequest {
+  type: "shutdown_request";
+  reason?: string;
+}
+
+/** Parent sends a follow-up task or message to wake an idle child. */
+export interface WakeMessage {
+  type: "wake";
+  /** New task to execute, or empty to just resume with the message. */
+  task?: string;
+  /** Message content from another agent or the user. */
+  message?: string;
+  from?: string;
+}
+
+export type ParentMessage = SpawnPayload | CancelMessage | DeliverMessage | ShutdownRequest | WakeMessage;
 
 // ── Child → Parent ──────────────────────────────────────────────────────────
 
@@ -124,6 +142,21 @@ export interface DirectMessageEvent {
   content: string;
 }
 
+/** Child confirms it has shut down cleanly. */
+export interface ShutdownApproved {
+  type: "shutdown_approved";
+  agentId: string;
+}
+
+/** Child entered idle state (finished task, waiting for next instruction). */
+export interface IdleNotification {
+  type: "idle";
+  agentId: string;
+  idleReason: "task_complete" | "awaiting_input" | "available";
+  /** Summaries of DMs received while the agent was running. */
+  dmSummaries?: Array<{ from: string; content: string; timestamp: string }>;
+}
+
 export type ChildMessage =
   | TextDeltaEvent
   | TextBlockEvent
@@ -132,7 +165,9 @@ export type ChildMessage =
   | StatusEvent
   | DoneEvent
   | ErrorEvent
-  | DirectMessageEvent;
+  | DirectMessageEvent
+  | ShutdownApproved
+  | IdleNotification;
 
 // ── Combined ────────────────────────────────────────────────────────────────
 
@@ -140,7 +175,7 @@ export type IpcMessage = ParentMessage | ChildMessage;
 
 // ── Agent registry types ────────────────────────────────────────────────────
 
-export type AgentStatus = "starting" | "running" | "done" | "error" | "cancelled";
+export type AgentStatus = "starting" | "running" | "idle" | "done" | "error" | "cancelled";
 
 export interface AgentEntry {
   id: string;
@@ -151,4 +186,5 @@ export interface AgentEntry {
   finishedAt?: number;
   result?: DoneEvent["result"];
   error?: string;
+  worktree?: { path: string; branch: string; agentId: string };
 }
