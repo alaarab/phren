@@ -2,10 +2,15 @@ import type { AgentTool, AgentToolResult } from "./types.js";
 import type { AgentToolDef } from "../providers/types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkPermission } from "../permissions/checker.js";
-import { askUser } from "../permissions/prompt.js";
+import { askUser as defaultAskUser } from "../permissions/prompt.js";
+
+/** Signature for the permission prompt function. */
+export type AskUserFn = (toolName: string, input: Record<string, unknown>, reason: string) => Promise<boolean>;
 
 export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
+  /** Override the default permission prompt (e.g. for Ink TUI). */
+  askUser: AskUserFn = defaultAskUser;
   permissionConfig: PermissionConfig = {
     mode: "suggest",
     projectRoot: process.cwd(),
@@ -50,7 +55,7 @@ export class ToolRegistry {
       return { output: `Permission denied: ${rule.reason}`, is_error: true };
     }
     if (rule.verdict === "ask") {
-      const allowed = await askUser(name, input, rule.reason);
+      const allowed = await this.askUser(name, input, rule.reason);
       if (!allowed) {
         return { output: "User denied permission.", is_error: true };
       }
