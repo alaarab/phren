@@ -117,6 +117,7 @@ export function App({
   const [ctrlCCount, setCtrlCCount] = useState(0);
   const [tabFocused, setTabFocused] = useState(false);
   const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
+  const [stashedInput, setStashedInput] = useState("");
 
   const handleSubmit = useCallback((value: string) => {
     setInputValue("");
@@ -148,6 +149,23 @@ export function App({
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
     onEscCancelAgent: onCancelAgent,
+    onOpenEditor: () => {
+      // Write input to temp file, open $EDITOR, read back
+      const tmpFile = `/tmp/phren-input-${Date.now()}.md`;
+      try {
+        const fs = require("fs");
+        const { execSync } = require("child_process");
+        fs.writeFileSync(tmpFile, inputValue);
+        const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+        execSync(`${editor} ${tmpFile}`, { stdio: "inherit" });
+        const result = fs.readFileSync(tmpFile, "utf-8");
+        fs.unlinkSync(tmpFile);
+        setInputValue(result.replace(/\n$/, ""));
+      } catch { /* editor cancelled or failed */ }
+    },
+    stashedInput,
+    onStash: (text: string) => { setStashedInput(text); },
+    onUnstash: () => { const s = stashedInput; setStashedInput(""); return s || null; },
     tabFocused,
     onEnterTabBar: agents && agents.length > 0 ? () => { setTabFocused(true); setHighlightedTabIndex(0); } : undefined,
     onExitTabBar: () => { setTabFocused(false); },
