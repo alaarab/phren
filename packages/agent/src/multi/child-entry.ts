@@ -16,7 +16,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
 import { writeFileTool } from "../tools/write-file.js";
 import { editFileTool } from "../tools/edit-file.js";
-import { shellTool } from "../tools/shell.js";
+import { shellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
 import { globTool } from "../tools/glob.js";
 import { grepTool } from "../tools/grep.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
@@ -125,6 +125,8 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   registry.register(writeFileTool);
   registry.register(editFileTool);
   registry.register(shellTool);
+  registry.register(taskOutputTool);
+  registry.register(taskStopTool);
   registry.register(globTool);
   registry.register(grepTool);
 

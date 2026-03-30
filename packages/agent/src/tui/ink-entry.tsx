@@ -441,6 +441,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     activeTool = null;
     running = false;
     thinkElapsed = elapsed;
+    process.stdout.write("\x07"); // terminal bell on completion
     update();
 
     // Clear elapsed indicator after a brief display

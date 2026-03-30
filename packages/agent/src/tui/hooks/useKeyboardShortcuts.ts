@@ -23,6 +23,12 @@ export interface KeyboardShortcutOpts {
   onCancelTurn: () => void;
   /** Cancel the selected agent's current work */
   onEscCancelAgent?: () => void;
+  /** Open $EDITOR for multi-line input */
+  onOpenEditor?: () => void;
+  /** Stash/restore input draft */
+  stashedInput?: string;
+  onStash?: (text: string) => void;
+  onUnstash?: () => string | null;
   /** Tab bar navigation */
   tabFocused?: boolean;
   onEnterTabBar?: () => void;
@@ -53,6 +59,24 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Down arrow (empty input) → enter tab bar
     if (key.downArrow && opts.inputValue === "" && opts.onEnterTabBar && !opts.tabFocused) {
       opts.onEnterTabBar();
+      return;
+    }
+
+    // Ctrl+G -- open external editor for input
+    if (key.ctrl && input === "g") {
+      opts.onOpenEditor?.();
+      return;
+    }
+
+    // Ctrl+S -- stash/unstash input
+    if (key.ctrl && input === "s") {
+      if (opts.inputValue && opts.onStash) {
+        opts.onStash(opts.inputValue);
+        opts.onSetInput("");
+      } else if (!opts.inputValue && opts.onUnstash) {
+        const stashed = opts.onUnstash();
+        if (stashed) opts.onSetInput(stashed);
+      }
       return;
     }
 
