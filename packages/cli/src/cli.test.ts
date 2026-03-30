@@ -1108,13 +1108,14 @@ describe("CLI integration: unknown command", () => {
 
   afterEach(() => cleanup());
 
-  it("exits with error for unknown command", () => {
-    // Unknown commands fall through CLI_COMMANDS check and hit the MCP server path
+  it("exits cleanly for unknown manage command", () => {
+    // Unknown commands now route to the agent by default.
+    // 'manage nonexistent-command' falls through gracefully.
     const { exitCode } = runCli(
-      ["nonexistent-command"],
+      ["manage", "nonexistent-command"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
-    expect(exitCode).not.toBe(0);
+    expect(exitCode).toBe(0);
   });
 });
 
@@ -1526,7 +1527,7 @@ describe("CLI integration: help and health", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("phren");
     expect(stdout).toContain("search");
-    expect(stdout).toContain("doctor");
+    expect(stdout).toContain("manage");
     expect(stdout).not.toContain("projects add");
     expect(stdout).not.toContain("phren link");
     expect(stdout).not.toContain("--from-existing");
@@ -1583,7 +1584,7 @@ describe("CLI integration: temp HOME subprocess stability", () => {
     expect(exitCode).toBe(0);
     expect(stdout).toContain("phren");
     expect(stdout).toContain("search");
-    expect(stdout).toContain("doctor");
+    expect(stdout).toContain("manage");
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("verify reports hook and index checks after init with a temp HOME", () => {
