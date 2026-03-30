@@ -242,35 +242,18 @@ export async function runAgentCli(raw: string[]) {
     sessionId,
   };
 
-  // Multi-agent TUI mode
-  if (args.multi || args.team) {
-    const { AgentSpawner } = await import("./multi/spawner.js");
-    const { startMultiTui } = await import("./multi/tui-multi.js");
-    const spawner = new AgentSpawner();
-
-    process.on("SIGINT", async () => {
-      await spawner.shutdown();
-      process.exit(130);
-    });
-
-    await startMultiTui(spawner, agentConfig);
-    await spawner.shutdown();
-    if (phrenCtx && sessionId) {
-      endSession(phrenCtx, sessionId, "Multi-agent session ended");
-    }
-    mcpCleanup?.();
-    return;
-  }
-
-  // Interactive mode — Ink TUI if available, legacy TUI fallback, REPL if not TTY
-  if (args.interactive) {
+  // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
+  if (args.interactive || args.multi || args.team) {
     const isTTY = process.stdout.isTTY && process.stdin.isTTY;
     let session;
     if (!isTTY) {
       session = await (await import("./repl.js")).startRepl(agentConfig);
     } else {
-      // Ink TUI only — no legacy fallback
-      session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig);
+      // Ink TUI with spawner always available for /spawn
+      const { AgentSpawner } = await import("./multi/spawner.js");
+      const spawner = new AgentSpawner();
+      session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
+      await spawner.shutdown();
     }
 
     // Flush anti-patterns at session end
