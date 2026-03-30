@@ -3,10 +3,13 @@ import { checkShellSafety } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 
-/** Tools that are safe in all modes — read-only, no side effects. */
+/** Tools that are safe in all modes — read-only or agent management, no side effects. */
 const ALWAYS_SAFE_TOOLS = new Set([
   "phren_search",
   "phren_get_tasks",
+  "spawn_agent",
+  "send_message_to_agent",
+  "list_agents",
 ]);
 
 /** Tools that access file paths and need sensitive-path checks. */

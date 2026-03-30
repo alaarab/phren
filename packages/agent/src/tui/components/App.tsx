@@ -82,6 +82,8 @@ export interface AppProps {
   selectedAgentId?: string | null;
   /** Callback when user selects a different agent tab */
   onSelectAgent?: (agentId: string | null) => void;
+  /** Callback when user presses Esc to cancel agent work */
+  onCancelAgent?: () => void;
 }
 
 export function App({
@@ -106,6 +108,7 @@ export function App({
   agents,
   selectedAgentId,
   onSelectAgent,
+  onCancelAgent,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -144,6 +147,7 @@ export function App({
     onExit: () => { onExit(); exit(); },
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
+    onEscCancelAgent: onCancelAgent,
     // Tab navigation: down enters tab bar, left/right cycles, enter selects, up exits
     tabFocused,
     onTabNavigate: agents && agents.length > 0 ? {
