@@ -98,19 +98,35 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
   function update() {
     if (!rerender) return;
+
+    // Determine what to display based on selected view
+    const agentConvo = selectedAgentId ? agentConvos.get(selectedAgentId) : null;
+
+    // When viewing an agent: show their messages with fresh IDs (so Static re-renders after screen clear)
+    const prefix = `v${viewSwitchCounter}-`;
+    const displayMessages = agentConvo
+      ? agentConvo.messages.map((m) => ({ ...m, id: prefix + m.id }))
+      : completedMessages.map((m) => ({ ...m, id: prefix + m.id }));
+
+    const displayStreaming = agentConvo ? agentConvo.streamingText : streamingText;
+    const displayToolCalls = agentConvo ? [...agentConvo.toolCalls] : [...currentToolCalls];
+    const displayActiveTool = agentConvo ? agentConvo.activeTool : activeTool;
+    const displayThinking = agentConvo ? false : thinking;
+    const displayRunning = agentConvo ? (spawner?.getAgent(selectedAgentId!)?.status === "running" || false) : running;
+
     rerender(
       <App
         state={getAppState()}
-        completedMessages={[...completedMessages]}
-        streamingText={streamingText}
-        completedToolCalls={[...currentToolCalls]}
-        activeTool={activeTool}
-        thinking={thinking}
+        completedMessages={displayMessages}
+        streamingText={displayStreaming}
+        completedToolCalls={displayToolCalls}
+        activeTool={displayActiveTool}
+        thinking={displayThinking}
         thinkStartTime={thinkStartTime}
-        thinkElapsed={thinkElapsed}
-        steerQueue={[...steerQueueBuf]}
-        running={running}
-        showBanner={true}
+        thinkElapsed={agentConvo ? null : thinkElapsed}
+        steerQueue={agentConvo ? [] : [...steerQueueBuf]}
+        running={displayRunning}
+        showBanner={!selectedAgentId}
         inputHistory={[...inputHistory]}
         verbose={verbose}
         theme={theme}
@@ -250,6 +266,37 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       saveInputMode(inputMode);
       completedMessages.push({ id: nextId(), kind: "status", text: `Input mode: ${inputMode}` });
       update();
+      return;
+    }
+
+    // /agent <name> — switch to an agent's conversation, /agent (no args) — back to main
+    if (line.startsWith("/agent")) {
+      const arg = line.slice(6).trim();
+      if (!arg || arg === "main" || arg === "phren") {
+        handleSelectAgent(null);
+        return;
+      }
+      // /agents — list all agents
+      if (arg === "s") {
+        const agents = spawner?.listAgents() ?? [];
+        if (agents.length === 0) {
+          completedMessages.push({ id: nextId(), kind: "status", text: "No agents spawned." });
+        } else {
+          const lines = agents.map((a) => `  ${a.displayName || a.id} [${a.status}]`).join("\n");
+          completedMessages.push({ id: nextId(), kind: "status", text: `Agents:\n${lines}` });
+        }
+        update();
+        return;
+      }
+      // Find agent by name or id
+      const agents = spawner?.listAgents() ?? [];
+      const match = agents.find((a) => a.displayName === arg || a.id === arg || a.displayName?.includes(arg));
+      if (match) {
+        handleSelectAgent(match.id);
+      } else {
+        completedMessages.push({ id: nextId(), kind: "status", text: `Agent "${arg}" not found. Use /agents to list.` });
+        update();
+      }
       return;
     }
 
@@ -418,22 +465,28 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   }
 
   // ── Multi-agent state ──────────────────────────────────────────────────
-  // Single chat stream — all agent output goes into completedMessages.
-  // Tabs just control INPUT routing — who you're talking to.
+  // TeamAgents: each gets their OWN conversation (separate from main stream).
+  // Switch between them with /agent <name>. Clear screen + re-render on switch.
   let selectedAgentId: string | null = null; // null = main orchestrator
   let agentTabs: AgentTab[] = [];
-  // Per-agent streaming buffers to prevent interleaving
-  const agentStreamBuffers = new Map<string, string>();
-  const agentToolBuffers = new Map<string, ToolCallProps[]>();
   const TAB_COLORS = ["cyan", "magenta", "yellow", "green", "blue", "red", "white", "cyanBright"];
 
-  function getAgentLabel(agentId: string): string {
-    const agent = spawner?.getAgent(agentId);
-    const name = agent?.displayName || agentId;
-    const agents = spawner?.listAgents() ?? [];
-    const idx = agents.findIndex((a) => a.id === agentId);
-    const color = TAB_COLORS[idx >= 0 ? idx % TAB_COLORS.length : 0];
-    return `\x1b[1m\x1b[${color === "cyan" ? "36" : color === "magenta" ? "35" : color === "yellow" ? "33" : color === "green" ? "32" : color === "blue" ? "34" : color === "red" ? "31" : "37"}m[${name}]\x1b[0m`;
+  // Per-agent conversation state — each agent has its own message history
+  interface AgentConvo {
+    messages: CompletedMessage[];
+    streamingText: string;
+    toolCalls: ToolCallProps[];
+    activeTool: ActiveToolInfo | null;
+  }
+  const agentConvos = new Map<string, AgentConvo>();
+
+  function getOrCreateConvo(agentId: string): AgentConvo {
+    let convo = agentConvos.get(agentId);
+    if (!convo) {
+      convo = { messages: [], streamingText: "", toolCalls: [], activeTool: null };
+      agentConvos.set(agentId, convo);
+    }
+    return convo;
   }
 
   function rebuildAgentTabs() {
@@ -446,96 +499,100 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }));
   }
 
+  // Switch views: clear screen, swap which messages are displayed
+  let viewSwitchCounter = 0;
   function handleSelectAgent(agentId: string | null) {
+    if (agentId === selectedAgentId) return;
     selectedAgentId = agentId;
-    // No chat message spam — the tab bar underline shows who's selected
+    viewSwitchCounter++;
+    // Clear screen so Ink's <Static> re-renders with fresh items
+    process.stdout.write("\x1b[2J\x1b[H");
     update();
   }
 
   function handleCancelAgent() {
-    // If a spawned agent is selected and running, cancel it
     if (selectedAgentId && selectedAgentId !== "__main__" && spawner) {
       const agent = spawner.getAgent(selectedAgentId);
       if (agent && (agent.status === "running" || agent.status === "starting")) {
         spawner.cancel(selectedAgentId);
-        const label = getAgentLabel(selectedAgentId);
-        completedMessages.push({ id: nextId(), kind: "status", text: `${label} cancelled` });
+        const convo = getOrCreateConvo(selectedAgentId);
+        convo.messages.push({ id: nextId(), kind: "status", text: "Cancelled" });
         update();
         return;
       }
     }
-    // Otherwise cancel the main agent turn
     handleCancelTurn();
   }
 
-  // Wire spawner events — per-agent buffers prevent interleaving
+  // Wire spawner events — each agent's output goes to its OWN conversation
   if (spawner) {
     spawner.on("text_delta", (agentId: string, text: string) => {
-      const buf = agentStreamBuffers.get(agentId) ?? "";
-      agentStreamBuffers.set(agentId, buf + text);
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText += text;
       rebuildAgentTabs();
-      update();
+      // Only update if this agent is currently selected
+      if (selectedAgentId === agentId) update();
     });
 
     spawner.on("text_block", (agentId: string, text: string) => {
-      const buf = agentStreamBuffers.get(agentId) ?? "";
-      agentStreamBuffers.set(agentId, buf + text);
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText += text;
       rebuildAgentTabs();
-      update();
+      if (selectedAgentId === agentId) update();
     });
 
     spawner.on("tool_start", (agentId: string, toolName: string, input: Record<string, unknown>) => {
-      const label = getAgentLabel(agentId);
-      // Show tool start as a completed status line immediately
-      completedMessages.push({ id: nextId(), kind: "status", text: `${label} \u25cf ${toolName} ${formatToolInput(toolName, input)}` });
+      const convo = getOrCreateConvo(agentId);
+      convo.activeTool = { name: toolName, preview: formatToolInput(toolName, input) };
       rebuildAgentTabs();
-      update();
+      if (selectedAgentId === agentId) update();
     });
 
     spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
-      // Store in per-agent tool buffer
-      const tools = agentToolBuffers.get(agentId) ?? [];
-      tools.push({ name: toolName, input, output, isError, durationMs });
-      agentToolBuffers.set(agentId, tools);
+      const convo = getOrCreateConvo(agentId);
+      convo.activeTool = null;
+      convo.toolCalls.push({ name: toolName, input, output, isError, durationMs });
       rebuildAgentTabs();
-      update();
+      if (selectedAgentId === agentId) update();
     });
 
     spawner.on("done", (agentId: string, result: { finalText: string; turns: number; toolCalls: number; totalCost?: string }) => {
-      const label = getAgentLabel(agentId);
-      const buf = agentStreamBuffers.get(agentId) ?? "";
-      const tools = agentToolBuffers.get(agentId) ?? [];
-
-      // Finalize this agent's buffered output as a completed message
-      const text = buf || result.finalText;
-      if (text || tools.length > 0) {
-        completedMessages.push({
+      const convo = getOrCreateConvo(agentId);
+      if (convo.streamingText || convo.toolCalls.length > 0) {
+        convo.messages.push({
           id: nextId(),
           kind: "assistant",
-          text: `${label} ${text}`,
-          toolCalls: tools.length > 0 ? [...tools] : undefined,
+          text: convo.streamingText || result.finalText,
+          toolCalls: convo.toolCalls.length > 0 ? [...convo.toolCalls] : undefined,
         });
+      } else if (result.finalText) {
+        convo.messages.push({ id: nextId(), kind: "assistant", text: result.finalText });
       }
-
-      // Clear agent buffers
-      agentStreamBuffers.delete(agentId);
-      agentToolBuffers.delete(agentId);
+      convo.streamingText = "";
+      convo.toolCalls = [];
+      convo.activeTool = null;
       rebuildAgentTabs();
+      // Notify main stream that an agent completed
+      completedMessages.push({
+        id: nextId(),
+        kind: "status",
+        text: `\x1b[2m${spawner!.getAgent(agentId)?.displayName || agentId} completed (${result.turns} turns, ${result.toolCalls} tools)\x1b[0m`,
+      });
       update();
     });
 
     spawner.on("error", (agentId: string, error: string) => {
-      const label = getAgentLabel(agentId);
-      agentStreamBuffers.delete(agentId);
-      agentToolBuffers.delete(agentId);
-      completedMessages.push({ id: nextId(), kind: "status", text: `${label} Error: ${error}` });
+      const convo = getOrCreateConvo(agentId);
+      convo.messages.push({ id: nextId(), kind: "status", text: `Error: ${error}` });
+      convo.streamingText = "";
+      convo.activeTool = null;
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("idle", (agentId: string, reason: string) => {
-      const label = getAgentLabel(agentId);
-      completedMessages.push({ id: nextId(), kind: "status", text: `${label} idle (${reason})` });
+      const convo = getOrCreateConvo(agentId);
+      convo.messages.push({ id: nextId(), kind: "status", text: `idle (${reason})` });
       rebuildAgentTabs();
       update();
     });
