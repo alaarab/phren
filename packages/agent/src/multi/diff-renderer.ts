@@ -69,9 +69,13 @@ function computeLineDiff(oldLines: string[], newLines: string[]): DiffEntry[] {
 const MAX_OUTPUT_LINES = 30;
 const MAX_FIRST_CHUNK = 20;
 const CONTEXT_LINES = 3;
+const SBS_MAX_OUTPUT_LINES = 40;
+const SBS_COLLAPSE_THRESHOLD = 3;
+const SBS_MIN_WIDTH = 70;
 
 /**
  * Render a colored inline diff between old and new file content.
+ * Automatically switches to side-by-side when the terminal is wide enough.
  *
  * Output format:
  *   ─── path/to/file ───
@@ -82,11 +86,206 @@ const CONTEXT_LINES = 3;
  * lines plus a "... (N more changes)" trailer.
  */
 export function renderInlineDiff(oldContent: string, newContent: string, filePath: string): string {
+  const termWidth = process.stdout.columns || 80;
+  if (termWidth >= SBS_MIN_WIDTH) {
+    return renderSideBySideDiff(oldContent, newContent, filePath, termWidth);
+  }
+  return renderInlineDiffCore(oldContent, newContent, filePath);
+}
+
+// ── Side-by-side renderer ───────────────────────────────────────────────────
+
+/**
+ * Render a side-by-side colored diff between old and new file content.
+ *
+ * Falls back to inline diff when terminal width < 70 columns.
+ *
+ * Layout:
+ *   ─── path/to/file ───
+ *   <lineNo> old text          │ <lineNo> new text
+ *
+ * Deletions in red (left only), additions in green (right only),
+ * unchanged lines in dim on both sides. Collapses unchanged runs > 3 lines.
+ * Capped at 40 output lines.
+ */
+export function renderSideBySideDiff(
+  oldContent: string,
+  newContent: string,
+  filePath: string,
+  termWidth?: number,
+): string {
+  const width = termWidth ?? process.stdout.columns ?? 80;
+  if (width < SBS_MIN_WIDTH) {
+    return renderInlineDiffCore(oldContent, newContent, filePath);
+  }
+
   const oldLines = oldContent.split("\n");
   const newLines = newContent.split("\n");
   const diff = computeLineDiff(oldLines, newLines);
 
-  // Identify which diff entries have changes nearby (within CONTEXT_LINES)
+  if (diff.length === 0) return "";
+
+  // Each side gets half the width minus the separator (" │ " = 3 chars)
+  const halfWidth = Math.floor((width - 3) / 2);
+  const lineNoWidth = 4; // e.g. "  42 "
+  const contentWidth = halfWidth - lineNoWidth - 1; // -1 for the space after lineNo
+
+  // Build paired rows: each row has optional left + optional right
+  interface PairRow {
+    kind: "equal" | "change";
+    leftLineNo?: number;
+    leftText?: string;
+    rightLineNo?: number;
+    rightText?: string;
+  }
+
+  const pairs: PairRow[] = [];
+  for (const entry of diff) {
+    switch (entry.op) {
+      case "equal":
+        pairs.push({
+          kind: "equal",
+          leftLineNo: entry.oldLineNo,
+          leftText: entry.line,
+          rightLineNo: entry.newLineNo,
+          rightText: entry.line,
+        });
+        break;
+      case "delete":
+        pairs.push({
+          kind: "change",
+          leftLineNo: entry.oldLineNo,
+          leftText: entry.line,
+        });
+        break;
+      case "insert":
+        pairs.push({
+          kind: "change",
+          rightLineNo: entry.newLineNo,
+          rightText: entry.line,
+        });
+        break;
+    }
+  }
+
+  // Collapse long runs of unchanged lines (> SBS_COLLAPSE_THRESHOLD)
+  interface OutputRow {
+    type: "line" | "collapse";
+    left?: string; // formatted left half
+    right?: string; // formatted right half
+    collapseCount?: number;
+  }
+
+  const truncStr = (s: string, max: number): string =>
+    s.length > max ? s.slice(0, max - 1) + "…" : s;
+
+  const padRight = (s: string, len: number): string => {
+    // Pad based on visible length (strip ANSI)
+    const visible = s.replace(/\x1b\[[0-9;]*m/g, "");
+    const pad = Math.max(0, len - visible.length);
+    return s + " ".repeat(pad);
+  };
+
+  const formatHalf = (
+    lineNo: number | undefined,
+    text: string | undefined,
+    cWidth: number,
+    colorFn?: (t: string) => string,
+  ): string => {
+    if (lineNo === undefined && text === undefined) {
+      return " ".repeat(lineNoWidth + 1 + cWidth);
+    }
+    const ln = lineNo !== undefined ? String(lineNo).padStart(lineNoWidth) : " ".repeat(lineNoWidth);
+    const content = text !== undefined ? truncStr(text, cWidth) : "";
+    const colored = colorFn ? colorFn(content) : dim(content);
+    return padRight(`${dim(ln)} ${colored}`, halfWidth);
+  };
+
+  const rows: OutputRow[] = [];
+  let equalRun: PairRow[] = [];
+
+  const flushEqualRun = () => {
+    if (equalRun.length === 0) return;
+    if (equalRun.length <= SBS_COLLAPSE_THRESHOLD) {
+      // Show them as normal lines
+      for (const p of equalRun) {
+        rows.push({
+          type: "line",
+          left: formatHalf(p.leftLineNo, p.leftText, contentWidth),
+          right: formatHalf(p.rightLineNo, p.rightText, contentWidth),
+        });
+      }
+    } else {
+      // Show first context line, collapse marker, last context line
+      const first = equalRun[0];
+      const last = equalRun[equalRun.length - 1];
+      rows.push({
+        type: "line",
+        left: formatHalf(first.leftLineNo, first.leftText, contentWidth),
+        right: formatHalf(first.rightLineNo, first.rightText, contentWidth),
+      });
+      rows.push({ type: "collapse", collapseCount: equalRun.length - 2 });
+      rows.push({
+        type: "line",
+        left: formatHalf(last.leftLineNo, last.leftText, contentWidth),
+        right: formatHalf(last.rightLineNo, last.rightText, contentWidth),
+      });
+    }
+    equalRun = [];
+  };
+
+  for (const pair of pairs) {
+    if (pair.kind === "equal") {
+      equalRun.push(pair);
+    } else {
+      flushEqualRun();
+      rows.push({
+        type: "line",
+        left: formatHalf(pair.leftLineNo, pair.leftText, contentWidth, pair.leftText !== undefined ? red : undefined),
+        right: formatHalf(
+          pair.rightLineNo,
+          pair.rightText,
+          contentWidth,
+          pair.rightText !== undefined ? green : undefined,
+        ),
+      });
+    }
+  }
+  flushEqualRun();
+
+  // Build final output lines
+  const outputLines: string[] = [];
+  const sep = "│";
+
+  for (const row of rows) {
+    if (outputLines.length >= SBS_MAX_OUTPUT_LINES) {
+      const remaining = rows.length - rows.indexOf(row);
+      outputLines.push(dim(`  ... (${remaining} more rows) ...`));
+      break;
+    }
+    if (row.type === "collapse") {
+      const msg = dim(`... (${row.collapseCount} unchanged) ...`);
+      outputLines.push(`${padRight(msg, halfWidth)} ${dim(sep)} ${msg}`);
+    } else {
+      outputLines.push(`${row.left} ${dim(sep)} ${row.right}`);
+    }
+  }
+
+  if (outputLines.length === 0) return "";
+
+  const header = cyan(`─── ${filePath} ───`);
+  return `${header}\n${outputLines.join("\n")}`;
+}
+
+/**
+ * Core inline diff logic (always inline, no side-by-side switch).
+ * Used as the fallback when the terminal is too narrow.
+ */
+function renderInlineDiffCore(oldContent: string, newContent: string, filePath: string): string {
+  const oldLines = oldContent.split("\n");
+  const newLines = newContent.split("\n");
+  const diff = computeLineDiff(oldLines, newLines);
+
   const hasChange = diff.map((d) => d.op !== "equal");
   const visible = new Array(diff.length).fill(false);
 
@@ -98,7 +297,6 @@ export function renderInlineDiff(oldContent: string, newContent: string, filePat
     }
   }
 
-  // Build output lines
   const outputLines: string[] = [];
   let inCollapsed = false;
   let collapsedCount = 0;
@@ -113,7 +311,6 @@ export function renderInlineDiff(oldContent: string, newContent: string, filePat
       continue;
     }
 
-    // Emit collapsed marker if we just exited a collapsed section
     if (inCollapsed) {
       outputLines.push(dim(`  ... (${collapsedCount} unchanged lines) ...`));
       inCollapsed = false;
@@ -137,17 +334,12 @@ export function renderInlineDiff(oldContent: string, newContent: string, filePat
     }
   }
 
-  // Trailing collapsed section
   if (inCollapsed) {
     outputLines.push(dim(`  ... (${collapsedCount} unchanged lines) ...`));
   }
 
-  // If no changes found
-  if (outputLines.length === 0) {
-    return "";
-  }
+  if (outputLines.length === 0) return "";
 
-  // Cap output
   let body: string;
   if (outputLines.length > MAX_OUTPUT_LINES) {
     const truncated = outputLines.slice(0, MAX_FIRST_CHUNK);
