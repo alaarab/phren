@@ -461,7 +461,15 @@ export function App({
           highlightedTabId={agents?.[highlightedTabIndex]?.id ?? null}
           tabFocused={tabFocused}
         />
-        {/* StatusBar is now rendered outside Ink via TerminalControl (DECSTBM scroll region) */}
+        <StatusBar
+          provider={state.provider}
+          project={state.project}
+          turns={state.turns}
+          cost={state.cost}
+          permMode={state.permMode}
+          agentCount={state.agentCount}
+          theme={theme}
+        />
       </Box>
     </>
   );

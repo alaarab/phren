@@ -21,8 +21,6 @@ import type { ToolCallProps } from "./components/ToolCall.js";
 import type { AgentTab } from "./components/InputArea.js";
 import { createRequire } from "node:module";
 import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
-import { TerminalControl } from "./terminal-control.js";
-import { enableMouse, disableMouse, parseMouseEvent } from "./mouse.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -40,12 +38,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let verbose = false;
   let theme: Theme = getTheme();
   let msgCounter = 0;
-
-  const terminalControl = new TerminalControl();
-
-  // Mouse handler ref — assigned after agentTabs/handleSelectAgent are defined.
-  // Stored here so handleExit (defined before the handler) can call .off on it.
-  let mouseHandler: ((data: Buffer) => void) = () => {};
 
   // Permission prompt state — when set, input field captures y/n/a/s
   let permissionResolve: ((allowed: boolean) => void) | null = null;
@@ -99,17 +91,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       agentCount: spawner?.listAgents().length ?? 0,
       version: AGENT_VERSION,
     };
-  }
-
-  function renderFixedStatus() {
-    if (!terminalControl.isEnabled) return;
-    const s = getAppState();
-    const cols = process.stdout.columns || 80;
-    const left = `  \u25c6 phren \u00b7 ${s.provider}${s.project ? ` \u00b7 ${s.project}` : ""}`;
-    const right = `${s.permMode}  T:${s.turns}${s.agentCount > 0 ? `  A:${s.agentCount}` : ""}  `;
-    const pad = Math.max(0, cols - left.length - right.length);
-    const line = `\x1b[7m${left}${" ".repeat(pad)}${right}\x1b[0m`;
-    terminalControl.renderStatusBar(process.stdout, line);
   }
 
   // Re-render the Ink app with current state
@@ -173,7 +154,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
       />
     );
-    renderFixedStatus();
   }
 
   function handlePermissionCycle() {
@@ -186,11 +166,6 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let resolveSession: ((session: AgentSession) => void) | null = null;
 
   function handleExit() {
-    disableMouse(process.stdout);
-    if (process.stdin.isTTY) {
-      process.stdin.off("data", mouseHandler);
-    }
-    terminalControl.disable(process.stdout);
     if (resolveSession) resolveSession(session);
   }
 
@@ -701,56 +676,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   );
   rerender = app.rerender;
   appInstance = app;
-  terminalControl.enable(process.stdout);
-  enableMouse(process.stdout);
-
-  // Mouse event handling — raw stdin listener catches SGR mouse events that
-  // Ink doesn't parse, enabling click-to-focus on agent tabs.
-  mouseHandler = (data: Buffer) => {
-    const str = data.toString();
-    const evt = parseMouseEvent(str);
-    if (!evt || evt.type !== "press" || evt.button !== "left") return;
-
-    // Check if click is in the agent tab row (row above the fixed status bar)
-    const rows = process.stdout.rows || 24;
-    const tabRow = rows - 1;
-
-    if (evt.y === tabRow && agentTabs.length > 0) {
-      // Determine which tab was clicked based on x position.
-      // Tab layout mirrors what InputArea renders: "phren●  name● ..."
-      let xPos = 2; // initial padding offset
-
-      // First slot is always the "phren" (main) tab
-      const mainTabWidth = "phren●".length + 2;
-      if (evt.x >= xPos && evt.x < xPos + mainTabWidth) {
-        handleSelectAgent(null);
-        return;
-      }
-      xPos += mainTabWidth;
-
-      for (const tab of agentTabs) {
-        const tabWidth = tab.name.length + 3; // "name● "
-        if (evt.x >= xPos && evt.x < xPos + tabWidth) {
-          handleSelectAgent(tab.id);
-          return;
-        }
-        xPos += tabWidth;
-      }
-    }
-  };
-
-  if (process.stdin.isTTY) {
-    process.stdin.on("data", mouseHandler);
-  }
 
   const done = new Promise<AgentSession>((r) => { resolveSession = r; });
 
   app.waitUntilExit().then(() => {
-    disableMouse(process.stdout);
-    if (process.stdin.isTTY) {
-      process.stdin.off("data", mouseHandler);
-    }
-    terminalControl.disable(process.stdout);
     if (resolveSession) resolveSession(session);
   });
 
