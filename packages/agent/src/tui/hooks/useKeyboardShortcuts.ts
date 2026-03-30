@@ -29,6 +29,8 @@ export interface KeyboardShortcutOpts {
   stashedInput?: string;
   onStash?: (text: string) => void;
   onUnstash?: () => string | null;
+  /** Ctrl+R history search */
+  onHistorySearch?: () => void;
   /** Tab bar navigation */
   tabFocused?: boolean;
   onEnterTabBar?: () => void;
@@ -77,6 +79,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
         const stashed = opts.onUnstash();
         if (stashed) opts.onSetInput(stashed);
       }
+      return;
+    }
+
+    // Ctrl+R -- history search
+    if (key.ctrl && input === "r") {
+      opts.onHistorySearch?.();
       return;
     }
 

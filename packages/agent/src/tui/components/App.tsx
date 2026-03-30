@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { Static, Box, Text, useApp } from "ink";
+import { Static, Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
@@ -118,6 +118,65 @@ export function App({
   const [tabFocused, setTabFocused] = useState(false);
   const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
   const [stashedInput, setStashedInput] = useState("");
+  const [historySearchMode, setHistorySearchMode] = useState(false);
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
+  const [historySearchIndex, setHistorySearchIndex] = useState(0);
+
+  // History search: compute matches from current query
+  const historyMatches = historySearchMode
+    ? inputHistory.filter((h) => h.toLowerCase().includes(historySearchQuery.toLowerCase()))
+    : [];
+  const currentMatch = historyMatches.length > 0
+    ? historyMatches[historySearchIndex % historyMatches.length]
+    : null;
+
+  // Handle keypresses while in history search mode
+  useInput((input, key) => {
+    if (!historySearchMode) return;
+
+    // Ctrl+R again: cycle to next match
+    if (key.ctrl && input === "r") {
+      if (historyMatches.length > 0) {
+        setHistorySearchIndex((i) => (i + 1) % historyMatches.length);
+      }
+      return;
+    }
+
+    // Enter: accept match
+    if (key.return) {
+      if (currentMatch) {
+        setInputValue(currentMatch);
+      }
+      setHistorySearchMode(false);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Escape: cancel search
+    if (key.escape) {
+      setHistorySearchMode(false);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Backspace: remove last char from query
+    if (key.backspace || key.delete) {
+      setHistorySearchQuery((q) => q.slice(0, -1));
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Skip ctrl/meta combinations (except already handled)
+    if (key.ctrl || key.meta) return;
+
+    // Regular character: append to query
+    if (input.length > 0 && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow && !key.tab) {
+      setHistorySearchQuery((q) => q + input);
+      setHistorySearchIndex(0);
+    }
+  }, { isActive: historySearchMode });
 
   const handleSubmit = useCallback((value: string) => {
     setInputValue("");
@@ -149,6 +208,11 @@ export function App({
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
     onEscCancelAgent: onCancelAgent,
+    onHistorySearch: () => {
+      setHistorySearchMode(true);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+    },
     onOpenEditor: () => {
       // Write input to temp file, open $EDITOR, read back
       const tmpFile = `/tmp/phren-input-${Date.now()}.md`;
@@ -270,13 +334,31 @@ export function App({
         {/* Steer queue display */}
         <SteerQueue items={steerQueue} />
 
+        {/* History search indicator */}
+        {historySearchMode && (
+          <Box>
+            <Text color="cyan">{"  "}search: {historySearchQuery}<Text inverse> </Text></Text>
+            {historyMatches.length > 0
+              ? <Text dimColor> (match {(historySearchIndex % historyMatches.length) + 1} of {historyMatches.length})</Text>
+              : historySearchQuery.length > 0
+                ? <Text dimColor color="red"> (no matches)</Text>
+                : <Text dimColor> (type to search history)</Text>
+            }
+          </Box>
+        )}
+        {historySearchMode && currentMatch && (
+          <Box>
+            <Text dimColor>{"  "}{"\u25b8"} {currentMatch}</Text>
+          </Box>
+        )}
+
         {/* Input + permissions */}
         <InputArea
           value={inputValue}
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={true}
+          focus={!historySearchMode}
           separatorColor={theme.separator}
         />
         <PermissionsLine
