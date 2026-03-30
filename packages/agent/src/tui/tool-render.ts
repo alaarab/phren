@@ -13,6 +13,19 @@ export function formatDuration(ms: number): string {
   return `${mins}m ${secs}s`;
 }
 
+const FILE_TOOLS = new Set(["read_file", "write_file", "edit_file"]);
+
+/** Wrap a file path in an OSC 8 hyperlink for terminals that support it. */
+export function fileLink(filePath: string): string {
+  const abs = filePath.startsWith("/") ? filePath : `${process.cwd()}/${filePath}`;
+  return `\x1b]8;;file://${abs}\x07${filePath}\x1b]8;;\x07`;
+}
+
+/** Returns true if the tool's preview string is a file path that should be linked. */
+export function isFileToolPreview(name: string): boolean {
+  return FILE_TOOLS.has(name);
+}
+
 export function formatToolInput(name: string, input: Record<string, unknown>): string {
   switch (name) {
     case "read_file":
@@ -30,9 +43,10 @@ export function formatToolInput(name: string, input: Record<string, unknown>): s
 
 export function renderToolCall(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number): string {
   const preview = formatToolInput(name, input);
+  const linkedPreview = isFileToolPreview(name) && preview ? fileLink(preview) : preview;
   const dur = formatDuration(durationMs);
   const icon = isError ? s.red("✗") : s.green("→");
-  const header = `  ${icon} ${s.bold(name)} ${s.gray(preview)}  ${s.dim(dur)}`;
+  const header = `  ${icon} ${s.bold(name)} ${s.gray(linkedPreview)}  ${s.dim(dur)}`;
 
   // Compact: show first 3 lines only, with overflow count
   const allLines = output.split("\n").filter(Boolean);
