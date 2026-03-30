@@ -6,6 +6,7 @@ import type { LlmMessage, LlmProvider } from "./providers/types.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import type { PickerResult } from "./multi/model-picker.js";
 import type { PhrenContext } from "./memory/context.js";
+import type { ReasoningEffort } from "./models.js";
 
 // Sub-module handlers
 import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, costCommand, planCommand, undoCommand, contextCommand } from "./commands/info.js";
@@ -26,6 +27,8 @@ export interface CommandContext {
   providerName?: string;
   /** Current model ID for /model command */
   currentModel?: string;
+  /** Current reasoning effort for /model command */
+  currentReasoning?: ReasoningEffort | null;
   /** Callback when model/reasoning changes */
   onModelChange?: (result: PickerResult) => void;
   /** LLM provider for /ask side-channel queries */

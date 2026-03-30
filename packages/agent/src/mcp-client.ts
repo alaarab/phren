@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as readline from "readline";
 import type { AgentTool, AgentToolResult } from "./tools/types.js";
+import { VERSION } from "./package-metadata.js";
 
 /** JSON-RPC 2.0 message types for MCP protocol. */
 interface JsonRpcRequest {
@@ -89,7 +90,7 @@ class McpConnection {
     await this.send("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "phren-agent", version: "0.0.1" },
+      clientInfo: { name: "phren-agent", version: VERSION },
     });
     // Send initialized notification (no id)
     this.proc.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");

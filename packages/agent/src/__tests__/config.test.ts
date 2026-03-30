@@ -77,6 +77,14 @@ describe("parseArgs", () => {
     expect(parseArgs(["--model", "gpt-4o"]).model).toBe("gpt-4o");
   });
 
+  it("parses --reasoning", () => {
+    expect(parseArgs(["--reasoning", "high"]).reasoning).toBe("high");
+  });
+
+  it("maps legacy max reasoning to xhigh", () => {
+    expect(parseArgs(["--reasoning", "max"]).reasoning).toBe("xhigh");
+  });
+
   it("parses --project", () => {
     expect(parseArgs(["--project", "phren"]).project).toBe("phren");
   });
@@ -122,10 +130,13 @@ describe("parseArgs", () => {
 
   describe("env vars", () => {
     const origModel = process.env.PHREN_AGENT_MODEL;
+    const origReasoning = process.env.PHREN_AGENT_REASONING;
 
     afterEach(() => {
       if (origModel === undefined) delete process.env.PHREN_AGENT_MODEL;
       else process.env.PHREN_AGENT_MODEL = origModel;
+      if (origReasoning === undefined) delete process.env.PHREN_AGENT_REASONING;
+      else process.env.PHREN_AGENT_REASONING = origReasoning;
     });
 
     it("falls back to PHREN_AGENT_MODEL when --model not provided", () => {
@@ -136,6 +147,11 @@ describe("parseArgs", () => {
     it("prefers --model over PHREN_AGENT_MODEL", () => {
       process.env.PHREN_AGENT_MODEL = "from-env";
       expect(parseArgs(["--model", "from-flag"]).model).toBe("from-flag");
+    });
+
+    it("falls back to PHREN_AGENT_REASONING when --reasoning not provided", () => {
+      process.env.PHREN_AGENT_REASONING = "medium";
+      expect(parseArgs([]).reasoning).toBe("medium");
     });
   });
 });

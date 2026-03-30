@@ -26,6 +26,8 @@ export interface SessionState {
   tasksCompleted: number;
   /** When true, this session was created by a lifecycle hook, not an explicit MCP call. */
   hookCreated?: boolean;
+  /** When true, this session was created by the coding agent runtime. */
+  agentCreated?: boolean;
 }
 
 export function sessionsDir(phrenPath: string): string {
@@ -36,6 +38,12 @@ export function sessionsDir(phrenPath: string): string {
 
 export function sessionFileForId(phrenPath: string, sessionId: string): string {
   return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
+}
+
+export function isSessionStateFileName(name: string): boolean {
+  return name.startsWith("session-") &&
+    name.endsWith(".json") &&
+    !name.endsWith("-messages.json");
 }
 
 export function readSessionStateFile(file: string): SessionState | null {
@@ -99,7 +107,7 @@ export function scanSessionFiles<T>(
   const results: SessionFileEntry<T>[] = [];
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.startsWith("session-") || !entry.name.endsWith(".json")) continue;
+    if (!entry.isFile() || !isSessionStateFileName(entry.name)) continue;
     const fullPath = path.join(dir, entry.name);
     try {
       const data = parse(fullPath);

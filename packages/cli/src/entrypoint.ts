@@ -3,7 +3,8 @@ import * as path from "path";
 import { parseMcpMode, runInit } from "./init/init.js";
 import { errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
-import { defaultPhrenPath, findPhrenPath } from "./shared.js";
+import { defaultPhrenPath, expandHomePath, findPhrenPath, readRootManifest } from "./shared.js";
+import { VERSION } from "./package-metadata.js";
 import { addProjectFromPath } from "./core/project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
@@ -13,28 +14,64 @@ import {
 } from "./project-config.js";
 
 
-const HELP_TEXT = `phren - persistent knowledge for your agents
+const HELP_TEXT = `phren manage - memory, setup, and store operations
 
-  phren                     Interactive shell
-  phren init                Set up phren
-  phren quickstart          Quick setup: init + project scaffold
-  phren add [path]          Register a project
-  phren search <query>      Search what phren knows
-  phren status              Health check
-  phren doctor [--fix]      Diagnose and repair
-  phren web-ui              Open the knowledge graph
-  phren tasks               Cross-project task view
-  phren graph               Fragment knowledge graph
-  phren agent <task>        Run the coding agent
-  phren agent -i            Interactive agent TUI
+  phren manage init                Set up phren
+  phren manage quickstart          Quick setup: init + project scaffold
+  phren manage add [path]          Register a project
+  phren manage search <query>      Search what phren knows
+  phren manage status              Health check
+  phren manage doctor [--fix]      Diagnose and repair
+  phren manage web-ui              Open the knowledge graph
+  phren manage tasks               Cross-project task view
+  phren manage graph               Fragment knowledge graph
+  phren manage shell               Interactive memory shell
 
-  phren store list              List registered stores
-  phren team init <name>        Create a team store
+Agent shortcuts:
+  phren                            Interactive coding agent
+  phren "fix the login bug"        One-shot coding task
+  phren --provider openai-codex -i Interactive agent with explicit provider
+  phren --reasoning high "..."     Run GPT-5.4 with higher reasoning
 
-  phren help <topic>        Detailed help for a topic
+Legacy shortcuts still work:
+  phren init, phren search, phren task, phren config, ...
 
+  phren manage help <topic>        Detailed management help
 Topics: projects, skills, hooks, config, maintain, setup, stores, team, env, all
 `;
+
+const INTEGRATED_HELP_TEXT = `phren - persistent memory with an integrated coding agent
+
+Agent:
+  phren                            Interactive coding agent
+  phren "fix the login bug"        One-shot coding task
+  phren -i                         Interactive agent TUI
+  phren --provider openai-codex "..."  Run the agent with an explicit provider
+  phren --reasoning high "..."         Override the default medium thinking level
+  phren agent ...                  Explicit alias for agent mode
+  phren auth status                Show configured provider auth
+  phren auth login                 Sign in with your Codex subscription
+
+Memory and management:
+  phren manage <command>           Memory/store/setup/config operations
+  phren mem <command>              Alias for \`phren manage\`
+  phren manage shell               Interactive memory shell
+  phren manage search <query>      Search what phren knows
+  phren manage task add <project> "..."
+  phren manage config ...
+  phren manage init
+
+Legacy shortcuts still work:
+  phren init
+  phren search <query>
+  phren task ...
+  phren config ...
+  phren store ...
+
+Machine-facing mode:
+  phren <phren-root-path>          Start the MCP server over stdio
+
+Use \`phren manage help\` for the full management command reference.`;
 
 const HELP_TOPICS: Record<string, string> = {
   projects: `Projects:
@@ -156,7 +193,7 @@ ${Object.values(HELP_TOPICS).join("\n")}`;
 }
 
 
-const CLI_COMMANDS = [
+export const CLI_COMMANDS = [
   "search",
   "shell",
   "update",
@@ -202,6 +239,91 @@ const CLI_COMMANDS = [
   "promote",
   "agent",
 ];
+
+const DIRECT_MANAGE_COMMANDS = new Set([
+  "add",
+  "init",
+  "uninstall",
+  "status",
+  "verify",
+  "mcp-mode",
+  "hooks-mode",
+  "link",
+  "--health",
+  ...CLI_COMMANDS,
+]);
+
+export type TopLevelInvocation =
+  | { kind: "agent"; argv: string[] }
+  | { kind: "manage"; argv: string[] }
+  | { kind: "mcp"; phrenArg: string }
+  | { kind: "help" }
+  | { kind: "version" };
+
+function looksLikePhrenRootArg(arg: string | undefined): arg is string {
+  if (!arg || arg.startsWith("-")) return false;
+  try {
+    const resolved = path.resolve(expandHomePath(arg));
+    return fs.existsSync(resolved) && Boolean(readRootManifest(resolved));
+  } catch {
+    return false;
+  }
+}
+
+function firstPositionalArg(argv: string[]): string | undefined {
+  return argv.find((arg) => !arg.startsWith("-"));
+}
+
+export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
+  const argvCommand = argv[0];
+  const positional = firstPositionalArg(argv);
+
+  if (looksLikePhrenRootArg(positional)) {
+    return { kind: "mcp", phrenArg: positional };
+  }
+
+  if (argvCommand === "--help" || argvCommand === "-h") {
+    return { kind: "help" };
+  }
+
+  if (argvCommand === "--version" || argvCommand === "-v" || argvCommand === "version") {
+    return { kind: "version" };
+  }
+
+  if (argvCommand === "help") {
+    return argv.length > 1 ? { kind: "manage", argv } : { kind: "help" };
+  }
+
+  if (argvCommand === "manage" || argvCommand === "mem") {
+    return { kind: "manage", argv: argv.slice(1).length > 0 ? argv.slice(1) : ["help"] };
+  }
+
+  if (argvCommand === "agent") {
+    return { kind: "agent", argv: argv.slice(1) };
+  }
+
+  if (argvCommand === "auth") {
+    return { kind: "agent", argv };
+  }
+
+  if (!argvCommand) {
+    return { kind: "agent", argv: ["-i"] };
+  }
+
+  if (DIRECT_MANAGE_COMMANDS.has(argvCommand)) {
+    return { kind: "manage", argv };
+  }
+
+  return { kind: "agent", argv };
+}
+
+export function printIntegratedHelp(): void {
+  console.log(INTEGRATED_HELP_TEXT);
+}
+
+export function printIntegratedVersion(): void {
+  console.log(`phren v${VERSION}`);
+}
 
 async function flushTopLevelOutput(): Promise<void> {
   await Promise.all([
@@ -270,7 +392,10 @@ async function promptProjectOwnership(phrenPath: string, fallback: ProjectOwners
   });
 }
 
-export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
+export async function runTopLevelCommand(
+  argv: string[],
+  opts: { allowDefaultShell?: boolean } = {},
+): Promise<boolean> {
   const argvCommand = argv[0];
 
   if (argvCommand === "--help" || argvCommand === "-h" || argvCommand === "help") {
@@ -448,6 +573,10 @@ export async function runTopLevelCommand(argv: string[]): Promise<boolean> {
   }
 
   if (!argvCommand && process.stdin.isTTY && process.stdout.isTTY) {
+    if (opts.allowDefaultShell === false) {
+      console.log(HELP_TEXT);
+      return finish();
+    }
     const { runCliCommand } = await import("./cli/cli.js");
     await runCliCommand("shell", []);
     return finish();

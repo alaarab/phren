@@ -10,7 +10,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { hasCodexToken } from "../providers/codex-auth.js";
+import { getAuthStatusEntries } from "@phren/cli/auth/profiles";
 import type { ReasoningLevel } from "./model-picker.js";
+import { getBuiltinModels } from "../models.js";
 export type { ReasoningLevel } from "./model-picker.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".phren-agent");
@@ -22,44 +24,50 @@ export interface ProviderStatus {
   name: string;
   configured: boolean;
   authMethod: "api-key" | "oauth" | "local" | "none";
+  authSource?: "env" | "profile" | "codex-cli" | "none";
   keyEnvVar?: string;
   models: string[];
 }
 
 export function getProviderStatuses(): ProviderStatus[] {
+  const auth = new Map(getAuthStatusEntries().map((entry) => [entry.provider, entry]));
   return [
     {
       name: "openrouter",
-      configured: !!process.env.OPENROUTER_API_KEY,
+      configured: auth.get("openrouter")?.configured ?? false,
       authMethod: "api-key",
+      authSource: auth.get("openrouter")?.source ?? "none",
       keyEnvVar: "OPENROUTER_API_KEY",
-      models: ["anthropic/claude-sonnet-4", "anthropic/claude-opus-4", "openai/gpt-4o", "openai/o4-mini", "google/gemini-2.5-pro", "deepseek/deepseek-r1"],
+      models: getBuiltinModels("openrouter").map((model) => model.id),
     },
     {
       name: "anthropic",
-      configured: !!process.env.ANTHROPIC_API_KEY,
+      configured: auth.get("anthropic")?.configured ?? false,
       authMethod: "api-key",
+      authSource: auth.get("anthropic")?.source ?? "none",
       keyEnvVar: "ANTHROPIC_API_KEY",
-      models: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001"],
+      models: getBuiltinModels("anthropic").map((model) => model.id),
     },
     {
       name: "openai",
-      configured: !!process.env.OPENAI_API_KEY,
+      configured: auth.get("openai")?.configured ?? false,
       authMethod: "api-key",
+      authSource: auth.get("openai")?.source ?? "none",
       keyEnvVar: "OPENAI_API_KEY",
-      models: ["gpt-4o", "o4-mini", "o3"],
+      models: getBuiltinModels("openai").map((model) => model.id),
     },
     {
-      name: "codex",
+      name: "openai-codex",
       configured: hasCodexToken(),
       authMethod: "oauth",
-      models: ["gpt-4o", "o4-mini", "o3"],
+      authSource: auth.get("openai-codex")?.source ?? "none",
+      models: getBuiltinModels("openai-codex").map((model) => model.id),
     },
     {
       name: "ollama",
       configured: (process.env.PHREN_OLLAMA_URL ?? "").toLowerCase() !== "off",
       authMethod: "local",
-      models: ["qwen2.5-coder:14b", "llama3.2", "deepseek-r1:14b"],
+      models: getBuiltinModels("ollama").map((model) => model.id),
     },
   ];
 }
@@ -150,12 +158,15 @@ export function formatProviderList(): string {
   for (const p of statuses) {
     const icon = p.configured ? `${GREEN}●${RESET}` : `${RED}○${RESET}`;
     const auth = p.configured ? `${GREEN}configured${RESET}` : p.authMethod === "oauth"
-      ? `${DIM}run: phren agent auth login${RESET}`
+      ? `${DIM}run: phren auth login${RESET}`
       : p.keyEnvVar
-        ? `${DIM}set ${p.keyEnvVar}${RESET}`
+        ? `${DIM}set ${p.keyEnvVar} or phren auth set-key ${p.name}${RESET}`
         : `${DIM}local${RESET}`;
+    const source = p.configured && p.authSource && p.authSource !== "none"
+      ? `${DIM}${p.authSource}${RESET}`
+      : null;
     const modelCount = `${DIM}${p.models.length} models${RESET}`;
-    lines.push(`  ${icon} ${BOLD}${p.name}${RESET}  ${auth}  ${modelCount}`);
+    lines.push(`  ${icon} ${BOLD}${p.name}${RESET}  ${auth}${source ? `  ${source}` : ""}  ${modelCount}`);
   }
 
   const custom = getCustomModels();
@@ -168,7 +179,7 @@ export function formatProviderList(): string {
 }
 
 export function formatModelAddHelp(): string {
-  return `${DIM}Usage: /model add <model-id> [provider=X] [context=128000] [reasoning=low|medium|high|max]
+  return `${DIM}Usage: /model add <model-id> [provider=X] [context=128000] [reasoning=low|medium|high|xhigh]
 
 Examples:
   /model add meta-llama/llama-3.1-405b provider=openrouter context=128000

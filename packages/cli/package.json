@@ -39,9 +39,17 @@
       "types": "./dist/core/finding.d.ts",
       "default": "./dist/core/finding.js"
     },
+    "./auth/profiles": {
+      "types": "./dist/auth/profiles.d.ts",
+      "default": "./dist/auth/profiles.js"
+    },
     "./session/utils": {
       "types": "./dist/session/utils.d.ts",
       "default": "./dist/session/utils.js"
+    },
+    "./session/artifacts": {
+      "types": "./dist/session/artifacts.d.ts",
+      "default": "./dist/session/artifacts.js"
     },
     "./shell/render-api": {
       "types": "./dist/shell/render-api.d.ts",

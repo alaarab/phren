@@ -16,7 +16,7 @@ import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
-import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionMessages } from "./memory/session.js";
+import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { runAgent, createSession, runTurn } from "./agent-loop.js";
@@ -25,8 +25,43 @@ import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
 import { connectMcpServers, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { VERSION } from "./package-metadata.js";
+import {
+  authProfilesPath,
+  getAuthStatusEntries,
+  removeApiKeyProfile,
+  upsertApiKeyProfile,
+  type ApiKeyProvider,
+} from "@phren/cli/auth/profiles";
 
-const VERSION = "0.0.1";
+function parseApiKeyProvider(raw: string | undefined): ApiKeyProvider | null {
+  if (raw === "openai" || raw === "openrouter" || raw === "anthropic") return raw;
+  return null;
+}
+
+function envVarForApiProvider(provider: ApiKeyProvider): string {
+  switch (provider) {
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "openrouter":
+      return "OPENROUTER_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+  }
+}
+
+function printAuthStatus(): void {
+  const entries = getAuthStatusEntries();
+  console.log("phren auth");
+  console.log(`store: ${authProfilesPath()}`);
+  console.log("");
+  for (const entry of entries) {
+    const status = entry.configured ? "configured" : "not configured";
+    const source = entry.source === "none" ? "" : ` via ${entry.source}`;
+    const account = entry.accountId ? ` account=${entry.accountId}` : "";
+    console.log(`- ${entry.provider}: ${status}${source}${account}`);
+  }
+}
 
 /**
  * Run the agent CLI with the given argv tokens.
@@ -44,7 +79,36 @@ export async function runAgentCli(raw: string[]) {
       codexLogout();
       process.exit(0);
     }
-    console.error("Usage: phren-agent auth login|logout");
+    if (raw[1] === "status") {
+      printAuthStatus();
+      process.exit(0);
+    }
+    if (raw[1] === "set-key") {
+      const provider = parseApiKeyProvider(raw[2]);
+      if (!provider) {
+        console.error("Usage: phren auth set-key <openai|openrouter|anthropic> [key]");
+        process.exit(1);
+      }
+      const key = raw[3] || process.env[envVarForApiProvider(provider)];
+      if (!key) {
+        console.error(`No API key provided. Pass it as an argument or set ${envVarForApiProvider(provider)}.`);
+        process.exit(1);
+      }
+      upsertApiKeyProfile(provider, key);
+      console.log(`Saved ${provider} API key profile to ${authProfilesPath()}`);
+      process.exit(0);
+    }
+    if (raw[1] === "clear-key") {
+      const provider = parseApiKeyProvider(raw[2]);
+      if (!provider) {
+        console.error("Usage: phren auth clear-key <openai|openrouter|anthropic>");
+        process.exit(1);
+      }
+      const removed = removeApiKeyProfile(provider);
+      console.log(removed ? `Removed ${provider} API key profile.` : `No ${provider} API key profile was set.`);
+      process.exit(0);
+    }
+    console.error("Usage: phren auth <login|logout|status|set-key|clear-key>");
     process.exit(1);
   }
 
@@ -60,7 +124,7 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
-    provider = resolveProvider(args.provider, args.model, args.maxOutput);
+    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning);
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
@@ -151,8 +215,8 @@ export async function runAgentCli(raw: string[]) {
   }
 
   // Build cost tracker from model info
-  const modelName = args.model ?? provider.name;
-  const costTracker = createCostTracker(modelName, args.budget);
+  const modelName = (provider as { model?: string }).model ?? args.model ?? provider.name;
+  const costTracker = createCostTracker(modelName, args.budget, provider.name);
 
   // Build lint/test config from CLI flags or auto-detect
   const cwd = process.cwd();
@@ -218,6 +282,7 @@ export async function runAgentCli(raw: string[]) {
     if (phrenCtx && sessionId) {
       const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
       endSession(phrenCtx, sessionId, lastText);
+      saveSessionMessages(phrenCtx.phrenPath, sessionId, session.messages, phrenCtx.project ?? undefined);
     }
     mcpCleanup?.();
     return;
@@ -247,15 +312,20 @@ export async function runAgentCli(raw: string[]) {
     let result;
     if (args.resume && phrenCtx) {
       // Resume: load previous messages and continue
-      const prevMessages = loadLastSessionMessages(phrenCtx.phrenPath);
-      if (prevMessages && prevMessages.length > 0) {
-        if (args.verbose) process.stderr.write(`Resuming session with ${prevMessages.length} messages\n`);
+      const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+      if (priorSnapshot && priorSnapshot.messages.length > 0) {
+        if (args.verbose) {
+          const projectLabel = priorSnapshot.project ?? "global";
+          process.stderr.write(
+            `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${projectLabel}) with ${priorSnapshot.messages.length} messages\n`,
+          );
+        }
         const contextLimit = provider.contextWindow ?? 200_000;
         const session = createSession(contextLimit);
-        session.messages = prevMessages as typeof session.messages;
+        session.messages = priorSnapshot.messages as typeof session.messages;
         const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
         // Save messages for future resume
-        saveSessionMessages(phrenCtx.phrenPath, sessionId!, session.messages);
+        saveSessionMessages(phrenCtx.phrenPath, sessionId!, session.messages, phrenCtx.project ?? undefined);
         result = {
           finalText: turnResult.text,
           turns: turnResult.turns,
@@ -284,7 +354,7 @@ export async function runAgentCli(raw: string[]) {
       endSession(phrenCtx, sessionId, summary);
 
       // Save messages for resume
-      saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages);
+      saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages, phrenCtx.project ?? undefined);
 
       // Evolve project context via lightweight LLM reflection
       try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }

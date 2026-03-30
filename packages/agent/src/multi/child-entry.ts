@@ -121,8 +121,8 @@ async function runChildAgent(payload: SpawnPayload): Promise<void> {
   registry.register(gitCommitTool);
 
   // Cost tracker
-  const modelName = model ?? provider.name;
-  const costTracker = createCostTracker(modelName, budget);
+  const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
+  const costTracker = createCostTracker(modelName, budget, provider.name);
 
   const config = {
     provider,

@@ -8,6 +8,7 @@ import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand } from "./commands.js";
 import type { PermissionMode } from "./permissions/types.js";
+import { resolveProvider } from "./providers/resolve.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
@@ -62,6 +63,20 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   rl.prompt();
 
   const allHistory = [...history];
+  const buildCommandContext = () => ({
+    session,
+    contextLimit,
+    undoStack: [],
+    phrenCtx: config.phrenCtx,
+    providerName: config.provider.name,
+    currentModel: (config.provider as { model?: string }).model,
+    currentReasoning: config.provider.reasoningEffort ?? null,
+    provider: config.provider,
+    systemPrompt: config.systemPrompt,
+    onModelChange: (result: import("./multi/model-picker.js").PickerResult) => {
+      config.provider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
+    },
+  });
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -98,7 +113,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       continue;
     }
 
-    if (handleCommand(trimmed, { session, contextLimit, undoStack: [], phrenCtx: config.phrenCtx })) {
+    if (handleCommand(trimmed, buildCommandContext())) {
       rl.prompt();
       continue;
     }
@@ -137,7 +152,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
           saveInputMode(inputMode);
           process.stderr.write(`${YELLOW}Input mode: ${inputMode}${RESET}\n`);
         } else {
-          handleCommand(queued, { session, contextLimit, undoStack: [], phrenCtx: config.phrenCtx });
+          handleCommand(queued, buildCommandContext());
         }
         break;
       }

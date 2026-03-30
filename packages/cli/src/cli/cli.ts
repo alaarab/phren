@@ -86,6 +86,7 @@ import {
 } from "./actions.js";
 import { handleGraphNamespace } from "./graph.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
+import { runBundledAgentCli } from "../agent-launch.js";
 
 // ── CLI router ───────────────────────────────────────────────────────────────
 
@@ -196,13 +197,7 @@ export async function runCliCommand(command: string, args: string[]) {
     case "promote":
       return handlePromoteNamespace(args);
     case "agent": {
-      try {
-        const { runAgentCli } = await import("@phren/agent");
-        return runAgentCli(args);
-      } catch {
-        console.error("@phren/agent is not installed. Install it with: npm i -g @phren/agent");
-        process.exit(1);
-      }
+      return runBundledAgentCli(args);
     }
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);

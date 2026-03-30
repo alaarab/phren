@@ -462,6 +462,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
         undoStack: [],
         providerName: config.provider.name,
         currentModel: (config.provider as { model?: string }).model,
+        currentReasoning: config.provider.reasoningEffort ?? null,
         provider: config.provider,
         systemPrompt: config.systemPrompt,
         spawner,
@@ -473,7 +474,7 @@ export async function startTui(config: AgentConfig, spawner?: AgentSpawner): Pro
           // Live model switch — re-resolve provider with new model
           try {
             const { resolveProvider } = await import("./providers/resolve.js") as typeof import("./providers/resolve.js");
-            const newProvider = resolveProvider(config.provider.name, result.model);
+            const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
             config.provider = newProvider;
             // Rebuild system prompt with new model info
             const { buildSystemPrompt } = await import("./system-prompt.js") as typeof import("./system-prompt.js");

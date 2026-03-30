@@ -88,15 +88,17 @@ Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user pro
 
 ---
 
-## Built-in Agent
+## Integrated Agent
 
-Phren includes a coding agent (`@phren/agent`) with 5 LLM providers, streaming TUI, multi-agent coordination, and 23 slash commands. [Read the agent docs →](docs/agent.md)
+Phren now uses `phren` itself as the primary coding-agent entrypoint. Memory operations remain available under `phren manage ...`, and `phren-agent` remains an explicit alias for the standalone agent runtime. [Read the agent docs →](docs/agent.md)
 
 ```bash
 npm i -g @phren/agent
-phren-agent -i                         # interactive TUI
-phren-agent "fix the login bug"        # one-shot task
-phren-agent --yolo "add tests"         # full-auto, no confirmations
+phren -i                               # interactive TUI
+phren "fix the login bug"              # one-shot task
+phren --reasoning high "audit auth"    # same GPT-5.4 default, higher reasoning
+phren --yolo "add tests"               # full-auto, no confirmations
+phren manage search auth               # memory/search surface
 ```
 
 ---
@@ -104,18 +106,19 @@ phren-agent --yolo "add tests"         # full-auto, no confirmations
 ## CLI quick reference
 
 ```bash
-phren                                   Interactive shell (explore/search)
-phren agent "task"                      Run the coding agent on a task
-phren agent -i                          Interactive agent (TUI/REPL)
-phren search <query>                    Full-text search with FTS5
-phren add-finding <project> "insight"   Capture a finding
-phren task add <project> "item"         Add a task
-phren session_start <project>           Start a session
-phren store list                        List personal + team stores
-phren team init <name> --remote <url>   Create a team store
-phren team join <url>                   Join a team store
-phren web-ui [--port 3499]              Launch the web UI
-phren doctor                            Health check & auto-fix
+phren                                   Interactive coding agent
+phren "task"                            Run a one-shot coding task
+phren -i                                Interactive agent (TUI/REPL)
+phren manage shell                      Interactive memory shell
+phren manage search <query>             Full-text search with FTS5
+phren manage add-finding <project> "insight"
+phren manage task add <project> "item"  Add a task
+phren manage session_start <project>    Start a session
+phren manage store list                 List personal + team stores
+phren manage team init <name> --remote <url>
+phren manage team join <url>            Join a team store
+phren manage web-ui [--port 3499]       Launch the web UI
+phren manage doctor                     Health check & auto-fix
 ```
 
 See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).

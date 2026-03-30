@@ -1,6 +1,6 @@
-# phren-agent
+# phren agent
 
-A coding agent with persistent memory. Reads, writes, and edits your code with tool calling. Starts each session knowing your project's gotchas, active tasks, and past decisions.
+A coding agent with persistent memory. The primary entrypoint is now `phren`; `phren-agent` remains an explicit alias for the standalone runtime. It reads, writes, and edits your code with tool calling, and starts each session knowing your project's gotchas, active tasks, and past decisions.
 
 ---
 
@@ -26,7 +26,7 @@ export OPENAI_API_KEY=sk-...            # OpenAI
 For Codex (ChatGPT subscription), authenticate via browser:
 
 ```bash
-phren-agent auth login
+phren auth login
 ```
 
 Ollama requires no key — just a running local server.
@@ -34,12 +34,15 @@ Ollama requires no key — just a running local server.
 ### First task
 
 ```bash
-phren-agent "fix the login bug"                        # one-shot
-phren-agent -i                                         # interactive TUI
-phren-agent --plan "refactor the database layer"       # review plan first
-phren-agent --provider codex --budget 2.00 "add tests" # pick provider, set cost cap
-phren-agent --yolo "add input validation"              # full-auto, no confirmations
+phren "fix the login bug"                              # one-shot
+phren -i                                               # interactive TUI
+phren --plan "refactor the database layer"             # review plan first
+phren --provider openai-codex --budget 2.00 "add tests" # pick provider, set cost cap
+phren --reasoning high "trace the auth race"            # override default medium reasoning
+phren --yolo "add input validation"                    # full-auto, no confirmations
 ```
+
+`phren-agent ...` still works if you prefer the explicit binary.
 
 ---
 
@@ -51,8 +54,8 @@ Auto-detected from env vars, or forced with `--provider <name>`.
 |----------|---------------|----------------|
 | OpenRouter | claude-sonnet-4-20250514 | `OPENROUTER_API_KEY` |
 | Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
-| OpenAI | gpt-4.1 | `OPENAI_API_KEY` |
-| Codex | gpt-5.3-codex | `phren-agent auth login` (ChatGPT subscription) |
+| OpenAI | gpt-5.4 | `OPENAI_API_KEY` |
+| Codex | gpt-5.4 | `phren auth login` (ChatGPT subscription) |
 | Ollama | llama3.3 | Local, no API key needed |
 
 Switch models mid-session with the `/model` command (interactive reasoning level slider).
@@ -65,8 +68,9 @@ Switch models mid-session with the `/model` command (interactive reasoning level
 |------|-------------|
 | `<task>` | Task description (one-shot mode) |
 | `-i`, `--interactive` | Interactive TUI with streaming, history, tab completion |
-| `--provider <name>` | Force provider: `openrouter`, `anthropic`, `openai`, `codex`, `ollama` |
+| `--provider <name>` | Force provider: `openrouter`, `anthropic`, `openai`, `openai-codex`, `ollama` |
 | `--model <id>` | Override the default model for the chosen provider |
+| `--reasoning <level>` | Reasoning effort for GPT-5.4/Codex: `low`, `medium`, `high`, `xhigh` |
 | `--budget <dollars>` | Max spend in USD (aborts when exceeded) |
 | `--plan` | Plan mode: show plan before executing tools |
 | `--yolo` | Full-auto permissions — no confirmations |
@@ -184,8 +188,8 @@ The agent has access to these built-in tools:
 Spawn and coordinate multiple agents from a single TUI.
 
 ```bash
-phren-agent --multi                       # start multi-agent TUI
-phren-agent --team myproject "build X"    # team mode with shared tasks
+phren --multi                             # start multi-agent TUI
+phren --team myproject "build X"          # team mode with shared tasks
 ```
 
 In the multi-agent TUI:

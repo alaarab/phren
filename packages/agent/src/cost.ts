@@ -1,103 +1,27 @@
 /** Cost tracking for LLM API usage. */
-
-interface ModelPricing {
-  inputPer1M: number;   // $ per 1M input tokens
-  outputPer1M: number;  // $ per 1M output tokens
-}
-
-// Pricing table — prefix match (most specific wins)
-const PRICING: [string, ModelPricing][] = [
-  // Anthropic
-  ["claude-opus-4",       { inputPer1M: 15,   outputPer1M: 75 }],
-  ["claude-sonnet-4",     { inputPer1M: 3,    outputPer1M: 15 }],
-  ["claude-haiku-4",      { inputPer1M: 0.80, outputPer1M: 4 }],
-  ["claude-3-5-sonnet",   { inputPer1M: 3,    outputPer1M: 15 }],
-  ["claude-3-5-haiku",    { inputPer1M: 0.80, outputPer1M: 4 }],
-  ["claude-3-opus",       { inputPer1M: 15,   outputPer1M: 75 }],
-  // OpenAI
-  ["gpt-5",              { inputPer1M: 2.50, outputPer1M: 10 }],
-  ["gpt-4.1",            { inputPer1M: 2,    outputPer1M: 8 }],
-  ["gpt-4o",             { inputPer1M: 2.50, outputPer1M: 10 }],
-  ["gpt-4-turbo",        { inputPer1M: 10,   outputPer1M: 30 }],
-  ["gpt-4",              { inputPer1M: 30,   outputPer1M: 60 }],
-  ["o3",                 { inputPer1M: 2,    outputPer1M: 8 }],
-  ["o4-mini",            { inputPer1M: 1.10, outputPer1M: 4.40 }],
-  // OpenRouter prefixed
-  ["anthropic/claude-opus-4",     { inputPer1M: 15,   outputPer1M: 75 }],
-  ["anthropic/claude-sonnet-4",   { inputPer1M: 3,    outputPer1M: 15 }],
-  ["anthropic/claude-haiku-4",    { inputPer1M: 0.80, outputPer1M: 4 }],
-  ["openai/gpt-4o",               { inputPer1M: 2.50, outputPer1M: 10 }],
-  // Local (free)
-  ["ollama",             { inputPer1M: 0, outputPer1M: 0 }],
-];
-
-PRICING.sort((a, b) => b[0].length - a[0].length); // longest prefix first
-
-// Max output token limits per model — prefix match (most specific wins)
-const OUTPUT_LIMITS: [string, number][] = [
-  // Anthropic
-  ["claude-opus-4",       32768],
-  ["claude-sonnet-4",     16384],
-  ["claude-haiku-4",      8192],
-  ["claude-3-5-sonnet",   8192],
-  ["claude-3-5-haiku",    8192],
-  ["claude-3-opus",       4096],
-  // OpenAI
-  ["gpt-5",              16384],
-  ["gpt-4.1",            32768],
-  ["gpt-4o",             16384],
-  ["gpt-4-turbo",        4096],
-  ["o3",                 100000],
-  ["o4-mini",            100000],
-  // OpenRouter prefixed
-  ["anthropic/claude-opus-4",     32768],
-  ["anthropic/claude-sonnet-4",   16384],
-  ["anthropic/claude-haiku-4",    8192],
-  ["openai/gpt-4o",               16384],
-  // Codex
-  ["gpt-5.2-codex",     16384],
-  // Local
-  ["qwen",              8192],
-];
-
-OUTPUT_LIMITS.sort((a, b) => b[0].length - a[0].length); // longest prefix first
-
-export function lookupMaxOutputTokens(model: string): number {
-  const lower = model.toLowerCase();
-  for (const [prefix, limit] of OUTPUT_LIMITS) {
-    if (lower.startsWith(prefix)) return limit;
-  }
-  return 8192; // default
-}
-
-function lookupPricing(model: string): ModelPricing {
-  const lower = model.toLowerCase();
-  for (const [prefix, pricing] of PRICING) {
-    if (lower.startsWith(prefix)) return pricing;
-  }
-  // Default fallback — assume mid-tier pricing
-  return { inputPer1M: 3, outputPer1M: 15 };
-}
+import { lookupPricing } from "./models.js";
 
 export interface CostTracker {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCost: number;
   budget: number | null;
+  metered: boolean;
   recordUsage(inputTokens: number, outputTokens: number): void;
   isOverBudget(): boolean;
   formatCost(): string;
   formatTurnCost(inputTokens: number, outputTokens: number): string;
 }
 
-export function createCostTracker(model: string, budget: number | null = null): CostTracker {
-  const pricing = lookupPricing(model);
+export function createCostTracker(model: string, budget: number | null = null, provider?: string): CostTracker {
+  const { pricing, metered } = lookupPricing(model, provider);
 
   const tracker: CostTracker = {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCost: 0,
     budget,
+    metered,
 
     recordUsage(inputTokens: number, outputTokens: number) {
       tracker.totalInputTokens += inputTokens;
@@ -108,19 +32,23 @@ export function createCostTracker(model: string, budget: number | null = null): 
     },
 
     isOverBudget() {
-      return budget !== null && tracker.totalCost >= budget;
+      return tracker.metered && budget !== null && tracker.totalCost >= budget;
     },
 
     formatCost() {
+      const tokens = `${tracker.totalInputTokens + tracker.totalOutputTokens} tokens`;
+      if (!tracker.metered) {
+        return `included (${tokens})`;
+      }
       const cost = tracker.totalCost < 0.01
         ? `$${tracker.totalCost.toFixed(4)}`
         : `$${tracker.totalCost.toFixed(2)}`;
-      const tokens = `${tracker.totalInputTokens + tracker.totalOutputTokens} tokens`;
       const budgetStr = budget !== null ? ` / $${budget.toFixed(2)} budget` : "";
       return `${cost} (${tokens}${budgetStr})`;
     },
 
     formatTurnCost(inputTokens: number, outputTokens: number) {
+      if (!tracker.metered) return "included";
       const turnCost =
         (inputTokens / 1_000_000) * pricing.inputPer1M +
         (outputTokens / 1_000_000) * pricing.outputPer1M;

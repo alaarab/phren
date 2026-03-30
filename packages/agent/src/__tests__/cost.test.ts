@@ -33,6 +33,14 @@ describe("createCostTracker", () => {
   // ── Pricing lookup by prefix ────────────────────────────────────────
 
   describe("pricing lookup", () => {
+    it("treats codex subscription models as included usage", () => {
+      const tracker = createCostTracker("gpt-5.4", 1, "openai-codex");
+      tracker.recordUsage(1_000_000, 1_000_000);
+      expect(tracker.totalCost).toBe(0);
+      expect(tracker.isOverBudget()).toBe(false);
+      expect(tracker.formatTurnCost(1000, 500)).toBe("included");
+    });
+
     it("matches claude-opus-4 models", () => {
       const tracker = createCostTracker("claude-opus-4-20250514");
       tracker.recordUsage(1_000_000, 0);
@@ -100,6 +108,12 @@ describe("createCostTracker", () => {
   // ── Formatting ──────────────────────────────────────────────────────
 
   describe("formatCost", () => {
+    it("formats unmetered providers as included", () => {
+      const tracker = createCostTracker("gpt-5.4", null, "openai-codex");
+      tracker.recordUsage(100, 100);
+      expect(tracker.formatCost()).toContain("included");
+    });
+
     it("formats small costs with 4 decimal places", () => {
       const tracker = createCostTracker("gpt-4o");
       tracker.recordUsage(100, 100);

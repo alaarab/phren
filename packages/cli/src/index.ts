@@ -30,17 +30,39 @@ import { register as registerConfig } from "./tools/config.js";
 import type { McpContext } from "./tools/types.js";
 import { mcpResponse } from "./tools/types.js";
 import { errorMessage } from "./utils.js";
-import { runTopLevelCommand } from "./entrypoint.js";
+import {
+  printIntegratedHelp,
+  printIntegratedVersion,
+  resolveTopLevelInvocation,
+  runTopLevelCommand,
+} from "./entrypoint.js";
 import { startEmbeddingWarmup } from "./startup-embedding.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { VERSION as PACKAGE_VERSION } from "./package-metadata.js";
+import { runBundledAgentCli } from "./agent-launch.js";
+const invocation = resolveTopLevelInvocation(process.argv.slice(2));
 
-const handledTopLevelCommand = await runTopLevelCommand(process.argv.slice(2));
+if (invocation.kind === "help") {
+  printIntegratedHelp();
+  process.exit(0);
+}
 
-// MCP mode: first non-flag arg is the phren path. Resolve it lazily so CLI commands
-// like `maintain` are not misinterpreted as a filesystem path after the command has run.
-const phrenArg = handledTopLevelCommand ? undefined : process.argv.find((a, i) => i >= 2 && !a.startsWith("-"));
-const phrenPath = handledTopLevelCommand ? "" : findPhrenPathWithArg(phrenArg);
+if (invocation.kind === "version") {
+  printIntegratedVersion();
+  process.exit(0);
+}
+
+if (invocation.kind === "manage") {
+  await runTopLevelCommand(invocation.argv, { allowDefaultShell: false });
+  process.exit(process.exitCode ?? 0);
+}
+
+if (invocation.kind === "agent") {
+  await runBundledAgentCli(invocation.argv);
+  process.exit(process.exitCode ?? 0);
+}
+
+const phrenPath = findPhrenPathWithArg(invocation.phrenArg);
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
@@ -228,9 +250,7 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
-if (!handledTopLevelCommand) {
-  main().catch((err) => {
-    console.error("Failed to start phren-mcp:", err);
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  console.error("Failed to start phren-mcp:", err);
+  process.exit(1);
+});
