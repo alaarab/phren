@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
-import TextInput from "ink-text-input";
+import { PhrenInput } from "./PhrenInput.js";
 import { PERMISSION_LABELS, PERMISSION_ICONS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
 
@@ -25,12 +25,11 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus }: InputA
           ? <Text color="yellow">! </Text>
           : <Text dimColor>{"\u25b8"} </Text>
         }
-        <TextInput
+        <PhrenInput
           value={value}
           onChange={onChange}
           onSubmit={onSubmit}
           focus={focus}
-          showCursor
         />
       </Box>
       <Text dimColor>{sep}</Text>
