@@ -11,10 +11,12 @@ import { grepTool } from "./tools/grep.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
 import { createWebSearchTool } from "./tools/web-search.js";
 import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
+import { createSkillTool } from "./tools/skill.js";
 import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
+import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -191,6 +193,7 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createPhrenGetTasksTool(phrenCtx));
     registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
     registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
+    registry.register(createSkillTool(phrenCtx));
   }
 
   // Web tools
@@ -199,6 +202,8 @@ export async function runAgentCli(raw: string[]) {
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+  registry.register(listMcpResourcesTool);
+  registry.register(readMcpResourceTool);
 
   // MCP server connections
   let mcpCleanup: (() => void) | undefined;
