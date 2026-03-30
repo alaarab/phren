@@ -421,14 +421,17 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (!spawner) { agentTabs = []; return; }
     agentTabs = spawner.listAgents().map((a, i) => ({
       id: a.id,
-      name: deriveAgentName(a.task),
+      name: a.displayName || deriveAgentName(a.task),
       status: a.status as AgentTab["status"],
       color: TAB_COLORS[i % TAB_COLORS.length],
     }));
   }
 
   function handleSelectAgent(agentId: string | null) {
+    if (agentId === selectedAgentId) return;
     selectedAgentId = agentId;
+    // Clear screen so <Static> re-renders with the new agent's messages
+    process.stdout.write("\x1b[2J\x1b[H");
     update();
   }
 

@@ -5,7 +5,7 @@ import type { CommandContext } from "../commands.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { pruneMessages } from "../context/pruner.js";
 import { renderMarkdown } from "../multi/markdown.js";
-import { saveSessionMessages } from "../memory/session.js";
+import { saveSessionMessages, loadLastSessionSnapshot } from "../memory/session.js";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -182,6 +182,34 @@ export function diffCommand(parts: string[], _ctx: CommandContext): boolean {
     const e = err as { stderr?: string; message?: string };
     process.stderr.write(`${RED}${e.stderr || e.message || "git diff failed"}${RESET}\n`);
   }
+  return true;
+}
+
+export function resumeCommand(_parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
+  if (!ctx.phrenPath) {
+    process.stderr.write(`${DIM}No phren context — cannot resume.${RESET}\n`);
+    return true;
+  }
+
+  const project = ctx.phrenCtx?.project;
+  const snapshot = loadLastSessionSnapshot(ctx.phrenPath, project ?? undefined);
+
+  if (!snapshot) {
+    process.stderr.write(`${DIM}No previous session to resume.${RESET}\n`);
+    return true;
+  }
+
+  // Load prior messages into current session (cast from serialized format)
+  const priorCount = snapshot.messages.length;
+  ctx.session.messages = snapshot.messages as unknown as typeof ctx.session.messages;
+
+  process.stderr.write(`${GREEN}-> Resumed ${priorCount} messages from session ${snapshot.sessionId}${RESET}\n`);
+  if (snapshot.project) {
+    process.stderr.write(`${DIM}   Project: ${snapshot.project}${RESET}\n`);
+  }
+  process.stderr.write(`${DIM}   Saved: ${snapshot.savedAt}${RESET}\n`);
+  process.stderr.write(`${DIM}   Use /history to review. The LLM will see the full prior conversation on your next message.${RESET}\n`);
+
   return true;
 }
 

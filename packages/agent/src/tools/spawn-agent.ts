@@ -45,6 +45,7 @@ export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
 
       const agentId = spawner.spawn({
         task: agentTask,
+        displayName: name,
         cwd: process.cwd(),
         verbose: false,
       });

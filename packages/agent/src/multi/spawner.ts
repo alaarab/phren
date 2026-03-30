@@ -32,6 +32,8 @@ const CHILD_ENTRY = join(__dirname, "child-entry.js");
 /** Options for spawning a child agent. */
 export interface SpawnOptions {
   task: string;
+  /** Short display name for the agent tab (e.g. "fixer", "explorer"). */
+  displayName?: string;
   cwd?: string;
   provider?: string;
   model?: string;
@@ -115,6 +117,7 @@ export class AgentSpawner extends EventEmitter {
     const entry: AgentEntry = {
       id: agentId,
       task: opts.task,
+      displayName: opts.displayName,
       status: "starting",
       startedAt: Date.now(),
     };
