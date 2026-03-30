@@ -32,6 +32,8 @@ export interface KeyboardShortcutOpts {
   /** Tab bar navigation state and callbacks */
   tabFocused?: boolean;
   onTabNavigate?: TabNavigateOpts;
+  /** Cancel the selected agent's current work (Esc when not in tab bar) */
+  onEscCancelAgent?: () => void;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -94,13 +96,16 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       return;
     }
 
-    // Escape -- exit bash mode or clear input
+    // Escape -- cancel agent work, exit bash mode, or clear input
     if (key.escape) {
       if (opts.bashMode) {
         opts.onSetBashMode(false);
         opts.onSetInput("");
       } else if (opts.inputValue) {
         opts.onSetInput("");
+      } else if (opts.onEscCancelAgent) {
+        // No input, not in bash mode — cancel the selected agent's work
+        opts.onEscCancelAgent();
       }
       return;
     }
