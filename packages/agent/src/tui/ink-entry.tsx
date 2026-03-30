@@ -120,6 +120,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onExit={handleExit}
         agents={agentTabs.length > 0 ? [{ id: "__main__", name: "phren", status: running ? "running" as const : "idle" as const, color: "magentaBright" }, ...agentTabs] : undefined}
         selectedAgentId={selectedAgentId ?? (agentTabs.length > 0 ? "__main__" : undefined)}
+        onCancelAgent={handleCancelAgent}
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
       />
     );
@@ -421,6 +422,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   // Tabs just control INPUT routing — who you're talking to.
   let selectedAgentId: string | null = null; // null = main orchestrator
   let agentTabs: AgentTab[] = [];
+  // Per-agent streaming buffers to prevent interleaving
+  const agentStreamBuffers = new Map<string, string>();
+  const agentToolBuffers = new Map<string, ToolCallProps[]>();
   const TAB_COLORS = ["cyan", "magenta", "yellow", "green", "blue", "red", "white", "cyanBright"];
 
   function getAgentLabel(agentId: string): string {
@@ -444,73 +448,86 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
   function handleSelectAgent(agentId: string | null) {
     selectedAgentId = agentId;
-    // Add a status message showing the switch
-    if (agentId && agentId !== "__main__") {
-      const agent = spawner?.getAgent(agentId);
-      const name = agent?.displayName || agentId;
-      completedMessages.push({ id: nextId(), kind: "status", text: `Switched to ${name} — your messages now go to this agent` });
-    } else {
-      completedMessages.push({ id: nextId(), kind: "status", text: "Switched to main — your messages now go to the orchestrator" });
-    }
+    // No chat message spam — the tab bar underline shows who's selected
     update();
   }
 
-  // Wire spawner events — ALL output goes into the ONE main chat stream
+  function handleCancelAgent() {
+    // If a spawned agent is selected and running, cancel it
+    if (selectedAgentId && selectedAgentId !== "__main__" && spawner) {
+      const agent = spawner.getAgent(selectedAgentId);
+      if (agent && (agent.status === "running" || agent.status === "starting")) {
+        spawner.cancel(selectedAgentId);
+        const label = getAgentLabel(selectedAgentId);
+        completedMessages.push({ id: nextId(), kind: "status", text: `${label} cancelled` });
+        update();
+        return;
+      }
+    }
+    // Otherwise cancel the main agent turn
+    handleCancelTurn();
+  }
+
+  // Wire spawner events — per-agent buffers prevent interleaving
   if (spawner) {
     spawner.on("text_delta", (agentId: string, text: string) => {
-      // Show agent streaming in the main stream (only if it's the active agent or no agent selected)
-      streamingText += text;
+      const buf = agentStreamBuffers.get(agentId) ?? "";
+      agentStreamBuffers.set(agentId, buf + text);
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("text_block", (agentId: string, text: string) => {
-      const label = getAgentLabel(agentId);
-      completedMessages.push({ id: nextId(), kind: "status", text: `${label} ${text}` });
+      const buf = agentStreamBuffers.get(agentId) ?? "";
+      agentStreamBuffers.set(agentId, buf + text);
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("tool_start", (agentId: string, toolName: string, input: Record<string, unknown>) => {
       const label = getAgentLabel(agentId);
-      activeTool = { name: `${label} ${toolName}`, preview: formatToolInput(toolName, input) };
+      // Show tool start as a completed status line immediately
+      completedMessages.push({ id: nextId(), kind: "status", text: `${label} \u25cf ${toolName} ${formatToolInput(toolName, input)}` });
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
-      activeTool = null;
-      currentToolCalls.push({ name: toolName, input, output, isError, durationMs });
+      // Store in per-agent tool buffer
+      const tools = agentToolBuffers.get(agentId) ?? [];
+      tools.push({ name: toolName, input, output, isError, durationMs });
+      agentToolBuffers.set(agentId, tools);
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("done", (agentId: string, result: { finalText: string; turns: number; toolCalls: number; totalCost?: string }) => {
       const label = getAgentLabel(agentId);
-      // Finalize any streaming text + tool calls into a completed message
-      if (streamingText || currentToolCalls.length > 0) {
+      const buf = agentStreamBuffers.get(agentId) ?? "";
+      const tools = agentToolBuffers.get(agentId) ?? [];
+
+      // Finalize this agent's buffered output as a completed message
+      const text = buf || result.finalText;
+      if (text || tools.length > 0) {
         completedMessages.push({
           id: nextId(),
           kind: "assistant",
-          text: `${label} ${streamingText || result.finalText}`,
-          toolCalls: currentToolCalls.length > 0 ? [...currentToolCalls] : undefined,
-        });
-        streamingText = "";
-        currentToolCalls = [];
-      } else if (result.finalText) {
-        completedMessages.push({
-          id: nextId(),
-          kind: "assistant",
-          text: `${label} ${result.finalText}`,
+          text: `${label} ${text}`,
+          toolCalls: tools.length > 0 ? [...tools] : undefined,
         });
       }
-      activeTool = null;
+
+      // Clear agent buffers
+      agentStreamBuffers.delete(agentId);
+      agentToolBuffers.delete(agentId);
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("error", (agentId: string, error: string) => {
       const label = getAgentLabel(agentId);
+      agentStreamBuffers.delete(agentId);
+      agentToolBuffers.delete(agentId);
       completedMessages.push({ id: nextId(), kind: "status", text: `${label} Error: ${error}` });
       rebuildAgentTabs();
       update();
@@ -558,6 +575,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onExit={handleExit}
       agents={undefined}
       selectedAgentId={undefined}
+      onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
     />,
     { exitOnCtrlC: false },

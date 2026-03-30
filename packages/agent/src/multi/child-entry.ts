@@ -84,6 +84,18 @@ interface AgentState {
   taskCount: number;
 }
 
+/** Build a lightweight system prompt for child agents. No "search memory first" forcing. */
+function buildChildPrompt(task: string): string {
+  return [
+    "You are a team agent. You have coding tools available but only use them when the task requires it.",
+    "If someone asks you a question or sends a conversational message, just respond directly — do NOT search, read files, or call tools unless the task explicitly requires code work.",
+    "When given a coding task, use your tools effectively: read files, make edits, run commands.",
+    "Be direct and concise.",
+    "",
+    `Your assignment: ${task}`,
+  ].join("\n");
+}
+
 /** Initialize the persistent agent state from the spawn payload. */
 async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   const { agentId, task: _task, cwd, provider: providerName, model, project, permissions, maxTurns, budget, plan, verbose } = payload;
@@ -94,26 +106,15 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   // Resolve LLM provider
   const provider = resolveProvider(providerName, model);
 
-  // Build phren context
+  // Child agents get a lightweight prompt — no "search memory first" forcing
+  const systemPrompt = buildChildPrompt(_task);
+
+  // Quick phren init — just resolve context, skip slow FTS5 search
+  // Child agents call phren_search themselves when they actually need it
   const phrenCtx = await buildPhrenContext(project);
-  let contextSnippet = "";
-  let priorSummary: string | null = null;
   let sessionId: string | null = null;
+  if (phrenCtx) { sessionId = startSession(phrenCtx); }
 
-  if (phrenCtx) {
-    contextSnippet = await buildContextSnippet(phrenCtx, _task);
-    priorSummary = getPriorSummary(phrenCtx);
-    sessionId = startSession(phrenCtx);
-
-    const projectCtx = loadProjectContext(phrenCtx);
-    if (projectCtx) {
-      contextSnippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
-    }
-  }
-
-  const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary);
-
-  // Register tools
   const registry = new ToolRegistry();
   registry.setPermissions({
     mode: permissions,
