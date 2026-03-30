@@ -102,25 +102,6 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       return;
     }
 
-    // Ctrl+W or Ctrl+Backspace -- delete last word
-    if ((key.ctrl && input === "w") || (key.ctrl && key.backspace) || input === "\x1b\x7f") {
-      const val = opts.inputValue;
-      const trimmed = val.replace(/\s+$/, ""); // strip trailing spaces
-      const lastSpace = trimmed.lastIndexOf(" ");
-      opts.onSetInput(lastSpace >= 0 ? trimmed.slice(0, lastSpace + 1) : "");
-      return;
-    }
-
-    // Ctrl+U -- clear entire line
-    if (key.ctrl && input === "u") {
-      opts.onSetInput("");
-      return;
-    }
-
-    // Ctrl+A -- move cursor to start (clear and re-set — Ink TextInput doesn't expose cursor)
-    // Ctrl+E -- move cursor to end (no-op, cursor is always at end in Ink TextInput)
-    // These are limited by ink-text-input which doesn't support cursor positioning
-
     // Tab -- slash command completion when input starts with /
     if (key.tab && !key.shift && !opts.isRunning) {
       const val = opts.inputValue;
