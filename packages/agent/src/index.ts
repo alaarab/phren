@@ -251,9 +251,11 @@ export async function runAgentCli(raw: string[]) {
     } else {
       // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
       const { AgentSpawner } = await import("./multi/spawner.js");
-      const { createSpawnAgentTool } = await import("./tools/spawn-agent.js");
+      const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
       const spawner = new AgentSpawner();
       registry.register(createSpawnAgentTool(spawner));
+      registry.register(createSendMessageTool(spawner));
+      registry.register(createListAgentsTool(spawner));
       session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
       await spawner.shutdown();
     }

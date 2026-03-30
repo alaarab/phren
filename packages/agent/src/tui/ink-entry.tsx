@@ -69,29 +69,19 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
   function update() {
     if (!rerender) return;
-
-    // If an agent tab is selected, show that agent's conversation
-    const agentConvo = selectedAgentId ? agentConvos.get(selectedAgentId) : null;
-    const displayMessages = agentConvo ? [...agentConvo.messages] : [...completedMessages];
-    const displayStreaming = agentConvo ? agentConvo.streamingText : streamingText;
-    const displayToolCalls = agentConvo ? [...agentConvo.toolCalls] : [...currentToolCalls];
-    const displayActiveTool = agentConvo ? agentConvo.activeTool : activeTool;
-    const displayThinking = agentConvo ? false : thinking;
-    const displayRunning = agentConvo ? false : running;
-
     rerender(
       <App
         state={getAppState()}
-        completedMessages={displayMessages}
-        streamingText={displayStreaming}
-        completedToolCalls={displayToolCalls}
-        activeTool={displayActiveTool}
-        thinking={displayThinking}
+        completedMessages={[...completedMessages]}
+        streamingText={streamingText}
+        completedToolCalls={[...currentToolCalls]}
+        activeTool={activeTool}
+        thinking={thinking}
         thinkStartTime={thinkStartTime}
-        thinkElapsed={agentConvo ? null : thinkElapsed}
-        steerQueue={agentConvo ? [] : [...steerQueueBuf]}
-        running={displayRunning}
-        showBanner={!selectedAgentId}
+        thinkElapsed={thinkElapsed}
+        steerQueue={[...steerQueueBuf]}
+        running={running}
+        showBanner={true}
         inputHistory={[...inputHistory]}
         verbose={verbose}
         theme={theme}
@@ -252,17 +242,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       return;
     }
 
-    // If a spawned agent is selected, send to THAT agent (not main orchestrator)
+    // If a spawned agent is selected, send input to THAT agent
     if (selectedAgentId && selectedAgentId !== "__main__" && spawner) {
-      const convo = getOrCreateConvo(selectedAgentId);
-      convo.messages.push({ id: nextId(), kind: "user", text: line });
-
       const agent = spawner.getAgent(selectedAgentId);
+      const agentName = agent?.displayName || selectedAgentId;
+      completedMessages.push({ id: nextId(), kind: "user", text: `[→ ${agentName}] ${line}` });
+
       if (agent?.status === "idle") {
-        // Wake the idle agent with this message
         spawner.wakeAgent(selectedAgentId, { message: line, from: "user" });
       } else {
-        // Agent is running — deliver as a message
         spawner.sendToAgent(selectedAgentId, line, "user");
       }
       update();
@@ -377,125 +365,108 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   }
 
   // ── Multi-agent state ──────────────────────────────────────────────────
-  // Per-agent conversation threads. null key = main orchestrator.
-  interface AgentConvo {
-    messages: CompletedMessage[];
-    streamingText: string;
-    toolCalls: ToolCallProps[];
-    activeTool: ActiveToolInfo | null;
-  }
-  const agentConvos = new Map<string, AgentConvo>();
-  let selectedAgentId: string | null = null; // null = main thread
+  // Single chat stream — all agent output goes into completedMessages.
+  // Tabs just control INPUT routing — who you're talking to.
+  let selectedAgentId: string | null = null; // null = main orchestrator
   let agentTabs: AgentTab[] = [];
-
-  function getOrCreateConvo(agentId: string): AgentConvo {
-    let convo = agentConvos.get(agentId);
-    if (!convo) {
-      convo = { messages: [], streamingText: "", toolCalls: [], activeTool: null };
-      agentConvos.set(agentId, convo);
-    }
-    return convo;
-  }
-
-  // Ink-compatible color names matching agent-colors palette order
   const TAB_COLORS = ["cyan", "magenta", "yellow", "green", "blue", "red", "white", "cyanBright"];
 
-  function deriveAgentName(task: string): string {
-    // Extract a short descriptive name from the task
-    const lower = task.toLowerCase();
-    if (lower.includes("test")) return "tester";
-    if (lower.includes("lint") || lower.includes("format")) return "linter";
-    if (lower.includes("fix") || lower.includes("bug")) return "fixer";
-    if (lower.includes("refactor")) return "refactor";
-    if (lower.includes("search") || lower.includes("find") || lower.includes("explore")) return "explorer";
-    if (lower.includes("review") || lower.includes("audit")) return "reviewer";
-    if (lower.includes("doc") || lower.includes("readme")) return "docs";
-    if (lower.includes("build") || lower.includes("compile")) return "builder";
-    if (lower.includes("deploy") || lower.includes("publish")) return "deployer";
-    if (lower.includes("plan") || lower.includes("design")) return "planner";
-    // Fallback: first 2-3 words
-    return task.split(/\s+/).slice(0, 3).join(" ").slice(0, 16);
+  function getAgentLabel(agentId: string): string {
+    const agent = spawner?.getAgent(agentId);
+    const name = agent?.displayName || agentId;
+    const agents = spawner?.listAgents() ?? [];
+    const idx = agents.findIndex((a) => a.id === agentId);
+    const color = TAB_COLORS[idx >= 0 ? idx % TAB_COLORS.length : 0];
+    return `\x1b[1m\x1b[${color === "cyan" ? "36" : color === "magenta" ? "35" : color === "yellow" ? "33" : color === "green" ? "32" : color === "blue" ? "34" : color === "red" ? "31" : "37"}m[${name}]\x1b[0m`;
   }
 
   function rebuildAgentTabs() {
     if (!spawner) { agentTabs = []; return; }
     agentTabs = spawner.listAgents().map((a, i) => ({
       id: a.id,
-      name: a.displayName || deriveAgentName(a.task),
+      name: a.displayName || a.task.slice(0, 20),
       status: a.status as AgentTab["status"],
       color: TAB_COLORS[i % TAB_COLORS.length],
     }));
   }
 
   function handleSelectAgent(agentId: string | null) {
-    if (agentId === selectedAgentId) return;
     selectedAgentId = agentId;
-    // Clear screen so <Static> re-renders with the new agent's messages
-    process.stdout.write("\x1b[2J\x1b[H");
+    // Add a status message showing the switch
+    if (agentId && agentId !== "__main__") {
+      const agent = spawner?.getAgent(agentId);
+      const name = agent?.displayName || agentId;
+      completedMessages.push({ id: nextId(), kind: "status", text: `Switched to ${name} — your messages now go to this agent` });
+    } else {
+      completedMessages.push({ id: nextId(), kind: "status", text: "Switched to main — your messages now go to the orchestrator" });
+    }
     update();
   }
 
-  // Wire spawner events to per-agent conversations
+  // Wire spawner events — ALL output goes into the ONE main chat stream
   if (spawner) {
     spawner.on("text_delta", (agentId: string, text: string) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.streamingText += text;
+      // Show agent streaming in the main stream (only if it's the active agent or no agent selected)
+      streamingText += text;
       rebuildAgentTabs();
-      if (selectedAgentId === agentId) update();
+      update();
     });
 
     spawner.on("text_block", (agentId: string, text: string) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.streamingText += text;
+      const label = getAgentLabel(agentId);
+      completedMessages.push({ id: nextId(), kind: "status", text: `${label} ${text}` });
       rebuildAgentTabs();
-      if (selectedAgentId === agentId) update();
+      update();
     });
 
     spawner.on("tool_start", (agentId: string, toolName: string, input: Record<string, unknown>) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.activeTool = { name: toolName, preview: formatToolInput(toolName, input) };
+      const label = getAgentLabel(agentId);
+      activeTool = { name: `${label} ${toolName}`, preview: formatToolInput(toolName, input) };
       rebuildAgentTabs();
-      if (selectedAgentId === agentId) update();
+      update();
     });
 
     spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.activeTool = null;
-      convo.toolCalls.push({ name: toolName, input, output, isError, durationMs });
+      activeTool = null;
+      currentToolCalls.push({ name: toolName, input, output, isError, durationMs });
       rebuildAgentTabs();
-      if (selectedAgentId === agentId) update();
+      update();
     });
 
     spawner.on("done", (agentId: string, result: { finalText: string; turns: number; toolCalls: number; totalCost?: string }) => {
-      const convo = getOrCreateConvo(agentId);
-      // Finalize streaming into completed message
-      if (convo.streamingText || convo.toolCalls.length > 0) {
-        convo.messages.push({
+      const label = getAgentLabel(agentId);
+      // Finalize any streaming text + tool calls into a completed message
+      if (streamingText || currentToolCalls.length > 0) {
+        completedMessages.push({
           id: nextId(),
           kind: "assistant",
-          text: convo.streamingText || result.finalText,
-          toolCalls: convo.toolCalls.length > 0 ? [...convo.toolCalls] : undefined,
+          text: `${label} ${streamingText || result.finalText}`,
+          toolCalls: currentToolCalls.length > 0 ? [...currentToolCalls] : undefined,
+        });
+        streamingText = "";
+        currentToolCalls = [];
+      } else if (result.finalText) {
+        completedMessages.push({
+          id: nextId(),
+          kind: "assistant",
+          text: `${label} ${result.finalText}`,
         });
       }
-      convo.streamingText = "";
-      convo.toolCalls = [];
-      convo.activeTool = null;
+      activeTool = null;
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("error", (agentId: string, error: string) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.messages.push({ id: nextId(), kind: "status", text: `Error: ${error}` });
-      convo.streamingText = "";
-      convo.activeTool = null;
+      const label = getAgentLabel(agentId);
+      completedMessages.push({ id: nextId(), kind: "status", text: `${label} Error: ${error}` });
       rebuildAgentTabs();
       update();
     });
 
     spawner.on("idle", (agentId: string, reason: string) => {
-      const convo = getOrCreateConvo(agentId);
-      convo.messages.push({ id: nextId(), kind: "status", text: `Agent idle (${reason})` });
+      const label = getAgentLabel(agentId);
+      completedMessages.push({ id: nextId(), kind: "status", text: `${label} idle (${reason})` });
       rebuildAgentTabs();
       update();
     });
