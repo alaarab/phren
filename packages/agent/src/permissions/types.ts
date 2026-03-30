@@ -1,6 +1,6 @@
 /** Permission system types. */
 
-export type PermissionMode = "suggest" | "auto-confirm" | "full-auto";
+export type PermissionMode = "suggest" | "auto-confirm" | "plan" | "full-auto";
 
 export type PermissionVerdict = "allow" | "ask" | "deny";
 

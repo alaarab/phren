@@ -64,6 +64,7 @@ export interface PermissionsLineProps {
 const PERM_COLOR_MAP: Record<PermissionMode, string> = {
   "suggest": "cyan",
   "auto-confirm": "green",
+  "plan": "blue",
   "full-auto": "yellow",
 };
 
