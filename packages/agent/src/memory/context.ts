@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { findPhrenPath, getProjectDirs } from "@phren/cli/paths";
 import { resolveRuntimeProfile } from "@phren/cli/runtime-profile";
@@ -71,18 +72,53 @@ function readTruths(phrenPath: string, project: string): string[] {
   }
 }
 
-/** Read source path from project.yaml. */
-function readProjectSourcePath(phrenPath: string, project: string): string | null {
-  try {
-    const configPath = path.join(phrenPath, project, "project.yaml");
-    if (!fs.existsSync(configPath)) return null;
-    const content = fs.readFileSync(configPath, "utf-8");
-    const match = content.match(/source:\s*(.+)/);
-    if (!match?.[1]) return null;
-    return match[1].trim().replace(/^['"]|['"]$/g, "");
-  } catch {
-    return null;
+const CLAUDE_MD_MAX_CHARS = 4000;
+
+/**
+ * Collect CLAUDE.md files by walking up from cwd to the filesystem root,
+ * then checking the user-level ~/.claude/CLAUDE.md.
+ * Returns entries most-specific first (cwd → parent → ... → user-level).
+ */
+function collectClaudeMdFiles(): { filePath: string; content: string }[] {
+  const seen = new Set<string>();
+  const results: { filePath: string; content: string }[] = [];
+
+  // Walk from cwd up to root
+  let dir = process.cwd();
+  while (true) {
+    const candidate = path.join(dir, "CLAUDE.md");
+    const resolved = path.resolve(candidate);
+    if (!seen.has(resolved)) {
+      seen.add(resolved);
+      try {
+        if (fs.existsSync(resolved)) {
+          const content = fs.readFileSync(resolved, "utf-8").trim();
+          if (content) {
+            results.push({ filePath: resolved, content });
+          }
+        }
+      } catch { /* skip unreadable */ }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached root
+    dir = parent;
   }
+
+  // Check user-level ~/.claude/CLAUDE.md
+  const userLevel = path.resolve(os.homedir(), ".claude", "CLAUDE.md");
+  if (!seen.has(userLevel)) {
+    seen.add(userLevel);
+    try {
+      if (fs.existsSync(userLevel)) {
+        const content = fs.readFileSync(userLevel, "utf-8").trim();
+        if (content) {
+          results.push({ filePath: userLevel, content });
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  return results;
 }
 
 /** Build a context string from phren knowledge to inject into the system prompt. */
@@ -134,19 +170,19 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 4: Project CLAUDE.md
-  if (ctx.project) {
-    try {
-      const sourcePath = readProjectSourcePath(ctx.phrenPath, ctx.project);
-      if (sourcePath) {
-        const claudePath = path.join(sourcePath, "CLAUDE.md");
-        if (fs.existsSync(claudePath)) {
-          const content = fs.readFileSync(claudePath, "utf-8").slice(0, 800);
-          sections.push(`## Project CLAUDE.md (${label})\n\n${content}`);
-        }
+  // Section 4: CLAUDE.md hierarchy (cwd → parent dirs → ~/.claude/CLAUDE.md)
+  try {
+    const claudeFiles = collectClaudeMdFiles();
+    if (claudeFiles.length > 0) {
+      let combined = claudeFiles
+        .map((f) => `<!-- ${f.filePath} -->\n${f.content}`)
+        .join("\n\n---\n\n");
+      if (combined.length > CLAUDE_MD_MAX_CHARS) {
+        combined = combined.slice(0, CLAUDE_MD_MAX_CHARS) + "\n\n<!-- truncated -->";
       }
-    } catch { /* silent */ }
-  }
+      sections.push(`## CLAUDE.md\n\n${combined}`);
+    }
+  } catch { /* silent */ }
 
   // Section 5: FTS5 search
   try {

@@ -22,6 +22,7 @@ import { grepTool } from "../tools/grep.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
 import { createPhrenFindingTool } from "../tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
+import { createSkillTool } from "../tools/skill.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
 import { buildPhrenContext, buildContextSnippet } from "../memory/context.js";
 import { startSession, endSession, getPriorSummary } from "../memory/session.js";
@@ -135,6 +136,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     registry.register(createPhrenFindingTool(phrenCtx, sessionId));
     registry.register(createPhrenGetTasksTool(phrenCtx));
     registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createSkillTool(phrenCtx));
   }
 
   registry.register(gitStatusTool);
