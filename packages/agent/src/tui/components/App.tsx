@@ -115,8 +115,7 @@ export function App({
   const [bashMode, setBashMode] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [ctrlCCount, setCtrlCCount] = useState(0);
-  const [tabFocused, setTabFocused] = useState(false);
-  const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
+  // No tab bar — CC-style: agents show as tree rows in the stream
 
   const handleSubmit = useCallback((value: string) => {
     setInputValue("");
@@ -148,21 +147,6 @@ export function App({
     onCyclePermissions: onPermissionCycle,
     onCancelTurn,
     onEscCancelAgent: onCancelAgent,
-    // Tab navigation: down enters tab bar, left/right cycles, enter selects, up exits
-    tabFocused,
-    onTabNavigate: agents && agents.length > 0 ? {
-      onEnterTabBar: () => { setTabFocused(true); setHighlightedTabIndex(0); },
-      onExitTabBar: () => { setTabFocused(false); },
-      onLeft: () => { setHighlightedTabIndex((prev) => Math.max(0, prev - 1)); },
-      onRight: () => { setHighlightedTabIndex((prev) => Math.min((agents?.length ?? 1) - 1, prev + 1)); },
-      onSelect: () => {
-        if (agents && agents[highlightedTabIndex]) {
-          const id = agents[highlightedTabIndex].id;
-          onSelectAgent?.(id === "__main__" ? null : id);
-        }
-        // Stay in tab bar — user presses Up to go back to chat
-      },
-    } : undefined,
   });
 
   // Build Static items — banner first, then completed messages
@@ -270,8 +254,6 @@ export function App({
           theme={theme}
           agents={agents}
           selectedAgentId={selectedAgentId}
-          highlightedTabId={agents && agents[highlightedTabIndex] ? agents[highlightedTabIndex].id : null}
-          tabFocused={tabFocused}
         />
       </Box>
     </>

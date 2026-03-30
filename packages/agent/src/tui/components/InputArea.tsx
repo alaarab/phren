@@ -44,21 +44,16 @@ export interface AgentTab {
   id: string;
   name: string;
   status: "running" | "idle" | "done" | "error" | "starting" | "cancelled";
-  /** Color from agent-colors palette */
   color: string;
 }
 
 export interface PermissionsLineProps {
   mode: PermissionMode;
   theme?: Theme;
-  /** Active agent tabs for multi-agent mode */
+  /** Active agents for status display */
   agents?: AgentTab[];
-  /** Currently active agent (whose thread is shown) */
+  /** Currently selected agent for input routing */
   selectedAgentId?: string | null;
-  /** Currently highlighted tab in tab-navigation mode (null = not in tab mode) */
-  highlightedTabId?: string | null;
-  /** Whether the tab bar has focus (user navigating with arrows) */
-  tabFocused?: boolean;
 }
 
 const PERM_COLOR_MAP: Record<PermissionMode, string> = {
@@ -77,7 +72,7 @@ const STATUS_ICON: Record<AgentTab["status"], string> = {
   cancelled: "\u2500", // ─
 };
 
-export function PermissionsLine({ mode, theme, agents, selectedAgentId, highlightedTabId, tabFocused }: PermissionsLineProps) {
+export function PermissionsLine({ mode, theme, agents, selectedAgentId }: PermissionsLineProps) {
   const icon = PERMISSION_ICONS[mode];
   const label = PERMISSION_LABELS[mode];
   const permColors = theme?.permission;
@@ -85,45 +80,30 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
     ? (mode === "suggest" ? permColors.suggest : mode === "auto-confirm" ? permColors.auto : mode === "plan" ? (permColors as Record<string, string>).plan ?? "magenta" : permColors.fullAuto)
     : PERM_COLOR_MAP[mode];
 
+  const showPerm = mode !== "suggest";
   const hasAgents = agents && agents.length > 0;
-  const showPerm = mode !== "suggest"; // ask mode shows nothing
+  const runningCount = agents?.filter((a) => a.status === "running").length ?? 0;
+  const idleCount = agents?.filter((a) => a.status === "idle").length ?? 0;
+
+  // Show which agent input is routed to
+  const routedAgent = selectedAgentId && selectedAgentId !== "__main__"
+    ? agents?.find((a) => a.id === selectedAgentId)
+    : null;
 
   return (
     <Box>
       {showPerm ? (
-        <Text>
-          {"  "}<Text color={color}>{icon} {label}</Text>
-        </Text>
+        <Text>{"  "}<Text color={color}>{icon} {label}</Text></Text>
       ) : (
         <Text>{"  "}</Text>
       )}
       {hasAgents ? (
         <Text>
-          {"  \u2502 "}
-          {agents!.map((agent, i) => {
-            const isActive = agent.id === selectedAgentId;
-            const isHighlighted = tabFocused && agent.id === highlightedTabId;
-            const statusIcon = STATUS_ICON[agent.status];
-            const nameText = `${statusIcon} ${agent.name}`;
-            return (
-              <Text key={agent.id}>
-                {i > 0 ? " " : ""}
-                {isHighlighted
-                  ? <Text bold inverse color={agent.color}>{` ${nameText} `}</Text>
-                  : isActive
-                    ? <Text bold underline color={agent.color}>{nameText}</Text>
-                    : <Text color={agent.color}>{nameText}</Text>
-                }
-              </Text>
-            );
-          })}
-          {tabFocused
-            ? <Text dimColor>{"  \u2190\u2192 navigate \u00b7 enter select \u00b7 \u2191 back"}</Text>
-            : <Text dimColor>{"  \u2193 agents"}</Text>
-          }
+          {showPerm ? "  " : ""}<Text dimColor>{runningCount > 0 ? `${runningCount} running` : ""}{runningCount > 0 && idleCount > 0 ? ", " : ""}{idleCount > 0 ? `${idleCount} idle` : ""}</Text>
+          {routedAgent ? <Text>{" \u2502 "}<Text bold color={routedAgent.color}>{"\u25b8"} {routedAgent.name}</Text></Text> : null}
         </Text>
       ) : (
-        <Text dimColor>{" \u00b7 shift+tab toggle \u00b7 esc to interrupt"}</Text>
+        <Text dimColor>{showPerm ? "" : " shift+tab toggle"}</Text>
       )}
     </Box>
   );

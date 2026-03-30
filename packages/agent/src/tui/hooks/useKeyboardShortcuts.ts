@@ -7,14 +7,6 @@ const SLASH_COMMANDS = [
   "/mode", "/verbose", "/theme", "/exit", "/quit",
 ];
 
-export interface TabNavigateOpts {
-  onEnterTabBar: () => void;
-  onExitTabBar: () => void;
-  onLeft: () => void;
-  onRight: () => void;
-  onSelect: () => void;
-}
-
 export interface KeyboardShortcutOpts {
   isRunning: boolean;
   inputValue: string;
@@ -29,10 +21,7 @@ export interface KeyboardShortcutOpts {
   onExit: () => void;
   onCyclePermissions: () => void;
   onCancelTurn: () => void;
-  /** Tab bar navigation state and callbacks */
-  tabFocused?: boolean;
-  onTabNavigate?: TabNavigateOpts;
-  /** Cancel the selected agent's current work (Esc when not in tab bar) */
+  /** Cancel the selected agent's current work */
   onEscCancelAgent?: () => void;
 }
 
@@ -41,22 +30,6 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Reset Ctrl+C count on any non-Ctrl+C keypress
     if (!(input === "c" && key.ctrl)) {
       if (opts.ctrlCCount > 0) opts.onSetCtrlCCount(0);
-    }
-
-    // ── Tab bar navigation mode ────────────────────────────────────
-    if (opts.tabFocused && opts.onTabNavigate) {
-      if (key.leftArrow) { opts.onTabNavigate.onLeft(); return; }
-      if (key.rightArrow) { opts.onTabNavigate.onRight(); return; }
-      if (key.return) { opts.onTabNavigate.onSelect(); return; }
-      if (key.upArrow || key.escape) { opts.onTabNavigate.onExitTabBar(); return; }
-      // Any other key exits tab mode and falls through to normal handling
-      opts.onTabNavigate.onExitTabBar();
-    }
-
-    // Down arrow (empty input) → enter tab bar
-    if (key.downArrow && !opts.isRunning && opts.inputValue === "" && opts.onTabNavigate && !opts.tabFocused) {
-      opts.onTabNavigate.onEnterTabBar();
-      return;
     }
 
     // Ctrl+D -- exit cleanly
