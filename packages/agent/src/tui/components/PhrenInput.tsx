@@ -24,6 +24,24 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
 
   useInput(
     (input, key) => {
+      // Bracketed paste: strip \x1b[200~ (start) and \x1b[201~ (end) markers.
+      // If markers are present, insert the cleaned text at cursor as a single paste.
+      const PASTE_START = "\x1b[200~";
+      const PASTE_END = "\x1b[201~";
+      if (input.includes(PASTE_START) || input.includes(PASTE_END)) {
+        const cleaned = input
+          .replaceAll(PASTE_START, "")
+          .replaceAll(PASTE_END, "")
+          .replace(/\r\n?/g, "\n")  // normalize line endings
+          .replace(/\n/g, " ");     // flatten newlines to spaces (single-line input)
+        if (cleaned.length > 0) {
+          const next = value.slice(0, cursor) + cleaned + value.slice(cursor);
+          onChange(next);
+          setCursor(cursor + cleaned.length);
+        }
+        return;
+      }
+
       // Submit
       if (key.return) {
         onSubmit(value);
