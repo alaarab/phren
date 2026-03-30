@@ -252,7 +252,24 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       return;
     }
 
-    // Normal user message — add to completed history and run agent turn
+    // If a spawned agent is selected, send to THAT agent (not main orchestrator)
+    if (selectedAgentId && selectedAgentId !== "__main__" && spawner) {
+      const convo = getOrCreateConvo(selectedAgentId);
+      convo.messages.push({ id: nextId(), kind: "user", text: line });
+
+      const agent = spawner.getAgent(selectedAgentId);
+      if (agent?.status === "idle") {
+        // Wake the idle agent with this message
+        spawner.wakeAgent(selectedAgentId, { message: line, from: "user" });
+      } else {
+        // Agent is running — deliver as a message
+        spawner.sendToAgent(selectedAgentId, line, "user");
+      }
+      update();
+      return;
+    }
+
+    // Normal user message — add to completed history and run main agent turn
     completedMessages.push({ id: nextId(), kind: "user", text: line });
     update();
     runAgentTurn(line);
