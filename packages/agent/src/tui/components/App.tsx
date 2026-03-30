@@ -152,7 +152,7 @@ export function App({
           if (item.kind === "assistant") {
             const aMsg = item as AssistantMsg;
             return (
-              <Box key={item.id} flexDirection="column" marginTop={1} paddingLeft={2}>
+              <Box key={item.id} flexDirection="column" marginTop={1}>
                 {aMsg.text ? (
                   <Box>
                     <Text color="magenta">{"\u25c6"} </Text>
@@ -181,7 +181,7 @@ export function App({
 
         {/* Active streaming text with diamond prefix */}
         {streamingText !== "" && (
-          <Box paddingLeft={2}>
+          <Box>
             <Text color="magenta">{"\u25c6"} </Text>
             <Text>{streamingText}</Text>
           </Box>
