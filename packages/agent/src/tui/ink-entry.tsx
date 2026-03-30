@@ -99,7 +99,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onPermissionCycle={handlePermissionCycle}
         onCancelTurn={handleCancelTurn}
         onExit={handleExit}
-        agents={agentTabs.length > 0 ? [{ id: "__main__", name: "phren", status: running ? "running" : "idle" }, ...agentTabs] : undefined}
+        agents={agentTabs.length > 0 ? [{ id: "__main__", name: "phren", status: running ? "running" as const : "idle" as const, color: "magentaBright" }, ...agentTabs] : undefined}
         selectedAgentId={selectedAgentId ?? (agentTabs.length > 0 ? "__main__" : undefined)}
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
       />
@@ -380,12 +380,33 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     return convo;
   }
 
+  // Ink-compatible color names matching agent-colors palette order
+  const TAB_COLORS = ["cyan", "magenta", "yellow", "green", "blue", "red", "white", "cyanBright"];
+
+  function deriveAgentName(task: string): string {
+    // Extract a short descriptive name from the task
+    const lower = task.toLowerCase();
+    if (lower.includes("test")) return "tester";
+    if (lower.includes("lint") || lower.includes("format")) return "linter";
+    if (lower.includes("fix") || lower.includes("bug")) return "fixer";
+    if (lower.includes("refactor")) return "refactor";
+    if (lower.includes("search") || lower.includes("find") || lower.includes("explore")) return "explorer";
+    if (lower.includes("review") || lower.includes("audit")) return "reviewer";
+    if (lower.includes("doc") || lower.includes("readme")) return "docs";
+    if (lower.includes("build") || lower.includes("compile")) return "builder";
+    if (lower.includes("deploy") || lower.includes("publish")) return "deployer";
+    if (lower.includes("plan") || lower.includes("design")) return "planner";
+    // Fallback: first 2-3 words
+    return task.split(/\s+/).slice(0, 3).join(" ").slice(0, 16);
+  }
+
   function rebuildAgentTabs() {
     if (!spawner) { agentTabs = []; return; }
-    agentTabs = spawner.listAgents().map((a) => ({
+    agentTabs = spawner.listAgents().map((a, i) => ({
       id: a.id,
-      name: a.task.slice(0, 20),
+      name: deriveAgentName(a.task),
       status: a.status as AgentTab["status"],
+      color: TAB_COLORS[i % TAB_COLORS.length],
     }));
   }
 

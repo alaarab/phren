@@ -7,6 +7,14 @@ const SLASH_COMMANDS = [
   "/mode", "/verbose", "/theme", "/exit", "/quit",
 ];
 
+export interface TabNavigateOpts {
+  onEnterTabBar: () => void;
+  onExitTabBar: () => void;
+  onLeft: () => void;
+  onRight: () => void;
+  onSelect: () => void;
+}
+
 export interface KeyboardShortcutOpts {
   isRunning: boolean;
   inputValue: string;
@@ -21,8 +29,9 @@ export interface KeyboardShortcutOpts {
   onExit: () => void;
   onCyclePermissions: () => void;
   onCancelTurn: () => void;
-  /** Callback when user presses a number key to switch agent tabs */
-  onSelectAgentByIndex?: (index: number) => void;
+  /** Tab bar navigation state and callbacks */
+  tabFocused?: boolean;
+  onTabNavigate?: TabNavigateOpts;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -32,9 +41,19 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       if (opts.ctrlCCount > 0) opts.onSetCtrlCCount(0);
     }
 
-    // Number keys 1-9 — switch agent tabs (only when input is empty)
-    if (!key.ctrl && !key.meta && !key.shift && opts.inputValue === "" && opts.onSelectAgentByIndex && /^[1-9]$/.test(input)) {
-      opts.onSelectAgentByIndex(parseInt(input, 10) - 1);
+    // ── Tab bar navigation mode ────────────────────────────────────
+    if (opts.tabFocused && opts.onTabNavigate) {
+      if (key.leftArrow) { opts.onTabNavigate.onLeft(); return; }
+      if (key.rightArrow) { opts.onTabNavigate.onRight(); return; }
+      if (key.return) { opts.onTabNavigate.onSelect(); return; }
+      if (key.upArrow || key.escape) { opts.onTabNavigate.onExitTabBar(); return; }
+      // Any other key exits tab mode and falls through to normal handling
+      opts.onTabNavigate.onExitTabBar();
+    }
+
+    // Down arrow (empty input) → enter tab bar
+    if (key.downArrow && !opts.isRunning && opts.inputValue === "" && opts.onTabNavigate && !opts.tabFocused) {
+      opts.onTabNavigate.onEnterTabBar();
       return;
     }
 
