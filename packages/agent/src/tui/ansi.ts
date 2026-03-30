@@ -31,7 +31,8 @@ export function stripAnsi(t: string): string {
 }
 
 // ── Permission mode helpers ─────────────────────────────────────────────────
-export const PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
+// Cycle: ask → auto edits → plan → autopilot (matches Claude Code pattern)
+export const PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
 
 export function nextPermissionMode(current: PermissionMode): PermissionMode {
   const idx = PERMISSION_MODES.indexOf(current);
@@ -39,23 +40,26 @@ export function nextPermissionMode(current: PermissionMode): PermissionMode {
 }
 
 export const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  "suggest": "suggest",
-  "auto-confirm": "auto",
-  "full-auto": "full-auto",
+  "suggest": "ask",
+  "auto-confirm": "auto edits",
+  "plan": "plan",
+  "full-auto": "autopilot",
 };
 
 export const PERMISSION_ICONS: Record<PermissionMode, string> = {
-  "suggest": "○",
-  "auto-confirm": "◐",
-  "full-auto": "●",
+  "suggest": "\u25cb",       // ○
+  "auto-confirm": "\u25d0",  // ◐
+  "plan": "\u25d1",          // ◑
+  "full-auto": "\u25cf",     // ●
 };
 
 export const PERMISSION_COLORS: Record<PermissionMode, (t: string) => string> = {
   "suggest": s.cyan,
   "auto-confirm": s.green,
+  "plan": s.blue,
   "full-auto": s.yellow,
 };
 
 export function permTag(mode: PermissionMode): string {
-  return PERMISSION_COLORS[mode](`${PERMISSION_ICONS[mode]} ${mode}`);
+  return PERMISSION_COLORS[mode](`${PERMISSION_ICONS[mode]} ${PERMISSION_LABELS[mode]}`);
 }
