@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { formatToolInput, formatDuration, COMPACT_LINES } from "../tool-render.js";
+import { formatToolInput, formatDuration } from "../tool-render.js";
 
 export interface ToolCallProps {
   name: string;
@@ -10,12 +10,30 @@ export interface ToolCallProps {
   durationMs: number;
 }
 
-export function ToolCall({ name, input, output, isError, durationMs }: ToolCallProps) {
+const VERBOSE_LINES = 5;
+
+export function ToolCall({ name, input, output, isError, durationMs, verbose }: ToolCallProps & { verbose?: boolean }) {
   const preview = formatToolInput(name, input);
   const dur = formatDuration(durationMs);
+
+  if (!verbose) {
+    // Non-verbose: header only, no output body
+    return (
+      <Box flexDirection="column" paddingLeft={2}>
+        <Box>
+          <Text color={isError ? "red" : "green"}>{isError ? "\u2717" : "\u2192"} </Text>
+          <Text bold>{name}</Text>
+          <Text color="gray"> {preview}</Text>
+          <Text dimColor>  {dur}</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  // Verbose: header + first 5 lines of output + overflow count
   const allLines = output.split("\n").filter(Boolean);
-  const shown = allLines.slice(0, COMPACT_LINES);
-  const overflow = allLines.length - COMPACT_LINES;
+  const shown = allLines.slice(0, VERBOSE_LINES);
+  const overflow = allLines.length - VERBOSE_LINES;
 
   return (
     <Box flexDirection="column" paddingLeft={2}>

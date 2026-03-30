@@ -61,6 +61,7 @@ export interface AppProps {
   running: boolean;
   showBanner: boolean;
   inputHistory: string[];
+  verbose: boolean;
   onSubmit: (input: string) => void;
   onPermissionCycle: () => void;
   onCancelTurn: () => void;
@@ -79,6 +80,7 @@ export function App({
   running,
   showBanner,
   inputHistory,
+  verbose,
   onSubmit,
   onPermissionCycle,
   onCancelTurn,
@@ -160,7 +162,7 @@ export function App({
                   </Box>
                 ) : null}
                 {aMsg.toolCalls?.map((tc, i) => (
-                  <ToolCall key={i} {...tc} />
+                  <ToolCall key={i} {...tc} verbose={verbose} />
                 ))}
               </Box>
             );
@@ -176,7 +178,7 @@ export function App({
       <Box flexDirection="column">
         {/* In-progress tool calls (not yet finalized) */}
         {completedToolCalls.map((tc, i) => (
-          <ToolCall key={`tc-${i}`} {...tc} />
+          <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} />
         ))}
 
         {/* Active streaming text with diamond prefix */}

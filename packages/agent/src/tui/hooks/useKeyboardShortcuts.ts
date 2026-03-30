@@ -4,7 +4,7 @@ const SLASH_COMMANDS = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/spawn", "/agents",
-  "/mode", "/exit", "/quit",
+  "/mode", "/verbose", "/exit", "/quit",
 ];
 
 export interface KeyboardShortcutOpts {
@@ -33,6 +33,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Ctrl+D -- exit cleanly
     if (key.ctrl && input === "d") {
       opts.onExit();
+      return;
+    }
+
+    // Ctrl+L -- clear screen
+    if (key.ctrl && input === "l") {
+      process.stdout.write("\x1b[2J\x1b[H");
       return;
     }
 

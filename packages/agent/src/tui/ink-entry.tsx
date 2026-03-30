@@ -32,6 +32,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const steerQueueBuf: string[] = [];
   const inputHistory: string[] = [];
   let running = false;
+  let verbose = false;
   let msgCounter = 0;
 
   // Mutable render state — updated then pushed to React via rerender()
@@ -76,6 +77,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         running={running}
         showBanner={true}
         inputHistory={[...inputHistory]}
+        verbose={verbose}
         onSubmit={handleSubmit}
         onPermissionCycle={handlePermissionCycle}
         onCancelTurn={handleCancelTurn}
@@ -183,6 +185,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       inputMode = inputMode === "steering" ? "queue" : "steering";
       saveInputMode(inputMode);
       completedMessages.push({ id: nextId(), kind: "status", text: `Input mode: ${inputMode}` });
+      update();
+      return;
+    }
+
+    if (line === "/verbose") {
+      verbose = !verbose;
+      completedMessages.push({ id: nextId(), kind: "status", text: `Verbose: ${verbose ? "on" : "off"}` });
       update();
       return;
     }
@@ -309,8 +318,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
   }
 
+  // Enable bracketed paste
+  process.stdout.write("\x1b[?2004h");
+
   // Clear screen before initial render — start clean
   process.stdout.write("\x1b[2J\x1b[H");
+  const projectName = config.phrenCtx?.project ?? "phren";
+  process.title = "phren";
+  process.stdout.write(`\x1b]0;phren \xb7 ${projectName}\x07`); // set terminal window title
 
   // Initial render
   const app = render(
@@ -326,6 +341,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       running={false}
       showBanner={true}
       inputHistory={[]}
+      verbose={verbose}
       onSubmit={handleSubmit}
       onPermissionCycle={handlePermissionCycle}
       onCancelTurn={handleCancelTurn}
@@ -338,6 +354,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const done = new Promise<AgentSession>((r) => { resolveSession = r; });
 
   app.waitUntilExit().then(() => {
+    process.stdout.write("\x1b[?2004l"); // disable bracketed paste
     if (resolveSession) resolveSession(session);
   });
 
