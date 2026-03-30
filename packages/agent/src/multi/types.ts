@@ -180,6 +180,8 @@ export type AgentStatus = "starting" | "running" | "idle" | "done" | "error" | "
 export interface AgentEntry {
   id: string;
   task: string;
+  /** Short display name for the agent tab (e.g. "fixer", "explorer"). */
+  displayName?: string;
   status: AgentStatus;
   pid?: number;
   startedAt: number;

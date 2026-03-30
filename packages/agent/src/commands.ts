@@ -10,7 +10,7 @@ import type { ReasoningEffort } from "./models.js";
 
 // Sub-module handlers
 import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, costCommand, planCommand, undoCommand, contextCommand } from "./commands/info.js";
-import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand } from "./commands/session.js";
+import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { modelCommand, providerCommand, presetCommand } from "./commands/model.js";
 
@@ -81,6 +81,7 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/git":      return gitCommand(parts, ctx);
     case "/mem":      return memCommand(parts, ctx);
     case "/ask":      return askCommand(parts, ctx);
+    case "/resume":   return resumeCommand(parts, ctx);
 
     case "/spawn": {
       if (!ctx.spawner) {
