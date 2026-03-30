@@ -5,6 +5,7 @@ import type { CommandContext } from "../commands.js";
 import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from "../multi/presets.js";
 import { showModelPicker } from "../multi/model-picker.js";
 import { formatProviderList, formatModelAddHelp, addCustomModel, removeCustomModel, type ReasoningLevel } from "../multi/provider-manager.js";
+import { normalizeReasoningEffort } from "../models.js";
 
 const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
@@ -29,9 +30,9 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean {
       if (k === "provider") provider = v;
       else if (k === "context") contextWindow = parseInt(v, 10) || 128_000;
       else if (k === "reasoning") {
-        reasoning = v as ReasoningLevel;
+        reasoning = normalizeReasoningEffort(v) ?? null;
         reasoningRange.push("low", "medium", "high");
-        if (v === "max") reasoningRange.push("max");
+        if (reasoning === "xhigh") reasoningRange.push("xhigh");
       }
     }
     addCustomModel(modelId, provider, { contextWindow, reasoning, reasoningRange });
@@ -56,7 +57,7 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean {
     process.stderr.write(`${DIM}Provider not configured. Start with --provider to set one.${RESET}\n`);
     return true;
   }
-  showModelPicker(ctx.providerName, ctx.currentModel, process.stdout).then((result) => {
+  showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then((result) => {
     if (result && ctx.onModelChange) {
       ctx.onModelChange(result);
       const reasoningLabel = result.reasoning ? ` (reasoning: ${result.reasoning})` : "";

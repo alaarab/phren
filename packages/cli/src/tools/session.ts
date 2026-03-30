@@ -15,6 +15,10 @@ import { readTasks } from "../data/tasks.js";
 import { readFindings } from "../data/access.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
+import {
+  findMostRecentSummaryWithProject as findMostRecentSummaryRecord,
+  writeLastSummary as writeLastSummaryRecord,
+} from "../session/artifacts.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
   atomicWriteJson, debugError, scanSessionFiles,
@@ -155,18 +159,9 @@ export function resolveActiveSessionScope(phrenPath: string, project?: string): 
   return normalizeMemoryScope(bestState?.agentScope);
 }
 
-/** Path for the last-summary fast-path file. */
-function lastSummaryPath(phrenPath: string): string {
-  return path.join(sessionsDir(phrenPath), "last-summary.json");
-}
-
 /** Write the last summary for fast retrieval by next session_start. */
 function writeLastSummary(phrenPath: string, summary: string, sessionId: string, project?: string): void {
-  try {
-    atomicWriteJson(lastSummaryPath(phrenPath), { summary, sessionId, project, endedAt: new Date().toISOString() });
-  } catch (err: unknown) {
-    debugError("writeLastSummary", err);
-  }
+  writeLastSummaryRecord(phrenPath, { summary, sessionId, project, endedAt: new Date().toISOString() });
 }
 
 /** Find the most recent session with a summary (including ended sessions).
@@ -177,29 +172,12 @@ export function findMostRecentSummary(phrenPath: string): string | null {
 
 /** Find the most recent session with a summary and project context. */
 function findMostRecentSummaryWithProject(phrenPath: string): { summary: string | null; project?: string; endedAt?: string } {
-  // Fast path: read from dedicated last-summary file
-  try {
-    const data = JSON.parse(fs.readFileSync(lastSummaryPath(phrenPath), "utf-8")) as { summary?: string; project?: string; endedAt?: string };
-    if (data.summary) return { summary: data.summary, project: data.project, endedAt: data.endedAt };
-  } catch (err: unknown) {
-    // ENOENT is expected when no summary has been written yet
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      debugError("findMostRecentSummaryWithProject fastPath", err);
-    }
-  }
-
-  // Slow path: scan all session files
-  const dir = sessionsDir(phrenPath);
-  const results = scanSessionFiles<SessionState>(
-    dir,
-    readSessionStateFile,
-    (state) => !!state.summary,
-    { errorScope: "findMostRecentSummaryWithProject" },
-  );
-
-  if (results.length === 0) return { summary: null };
-  const best = results[0]; // already sorted newest-mtime-first
-  return { summary: best.data.summary!, project: best.data.project, endedAt: best.data.endedAt };
+  const result = findMostRecentSummaryRecord(phrenPath);
+  return {
+    summary: result.summary,
+    project: result.project,
+    endedAt: result.endedAt,
+  };
 }
 
 /** Resolve session file from an explicit sessionId or a previously-bound connectionId. */

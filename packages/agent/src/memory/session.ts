@@ -1,122 +1,63 @@
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
+import {
+  endSessionRecord,
+  findMostRecentSummaryWithProject,
+  incrementSessionStateCounter,
+  loadLastSessionMessages as loadSharedLastSessionMessages,
+  loadLastSessionSnapshot as loadSharedLastSessionSnapshot,
+  saveSessionMessages as saveSharedSessionMessages,
+  startSessionRecord,
+  type SerializedSessionMessage,
+} from "@phren/cli/session/artifacts";
 import type { PhrenContext } from "./context.js";
 
-interface SessionState {
+type SessionCounterField = "findingsAdded" | "tasksCompleted";
+
+export interface SessionResumeSnapshot {
   sessionId: string;
   project?: string;
-  startedAt: string;
-  endedAt?: string;
-  findingsAdded: number;
-  tasksCompleted: number;
-  hookCreated?: boolean;
-  agentCreated?: boolean;
-}
-
-function sessionsDir(phrenPath: string): string {
-  const dir = path.join(phrenPath, ".runtime", "sessions");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function sessionFile(phrenPath: string, sessionId: string): string {
-  return path.join(sessionsDir(phrenPath), `session-${sessionId}.json`);
+  savedAt: string;
+  messages: SerializedSessionMessage[];
 }
 
 export function startSession(ctx: PhrenContext): string {
-  const sessionId = crypto.randomUUID();
-  const state: SessionState = {
-    sessionId,
-    project: ctx.project || undefined,
-    startedAt: new Date().toISOString(),
-    findingsAdded: 0,
-    tasksCompleted: 0,
+  return startSessionRecord(ctx.phrenPath, {
+    project: ctx.project ?? undefined,
     agentCreated: true,
-  };
-  const file = sessionFile(ctx.phrenPath, sessionId);
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
-  return sessionId;
+  });
 }
 
 export function endSession(ctx: PhrenContext, sessionId: string, summary?: string): void {
-  const file = sessionFile(ctx.phrenPath, sessionId);
-  if (!fs.existsSync(file)) return;
-  try {
-    const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
-    state.endedAt = new Date().toISOString();
-    if (summary) {
-      // Also write to last-summary.json for fast pickup by next session_start
-      const summaryFile = path.join(sessionsDir(ctx.phrenPath), "last-summary.json");
-      fs.writeFileSync(summaryFile, JSON.stringify({
-        summary,
-        sessionId,
-        project: state.project,
-        endedAt: state.endedAt,
-      }, null, 2) + "\n");
-    }
-    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
-  } catch { /* best effort */ }
+  endSessionRecord(ctx.phrenPath, sessionId, summary);
 }
 
-export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: "findingsAdded" | "tasksCompleted"): void {
-  const file = sessionFile(phrenPath, sessionId);
-  if (!fs.existsSync(file)) return;
-  try {
-    const state: SessionState = JSON.parse(fs.readFileSync(file, "utf-8"));
-    state[counter] = (state[counter] ?? 0) + 1;
-    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
-  } catch { /* best effort */ }
+export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: SessionCounterField): void {
+  incrementSessionStateCounter(phrenPath, sessionId, counter);
 }
 
-/** Read the most recent session summary for prior context. */
 export function getPriorSummary(ctx: PhrenContext): string | null {
-  try {
-    const summaryFile = path.join(sessionsDir(ctx.phrenPath), "last-summary.json");
-    if (!fs.existsSync(summaryFile)) return null;
-    const data = JSON.parse(fs.readFileSync(summaryFile, "utf-8"));
-    return data.summary || null;
-  } catch {
-    return null;
-  }
+  return findMostRecentSummaryWithProject(ctx.phrenPath, ctx.project ?? undefined).summary;
 }
 
-// --- Session resume ---
-
-interface SerializedMessage {
-  role: string;
-  content: unknown;
+export function saveSessionMessages(
+  phrenPath: string,
+  sessionId: string,
+  messages: SerializedSessionMessage[],
+  project?: string,
+): void {
+  saveSharedSessionMessages(phrenPath, sessionId, messages, project);
 }
 
-function messagesDir(phrenPath: string): string {
-  const dir = path.join(phrenPath, ".runtime", "sessions");
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+export function loadLastSessionSnapshot(phrenPath: string, project?: string): SessionResumeSnapshot | null {
+  const snapshot = loadSharedLastSessionSnapshot(phrenPath, project);
+  if (!snapshot) return null;
+  return {
+    sessionId: snapshot.sessionId,
+    project: snapshot.project,
+    savedAt: snapshot.savedAt,
+    messages: snapshot.messages,
+  };
 }
 
-/** Save session messages for later resume. */
-export function saveSessionMessages(phrenPath: string, sessionId: string, messages: SerializedMessage[]): void {
-  const file = path.join(messagesDir(phrenPath), `session-${sessionId}-messages.json`);
-  fs.writeFileSync(file, JSON.stringify(messages, null, 2) + "\n");
-}
-
-/** Load the last session's messages for resume. Returns null if none found. */
-export function loadLastSessionMessages(phrenPath: string): SerializedMessage[] | null {
-  try {
-    const dir = messagesDir(phrenPath);
-    const files = fs.readdirSync(dir)
-      .filter(f => f.endsWith("-messages.json"))
-      .map(f => ({
-        name: f,
-        mtime: fs.statSync(path.join(dir, f)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime);
-
-    if (files.length === 0) return null;
-
-    const data = fs.readFileSync(path.join(dir, files[0].name), "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
+export function loadLastSessionMessages(phrenPath: string, project?: string): SerializedSessionMessage[] | null {
+  return loadSharedLastSessionMessages(phrenPath, project);
 }

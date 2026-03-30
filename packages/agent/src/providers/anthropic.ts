@@ -5,7 +5,7 @@ export class AnthropicProvider implements LlmProvider {
   contextWindow = 200_000;
   maxOutputTokens: number;
   private apiKey: string;
-  private model: string;
+  model: string;
   private cacheEnabled: boolean;
 
   constructor(apiKey: string, model?: string, maxOutputTokens?: number, cacheEnabled = true) {

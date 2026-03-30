@@ -18,7 +18,7 @@ export interface SpawnPayload {
   task: string;
   /** Working directory for the child agent. */
   cwd: string;
-  /** Provider name (openrouter, anthropic, openai, codex, ollama). */
+  /** Provider name (openrouter, anthropic, openai, openai-codex, ollama). */
   provider?: string;
   /** Model override. */
   model?: string;

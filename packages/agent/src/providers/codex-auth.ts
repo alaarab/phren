@@ -3,10 +3,15 @@
  * Same flow as Codex CLI, no middleman.
  */
 import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
 import * as http from "http";
-import * as os from "os";
+import {
+  authProfilesPath,
+  getCodexAuthProfile,
+  hasCodexAuthProfile,
+  hasCodexCliAuth,
+  removeCodexAuthProfile,
+  upsertCodexAuthProfile,
+} from "@phren/cli/auth/profiles";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTH_URL = "https://auth.openai.com/oauth/authorize";
@@ -22,10 +27,13 @@ interface TokenSet {
   account_id?: string;
 }
 
-function tokenPath(): string {
-  const dir = path.join(os.homedir(), ".phren-agent");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return path.join(dir, "codex-token.json");
+function parseAccountId(accessToken: string): string | undefined {
+  try {
+    const payload = JSON.parse(Buffer.from(accessToken.split(".")[1], "base64url").toString());
+    return payload.sub || payload.account_id;
+  } catch {
+    return undefined;
+  }
 }
 
 function generatePKCE(): { codeVerifier: string; codeChallenge: string } {
@@ -71,23 +79,18 @@ async function exchangeCode(code: string, codeVerifier: string): Promise<TokenSe
 
   const data = await res.json() as Record<string, unknown>;
   const expiresIn = (data.expires_in as number) || 3600;
-
-  // Extract account_id from JWT access token
-  let accountId: string | undefined;
-  try {
-    const payload = JSON.parse(Buffer.from((data.access_token as string).split(".")[1], "base64url").toString());
-    accountId = payload.sub || payload.account_id;
-  } catch { /* skip */ }
+  const accessToken = data.access_token as string;
+  const accountId = parseAccountId(accessToken);
 
   return {
-    access_token: data.access_token as string,
+    access_token: accessToken,
     refresh_token: data.refresh_token as string | undefined,
     expires_at: Date.now() + expiresIn * 1000,
     account_id: accountId,
   };
 }
 
-async function refreshToken(refreshTok: string): Promise<TokenSet> {
+async function refreshToken(refreshTok: string, existingAccountId?: string): Promise<TokenSet> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -105,11 +108,13 @@ async function refreshToken(refreshTok: string): Promise<TokenSet> {
 
   const data = await res.json() as Record<string, unknown>;
   const expiresIn = (data.expires_in as number) || 3600;
+  const accessToken = data.access_token as string;
 
   return {
-    access_token: data.access_token as string,
+    access_token: accessToken,
     refresh_token: (data.refresh_token as string) || refreshTok,
     expires_at: Date.now() + expiresIn * 1000,
+    account_id: parseAccountId(accessToken) ?? existingAccountId,
   };
 }
 
@@ -185,8 +190,15 @@ export async function codexLogin(): Promise<void> {
   const tokens = await exchangeCode(code, codeVerifier);
 
   // Save tokens
-  fs.writeFileSync(tokenPath(), JSON.stringify(tokens, null, 2) + "\n", { mode: 0o600 });
-  console.log(`Logged in! Token saved to ${tokenPath()}`);
+  upsertCodexAuthProfile({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: tokens.expires_at,
+    accountId: tokens.account_id,
+    lastRefresh: new Date().toISOString(),
+    source: "phren-oauth",
+  });
+  console.log(`Logged in! Token saved to ${authProfilesPath()}`);
 }
 
 // Lock so concurrent callers share a single in-flight refresh
@@ -194,41 +206,48 @@ let refreshPromise: Promise<TokenSet> | null = null;
 
 /** Load stored token, auto-refresh if expiring within 5 minutes. */
 export async function getAccessToken(): Promise<{ accessToken: string; accountId?: string }> {
-  const file = tokenPath();
-  if (!fs.existsSync(file)) {
+  let profile = getCodexAuthProfile({ allowCliImport: true });
+  if (!profile) {
     throw new Error("Not logged in to Codex. Run: phren-agent auth login");
   }
 
-  let tokens: TokenSet = JSON.parse(fs.readFileSync(file, "utf-8"));
-
   // Refresh if expiring within 5 minutes
-  if (tokens.expires_at < Date.now() + 5 * 60 * 1000) {
-    if (!tokens.refresh_token) {
+  if (profile.expiresAt < Date.now() + 5 * 60 * 1000) {
+    if (!profile.refreshToken) {
       throw new Error("Token expired and no refresh token. Run: phren-agent auth login");
     }
     if (!refreshPromise) {
       console.error("Refreshing Codex token...");
-      refreshPromise = refreshToken(tokens.refresh_token).finally(() => { refreshPromise = null; });
+      refreshPromise = refreshToken(profile.refreshToken, profile.accountId).finally(() => { refreshPromise = null; });
     }
-    tokens = await refreshPromise;
-    fs.writeFileSync(file, JSON.stringify(tokens, null, 2) + "\n", { mode: 0o600 });
+    const refreshed = await refreshPromise;
+    profile = upsertCodexAuthProfile({
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token,
+      expiresAt: refreshed.expires_at,
+      accountId: refreshed.account_id ?? profile.accountId,
+      lastRefresh: new Date().toISOString(),
+      source: "phren-oauth",
+    });
   }
 
-  return { accessToken: tokens.access_token, accountId: tokens.account_id };
+  return { accessToken: profile.accessToken, accountId: profile.accountId };
 }
 
 /** Check if user has a stored Codex token. */
 export function hasCodexToken(): boolean {
-  return fs.existsSync(tokenPath());
+  return hasCodexAuthProfile({ allowCliImport: true });
 }
 
 /** Remove stored token. */
 export function codexLogout(): void {
-  const file = tokenPath();
-  if (fs.existsSync(file)) {
-    fs.unlinkSync(file);
-    console.log("Logged out of Codex.");
+  const removed = removeCodexAuthProfile();
+  if (!removed) {
+    console.log("No local Phren Codex profile found.");
   } else {
-    console.log("Not logged in.");
+    console.log("Logged out of Codex in Phren.");
+  }
+  if (hasCodexCliAuth()) {
+    console.log("Codex CLI auth at ~/.codex/auth.json was left untouched.");
   }
 }
