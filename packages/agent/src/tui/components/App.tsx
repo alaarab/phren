@@ -9,6 +9,7 @@ import { InputArea, PermissionsLine } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
+import { renderMarkdown } from "../../multi/markdown.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
 
@@ -172,7 +173,7 @@ export function App({
                 {aMsg.text ? (
                   <Box>
                     <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-                    <Text wrap="wrap">{aMsg.text}</Text>
+                    <Text wrap="wrap">{renderMarkdown(aMsg.text)}</Text>
                   </Box>
                 ) : null}
               </Box>
