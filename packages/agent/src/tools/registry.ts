@@ -16,6 +16,18 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  remove(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  toolNames(): string[] {
+    return [...this.tools.keys()];
+  }
+
   setPermissions(config: PermissionConfig): void {
     this.permissionConfig = config;
   }

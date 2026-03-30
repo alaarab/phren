@@ -15,6 +15,21 @@ import * as crypto from "node:crypto";
 
 export type TaskStatus = "pending" | "claimed" | "in_progress" | "completed" | "failed";
 
+export interface TeamMember {
+  agentId: string;
+  name: string;
+  agentType: string;
+  model: string;
+  joinedAt: string;
+}
+
+interface TeamConfig {
+  teamName: string;
+  members: TeamMember[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TeamTask {
   id: string;
   subject: string;
@@ -111,16 +126,13 @@ function atomicWriteJsonSync(filePath: string, data: unknown): void {
 export class TeamCoordinator {
   readonly teamName: string;
   readonly filePath: string;
+  readonly configPath: string;
 
   constructor(teamName: string) {
     this.teamName = teamName;
-    this.filePath = path.join(
-      os.homedir(),
-      ".phren-agent",
-      "teams",
-      teamName,
-      "tasks.json",
-    );
+    const teamDir = path.join(os.homedir(), ".phren-agent", "teams", teamName);
+    this.filePath = path.join(teamDir, "tasks.json");
+    this.configPath = path.join(teamDir, "config.json");
   }
 
   // ── Read / Write helpers (always called inside a lock) ──────────────
@@ -311,5 +323,76 @@ export class TeamCoordinator {
       .join(", ");
     lines.push(`  (${summary})`);
     return lines.join("\n");
+  }
+
+  // ── Config helpers (always called inside a lock) ──────────────────
+
+  private readConfig(): TeamConfig {
+    try {
+      const raw = fs.readFileSync(this.configPath, "utf-8");
+      return JSON.parse(raw) as TeamConfig;
+    } catch {
+      const now = new Date().toISOString();
+      return { teamName: this.teamName, members: [], createdAt: now, updatedAt: now };
+    }
+  }
+
+  private writeConfig(data: TeamConfig): void {
+    data.updatedAt = new Date().toISOString();
+    atomicWriteJsonSync(this.configPath, data);
+  }
+
+  // ── Member Registry ───────────────────────────────────────────────
+
+  /** Register an agent as a team member. Updates existing entry if agentId matches. */
+  registerAgent(agentId: string, name: string, agentType?: string, model?: string): TeamMember {
+    return withLock(this.configPath, () => {
+      const data = this.readConfig();
+      const existing = data.members.find((m) => m.agentId === agentId);
+      if (existing) {
+        existing.name = name;
+        existing.agentType = agentType ?? existing.agentType;
+        existing.model = model ?? existing.model;
+        this.writeConfig(data);
+        return existing;
+      }
+      const member: TeamMember = {
+        agentId,
+        name,
+        agentType: agentType ?? "agent",
+        model: model ?? "unknown",
+        joinedAt: new Date().toISOString(),
+      };
+      data.members.push(member);
+      this.writeConfig(data);
+      return member;
+    });
+  }
+
+  /** Remove an agent from the team by agentId. Returns true if found and removed. */
+  unregisterAgent(agentId: string): boolean {
+    return withLock(this.configPath, () => {
+      const data = this.readConfig();
+      const idx = data.members.findIndex((m) => m.agentId === agentId);
+      if (idx === -1) return false;
+      data.members.splice(idx, 1);
+      this.writeConfig(data);
+      return true;
+    });
+  }
+
+  /** Get all registered team members (read-only snapshot). */
+  getMembers(): TeamMember[] {
+    return withLock(this.configPath, () => {
+      return structuredClone(this.readConfig().members);
+    });
+  }
+
+  /** Find a team member by name. Returns null if not found. */
+  getMember(name: string): TeamMember | null {
+    return withLock(this.configPath, () => {
+      const data = this.readConfig();
+      return data.members.find((m) => m.name === name) ?? null;
+    });
   }
 }

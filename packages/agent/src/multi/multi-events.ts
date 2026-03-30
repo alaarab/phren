@@ -75,6 +75,25 @@ export function wireSpawnerEvents(spawner: AgentSpawner, ctx: EventContext): voi
     ctx.render();
   });
 
+  spawner.on("idle", (agentId: string, reason: string, dmSummaries?: Array<{ from: string; content: string; timestamp: string }>) => {
+    const pane = ctx.getOrCreatePane(agentId);
+    const style = getAgentStyle(pane.index);
+    appendToPane(pane, s.dim(`  ${style.icon} Agent idle (${reason})`) + "\n");
+    if (dmSummaries && dmSummaries.length > 0) {
+      appendToPane(pane, s.dim("  Messages received while running:") + "\n");
+      for (const dm of dmSummaries) {
+        appendToPane(pane, s.yellow(`    [${dm.from}] ${dm.content.slice(0, 100)}`) + "\n");
+      }
+    }
+    ctx.render();
+  });
+
+  spawner.on("shutdown_approved", (agentId: string) => {
+    const pane = ctx.getOrCreatePane(agentId);
+    appendToPane(pane, s.dim("  Agent shut down gracefully.") + "\n");
+    ctx.render();
+  });
+
   spawner.on("message", (from: string, to: string, content: string) => {
     const senderPane = ctx.panes.get(from);
     if (senderPane) {
