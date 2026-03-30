@@ -50,10 +50,10 @@ export interface AgentTab {
 export interface PermissionsLineProps {
   mode: PermissionMode;
   theme?: Theme;
-  /** Active agents for status display */
   agents?: AgentTab[];
-  /** Currently selected agent for input routing */
   selectedAgentId?: string | null;
+  highlightedTabId?: string | null;
+  tabFocused?: boolean;
 }
 
 const PERM_COLOR_MAP: Record<PermissionMode, string> = {
@@ -72,7 +72,7 @@ const STATUS_ICON: Record<AgentTab["status"], string> = {
   cancelled: "\u2500", // ─
 };
 
-export function PermissionsLine({ mode, theme, agents, selectedAgentId }: PermissionsLineProps) {
+export function PermissionsLine({ mode, theme, agents, selectedAgentId, highlightedTabId, tabFocused }: PermissionsLineProps) {
   const icon = PERMISSION_ICONS[mode];
   const label = PERMISSION_LABELS[mode];
   const permColors = theme?.permission;
@@ -82,13 +82,6 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId }: Permis
 
   const showPerm = mode !== "suggest";
   const hasAgents = agents && agents.length > 0;
-  const runningCount = agents?.filter((a) => a.status === "running").length ?? 0;
-  const idleCount = agents?.filter((a) => a.status === "idle").length ?? 0;
-
-  // Show which agent input is routed to
-  const routedAgent = selectedAgentId && selectedAgentId !== "__main__"
-    ? agents?.find((a) => a.id === selectedAgentId)
-    : null;
 
   return (
     <Box>
@@ -99,12 +92,29 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId }: Permis
       )}
       {hasAgents ? (
         <Text>
-          {showPerm ? "  " : ""}<Text dimColor>{runningCount > 0 ? `${runningCount} running` : ""}{runningCount > 0 && idleCount > 0 ? ", " : ""}{idleCount > 0 ? `${idleCount} idle` : ""}</Text>
-          {routedAgent ? <Text>{" \u2502 "}<Text bold color={routedAgent.color}>{"\u25b8"} {routedAgent.name}</Text></Text> : null}
+          {"  "}
+          {agents!.map((agent, i) => {
+            const isActive = agent.id === selectedAgentId;
+            const isHighlighted = tabFocused && agent.id === highlightedTabId;
+            const statusIcon = STATUS_ICON[agent.status];
+            return (
+              <Text key={agent.id}>
+                {i > 0 ? " " : ""}
+                {isHighlighted
+                  ? <Text bold inverse color={agent.color}>{` ${statusIcon} ${agent.name} `}</Text>
+                  : isActive
+                    ? <Text bold underline color={agent.color}>{statusIcon} {agent.name}</Text>
+                    : <Text color={agent.color} dimColor={agent.status === "idle" || agent.status === "done"}>{statusIcon} {agent.name}</Text>
+                }
+              </Text>
+            );
+          })}
+          {tabFocused
+            ? <Text dimColor>{"  \u2190\u2192 enter \u2191 back"}</Text>
+            : <Text dimColor>{"  \u2193"}</Text>
+          }
         </Text>
-      ) : (
-        <Text dimColor>{showPerm ? "" : " shift+tab toggle"}</Text>
-      )}
+      ) : null}
     </Box>
   );
 }

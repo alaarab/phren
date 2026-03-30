@@ -23,6 +23,13 @@ export interface KeyboardShortcutOpts {
   onCancelTurn: () => void;
   /** Cancel the selected agent's current work */
   onEscCancelAgent?: () => void;
+  /** Tab bar navigation */
+  tabFocused?: boolean;
+  onEnterTabBar?: () => void;
+  onExitTabBar?: () => void;
+  onTabLeft?: () => void;
+  onTabRight?: () => void;
+  onTabSelect?: () => void;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -30,6 +37,23 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Reset Ctrl+C count on any non-Ctrl+C keypress
     if (!(input === "c" && key.ctrl)) {
       if (opts.ctrlCCount > 0) opts.onSetCtrlCCount(0);
+    }
+
+    // ── Tab bar navigation ────────────────────────────────────
+    if (opts.tabFocused) {
+      if (key.leftArrow) { opts.onTabLeft?.(); return; }
+      if (key.rightArrow) { opts.onTabRight?.(); return; }
+      if (key.return) { opts.onTabSelect?.(); return; }
+      if (key.upArrow) { opts.onExitTabBar?.(); return; }
+      if (key.escape) { opts.onExitTabBar?.(); return; }
+      // Any other key: exit tab bar and fall through
+      opts.onExitTabBar?.();
+    }
+
+    // Down arrow (empty input) → enter tab bar
+    if (key.downArrow && opts.inputValue === "" && opts.onEnterTabBar && !opts.tabFocused) {
+      opts.onEnterTabBar();
+      return;
     }
 
     // Ctrl+D -- exit cleanly
