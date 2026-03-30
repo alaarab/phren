@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Text, useInput } from "ink";
+import { Box, Text, useInput } from "ink";
+import * as fs from "fs";
+import * as nodePath from "path";
+import * as os from "os";
 
 export interface PhrenInputProps {
   value: string;
@@ -9,10 +12,35 @@ export interface PhrenInputProps {
   focus?: boolean;
 }
 
+/** Map a flat cursor offset to { line, col } within a multi-line string. */
+function offsetToPos(text: string, offset: number): { line: number; col: number } {
+  let line = 0;
+  let col = 0;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text[i] === "\n") {
+      line++;
+      col = 0;
+    } else {
+      col++;
+    }
+  }
+  return { line, col };
+}
+
+/** Map { line, col } back to a flat cursor offset. */
+function posToOffset(lines: string[], line: number, col: number): number {
+  let offset = 0;
+  for (let i = 0; i < line && i < lines.length; i++) {
+    offset += lines[i]!.length + 1; // +1 for the \n
+  }
+  const targetLine = lines[line] ?? "";
+  return offset + Math.min(col, targetLine.length);
+}
+
 /**
- * Custom controlled text input with full cursor support.
+ * Custom controlled text input with full cursor and multi-line support.
  * Replaces ink-text-input to enable cursor positioning, word jump,
- * kill-line, and other readline-style keybindings.
+ * kill-line, Shift+Enter multi-line, and other readline-style keybindings.
  */
 export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = true }: PhrenInputProps) {
   const [cursor, setCursor] = useState(value.length);
@@ -21,6 +49,9 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
   useEffect(() => {
     setCursor((c) => Math.min(c, value.length));
   }, [value]);
+
+  const lines = value.split("\n");
+  const isMultiLine = lines.length > 1;
 
   useInput(
     (input, key) => {
@@ -32,8 +63,7 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         const cleaned = input
           .replaceAll(PASTE_START, "")
           .replaceAll(PASTE_END, "")
-          .replace(/\r\n?/g, "\n")  // normalize line endings
-          .replace(/\n/g, " ");     // flatten newlines to spaces (single-line input)
+          .replace(/\r\n?/g, "\n");  // normalize line endings
         if (cleaned.length > 0) {
           const next = value.slice(0, cursor) + cleaned + value.slice(cursor);
           onChange(next);
@@ -42,10 +72,36 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Submit
+      // Shift+Enter — insert newline (multi-line input)
+      if (key.return && key.shift) {
+        const next = value.slice(0, cursor) + "\n" + value.slice(cursor);
+        onChange(next);
+        setCursor(cursor + 1);
+        return;
+      }
+
+      // Plain Enter — submit
       if (key.return) {
         onSubmit(value);
         setCursor(0);
+        return;
+      }
+
+      // Up arrow — in multi-line: move cursor up; single-line: pass through
+      if (key.upArrow && isMultiLine) {
+        const { line, col } = offsetToPos(value, cursor);
+        if (line > 0) {
+          setCursor(posToOffset(lines, line - 1, col));
+        }
+        return;
+      }
+
+      // Down arrow — in multi-line: move cursor down; single-line: pass through
+      if (key.downArrow && isMultiLine) {
+        const { line, col } = offsetToPos(value, cursor);
+        if (line < lines.length - 1) {
+          setCursor(posToOffset(lines, line + 1, col));
+        }
         return;
       }
 
@@ -83,15 +139,17 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Home / Ctrl+A — beginning of line
+      // Home / Ctrl+A — beginning of current line
       if (key.ctrl && input === "a") {
-        setCursor(0);
+        const { line } = offsetToPos(value, cursor);
+        setCursor(posToOffset(lines, line, 0));
         return;
       }
 
-      // End / Ctrl+E — end of line
+      // End / Ctrl+E — end of current line
       if (key.ctrl && input === "e") {
-        setCursor(value.length);
+        const { line } = offsetToPos(value, cursor);
+        setCursor(posToOffset(lines, line, lines[line]!.length));
         return;
       }
 
@@ -113,21 +171,37 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Ctrl+U — kill line (delete everything before cursor)
+      // Ctrl+U — kill to beginning of current line
       if (key.ctrl && input === "u") {
-        onChange(value.slice(cursor));
-        setCursor(0);
+        const { line } = offsetToPos(value, cursor);
+        const lineStart = posToOffset(lines, line, 0);
+        onChange(value.slice(0, lineStart) + value.slice(cursor));
+        setCursor(lineStart);
         return;
       }
 
-      // Ctrl+K — kill to end of line (delete everything after cursor)
+      // Ctrl+K — kill to end of current line
       if (key.ctrl && input === "k") {
-        onChange(value.slice(0, cursor));
+        const { line } = offsetToPos(value, cursor);
+        const lineEnd = posToOffset(lines, line, lines[line]!.length);
+        onChange(value.slice(0, cursor) + value.slice(lineEnd));
         return;
       }
 
-      // Tab, escape, arrows already handled — skip control sequences
-      if (key.tab || key.escape || key.upArrow || key.downArrow) {
+      // Tab — file path completion (slash commands handled by shortcuts hook)
+      if (key.tab && !key.shift) {
+        if (!value.startsWith("/")) {
+          const result = completeFilePath(value, cursor);
+          if (result) {
+            onChange(result.value);
+            setCursor(result.cursor);
+          }
+        }
+        return;
+      }
+
+      // Escape, arrows already handled — skip control sequences
+      if (key.escape || key.upArrow || key.downArrow) {
         return;
       }
 
@@ -146,7 +220,7 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
     { isActive: focus },
   );
 
-  // Render: text with inverse cursor
+  // Render: empty with placeholder
   if (value.length === 0 && placeholder) {
     return (
       <Text>
@@ -156,38 +230,148 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
     );
   }
 
-  const before = value.slice(0, cursor);
-  const cursorChar = cursor < value.length ? value[cursor] : " ";
-  const after = cursor < value.length ? value.slice(cursor + 1) : "";
+  // Single-line render (fast path)
+  if (!isMultiLine) {
+    const before = value.slice(0, cursor);
+    const cursorChar = cursor < value.length ? value[cursor] : " ";
+    const after = cursor < value.length ? value.slice(cursor + 1) : "";
+    return (
+      <Text>
+        {before}
+        <Text inverse>{cursorChar}</Text>
+        {after}
+      </Text>
+    );
+  }
 
+  // Multi-line render: each line separately, cursor inverse on correct position
+  let charsSeen = 0;
   return (
-    <Text>
-      {before}
-      <Text inverse>{cursorChar}</Text>
-      {after}
-    </Text>
+    <Box flexDirection="column">
+      {lines.map((line, lineIdx) => {
+        const lineStart = charsSeen;
+        const lineEnd = lineStart + line.length;
+        // Advance past this line's content + its \n separator (except last line)
+        charsSeen = lineEnd + (lineIdx < lines.length - 1 ? 1 : 0);
+
+        const cursorInLine = cursor >= lineStart && cursor <= lineEnd;
+
+        if (!cursorInLine) {
+          return <Text key={lineIdx}>{line || " "}</Text>;
+        }
+
+        const localCursor = cursor - lineStart;
+        const before = line.slice(0, localCursor);
+        const cursorChar = localCursor < line.length ? line[localCursor] : " ";
+        const after = localCursor < line.length ? line.slice(localCursor + 1) : "";
+
+        return (
+          <Text key={lineIdx}>
+            {before}
+            <Text inverse>{cursorChar}</Text>
+            {after}
+          </Text>
+        );
+      })}
+    </Box>
   );
 }
 
-/** Find the start of the word to the left of pos. */
+/** Find the start of the word to the left of pos (stops at newlines). */
 function wordBoundaryLeft(text: string, pos: number): number {
   if (pos <= 0) return 0;
   let i = pos - 1;
-  // Skip whitespace
-  while (i > 0 && /\s/.test(text[i]!)) i--;
+  // Skip whitespace but not newlines
+  while (i > 0 && text[i] !== "\n" && /\s/.test(text[i]!)) i--;
   // Skip word characters
-  while (i > 0 && /\S/.test(text[i - 1]!)) i--;
+  while (i > 0 && text[i - 1] !== "\n" && /\S/.test(text[i - 1]!)) i--;
   return i;
 }
 
-/** Find the end of the word to the right of pos. */
+/** Find the end of the word to the right of pos (stops at newlines). */
 function wordBoundaryRight(text: string, pos: number): number {
   const len = text.length;
   if (pos >= len) return len;
   let i = pos;
   // Skip word characters
-  while (i < len && /\S/.test(text[i]!)) i++;
-  // Skip whitespace
-  while (i < len && /\s/.test(text[i]!)) i++;
+  while (i < len && text[i] !== "\n" && /\S/.test(text[i]!)) i++;
+  // Skip whitespace but not newlines
+  while (i < len && text[i] !== "\n" && /\s/.test(text[i]!)) i++;
   return i;
+}
+
+/** Expand ~ to home directory. */
+function expandHome(p: string): string {
+  if (p === "~" || p.startsWith("~/")) {
+    return os.homedir() + p.slice(1);
+  }
+  return p;
+}
+
+/**
+ * File path tab completion.
+ * Extracts the last whitespace-delimited token before the cursor,
+ * checks if it looks like a path, and completes it from the filesystem.
+ * Returns null if no completion applies.
+ */
+function completeFilePath(
+  value: string,
+  cursor: number,
+): { value: string; cursor: number } | null {
+  // Extract the text before cursor and find the last token
+  const before = value.slice(0, cursor);
+  const tokenMatch = before.match(/(\S+)$/);
+  if (!tokenMatch) return null;
+
+  const token = tokenMatch[1]!;
+  const tokenStart = cursor - token.length;
+
+  // Only complete tokens that look like paths
+  if (!/[/.~]/.test(token)) return null;
+
+  const expanded = expandHome(token);
+  const resolved = nodePath.resolve(expanded);
+  const dir = expanded.endsWith("/") ? resolved : nodePath.dirname(resolved);
+  const partial = expanded.endsWith("/") ? "" : nodePath.basename(resolved);
+
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+
+  const matches = entries.filter((e) => e.startsWith(partial));
+  if (matches.length === 0) return null;
+
+  let completion: string;
+  if (matches.length === 1) {
+    completion = matches[0]!;
+    // Append / for directories
+    try {
+      const stat = fs.statSync(nodePath.join(dir, completion));
+      if (stat.isDirectory()) completion += "/";
+    } catch { /* leave as is */ }
+  } else {
+    // Find longest common prefix among matches
+    let prefix = matches[0]!;
+    for (let i = 1; i < matches.length; i++) {
+      const m = matches[i]!;
+      let j = 0;
+      while (j < prefix.length && j < m.length && prefix[j] === m[j]) j++;
+      prefix = prefix.slice(0, j);
+    }
+    if (prefix.length <= partial.length) return null; // no progress
+    completion = prefix;
+  }
+
+  // Build the completed token: keep the original prefix up to partial, append completion
+  const suffix = completion.slice(partial.length);
+  if (suffix.length === 0) return null;
+
+  const after = value.slice(cursor);
+  const newValue = before + suffix + after;
+  const newCursor = cursor + suffix.length;
+
+  return { value: newValue, cursor: newCursor };
 }

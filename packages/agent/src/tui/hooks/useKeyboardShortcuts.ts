@@ -4,7 +4,7 @@ const SLASH_COMMANDS = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/spawn", "/agents",
-  "/mode", "/verbose", "/exit", "/quit",
+  "/mode", "/verbose", "/theme", "/exit", "/quit",
 ];
 
 export interface KeyboardShortcutOpts {

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import { Static, Box, Text, useApp } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
+import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
 import { InputArea, PermissionsLine } from "./InputArea.js";
@@ -49,11 +50,17 @@ export interface AppState {
   version: string;
 }
 
+export interface ActiveToolInfo {
+  name: string;
+  preview: string;
+}
+
 export interface AppProps {
   state: AppState;
   completedMessages: CompletedMessage[];
   streamingText: string;
   completedToolCalls: ToolCallProps[];
+  activeTool: ActiveToolInfo | null;
   thinking: boolean;
   thinkStartTime: number;
   thinkElapsed: string | null;
@@ -73,6 +80,7 @@ export function App({
   completedMessages,
   streamingText,
   completedToolCalls,
+  activeTool,
   thinking,
   thinkStartTime,
   thinkElapsed,
@@ -180,6 +188,15 @@ export function App({
         {completedToolCalls.map((tc, i) => (
           <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} />
         ))}
+
+        {/* Currently executing tool — animated spinner */}
+        {activeTool && (
+          <Box paddingLeft={2}>
+            <ToolSpinner />
+            <Text bold>{activeTool.name}</Text>
+            {activeTool.preview ? <Text color="gray"> {activeTool.preview}</Text> : null}
+          </Box>
+        )}
 
         {/* Active streaming text with diamond prefix */}
         {streamingText !== "" && (
