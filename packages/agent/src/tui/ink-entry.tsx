@@ -372,10 +372,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       return;
     }
 
-    // Normal user message — add to completed history and run main agent turn
-    completedMessages.push({ id: nextId(), kind: "user", text: line });
-    update();
-    runAgentTurn(line);
+    // Normal user message — defer static push to next tick so dynamic area is clean
+    update(); // flush clean state first (empty input)
+    setImmediate(() => {
+      completedMessages.push({ id: nextId(), kind: "user", text: line });
+      update();
+      runAgentTurn(line);
+    });
   }
 
   // TurnHooks bridge — updates mutable state, calls update()
@@ -422,6 +425,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     },
   };
 
+  // Phren's past-tense verbs for turn summaries
+  const PAST_VERBS = ["Recalled", "Reasoned", "Connected", "Synthesized", "Reflected", "Distilled", "Threaded", "Mapped"];
+
   async function runAgentTurn(userInput: string) {
     running = true;
     thinking = true;
@@ -430,6 +436,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     streamingText = "";
     currentToolCalls = [];
     activeTool = null;
+    const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
     update();
 
     try {
@@ -456,7 +463,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     currentToolCalls = [];
     activeTool = null;
     running = false;
-    thinkElapsed = elapsed;
+    thinkElapsed = `${pastVerb} for ${elapsed}s`;
     process.stdout.write("\x07"); // terminal bell on completion
     update();
 

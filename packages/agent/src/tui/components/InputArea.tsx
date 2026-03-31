@@ -24,12 +24,11 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus, separato
   const bashPromptColor = theme?.input.bashPrompt ?? "yellow";
 
   return (
-    <Box flexDirection="column">
-      <Text color={sepColor} dimColor>{sep}</Text>
+    <Box flexDirection="column" marginTop={1}>
       <Box>
         {bashMode
           ? <Text color={bashPromptColor}>! </Text>
-          : <Text color={promptColor} dimColor>{"\u25b8"} </Text>
+          : <Text color={promptColor} dimColor>{"\u276f"} </Text>
         }
         <PhrenInput
           value={value}
@@ -38,7 +37,6 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus, separato
           focus={focus}
         />
       </Box>
-      <Text color={sepColor} dimColor>{sep}</Text>
     </Box>
   );
 }
@@ -98,7 +96,7 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
   return (
     <Box>
       {showPerm ? (
-        <Text>{"  "}<Text color={color}>{icon} {label}</Text></Text>
+        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle)</Text></Text>
       ) : (
         <Text>{"  "}</Text>
       )}
