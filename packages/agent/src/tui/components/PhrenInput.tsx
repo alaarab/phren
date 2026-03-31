@@ -117,10 +117,10 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Left arrow / Ctrl+B — move cursor left
+      // Left arrow — move cursor left (with word jump modifiers)
       if (key.leftArrow || (key.ctrl && input === "b")) {
-        if (key.meta) {
-          // Alt+Left / Alt+B — word jump left
+        if (key.meta || key.ctrl) {
+          // Alt+Left / Ctrl+Left / Alt+B / Ctrl+B — word jump left
           setCursor((c) => wordBoundaryLeft(value, c));
         } else {
           setCursor((c) => Math.max(0, c - 1));
@@ -128,10 +128,10 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Right arrow / Ctrl+F — move cursor right
+      // Right arrow — move cursor right (with word jump modifiers)
       if (key.rightArrow || (key.ctrl && input === "f")) {
-        if (key.meta) {
-          // Alt+Right / Alt+F — word jump right
+        if (key.meta || key.ctrl) {
+          // Alt+Right / Ctrl+Right / Alt+F / Ctrl+F — word jump right
           setCursor((c) => wordBoundaryRight(value, c));
         } else {
           setCursor((c) => Math.min(value.length, c + 1));
@@ -139,7 +139,7 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
         return;
       }
 
-      // Alt+B — word jump left (standalone, not combined with arrow)
+      // Alt+B — word jump left (standalone)
       if (key.meta && input === "b") {
         setCursor((c) => wordBoundaryLeft(value, c));
         return;
@@ -162,6 +162,22 @@ export function PhrenInput({ value, onChange, onSubmit, placeholder, focus = tru
       if (key.ctrl && input === "e") {
         const { line } = offsetToPos(value, cursor);
         setCursor(posToOffset(lines, line, lines[line]!.length));
+        return;
+      }
+
+      // Alt+Backspace / Alt+Delete — delete word before cursor
+      if ((key.backspace || key.delete) && key.meta) {
+        const boundary = wordBoundaryLeft(value, cursor);
+        onChange(value.slice(0, boundary) + value.slice(cursor));
+        setCursor(boundary);
+        return;
+      }
+
+      // Ctrl+Backspace / Ctrl+Delete — delete word before cursor
+      if ((key.backspace || key.delete) && key.ctrl) {
+        const boundary = wordBoundaryLeft(value, cursor);
+        onChange(value.slice(0, boundary) + value.slice(cursor));
+        setCursor(boundary);
         return;
       }
 

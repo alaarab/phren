@@ -127,15 +127,18 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       return;
     }
 
-    // Escape -- cancel agent work, exit bash mode, or clear input
+    // Escape -- cancel running turn, exit bash mode, clear input, or cancel agent
     if (key.escape) {
+      if (opts.isRunning) {
+        opts.onCancelTurn();
+        return;
+      }
       if (opts.bashMode) {
         opts.onSetBashMode(false);
         opts.onSetInput("");
       } else if (opts.inputValue) {
         opts.onSetInput("");
       } else if (opts.onEscCancelAgent) {
-        // No input, not in bash mode — cancel the selected agent's work
         opts.onEscCancelAgent();
       }
       return;
