@@ -39,7 +39,7 @@ export function ThinkingIndicator({ startTime: _startTime, theme }: ThinkingIndi
 
   return (
     <Text>
-      {"  "}<Text color={hex}>{"\u25c6"} {verb}\u2026</Text>
+      {"  "}<Text color={hex}>{"\u25c6"} {verb}{"\u2026"}</Text>
     </Text>
   );
 }
