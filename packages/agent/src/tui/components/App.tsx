@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import { Static, Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
@@ -318,47 +318,49 @@ export function App({
   }, [search.state.active, search.state.query]);
 
   return (
-    <Box flexDirection="column">
-      {/* ── Scrollable zone: messages + active turn (CC: fk9.scrollable) ── */}
+    <>
+      {/* Completed messages — rendered once via <Static>, scroll up permanently */}
+      <Static items={completedMessages}>
+        {(item) => {
+          if (item.kind === "user") {
+            return (
+              <Box key={item.id} flexDirection="column">
+                <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((item as UserMsg).text)}</Text>
+              </Box>
+            );
+          }
+          if (item.kind === "assistant") {
+            const aMsg = item as AssistantMsg;
+            const renderedText = aMsg.text
+              ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
+              : "";
+            return (
+              <Box key={item.id} flexDirection="column" marginTop={1}>
+                {aMsg.toolCalls?.map((tc, i) => (
+                  <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
+                ))}
+                {renderedText ? (
+                  <Box>
+                    <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
+                    <Text wrap="wrap">{renderedText}</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            );
+          }
+          if (item.kind === "status") {
+            return <Text key={item.id} color={theme.system.color} dimColor>{applySearch((item as StatusMsg).text)}</Text>;
+          }
+          return null;
+        }}
+      </Static>
 
-      {/* Banner */}
-      {showBanner && <Banner version={state.version} theme={theme} />}
+      {/* Dynamic area — active turn + input (erased and repainted each frame) */}
+      <Box flexDirection="column">
+        {/* Banner shows in dynamic area when no messages yet */}
+        {showBanner && completedMessages.length === 0 && <Banner version={state.version} theme={theme} />}
 
-      {/* Completed messages — all dynamic, re-rendered each frame (matches CC) */}
-      {completedMessages.map((msg) => {
-        if (msg.kind === "user") {
-          return (
-            <Box key={msg.id} flexDirection="column">
-              <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((msg as UserMsg).text)}</Text>
-            </Box>
-          );
-        }
-        if (msg.kind === "assistant") {
-          const aMsg = msg as AssistantMsg;
-          const renderedText = aMsg.text
-            ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
-            : "";
-          return (
-            <Box key={msg.id} flexDirection="column" marginTop={1}>
-              {aMsg.toolCalls?.map((tc, i) => (
-                <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
-              ))}
-              {renderedText ? (
-                <Box>
-                  <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-                  <Text wrap="wrap">{renderedText}</Text>
-                </Box>
-              ) : null}
-            </Box>
-          );
-        }
-        if (msg.kind === "status") {
-          return <Text key={msg.id} color={theme.system.color} dimColor>{applySearch((msg as StatusMsg).text)}</Text>;
-        }
-        return null;
-      })}
-
-      {/* In-progress tool calls (current turn) */}
+        {/* In-progress tool calls (current turn) */}
       {completedToolCalls.map((tc, i) => (
         <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} />
       ))}
@@ -456,6 +458,7 @@ export function App({
           agentCount={state.agentCount}
           theme={theme}
         />
-    </Box>
+      </Box>
+    </>
   );
 }
