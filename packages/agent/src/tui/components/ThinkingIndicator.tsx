@@ -7,12 +7,12 @@ export interface ThinkingIndicatorProps {
   theme: Theme;
 }
 
-// Phren's own thinking verbs — memory-oriented, not generic
+// Phren's own thinking verbs — memory-oriented
 const THINKING_VERBS = [
-  "thinking", "reasoning", "recalling", "connecting", "processing",
+  "recalling", "connecting", "reasoning", "threading", "mapping", "synthesizing",
 ];
 
-export function ThinkingIndicator({ startTime, theme }: ThinkingIndicatorProps) {
+export function ThinkingIndicator({ startTime: _startTime, theme }: ThinkingIndicatorProps) {
   const [frame, setFrame] = useState(0);
 
   // Pick a random verb once per mount
@@ -24,14 +24,12 @@ export function ThinkingIndicator({ startTime, theme }: ThinkingIndicatorProps) 
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame((f) => f + 1);
-    }, 50);
+    }, 500);
     return () => clearInterval(timer);
   }, []);
 
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
   // Gentle sine-wave interpolation between theme thinking colors
-  const t = (Math.sin(frame * 0.08) + 1) / 2;
+  const t = (Math.sin(frame * 0.4) + 1) / 2;
   const [pr, pg, pb] = theme.thinking.primary;
   const [sr, sg, sb] = theme.thinking.secondary;
   const r = Math.round(pr * (1 - t) + sr * t);
@@ -41,7 +39,7 @@ export function ThinkingIndicator({ startTime, theme }: ThinkingIndicatorProps) 
 
   return (
     <Text>
-      {"  "}<Text color={hex}>{"\u25c6"} {verb}</Text> <Text dimColor>{elapsed}s</Text>
+      {"  "}<Text color={hex}>{"\u25c6"} {verb}\u2026</Text>
     </Text>
   );
 }

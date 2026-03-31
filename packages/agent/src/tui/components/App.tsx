@@ -374,20 +374,20 @@ export function App({
         </Box>
       )}
 
-      {/* Active streaming text */}
+      {/* Active streaming text — render markdown live during streaming */}
       {streamingText !== "" && (
         <Box marginTop={1}>
           <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-          <Text wrap="wrap">{streamingText}</Text>
+          <Text wrap="wrap">{renderMarkdown(streamingText, theme.markdown)}</Text>
         </Box>
       )}
 
       {/* Thinking animation */}
       {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} theme={theme} /></Box>}
 
-      {/* "thought for Xs" after turn completes */}
+      {/* "◈ verb for Xs" after turn completes */}
       {thinkElapsed !== null && (
-        <Text color={theme.dim} dimColor>{"  "}{"\u25c6"} thought for {thinkElapsed}s</Text>
+        <Text color={theme.dim} dimColor>{"  "}{"\u25c8"} {thinkElapsed}</Text>
       )}
 
       {/* Ctrl+C warning */}
@@ -448,15 +448,6 @@ export function App({
           selectedAgentId={selectedAgentId}
           highlightedTabId={agents?.[highlightedTabIndex]?.id ?? null}
           tabFocused={tabFocused}
-        />
-        <StatusBar
-          provider={state.provider}
-          project={state.project}
-          turns={state.turns}
-          cost={state.cost}
-          permMode={state.permMode}
-          agentCount={state.agentCount}
-          theme={theme}
         />
       </Box>
     </>
