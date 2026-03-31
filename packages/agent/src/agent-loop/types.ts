@@ -61,6 +61,8 @@ export interface TurnHooks {
   onStatus?: (msg: string) => void;
   /** Mid-turn steering input injection. Return null for none. */
   getSteeringInput?: () => string | null;
+  /** Abort signal — when aborted, the turn stops immediately. */
+  signal?: AbortSignal;
 }
 
 // Re-import LlmMessage for the AgentResult/AgentSession interfaces

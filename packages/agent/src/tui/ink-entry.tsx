@@ -168,10 +168,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (resolveSession) resolveSession(session);
   }
 
-  let cancelRequested = false;
+  let turnAbort: AbortController | null = null;
   function handleCancelTurn() {
-    if (cancelRequested) return; // Only cancel once per turn
-    cancelRequested = true;
+    if (turnAbort) {
+      turnAbort.abort();
+      turnAbort = null;
+    }
     pendingInput = null;
     steerQueueBuf.length = 0;
     update();
@@ -434,7 +436,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   async function runAgentTurn(userInput: string) {
     running = true;
     thinking = true;
-    cancelRequested = false;
+    turnAbort = new AbortController();
     thinkStartTime = Date.now();
     thinkElapsed = null;
     streamingText = "";
@@ -444,7 +446,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     update();
 
     try {
-      await runTurn(userInput, session, config, tuiHooks);
+      await runTurn(userInput, session, config, { ...tuiHooks, signal: turnAbort?.signal });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       streamingText += `\nError: ${msg}`;
