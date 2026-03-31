@@ -59,6 +59,7 @@ export interface AgentTab {
 export interface PermissionsLineProps {
   mode: PermissionMode;
   theme?: Theme;
+  running?: boolean;
   agents?: AgentTab[];
   selectedAgentId?: string | null;
   highlightedTabId?: string | null;
@@ -74,14 +75,14 @@ const STATUS_ICON: Record<AgentTab["status"], string> = {
   cancelled: "\u2500", // ─
 };
 
-export function PermissionsLine({ mode, theme, agents, selectedAgentId, highlightedTabId, tabFocused }: PermissionsLineProps) {
+export function PermissionsLine({ mode, theme, running, agents, selectedAgentId, highlightedTabId, tabFocused }: PermissionsLineProps) {
   const icon = PERMISSION_ICONS[mode];
   const label = PERMISSION_LABELS[mode];
   const permColors = theme?.permission;
   const color = mode === "suggest"
     ? (permColors?.suggest ?? "")
     : mode === "auto-confirm"
-      ? (permColors?.auto ?? "yellow")
+      ? (permColors?.auto ?? "blue")
       : mode === "plan"
         ? ((permColors as Record<string, string> | undefined)?.plan ?? "magenta")
         : (permColors?.fullAuto ?? "green");
@@ -104,9 +105,9 @@ export function PermissionsLine({ mode, theme, agents, selectedAgentId, highligh
   return (
     <Box>
       {showPerm ? (
-        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle)</Text></Text>
+        <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle){running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
       ) : (
-        <Text>{"  "}</Text>
+        <Text>{"  "}{running ? <Text dimColor>esc to interrupt</Text> : null}</Text>
       )}
       {hasAgents ? (
         <Text>

@@ -175,9 +175,9 @@ export const DARK_THEME: Theme = {
 
   permission: {
     suggest: "cyan",
-    auto: "green",
+    auto: "blue",
     plan: "magenta",
-    fullAuto: "yellow",
+    fullAuto: "green",
   },
 
   markdown: {
