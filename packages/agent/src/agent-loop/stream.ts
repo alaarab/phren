@@ -48,6 +48,7 @@ export async function consumeStream(
   stream: AsyncIterable<StreamDelta>,
   costTracker?: CostTracker | null,
   onTextDelta?: (text: string) => void,
+  signal?: AbortSignal,
 ): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens" }> {
   const content: ContentBlock[] = [];
   let stop_reason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
@@ -57,6 +58,7 @@ export async function consumeStream(
   const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
 
   for await (const delta of stream) {
+    if (signal?.aborted) break;
     if (delta.type === "text_delta") {
       (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
       currentText += delta.text;

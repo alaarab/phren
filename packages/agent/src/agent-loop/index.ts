@@ -39,7 +39,12 @@ export async function runTurn(
   let turnToolCalls = 0;
   const turnStart = session.turns;
 
+  const signal = hooks?.signal;
+
   while (session.turns - turnStart < maxTurns) {
+    // Abort check
+    if (signal?.aborted) break;
+
     // Budget check
     if (costTracker?.isOverBudget()) {
       status(`\x1b[33m[budget exceeded: ${costTracker.formatCost()}]\x1b[0m\n`);
@@ -84,7 +89,7 @@ export async function runTurn(
         undefined,
         verbose,
       );
-      const result = await consumeStream(stream, costTracker, hooks?.onTextDelta);
+      const result = await consumeStream(stream, costTracker, hooks?.onTextDelta, signal);
       assistantContent = result.content;
       stopReason = result.stop_reason;
     } else {
@@ -120,6 +125,9 @@ export async function runTurn(
 
     session.messages.push({ role: "assistant", content: assistantContent });
     session.turns++;
+
+    // Abort check after LLM response
+    if (signal?.aborted) break;
 
     // Show turn cost
     if (verbose && costTracker) {
