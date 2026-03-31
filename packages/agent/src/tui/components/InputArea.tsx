@@ -24,19 +24,27 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus, separato
   const bashPromptColor = theme?.input.bashPrompt ?? "yellow";
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box>
-        {bashMode
-          ? <Text color={bashPromptColor}>! </Text>
-          : <Text color={promptColor} dimColor>{"\u276f"} </Text>
-        }
-        <PhrenInput
-          value={value}
-          onChange={onChange}
-          onSubmit={onSubmit}
-          focus={focus}
-        />
-      </Box>
+    <Box
+      flexDirection="row"
+      borderStyle="round"
+      borderColor={sepColor}
+      borderLeft={false}
+      borderRight={false}
+      borderTop={true}
+      borderBottom={true}
+      width={columns}
+      marginTop={1}
+    >
+      {bashMode
+        ? <Text color={bashPromptColor}>! </Text>
+        : <Text color={promptColor} dimColor>{"\u276f"} </Text>
+      }
+      <PhrenInput
+        value={value}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        focus={focus}
+      />
     </Box>
   );
 }
