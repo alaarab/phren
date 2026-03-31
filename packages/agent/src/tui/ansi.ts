@@ -34,9 +34,13 @@ export function stripAnsi(t: string): string {
 // Cycle: ask → auto edits → plan → autopilot (matches Claude Code pattern)
 export const PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
 
-export function nextPermissionMode(current: PermissionMode): PermissionMode {
-  const idx = PERMISSION_MODES.indexOf(current);
-  return PERMISSION_MODES[(idx + 1) % PERMISSION_MODES.length];
+/** Cycle to next permission mode. Skips full-auto unless yolo is true. */
+export function nextPermissionMode(current: PermissionMode, yolo = false): PermissionMode {
+  const modes = yolo ? PERMISSION_MODES : PERMISSION_MODES.filter(m => m !== "full-auto");
+  const idx = modes.indexOf(current);
+  // If current mode is full-auto but yolo is false, jump to suggest
+  if (idx === -1) return modes[0];
+  return modes[(idx + 1) % modes.length];
 }
 
 export const PERMISSION_LABELS: Record<PermissionMode, string> = {
@@ -55,9 +59,9 @@ export const PERMISSION_ICONS: Record<PermissionMode, string> = {
 
 export const PERMISSION_COLORS: Record<PermissionMode, (t: string) => string> = {
   "suggest": (t: string) => t,  // invisible / no color
-  "auto-confirm": s.yellow,     // orange-ish (ANSI yellow)
+  "auto-confirm": s.blue,       // blue
   "plan": s.magenta,            // purple
-  "full-auto": s.green,         // green
+  "full-auto": s.green,         // green (requires --yolo to enable)
 };
 
 export function permTag(mode: PermissionMode): string {

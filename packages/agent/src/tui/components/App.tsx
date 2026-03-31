@@ -444,6 +444,7 @@ export function App({
         <PermissionsLine
           mode={state.permMode}
           theme={theme}
+          running={running}
           agents={agents}
           selectedAgentId={selectedAgentId}
           highlightedTabId={agents?.[highlightedTabIndex]?.id ?? null}

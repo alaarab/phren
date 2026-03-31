@@ -38,6 +38,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let verbose = false;
   let theme: Theme = getTheme();
   let msgCounter = 0;
+  // Autopilot (full-auto) requires --yolo flag to be cycleable via Shift+Tab
+  const yoloEnabled = config.registry.permissionConfig.mode === "full-auto";
 
   // Permission prompt state — when set, input field captures y/n/a/s
   let permissionResolve: ((allowed: boolean) => void) | null = null;
@@ -155,7 +157,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   }
 
   function handlePermissionCycle() {
-    const next = nextPermissionMode(config.registry.permissionConfig.mode);
+    const next = nextPermissionMode(config.registry.permissionConfig.mode, yoloEnabled);
     config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
     savePermissionMode(next);
     update();
