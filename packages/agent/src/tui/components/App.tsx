@@ -123,6 +123,7 @@ export function App({
   const [ctrlCCount, setCtrlCCount] = useState(0);
   const [tabFocused, setTabFocused] = useState(false);
   const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
+  const [showTaskList, setShowTaskList] = useState(false);
   const [stashedInput, setStashedInput] = useState("");
   const [historySearchMode, setHistorySearchMode] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState("");
@@ -327,6 +328,13 @@ export function App({
         onSelectAgent?.(id === "__main__" ? null : id);
       }
     },
+    onCycleAgent: agents && agents.length > 0 ? () => {
+      const currentIdx = agents.findIndex(a => a.id === selectedAgentId || (selectedAgentId === null && a.id === "__main__"));
+      const nextIdx = (currentIdx + 1) % agents.length;
+      const nextId = agents[nextIdx].id;
+      onSelectAgent?.(nextId === "__main__" ? null : nextId);
+    } : undefined,
+    onToggleTaskList: () => setShowTaskList(v => !v),
   });
 
   // Helper: apply search highlighting to a text string (ANSI only works in
@@ -419,6 +427,14 @@ export function App({
 
       {/* Steer queue display */}
       <SteerQueue items={steerQueue} theme={theme} />
+
+        {/* Task list (Ctrl+T) */}
+        {showTaskList && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text dimColor>{"  "}Tasks: (ctrl+t to hide)</Text>
+            <Text dimColor>{"  "}No shared task list in this session.</Text>
+          </Box>
+        )}
 
         {/* Content search bar (Ctrl+F) */}
         {search.state.active && (
