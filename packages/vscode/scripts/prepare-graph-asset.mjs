@@ -8,7 +8,7 @@ const assets = [
 ];
 
 for (const asset of assets) {
-  const sourcePath = path.resolve(extensionRoot, "..", "mcp", "dist", asset);
+  const sourcePath = path.resolve(extensionRoot, "..", "cli", "dist", asset);
   const targetPath = path.resolve(extensionRoot, "out", asset);
   if (!fs.existsSync(sourcePath)) {
     throw new Error(`Missing graph engine asset at ${sourcePath}. Run the root Phren build before packaging the VS Code extension.`);
