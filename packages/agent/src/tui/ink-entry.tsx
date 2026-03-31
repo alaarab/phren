@@ -170,9 +170,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   }
 
   function handleCancelTurn() {
-    // Signal cancellation — the running turn will see this via steering
+    // Signal cancellation — clear queues and inject a steering redirect
     pendingInput = null;
     steerQueueBuf.length = 0;
+    // Inject a steering message to redirect the LLM to stop
+    steerQueueBuf.push("STOP. The user pressed Escape to cancel. End your response immediately.");
+    completedMessages.push({ id: nextId(), kind: "status", text: "Cancelling..." });
     update();
   }
 
