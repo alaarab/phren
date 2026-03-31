@@ -51,6 +51,9 @@ export interface AppState {
   permMode: PermissionMode;
   agentCount: number;
   version: string;
+  model?: string;
+  contextWindow?: number;
+  reasoningEffort?: string;
 }
 
 export interface ActiveToolInfo {
@@ -77,6 +80,7 @@ export interface AppProps {
   onPermissionCycle: () => void;
   onCancelTurn: () => void;
   onExit: () => void;
+  onExpandTool?: () => void;
   /** Agent tabs for multi-agent mode */
   agents?: AgentTab[];
   /** Currently selected agent ID (null = main orchestrator) */
@@ -106,6 +110,7 @@ export function App({
   onPermissionCycle,
   onCancelTurn,
   onExit,
+  onExpandTool,
   agents,
   selectedAgentId,
   onSelectAgent,
@@ -122,6 +127,7 @@ export function App({
   const [historySearchMode, setHistorySearchMode] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
+  const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
 
   // ── Ctrl+F content search ────────────────────────────────────────────────
   const search = useSearch();
@@ -279,6 +285,20 @@ export function App({
     onContentSearch: () => {
       search.activate();
     },
+    onExpandTool: () => {
+      const lastIndex = completedToolCalls.length - 1;
+      if (lastIndex < 0) return;
+      setExpandedTools((prev) => {
+        const next = new Set(prev);
+        if (next.has(lastIndex)) {
+          next.delete(lastIndex);
+        } else {
+          next.add(lastIndex);
+        }
+        return next;
+      });
+      onExpandTool?.();
+    },
     onOpenEditor: () => {
       // Write input to temp file, open $EDITOR, read back
       const tmpFile = `/tmp/phren-input-${Date.now()}.md`;
@@ -358,11 +378,11 @@ export function App({
       {/* Dynamic area — active turn + input (erased and repainted each frame) */}
       <Box flexDirection="column">
         {/* Banner shows in dynamic area when no messages yet */}
-        {showBanner && completedMessages.length === 0 && <Banner version={state.version} theme={theme} />}
+        {showBanner && completedMessages.length === 0 && <Banner state={state} theme={theme} />}
 
         {/* In-progress tool calls (current turn) */}
       {completedToolCalls.map((tc, i) => (
-        <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} />
+        <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} expanded={expandedTools.has(i)} />
       ))}
 
       {/* Currently executing tool — animated spinner */}
