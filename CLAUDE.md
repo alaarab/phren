@@ -419,9 +419,21 @@ phren agent --team myproject "build X" # team mode with task
 |---------|-------------|
 | `/spawn <name> <task>` | Spawn a new child agent |
 | `/agents` or `/list` | List all agents with status |
-| `/kill <name\|index>` | Terminate a running agent |
-| `/broadcast <msg>` | Send a message to all running agents |
 | `/team` | Show team task status |
+
+### Keyboard Shortcuts (Multi-Agent TUI)
+
+| Shortcut | Description |
+|----------|-------------|
+| Shift+Down | Cycle through teammates |
+| Enter (in tab bar) | View teammate's session |
+| Escape | Interrupt current action |
+| Ctrl+T | Toggle task list |
+| Down arrow | Enter agent tab bar |
+| Left/Right | Navigate tabs |
+| `/agent <name>` | Switch to agent by name |
+| `/agent main` | Back to main orchestrator |
+| `/agents` | List all agents with status |
 
 ### Architecture
 

@@ -36,6 +36,10 @@ export interface KeyboardShortcutOpts {
   onTabLeft?: () => void;
   onTabRight?: () => void;
   onTabSelect?: () => void;
+  /** Shift+Down cycles through agent tabs */
+  onCycleAgent?: () => void;
+  /** Ctrl+T toggles task list display */
+  onToggleTaskList?: () => void;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -54,6 +58,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       if (key.escape) { opts.onExitTabBar?.(); return; }
       // Any other key: exit tab bar and fall through
       opts.onExitTabBar?.();
+    }
+
+    // Shift+Down → cycle through agent tabs
+    if (key.downArrow && key.shift && opts.onCycleAgent) {
+      opts.onCycleAgent();
+      return;
     }
 
     // Down arrow (empty input) → enter tab bar
@@ -95,6 +105,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Ctrl+O -- expand/collapse last tool call output
     if (key.ctrl && input === "o") {
       opts.onExpandTool?.();
+      return;
+    }
+
+    // Ctrl+T -- toggle task list display
+    if (key.ctrl && input === "t") {
+      opts.onToggleTaskList?.();
       return;
     }
 
