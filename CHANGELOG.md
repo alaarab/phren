@@ -3,6 +3,61 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.11] - 2026-03-30
+
+Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1711/-605 lines.
+
+### Added
+- **Theme system** — 60+ semantic color keys across 4 presets (dark, light, solarized, mono) with `COLORFGBG` auto-detection. Theme threaded through all renderers (markdown, syntax highlighting, diff) and all Ink components
+- **Live markdown streaming** — markdown renders during streaming, not just after turn completes
+- **Diff rendering in TUI** — edit_file/write_file tool calls now show inline diffs with `⎿` tree connectors (was silently discarded)
+- **Ctrl+F search** — search with match highlighting across conversation history
+- **Ctrl+O expand** — expand/collapse truncated tool output (`… +N lines (ctrl+o to expand)`)
+- **Ctrl+T task list** — toggle task list display in multi-agent mode
+- **Shift+Down agent cycling** — cycle through teammates (matches CC's TeamAgent UX)
+- **AbortController on Esc** — pressing Escape kills mid-stream immediately via AbortSignal through runTurn → consumeStream
+- **Permission queue** — multiple concurrent tool permissions queue properly instead of leaking to steering
+- **Deny with feedback** — type a message instead of `n` to deny AND redirect the agent
+- **`/config` command** — displays current provider, model, reasoning, and project
+- **`/compact` verified** — conversation compaction already working, confirmed functional
+- **Compact banner** — 3-line banner with model/context/effort info (was 8-line pixel art)
+- **Creative past-tense verbs** — turn summaries like "◈ Reflected for 2.3s" instead of "thought for Xs"
+- **Enhanced paste detection** — heuristic paste detection for terminals without bracketed paste support
+- **OSC 8 hyperlinks** — clickable links in markdown `[text](url)` and diff file headers
+- **Word navigation** — Alt+Left/Right, Ctrl+Left/Right for word jumping; Alt+Backspace, Ctrl+Backspace for word deletion
+- **`--yolo` gate** — autopilot mode only available when launched with `--yolo` flag
+- **"esc to interrupt" hint** — shown in permissions line when agent is running
+
+### Fixed
+- **MCP env scrub** — MCP child processes now use `scrubEnv()` instead of inheriting full `process.env` with secrets
+- **Ollama tool_call_id** — deterministic index-based IDs (`call_0`, `call_1`) instead of random IDs that broke round-trip
+- **Codex provider parsing** — handles both Responses API output formats + debug logging gated on `PHREN_DEBUG`
+- **VS Code `proactivityTasks`** — fixed key typo that silently dropped the setting
+- **VS Code env var fallback** — fixed copy-paste bug (same var both sides of `??`)
+- **VS Code `hasPhrenMcpEntry`** — now checks all 3 config files instead of just one
+- **Agent type forwarding** — `agentType` now forwarded in `SpawnPayload` so child agents get tool restrictions
+- **Spawner events** — `status` and `message` events wired in TUI (inter-agent DMs now visible)
+- **Slash command unification** — `/mode` and `/permissions` moved into `handleCommand()`, work in both REPL and Ink TUI
+- **Ghost line mitigation** — deferred `<Static>` push via `setImmediate` for cleaner renders
+
+### Changed
+- **Diamond identity** — phren uses `◆` (assistant), `◇` (tools), `◈` (timing), `❯` (input), `⎿` (tree)
+- **Tool call format** — `◇ Name(args)` with tree connectors, 3-line fold (was `→ name preview`, 5-line)
+- **Permission colors** — auto-confirm=blue, plan=purple, autopilot=green
+- **Input prompt** — `❯` with Ink `borderStyle="round"` borders (was `▸` with manual separator lines)
+- **No separator lines** — removed all `────` horizontal rules, using blank-line spacing only
+- **No inverted StatusBar** — removed heavy bottom bar, permission hint is inline
+- **ThinkingIndicator** — slowed to 500ms tick, removed live elapsed counter, memory-oriented verbs
+- **`scheduleUpdate()` batching** — streaming text deltas coalesced via microtask
+
+### Removed
+- 6 dead components (AgentMessage, UserMessage, ChatMessage, StreamingText, Separator, CodeBlock)
+- 2 unused npm dependencies (ink-spinner, ink-text-input)
+- Fake `/kill` and `/broadcast` slash commands from CLAUDE.md (were never implemented)
+
+### Closed
+- 20+ stale tasks verified and completed (TUI features, agent bugs, CLI items that were already done)
+
 ## [0.1.3] - 2026-03-29
 
 42 commits. Monorepo conversion, full agent TUI rebuild, multi-agent coordination, provider system, and cross-platform fixes.
