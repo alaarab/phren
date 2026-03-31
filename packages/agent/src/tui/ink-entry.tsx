@@ -115,12 +115,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
     // Determine what to display based on selected view
     const agentConvo = selectedAgentId ? agentConvos.get(selectedAgentId) : null;
-
-    // When viewing an agent: show their messages with fresh IDs (so Static re-renders after screen clear)
-    const prefix = `v${viewSwitchCounter}-`;
-    const displayMessages = agentConvo
-      ? agentConvo.messages.map((m) => ({ ...m, id: prefix + m.id }))
-      : completedMessages.map((m) => ({ ...m, id: prefix + m.id }));
+    const displayMessages = agentConvo ? agentConvo.messages : completedMessages;
 
     const displayStreaming = agentConvo ? agentConvo.streamingText : streamingText;
     const displayToolCalls = agentConvo ? [...agentConvo.toolCalls] : [...currentToolCalls];
@@ -518,15 +513,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }));
   }
 
-  // Switch views: clear screen, swap which messages are displayed
-  let viewSwitchCounter = 0;
+  // Switch views — no screen clear needed, all messages are dynamic
   function handleSelectAgent(agentId: string | null) {
     if (agentId === selectedAgentId) return;
     selectedAgentId = agentId;
-    viewSwitchCounter++;
-    // Clear screen so Ink's <Static> re-renders with fresh items
-    if (appInstance) appInstance.clear();
-    else process.stdout.write("\x1b[2J\x1b[H");
     update();
   }
 
@@ -672,7 +662,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
     />,
-    { exitOnCtrlC: false },
+    { exitOnCtrlC: false, incrementalRendering: true },
   );
   rerender = app.rerender;
   appInstance = app;

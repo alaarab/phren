@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { Static, Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
@@ -40,7 +40,6 @@ export interface StatusMsg {
 }
 
 export type CompletedMessage = UserMsg | AssistantMsg | StatusMsg;
-type StaticItem = BannerMsg | CompletedMessage;
 
 // ── App state and props ──────────────────────────────────────────────────────
 
@@ -318,99 +317,86 @@ export function App({
     return highlightMatches(text, search.state.query).highlighted;
   }, [search.state.active, search.state.query]);
 
-  // Build Static items — banner first, then completed messages
-  const staticItems: StaticItem[] = [];
-  if (showBanner) {
-    staticItems.push({ id: "banner", kind: "banner" });
-  }
-  for (const msg of completedMessages) {
-    staticItems.push(msg);
-  }
-
   return (
-    <>
-      {/* Completed messages — rendered once, scroll up in terminal */}
-      <Static items={staticItems}>
-        {(item) => {
-          if (item.kind === "banner") {
-            return (
-              <Box key="banner" flexDirection="column">
-                <Banner version={state.version} theme={theme} />
-              </Box>
-            );
-          }
-          if (item.kind === "user") {
-            return (
-              <Box key={item.id} flexDirection="column">
-                <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((item as UserMsg).text)}</Text>
-              </Box>
-            );
-          }
-          if (item.kind === "assistant") {
-            const aMsg = item as AssistantMsg;
-            const renderedText = aMsg.text
-              ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
-              : "";
-            return (
-              <Box key={item.id} flexDirection="column" marginTop={1}>
-                {aMsg.toolCalls?.map((tc, i) => (
-                  <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
-                ))}
-                {renderedText ? (
-                  <Box>
-                    <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-                    <Text wrap="wrap">{renderedText}</Text>
-                  </Box>
-                ) : null}
-              </Box>
-            );
-          }
-          if (item.kind === "status") {
-            return <Text key={item.id} color={theme.system.color} dimColor>{applySearch((item as StatusMsg).text)}</Text>;
-          }
-          return null;
-        }}
-      </Static>
+    <Box flexDirection="column">
+      {/* ── Scrollable zone: messages + active turn (CC: fk9.scrollable) ── */}
 
-      {/* Dynamic area — only active turn content + input */}
-      <Box flexDirection="column">
-        {/* In-progress tool calls (not yet finalized) */}
-        {completedToolCalls.map((tc, i) => (
-          <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} />
-        ))}
+      {/* Banner */}
+      {showBanner && <Banner version={state.version} theme={theme} />}
 
-        {/* Currently executing tool — animated spinner */}
-        {activeTool && (
-          <Box paddingLeft={2}>
-            <ToolSpinner theme={theme} />
-            <Text bold color={theme.tool.name}>{activeTool.name}</Text>
-            {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
-          </Box>
-        )}
+      {/* Completed messages — all dynamic, re-rendered each frame (matches CC) */}
+      {completedMessages.map((msg) => {
+        if (msg.kind === "user") {
+          return (
+            <Box key={msg.id} flexDirection="column">
+              <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((msg as UserMsg).text)}</Text>
+            </Box>
+          );
+        }
+        if (msg.kind === "assistant") {
+          const aMsg = msg as AssistantMsg;
+          const renderedText = aMsg.text
+            ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
+            : "";
+          return (
+            <Box key={msg.id} flexDirection="column" marginTop={1}>
+              {aMsg.toolCalls?.map((tc, i) => (
+                <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
+              ))}
+              {renderedText ? (
+                <Box>
+                  <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
+                  <Text wrap="wrap">{renderedText}</Text>
+                </Box>
+              ) : null}
+            </Box>
+          );
+        }
+        if (msg.kind === "status") {
+          return <Text key={msg.id} color={theme.system.color} dimColor>{applySearch((msg as StatusMsg).text)}</Text>;
+        }
+        return null;
+      })}
 
-        {/* Active streaming text with diamond prefix */}
-        {streamingText !== "" && (
-          <Box marginTop={1}>
-            <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-            <Text wrap="wrap">{streamingText}</Text>
-          </Box>
-        )}
+      {/* In-progress tool calls (current turn) */}
+      {completedToolCalls.map((tc, i) => (
+        <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} />
+      ))}
 
-        {/* Thinking animation */}
-        {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} theme={theme} /></Box>}
+      {/* Currently executing tool — animated spinner */}
+      {activeTool && (
+        <Box paddingLeft={2}>
+          <ToolSpinner theme={theme} />
+          <Text bold color={theme.tool.name}>{activeTool.name}</Text>
+          {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
+        </Box>
+      )}
 
-        {/* "thought for Xs" after turn completes */}
-        {thinkElapsed !== null && (
-          <Text color={theme.dim} dimColor>{"  "}{"\u25c6"} thought for {thinkElapsed}s</Text>
-        )}
+      {/* Active streaming text */}
+      {streamingText !== "" && (
+        <Box marginTop={1}>
+          <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
+          <Text wrap="wrap">{streamingText}</Text>
+        </Box>
+      )}
 
-        {/* Ctrl+C warning */}
-        {ctrlCCount > 0 && !running && (
-          <Text dimColor>{"  "}Press Ctrl+C again to exit.</Text>
-        )}
+      {/* Thinking animation */}
+      {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} theme={theme} /></Box>}
 
-        {/* Steer queue display */}
-        <SteerQueue items={steerQueue} theme={theme} />
+      {/* "thought for Xs" after turn completes */}
+      {thinkElapsed !== null && (
+        <Text color={theme.dim} dimColor>{"  "}{"\u25c6"} thought for {thinkElapsed}s</Text>
+      )}
+
+      {/* Ctrl+C warning */}
+      {ctrlCCount > 0 && !running && (
+        <Text dimColor>{"  "}Press Ctrl+C again to exit.</Text>
+      )}
+
+      {/* ── Bottom zone: status + input (CC: fk9.bottom) ── */}
+
+      {/* Steer queue display */}
+      <SteerQueue items={steerQueue} theme={theme} />
 
         {/* Content search bar (Ctrl+F) */}
         {search.state.active && (
@@ -470,7 +456,6 @@ export function App({
           agentCount={state.agentCount}
           theme={theme}
         />
-      </Box>
-    </>
+    </Box>
   );
 }
