@@ -41,10 +41,16 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   // Autopilot (full-auto) requires --yolo flag to be cycleable via Shift+Tab
   const yoloEnabled = config.registry.permissionConfig.mode === "full-auto";
 
-  // Permission prompt state — when set, input field captures y/n/a/s
-  let permissionResolve: ((allowed: boolean) => void) | null = null;
+  // Permission prompt queue — multiple tool calls may need permission concurrently
+  interface PermissionEntry {
+    resolve: (allowed: boolean) => void;
+    toolName: string;
+    input: Record<string, unknown>;
+    addAllow: (t: string, i: Record<string, unknown>, s: "once" | "session" | "tool") => void;
+  }
+  const permissionQueue: PermissionEntry[] = [];
 
-  // Ink-compatible askUser: shows prompt in chat, waits for y/n in input
+  // Ink-compatible askUser: shows prompt in chat, queues for y/n in input
   config.registry.askUser = async (toolName, input, reason) => {
     const { addAllow } = await import("../permissions/allowlist.js");
     const summary = Object.keys(input).length > 0
@@ -54,19 +60,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     completedMessages.push({
       id: nextId(),
       kind: "status",
-      text: `\x1b[1m\x1b[33m[PERMISSION]\x1b[0m ${toolName}\n  ${reason}\n  ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow-tool  [s]ession-allow\x1b[0m`,
+      text: `\x1b[1m\x1b[33m◇ Allow ${toolName}?\x1b[0m ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow-tool  [s]ession-allow\x1b[0m`,
     });
     update();
 
     return new Promise<boolean>((resolve) => {
-      permissionResolve = (allowed) => {
-        permissionResolve = null;
-        resolve(allowed);
-      };
-      // Store the addAllow function for a/s responses
-      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).toolName = toolName;
-      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).input = input;
-      (permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: typeof addAllow }).addAllow = addAllow;
+      permissionQueue.push({ resolve, toolName, input, addAllow });
     });
   };
 
@@ -219,24 +218,24 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     const line = input.trim();
     if (!line) return;
 
-    // Permission prompt active — intercept y/n/a/s
-    if (permissionResolve) {
+    // Permission prompt active — intercept y/n/a/s (process next in queue)
+    if (permissionQueue.length > 0) {
+      const entry = permissionQueue.shift()!;
       const key = line.toLowerCase();
-      const meta = permissionResolve as unknown as { toolName: string; input: Record<string, unknown>; addAllow: (t: string, i: Record<string, unknown>, s: string) => void };
       if (key === "y" || key === "yes") {
-        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed\x1b[0m" });
-        permissionResolve(true);
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[32m\u2713 ${entry.toolName}\x1b[0m` });
+        entry.resolve(true);
       } else if (key === "a") {
-        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed (tool for session)\x1b[0m" });
-        meta.addAllow(meta.toolName, meta.input, "tool");
-        permissionResolve(true);
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[32m\u2713 ${entry.toolName} (always)\x1b[0m` });
+        entry.addAllow(entry.toolName, entry.input, "tool");
+        entry.resolve(true);
       } else if (key === "s") {
-        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m✓ Allowed (session)\x1b[0m" });
-        meta.addAllow(meta.toolName, meta.input, "session");
-        permissionResolve(true);
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[32m\u2713 ${entry.toolName} (session)\x1b[0m` });
+        entry.addAllow(entry.toolName, entry.input, "session");
+        entry.resolve(true);
       } else {
-        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[31m✗ Denied\x1b[0m" });
-        permissionResolve(false);
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31m\u2717 ${entry.toolName}\x1b[0m` });
+        entry.resolve(false);
       }
       update();
       return;
