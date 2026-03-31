@@ -1,75 +1,46 @@
 import React from "react";
 import { Box, Text } from "ink";
 import * as os from "os";
-import { createRequire } from "module";
 import type { Theme } from "../themes.js";
-
-const _require = createRequire(import.meta.url);
+import type { AppState } from "./App.js";
 
 export interface BannerProps {
-  version: string;
+  state: AppState;
   theme?: Theme;
 }
 
-let cachedArt: string[] | null = null;
-let artLoaded = false;
-
-function getArtLines(): string[] {
-  if (artLoaded) return cachedArt ?? [];
-  artLoaded = true;
-  try {
-    const mod = _require("@phren/cli/phren-art") as { PHREN_ART: string[] };
-    cachedArt = mod.PHREN_ART.filter((l: string) => l.trim());
-    return cachedArt;
-  } catch {
-    return [];
-  }
+function formatContextWindow(n: number): string {
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)}M ctx`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k ctx`;
+  return `${n} ctx`;
 }
 
-function stripAnsi(t: string): string {
-  return t.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-}
-
-export function Banner({ version, theme }: BannerProps) {
+export function Banner({ state, theme }: BannerProps) {
   const cwd = process.cwd().replace(os.homedir(), "~");
-  const artLines = getArtLines();
-  const maxArtWidth = 26;
 
   const logoColor = theme?.banner.logo ?? "magenta";
   const versionColor = theme?.banner.version ?? "gray";
   const cwdColor = theme?.banner.cwd ?? "cyan";
 
-  const infoLines = [
-    { key: "title", node: <Text bold color={logoColor}>{"◆ phren"}</Text> },
-    { key: "version", node: <Text color={versionColor} dimColor>{"  v" + version}</Text> },
-    { key: "cwd", node: <Text color={cwdColor} dimColor>{cwd}</Text> },
-  ];
-
-  if (artLines.length > 0) {
-    const rowCount = Math.max(artLines.length, infoLines.length);
-    return (
-      <Box flexDirection="column">
-        {Array.from({ length: rowCount }, (_, i) => {
-          const artLine = i < artLines.length ? artLines[i] : "";
-          const artVisible = stripAnsi(artLine).length;
-          const padding = Math.max(0, maxArtWidth - artVisible);
-          const info = i < infoLines.length ? infoLines[i] : null;
-          return (
-            <Box key={i} flexDirection="row">
-              <Text>{artLine + " ".repeat(padding)}</Text>
-              {info ? info.node : <Text>{""}</Text>}
-            </Box>
-          );
-        })}
-        <Text>{""}</Text>
-      </Box>
-    );
-  }
+  const modelParts: string[] = [];
+  if (state.model) modelParts.push(state.model);
+  if (state.contextWindow) modelParts.push(formatContextWindow(state.contextWindow));
+  if (state.reasoningEffort) modelParts.push(state.reasoningEffort);
+  const modelLine = modelParts.join(" · ");
 
   return (
     <Box flexDirection="column" paddingLeft={2}>
-      <Box>{infoLines[0].node}{infoLines[1].node}</Box>
-      {infoLines[2].node}
+      {/* Line 1: brand + version */}
+      <Box flexDirection="row">
+        <Text bold color={logoColor}>{"◆ phren"}</Text>
+        <Text color={versionColor} dimColor>{" v" + state.version}</Text>
+      </Box>
+      {/* Line 2: model info (only if available) */}
+      {modelLine ? (
+        <Text color={versionColor} dimColor>{modelLine}</Text>
+      ) : null}
+      {/* Line 3: cwd */}
+      <Text color={cwdColor} dimColor>{cwd}</Text>
       <Text>{""}</Text>
     </Box>
   );

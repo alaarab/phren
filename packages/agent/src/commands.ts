@@ -13,6 +13,7 @@ import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, cost
 import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { modelCommand, providerCommand, presetCommand } from "./commands/model.js";
+import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
 
@@ -64,7 +65,7 @@ export function createCommandContext(session: AgentSession, contextLimit: number
 export const COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
-  "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/spawn", "/agents",
+  "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/config", "/spawn", "/agents",
   "/mode", "/permissions", "/verbose", "/theme", "/agent",
   "/exit", "/quit", "/q",
 ];
@@ -98,6 +99,7 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/mem":      return memCommand(parts, ctx);
     case "/ask":      return askCommand(parts, ctx);
     case "/resume":   return resumeCommand(parts, ctx);
+    case "/config":   return configCommand(parts, ctx);
 
     case "/mode": {
       const current = loadInputMode();
