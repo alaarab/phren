@@ -12,7 +12,7 @@ export interface ToolCallProps {
   diffRendered?: string;
 }
 
-const VERBOSE_LINES = 5;
+const FOLD_LINES = 3;
 
 export function ToolCall({ name, input, output, isError, durationMs, diffRendered, verbose, theme }: ToolCallProps & { verbose?: boolean; theme?: Theme }) {
   const rawPreview = formatToolInput(name, input);
@@ -24,43 +24,48 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
   const durationColor = theme?.tool.duration ?? undefined;
   const outputColor = theme?.tool.output ?? undefined;
 
+  // Header: ◇ Name(preview)  dur
+  const header = (
+    <Box>
+      <Text color={statusColor}>{isError ? "\u2717" : "\u25c7"} </Text>
+      <Text bold color={nameColor}>{name}</Text>
+      {preview ? <Text color={previewColor}>({preview})</Text> : null}
+      <Text color={durationColor} dimColor>  {dur}</Text>
+    </Box>
+  );
+
   if (!verbose) {
     return (
       <Box flexDirection="column" paddingLeft={2}>
-        <Box>
-          <Text color={statusColor}>{isError ? "\u2717" : "\u2192"} </Text>
-          <Text bold color={nameColor}>{name}</Text>
-          <Text color={previewColor}> {preview}</Text>
-          <Text color={durationColor} dimColor>  {dur}</Text>
-        </Box>
+        {header}
         {diffRendered && (
-          <Text>{diffRendered}</Text>
+          <Text>{"  \u23bf  "}{diffRendered}</Text>
         )}
       </Box>
     );
   }
 
   const allLines = output.split("\n").filter(Boolean);
-  const shown = allLines.slice(0, VERBOSE_LINES);
-  const overflow = allLines.length - VERBOSE_LINES;
+  const shown = allLines.slice(0, FOLD_LINES);
+  const overflow = allLines.length - FOLD_LINES;
 
   return (
     <Box flexDirection="column" paddingLeft={2}>
-      <Box>
-        <Text color={statusColor}>{isError ? "\u2717" : "\u2192"} </Text>
-        <Text bold color={nameColor}>{name}</Text>
-        <Text color={previewColor}> {preview}</Text>
-        <Text color={durationColor} dimColor>  {dur}</Text>
-      </Box>
+      {header}
       {diffRendered ? (
-        <Text>{diffRendered}</Text>
+        <>
+          <Text>{"  \u23bf  "}{diffRendered.split("\n")[0] ?? ""}</Text>
+          {diffRendered.split("\n").slice(1).map((line, i) => (
+            <Text key={i}>{"     "}{line}</Text>
+          ))}
+        </>
       ) : (
         <>
           {shown.map((line, i) => (
-            <Text key={i} color={outputColor} dimColor>{"    " + line.slice(0, 120)}</Text>
+            <Text key={i} color={outputColor} dimColor>{i === 0 ? "  \u23bf  " : "     "}{line.slice(0, 120)}</Text>
           ))}
           {overflow > 0 && (
-            <Text color={outputColor} dimColor>{"    ... +" + overflow + " lines"}</Text>
+            <Text color={outputColor} dimColor>{"     \u2026 +"}{overflow}{" lines"}</Text>
           )}
         </>
       )}
