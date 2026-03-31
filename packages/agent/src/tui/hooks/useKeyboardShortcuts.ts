@@ -27,6 +27,8 @@ export interface KeyboardShortcutOpts {
   onHistorySearch?: () => void;
   /** Ctrl+F content search */
   onContentSearch?: () => void;
+  /** Ctrl+O expand/collapse last tool call output */
+  onExpandTool?: () => void;
   /** Tab bar navigation */
   tabFocused?: boolean;
   onEnterTabBar?: () => void;
@@ -87,6 +89,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Ctrl+F -- content search
     if (key.ctrl && input === "f") {
       opts.onContentSearch?.();
+      return;
+    }
+
+    // Ctrl+O -- expand/collapse last tool call output
+    if (key.ctrl && input === "o") {
+      opts.onExpandTool?.();
       return;
     }
 

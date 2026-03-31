@@ -12,9 +12,13 @@ export interface ToolCallProps {
   diffRendered?: string;
 }
 
+export interface ToolCallExpandProps {
+  expanded?: boolean;
+}
+
 const FOLD_LINES = 3;
 
-export function ToolCall({ name, input, output, isError, durationMs, diffRendered, verbose, theme }: ToolCallProps & { verbose?: boolean; theme?: Theme }) {
+export function ToolCall({ name, input, output, isError, durationMs, diffRendered, verbose, theme, expanded }: ToolCallProps & ToolCallExpandProps & { verbose?: boolean; theme?: Theme }) {
   const rawPreview = formatToolInput(name, input);
   const preview = isFileToolPreview(name) && rawPreview ? fileLink(rawPreview) : rawPreview;
   const dur = formatDuration(durationMs);
@@ -46,7 +50,7 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
   }
 
   const allLines = output.split("\n").filter(Boolean);
-  const shown = allLines.slice(0, FOLD_LINES);
+  const shown = expanded ? allLines : allLines.slice(0, FOLD_LINES);
   const overflow = allLines.length - FOLD_LINES;
 
   return (
@@ -64,8 +68,8 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
           {shown.map((line, i) => (
             <Text key={i} color={outputColor} dimColor>{i === 0 ? "  \u23bf  " : "     "}{line.slice(0, 120)}</Text>
           ))}
-          {overflow > 0 && (
-            <Text color={outputColor} dimColor>{"     \u2026 +"}{overflow}{" lines"}</Text>
+          {!expanded && overflow > 0 && (
+            <Text color={outputColor} dimColor>{"     \u2026 +"}{overflow}{" lines (ctrl+o to expand)"}</Text>
           )}
         </>
       )}

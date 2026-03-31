@@ -60,7 +60,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     completedMessages.push({
       id: nextId(),
       kind: "status",
-      text: `\x1b[1m\x1b[33m◇ Allow ${toolName}?\x1b[0m ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow-tool  [s]ession-allow\x1b[0m`,
+      text: `\x1b[1m\x1b[33m◇ Allow ${toolName}?\x1b[0m ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow  [s]ession  or type feedback to deny & redirect\x1b[0m`,
     });
     update();
 
@@ -91,6 +91,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       permMode: config.registry.permissionConfig.mode,
       agentCount: spawner?.listAgents().length ?? 0,
       version: AGENT_VERSION,
+      model: (config.provider as { model?: string }).model,
+      contextWindow: config.provider.contextWindow,
+      reasoningEffort: config.provider.reasoningEffort as string | undefined,
     };
   }
 
@@ -235,7 +238,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         entry.addAllow(entry.toolName, entry.input, "session");
         entry.resolve(true);
       } else {
-        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31m\u2717 ${entry.toolName}\x1b[0m` });
+        // Deny with feedback: if the input is more than a single n/no, treat it as a redirect message
+        const isSilentDeny = key === "n" || key === "no";
+        if (!isSilentDeny && line.length > 1) {
+          completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31m\u2717 ${entry.toolName} \x1b[2m\u2014 redirecting: "${line}"\x1b[0m` });
+          steerQueueBuf.push(line);
+        } else {
+          completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31m\u2717 ${entry.toolName}\x1b[0m` });
+        }
         entry.resolve(false);
       }
       update();
