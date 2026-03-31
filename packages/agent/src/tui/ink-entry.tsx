@@ -115,7 +115,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
     // Determine what to display based on selected view
     const agentConvo = selectedAgentId ? agentConvos.get(selectedAgentId) : null;
-    const displayMessages = agentConvo ? agentConvo.messages : completedMessages;
+    // Prefix IDs so <Static> re-renders after agent tab switch
+    const prefix = `v${viewSwitchCounter}-`;
+    const rawMessages = agentConvo ? agentConvo.messages : completedMessages;
+    const displayMessages = rawMessages.map((m) => ({ ...m, id: prefix + m.id }));
 
     const displayStreaming = agentConvo ? agentConvo.streamingText : streamingText;
     const displayToolCalls = agentConvo ? [...agentConvo.toolCalls] : [...currentToolCalls];
@@ -513,10 +516,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }));
   }
 
-  // Switch views — no screen clear needed, all messages are dynamic
+  // Switch views: clear screen so <Static> re-renders with fresh IDs
+  let viewSwitchCounter = 0;
   function handleSelectAgent(agentId: string | null) {
     if (agentId === selectedAgentId) return;
     selectedAgentId = agentId;
+    viewSwitchCounter++;
+    if (appInstance) appInstance.clear();
+    else process.stdout.write("\x1b[2J\x1b[H");
     update();
   }
 
@@ -662,7 +669,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
     />,
-    { exitOnCtrlC: false, incrementalRendering: true },
+    { exitOnCtrlC: false },
   );
   rerender = app.rerender;
   appInstance = app;
