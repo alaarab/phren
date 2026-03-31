@@ -168,13 +168,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (resolveSession) resolveSession(session);
   }
 
+  let cancelRequested = false;
   function handleCancelTurn() {
-    // Signal cancellation — clear queues and inject a steering redirect
+    if (cancelRequested) return; // Only cancel once per turn
+    cancelRequested = true;
     pendingInput = null;
     steerQueueBuf.length = 0;
-    // Inject a steering message to redirect the LLM to stop
-    steerQueueBuf.push("STOP. The user pressed Escape to cancel. End your response immediately.");
-    completedMessages.push({ id: nextId(), kind: "status", text: "Cancelling..." });
     update();
   }
 
@@ -435,6 +434,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   async function runAgentTurn(userInput: string) {
     running = true;
     thinking = true;
+    cancelRequested = false;
     thinkStartTime = Date.now();
     thinkElapsed = null;
     streamingText = "";
