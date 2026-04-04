@@ -142,7 +142,7 @@
       },
       {
         "command": "phren.pinTask",
-        "title": "Phren: Pin Task",
+        "title": "Phren: Pin / Unpin Task",
         "icon": "$(pin)"
       },
       {

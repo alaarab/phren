@@ -161,6 +161,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   function handlePermissionCycle() {
     const next = nextPermissionMode(config.registry.permissionConfig.mode, yoloEnabled);
     config.registry.setPermissions({ ...config.registry.permissionConfig, mode: next });
+    config.plan = next === "plan";
     savePermissionMode(next);
     update();
   }
@@ -424,6 +425,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur, diffRendered });
       update();
     },
+    // In the TUI, plan approval is handled by per-tool permission prompts
+    // rather than a blocking readline prompt.  Auto-approve the plan gate
+    // and let the permission checker require approval on each tool call.
+    onPlanApproval: async () => ({ approved: true }),
     getSteeringInput: () => {
       const result = (() => {
         if (steerQueueBuf.length > 0 && inputMode === "steering") {

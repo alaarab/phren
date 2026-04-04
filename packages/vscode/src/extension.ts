@@ -77,6 +77,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
   };
 
+  // --- Focus project from graph webview ---
+  const focusProject = vscode.commands.registerCommand("phren.focusProject", async (projectName: string) => {
+    if (!projectName) return;
+    // Reveal project's Findings category in the sidebar tree
+    const findingsNode = { kind: "category" as const, projectName, category: "findings" as const };
+    try {
+      await treeView.reveal(findingsNode, { select: true, focus: true, expand: 2 });
+    } catch {
+      // Fallback: try revealing just the project node
+      try {
+        await treeView.reveal({ kind: "project" as const, projectName }, { select: true, focus: true, expand: 1 });
+      } catch {
+        // Last resort: just focus the sidebar
+        await vscode.commands.executeCommand("phren.explorer.focus");
+      }
+    }
+  });
+  context.subscriptions.push(focusProject);
+
   // --- Register all commands from modules ---
   context.subscriptions.push(
     ...registerFindingCommands(extCtx),

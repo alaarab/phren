@@ -385,8 +385,9 @@ function repairGlobalClaudeSymlink(phrenPath: string): boolean {
     if (stat.isSymbolicLink()) {
       const target = path.resolve(path.dirname(dest), fs.readlinkSync(dest));
       if (target === path.resolve(src)) return false; // already correct
-      // Stale symlink pointing elsewhere — managed by phren, safe to replace
-      if (target.includes(".phren")) fs.unlinkSync(dest);
+      // Stale symlink pointing elsewhere — managed by phren, safe to replace.
+      // Match .phren dirs and phren-created links (test runs use /tmp/phren-*/global/CLAUDE.md)
+      if (target.includes(".phren") || target.endsWith("global/CLAUDE.md")) fs.unlinkSync(dest);
       else return false; // not ours, don't touch
     } else {
       return false; // regular file exists, don't clobber

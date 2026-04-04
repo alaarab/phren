@@ -61,6 +61,9 @@ export interface TurnHooks {
   onStatus?: (msg: string) => void;
   /** Mid-turn steering input injection. Return null for none. */
   getSteeringInput?: () => string | null;
+  /** Plan approval override. Return { approved: true } to skip the readline
+   *  prompt (e.g. in a TUI where per-tool approval handles gating instead). */
+  onPlanApproval?: () => Promise<{ approved: boolean; feedback?: string }>;
   /** Abort signal — when aborted, the turn stops immediately. */
   signal?: AbortSignal;
 }
