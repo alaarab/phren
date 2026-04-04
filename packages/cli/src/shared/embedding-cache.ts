@@ -43,6 +43,9 @@ function readEmbeddingMapFromDisk(filePath: string): EmbeddingMap {
   return data;
 }
 
+/** Maximum number of entries to keep in memory. Oldest-accessed entries are evicted first. */
+const MAX_CACHE_ENTRIES = 10_000;
+
 export class EmbeddingCache {
   private phrenPath: string;
   private cache: Map<string, EmbeddingEntry> = new Map();
@@ -52,6 +55,24 @@ export class EmbeddingCache {
 
   constructor(phrenPath: string) {
     this.phrenPath = phrenPath;
+  }
+
+  /** Evict oldest entries (by Map insertion order) when the cache exceeds MAX_CACHE_ENTRIES. */
+  private evictIfNeeded(): void {
+    if (this.cache.size <= MAX_CACHE_ENTRIES) return;
+    const excess = this.cache.size - MAX_CACHE_ENTRIES;
+    let removed = 0;
+    for (const key of this.cache.keys()) {
+      if (removed >= excess) break;
+      this.cache.delete(key);
+      this.dirtyDeletes.add(key);
+      this.dirtyUpserts.delete(key);
+      removed++;
+    }
+    if (removed > 0) {
+      this.dirty = true;
+      debugLog(`EmbeddingCache: evicted ${removed} entries (limit ${MAX_CACHE_ENTRIES})`);
+    }
   }
 
   async load(): Promise<void> {
@@ -74,6 +95,9 @@ export class EmbeddingCache {
   get(docPath: string, model: string): number[] | null {
     const entry = this.cache.get(docPath);
     if (!entry || entry.model !== model) return null;
+    // Move to end of Map for LRU ordering (most-recently-accessed = last)
+    this.cache.delete(docPath);
+    this.cache.set(docPath, entry);
     return entry.vec;
   }
 
@@ -82,6 +106,7 @@ export class EmbeddingCache {
     this.dirty = true;
     this.dirtyUpserts.add(docPath);
     this.dirtyDeletes.delete(docPath);
+    this.evictIfNeeded();
   }
 
   delete(docPath: string): void {

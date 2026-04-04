@@ -199,24 +199,31 @@ interface GovernanceRegistryEntry {
   normalize: (data: Record<string, unknown>) => Record<string, unknown>;
 }
 
+/** Spread a typed policy into a plain Record<string, unknown> without double-casting. */
+function toRecord<T extends object>(obj: T): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) result[key] = value;
+  return result;
+}
+
 const GOVERNANCE_REGISTRY: Record<GovernanceSchema, GovernanceRegistryEntry> = {
   "retention-policy": {
     file: "retention-policy.json",
     validate: GOVERNANCE_VALIDATORS["retention-policy"],
     defaults: () => ({ ...DEFAULT_POLICY }),
-    normalize: (data) => normalizeRetentionPolicy(data) as unknown as Record<string, unknown>,
+    normalize: (data) => toRecord(normalizeRetentionPolicy(data)),
   },
   "workflow-policy": {
     file: "workflow-policy.json",
     validate: GOVERNANCE_VALIDATORS["workflow-policy"],
     defaults: () => ({ ...DEFAULT_WORKFLOW_POLICY }),
-    normalize: (data) => normalizeWorkflowPolicy(data) as unknown as Record<string, unknown>,
+    normalize: (data) => toRecord(normalizeWorkflowPolicy(data)),
   },
   "index-policy": {
     file: "index-policy.json",
     validate: GOVERNANCE_VALIDATORS["index-policy"],
     defaults: () => ({ ...DEFAULT_INDEX_POLICY }),
-    normalize: (data) => normalizeIndexPolicy(data) as unknown as Record<string, unknown>,
+    normalize: (data) => toRecord(normalizeIndexPolicy(data)),
   },
 };
 

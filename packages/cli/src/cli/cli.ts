@@ -59,7 +59,7 @@ import {
   handleReviewNamespace,
   handleStoreNamespace,
   handleTaskNamespace,
-} from "./namespaces.js";
+} from "./namespaces/index.js";
 import { handleTeamNamespace } from "./team.js";
 import {
   handleTaskView,

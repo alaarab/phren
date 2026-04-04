@@ -36,8 +36,15 @@ interface McpServerConfig {
   env?: Record<string, string>;
 }
 
+export interface McpResourceDef {
+  uri: string;
+  name?: string;
+  description?: string;
+  mimeType?: string;
+}
+
 /** Active MCP server connection. */
-class McpConnection {
+export class McpConnection {
   private proc: ChildProcess;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
@@ -108,6 +115,19 @@ class McpConnection {
     };
   }
 
+  async listResources(): Promise<McpResourceDef[]> {
+    const result = await this.send("resources/list") as { resources?: McpResourceDef[] };
+    return result?.resources ?? [];
+  }
+
+  async readResource(uri: string): Promise<string> {
+    const result = await this.send("resources/read", { uri }) as {
+      contents?: Array<{ uri: string; text?: string; mimeType?: string }>;
+    };
+    const contents = result?.contents ?? [];
+    return contents.map((c) => c.text ?? "").join("\n") || "(empty)";
+  }
+
   close(): void {
     try { this.proc.stdin!.end(); } catch { /* ignore */ }
     try { this.proc.kill(); } catch { /* ignore */ }
@@ -148,7 +168,7 @@ export interface McpConfigEntry {
 export async function connectMcpServers(
   servers: Record<string, McpConfigEntry>,
   verbose = false,
-): Promise<{ tools: AgentTool[]; cleanup: () => void }> {
+): Promise<{ tools: AgentTool[]; connections: McpConnection[]; cleanup: () => void }> {
   const connections: McpConnection[] = [];
   const tools: AgentTool[] = [];
 
@@ -173,6 +193,7 @@ export async function connectMcpServers(
 
   return {
     tools,
+    connections,
     cleanup: () => { for (const conn of connections) conn.close(); },
   };
 }
