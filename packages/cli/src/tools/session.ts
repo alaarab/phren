@@ -21,7 +21,7 @@ import {
 } from "../session/artifacts.js";
 import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
-  atomicWriteJson, debugError, scanSessionFiles,
+  debugError, scanSessionFiles,
   type SessionState, sessionsDir, sessionFileForId,
   readSessionStateFile, writeSessionStateFile,
 } from "../session/utils.js";

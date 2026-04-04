@@ -85,7 +85,7 @@ describe.sequential("1.10.x release hardening gates", () => {
     const linkSkillsTs = fs.readFileSync(path.join(srcDir, "link", "skills.ts"), "utf8");
     expect(linkSkillsTs).toContain("getToolCount()");
     expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
-    expect(getToolCount()).toBe(53);
+    expect(getToolCount()).toBe(54);
   });
 
   it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {

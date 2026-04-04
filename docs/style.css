@@ -731,7 +731,7 @@ section {
 .bento-card-fun {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(300px, 1.05fr);
+  grid-template-columns: minmax(200px, 0.95fr) minmax(300px, 1.05fr);
   align-items: center;
   gap: 28px;
   padding: 28px;
