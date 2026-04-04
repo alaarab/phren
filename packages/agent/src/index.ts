@@ -16,7 +16,8 @@ import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
-import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
+import { createMcpResourceTools } from "./tools/mcp-resources.js";
+import type { McpConnection } from "./mcp-client.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -202,11 +203,10 @@ export async function runAgentCli(raw: string[]) {
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
-  registry.register(listMcpResourcesTool);
-  registry.register(readMcpResourceTool);
 
   // MCP server connections
   let mcpCleanup: (() => void) | undefined;
+  const mcpConnections: McpConnection[] = [];
   const mcpServers: Record<string, McpConfigEntry> = {};
   if (args.mcpConfig) {
     Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
@@ -216,9 +216,15 @@ export async function runAgentCli(raw: string[]) {
     mcpServers[`mcp-${idx}`] = entry;
   }
   if (Object.keys(mcpServers).length > 0) {
-    const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
+    const { tools: mcpTools, connections, cleanup } = await connectMcpServers(mcpServers, args.verbose);
     mcpCleanup = cleanup;
+    mcpConnections.push(...connections);
     for (const tool of mcpTools) registry.register(tool);
+  }
+
+  // Register MCP resource tools wired to live connections
+  for (const tool of createMcpResourceTools(() => mcpConnections)) {
+    registry.register(tool);
   }
 
   // Build cost tracker from model info

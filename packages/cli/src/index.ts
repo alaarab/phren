@@ -64,7 +64,7 @@ if (invocation.kind === "agent") {
 
 const phrenPath = findPhrenPathWithArg(invocation.phrenArg);
 
-const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
+const STALE_LOCK_MS = 45_000; // 45s — 1.5× the write timeout (30s); short enough to unblock healthy writers quickly
 
 function cleanStaleLocks(phrenPath: string): void {
   const dir = runtimeDir(phrenPath);
@@ -97,10 +97,15 @@ async function main() {
     db = await buildIndex(phrenPath, profile);
     indexReady = true;
 
-    // Load embedding cache and kick off background embedding (fire-and-forget)
+    // Load embedding cache and kick off background embedding
     const { getEmbeddingCache } = await import("./shared/embedding-cache.js");
     const embCache = getEmbeddingCache(phrenPath);
-    void startEmbeddingWarmup(db, embCache);
+    const warmup = startEmbeddingWarmup(db, embCache);
+    warmup.backgroundPromise.then((count) => {
+      if (count > 0) structuredLog("info", "embedding-warmup", `Embedded ${count} new docs`);
+    }).catch((err: unknown) => {
+      structuredLog("warn", "embedding-warmup", `Background embedding failed: ${errorMessage(err)}`);
+    });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     structuredLog("error", "startup", `Failed to build phren index: ${msg}`);
@@ -111,6 +116,8 @@ async function main() {
   let writeQueueDepth = 0;
   const MAX_QUEUE_DEPTH = 50;
   const WRITE_TIMEOUT_MS = 30_000;
+  const WRITE_MAX_RETRIES = 3;
+  const WRITE_RETRY_BASE_MS = 500;
   async function rebuildIndex() {
     runCustomHooks(phrenPath, "pre-index");
     const oldDb = db;
@@ -129,28 +136,54 @@ async function main() {
     }
     runCustomHooks(phrenPath, "post-index");
   }
+
+  /** Returns true if an error is transient and worth retrying (lock contention, I/O). */
+  function isTransientWriteError(err: unknown): boolean {
+    if (!(err instanceof Error)) return false;
+    const msg = err.message;
+    return msg.includes("EBUSY")
+      || msg.includes("EAGAIN")
+      || msg.includes("ENOTEMPTY")
+      || msg.includes("could not acquire lock");
+  }
+
   async function withWriteQueue<T>(fn: () => Promise<T>): Promise<T | { content: { type: "text"; text: string }[] }> {
     if (writeQueueDepth >= MAX_QUEUE_DEPTH) {
       return mcpResponse({ ok: false, error: `Write queue full (${MAX_QUEUE_DEPTH} items). Try again shortly.`, errorCode: "TIMEOUT" });
     }
     writeQueueDepth++;
     const run = writeQueue.then(async () => {
-      try {
-        return await Promise.race([
-          fn(),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
-        ]);
-      } catch (err: unknown) {
-        const message = errorMessage(err);
-        if (message.includes("Write timeout") || message.includes("Write queue full")) {
-          debugLog(`Write queue timeout: ${message}`);
-          return mcpResponse({ ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" });
+      let lastErr: unknown;
+      for (let attempt = 0; attempt <= WRITE_MAX_RETRIES; attempt++) {
+        try {
+          return await Promise.race([
+            fn(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Write timeout after 30s")), WRITE_TIMEOUT_MS))
+          ]);
+        } catch (err: unknown) {
+          lastErr = err;
+          const message = errorMessage(err);
+          if (message.includes("Write timeout") || message.includes("Write queue full")) {
+            debugLog(`Write queue timeout: ${message}`);
+            return mcpResponse({ ok: false, error: `Write queue timeout: ${message}`, errorCode: "TIMEOUT" });
+          }
+          // Retry transient errors with exponential backoff
+          if (attempt < WRITE_MAX_RETRIES && isTransientWriteError(err)) {
+            const delay = WRITE_RETRY_BASE_MS * 2 ** attempt;
+            debugLog(`Write queue retry ${attempt + 1}/${WRITE_MAX_RETRIES} after ${delay}ms: ${message}`);
+            await new Promise<void>((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          throw err;
         }
-        throw err;
-      } finally {
-        writeQueueDepth = Math.max(0, writeQueueDepth - 1);
       }
+      // Exhausted retries — surface the last error
+      const message = errorMessage(lastErr);
+      debugLog(`Write queue exhausted ${WRITE_MAX_RETRIES} retries: ${message}`);
+      return mcpResponse({ ok: false, error: `Write failed after ${WRITE_MAX_RETRIES} retries: ${message}`, errorCode: "TIMEOUT" });
     });
+    // Always decrement depth once the queued operation settles
+    run.finally(() => { writeQueueDepth = Math.max(0, writeQueueDepth - 1); });
     writeQueue = run.then(() => undefined).catch((error): void => {
       try {
         const message = error instanceof Error

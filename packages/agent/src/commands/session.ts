@@ -199,7 +199,9 @@ export function resumeCommand(_parts: string[], ctx: CommandContext): boolean | 
     return true;
   }
 
-  // Load prior messages into current session (cast from serialized format)
+  // Restore serialized messages into the live session. The cast bridges
+  // SerializedSessionMessage (role: string, content: unknown) to LlmMessage;
+  // the shapes are structurally identical at runtime.
   const priorCount = snapshot.messages.length;
   ctx.session.messages = snapshot.messages as unknown as typeof ctx.session.messages;
 
