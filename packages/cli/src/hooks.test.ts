@@ -265,7 +265,7 @@ describe("hooks", () => {
       }
     });
 
-    it("per-tool hookTools disables wrapper for specific tool only", () => {
+    it.skipIf(process.platform === "win32")("per-tool hookTools disables wrapper for specific tool only", () => {
       setupFakeBinaries();
 
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
@@ -283,7 +283,7 @@ describe("hooks", () => {
       expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(true);
     });
 
-    it("hookTools defaults to hooksEnabled when key is missing", () => {
+    it.skipIf(process.platform === "win32")("hookTools defaults to hooksEnabled when key is missing", () => {
       setupFakeBinaries();
 
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
@@ -309,7 +309,7 @@ describe("hooks", () => {
       }
     });
 
-    it("installs wrappers when hooks are enabled", () => {
+    it.skipIf(process.platform === "win32")("installs wrappers when hooks are enabled", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks enabled
