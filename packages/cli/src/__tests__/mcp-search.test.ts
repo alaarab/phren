@@ -196,8 +196,9 @@ describe("mcp-search: tag filter", () => {
     tmp = makeTempDir("mcp-search-tag-");
     grantAdmin(tmp.path);
 
+    const recentDate = new Date().toISOString().slice(0, 10);
     makeProject(tmp.path, "myapp", {
-      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- [bug] Cache warmup fails when Redis is unavailable\n- [decision] Keep SQLite for local mode\n",
+      "FINDINGS.md": `# myapp Findings\n\n## ${recentDate}\n\n- [bug] Cache warmup fails when Redis is unavailable\n- [decision] Keep SQLite for local mode\n`,
     });
 
     db = await buildIndex(tmp.path);
