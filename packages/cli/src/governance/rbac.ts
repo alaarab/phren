@@ -31,6 +31,7 @@ type RbacAction =
   | "add_task"
   | "remove_task"
   | "update_task"
+  | "pin_task"
   | "manage_config";
 
 interface AccessControl {
@@ -99,6 +100,7 @@ const CONTRIBUTOR_ACTIONS = new Set<RbacAction>([
   "add_task",
   "remove_task",
   "update_task",
+  "pin_task",
 ]);
 
 const ADMIN_ONLY_ACTIONS = new Set<RbacAction>([

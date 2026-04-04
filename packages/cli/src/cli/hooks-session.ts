@@ -1247,21 +1247,55 @@ export async function handleHookContext() {
       }
     }
 
+    // Collect pinned tasks across ALL projects (excluding Done)
+    const allTaskRows = queryRows(db, "SELECT project, content FROM docs WHERE type = 'task'", []);
+    const pinnedFromOtherProjects: string[] = [];
+    if (allTaskRows) {
+      for (const row of allTaskRows) {
+        const taskProject = row[0] as string;
+        if (taskProject === project) continue;
+        const content = row[1] as string;
+        const pinned = content.split("\n")
+          .filter(l => l.startsWith("- [ ] ") && /\[pinned\]/i.test(l))
+          .map(l => `[${taskProject}] ${l}`);
+        pinnedFromOtherProjects.push(...pinned);
+      }
+    }
+
+    // Active project tasks — pinned float to top, exclude Done
     const taskRow = queryRows(
       db,
       "SELECT content FROM docs WHERE project = ? AND type = 'task'",
       [project]
     );
+    const pinnedItems: string[] = [];
+    const otherItems: string[] = [];
     if (taskRow) {
       const content = taskRow[0][0] as string;
-      const activeItems = content.split("\n").filter(l => l.startsWith("- "));
-      const filtered = filterTaskByPriority(activeItems);
-      const trimmed = filtered.slice(0, 5);
-      if (trimmed.length > 0) {
-        parts.push("## Active tasks");
-        parts.push(trimmed.join("\n"));
-        parts.push("");
+      const allItems = content.split("\n").filter(l => l.startsWith("- [ ] "));
+      for (const item of allItems) {
+        if (/\[pinned\]/i.test(item)) {
+          pinnedItems.push(item);
+        } else {
+          otherItems.push(item);
+        }
       }
+    }
+    const filteredOther = filterTaskByPriority(otherItems);
+    const allPinned = [...pinnedItems, ...pinnedFromOtherProjects].slice(0, 10);
+    const remaining = Math.max(0, 5 - allPinned.length);
+    const trimmedOther = filteredOther.slice(0, remaining);
+
+    if (allPinned.length > 0 || trimmedOther.length > 0) {
+      if (allPinned.length > 0) {
+        parts.push("## Pinned tasks");
+        parts.push(allPinned.join("\n"));
+      }
+      if (trimmedOther.length > 0) {
+        parts.push("## Active tasks");
+        parts.push(trimmedOther.join("\n"));
+      }
+      parts.push("");
     }
   } else {
     const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);

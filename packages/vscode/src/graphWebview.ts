@@ -206,6 +206,13 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (!projectName || !text) return;
       if (!isValidProjectName(projectName)) return;
 
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete this finding from ${projectName}?`,
+        { modal: true },
+        "Delete",
+      );
+      if (confirmed !== "Delete") return;
+
       try {
         await client.removeFinding(projectName, text);
         await refreshGraph();
@@ -274,13 +281,22 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (!projectName || !item) return;
       if (!isValidProjectName(projectName)) return;
 
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete this task from ${projectName}?`,
+        { modal: true },
+        "Delete",
+      );
+      if (confirmed !== "Delete") return;
+
       try {
         await client.removeTask(projectName, item);
         await refreshGraph();
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to delete task: ${toErrorMessage(err)}`);
       }
+      return;
     }
+
   });
 }
 
@@ -857,12 +873,12 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       color: var(--vscode-button-foreground, var(--ink));
     }
     .btn {
-      padding: 6px 10px;
+      padding: 4px 8px;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 6px;
       background: var(--surface);
       color: var(--ink);
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
     }
     .btn:hover, .btn.active {
@@ -879,31 +895,41 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       left: 0;
       top: 0;
       z-index: 20;
-      max-width: min(420px, calc(100% - 24px));
+      max-width: min(300px, calc(100% - 24px));
       pointer-events: none;
     }
     #node-popover-card {
       position: relative;
       pointer-events: auto;
-      border-radius: 16px;
+      border-radius: 10px;
       border: 1px solid var(--border);
       background: color-mix(in srgb, var(--surface) 96%, transparent);
       box-shadow: var(--shadow);
       backdrop-filter: blur(12px);
-      padding: 18px 18px 16px;
+      padding: 8px 10px 8px;
     }
+    #node-popover-handle {
+      height: 3px;
+      width: 28px;
+      margin: 0 auto 4px;
+      border-radius: 2px;
+      background: var(--muted);
+      cursor: grab;
+      opacity: 0.45;
+    }
+    #node-popover-handle:active { cursor: grabbing; opacity: 0.8; }
     #node-popover-close {
       position: absolute;
-      top: 10px;
-      right: 10px;
-      width: 40px;
-      height: 40px;
+      top: 5px;
+      right: 5px;
+      width: 22px;
+      height: 22px;
       padding: 0;
       border-radius: 999px;
       border: 1px solid var(--border);
       background: var(--surface-raised);
       color: var(--ink);
-      font-size: 20px;
+      font-size: 13px;
       line-height: 1;
       cursor: pointer;
       display: grid;
@@ -913,77 +939,102 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     #node-popover-content {
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      padding-right: 42px;
+      gap: 6px;
+      padding-right: 26px;
     }
-    .node-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .node-date { font-size: 10px; color: var(--muted); }
+    .node-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .node-chip {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 9px;
+      gap: 4px;
+      padding: 2px 7px;
       border-radius: 999px;
       border: 1px solid var(--border);
       background: var(--surface-sunken);
       font-size: 11px;
       color: var(--ink);
     }
-    .node-copy { white-space: pre-wrap; line-height: 1.65; font-size: 13px; }
-    .node-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .node-copy { white-space: pre-wrap; line-height: 1.5; font-size: 12px; }
+    .node-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
     .node-metric {
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 6px;
       background: var(--surface-raised);
-      padding: 10px 12px;
+      padding: 5px 7px;
     }
     .node-metric-label {
-      font-size: 11px;
+      font-size: 9px;
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: .05em;
     }
     .node-metric-value {
-      font-size: 20px;
+      font-size: 15px;
       font-weight: 600;
-      margin-top: 4px;
+      margin-top: 1px;
     }
     .node-docs {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 4px;
     }
-    .node-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .node-actions { display: flex; flex-wrap: wrap; gap: 5px; }
     .node-editor {
       width: 100%;
-      min-height: 170px;
+      min-height: 100px;
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px 14px;
+      border-radius: 8px;
+      padding: 6px 8px;
       background: var(--surface-sunken);
       color: var(--ink);
       font: inherit;
-      line-height: 1.6;
+      font-size: 11px;
+      line-height: 1.5;
       resize: vertical;
     }
     .node-select-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      gap: 6px;
     }
     .node-select-wrap {
       display: flex;
       flex-direction: column;
-      gap: 6px;
-      font-size: 12px;
+      gap: 3px;
+      font-size: 10px;
       color: var(--muted);
     }
     .node-select-wrap select {
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 8px 10px;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 11px;
       background: var(--surface);
       color: var(--ink);
     }
+    .node-ctx-menu {
+      position: absolute;
+      z-index: 25;
+      min-width: 140px;
+      padding: 3px 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .node-ctx-item {
+      display: block;
+      width: 100%;
+      padding: 5px 10px;
+      border: none;
+      background: none;
+      color: var(--ink);
+      font-size: 11px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .node-ctx-item:hover { background: var(--surface-sunken); }
   </style>
 </head>
 <body>
@@ -1003,10 +1054,12 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       </div>
       <div id="node-popover" role="dialog" aria-label="Node detail">
         <div id="node-popover-card">
+          <div id="node-popover-handle" title="Drag to move"></div>
           <button id="node-popover-close" title="Close" aria-label="Close">&times;</button>
           <div id="node-popover-content"></div>
         </div>
       </div>
+      <div id="node-ctx-menu" class="node-ctx-menu" style="display:none"></div>
     </section>
   </main>
   <script nonce="${nonce}">
@@ -1082,6 +1135,7 @@ ${graphScript}
       entityType: n.entityType || n.subtype || '',
       section: n.section || '',
       priority: n.priority || '',
+      date: n.date || '',
       refDocs: (n.docs || []).map(function(doc) { return { doc: doc, project: n.projectName || '' }; }),
       connectedProjects: n.connectedProjects || [],
       topicSlug: n.topicSlug || '',
@@ -1151,8 +1205,62 @@ ${graphScript}
   var popoverCard = document.getElementById('node-popover-card');
   var popoverContent = document.getElementById('node-popover-content');
   var popoverClose = document.getElementById('node-popover-close');
+  var popoverHandle = document.getElementById('node-popover-handle');
+  var ctxMenu = document.getElementById('node-ctx-menu');
   var currentNode = null;
   var editMode = null;
+
+  // --- Draggable popover ---
+  var isDraggingPopover = false;
+  var dragOffsetX = 0;
+  var dragOffsetY = 0;
+  if (popoverHandle) {
+    popoverHandle.addEventListener('mousedown', function(e) {
+      if (!popover) return;
+      isDraggingPopover = true;
+      dragOffsetX = e.clientX - parseFloat(popover.style.left || '0');
+      dragOffsetY = e.clientY - parseFloat(popover.style.top || '0');
+      e.preventDefault();
+    });
+  }
+  document.addEventListener('mousemove', function(e) {
+    if (!isDraggingPopover || !popover) return;
+    var container = document.querySelector('.graph-container');
+    var cw = container ? container.getBoundingClientRect().width : 900;
+    var ch = container ? container.getBoundingClientRect().height : 600;
+    var newLeft = Math.max(0, Math.min(cw - 60, e.clientX - dragOffsetX));
+    var newTop = Math.max(0, Math.min(ch - 40, e.clientY - dragOffsetY));
+    popover.style.left = newLeft + 'px';
+    popover.style.top = newTop + 'px';
+  });
+  document.addEventListener('mouseup', function() { isDraggingPopover = false; });
+
+  // --- Date helpers ---
+  function formatRelativeDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      var days = Math.floor((Date.now() - d.getTime()) / 86400000);
+      if (days < 1) return 'today';
+      if (days === 1) return 'yesterday';
+      if (days < 30) return days + 'd ago';
+      if (days < 365) return Math.floor(days / 30) + 'mo ago';
+      return Math.floor(days / 365) + 'y ago';
+    } catch (e) { return ''; }
+  }
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) { return ''; }
+  }
+
+  // --- Context menu helpers ---
+  function hideCtxMenu() { if (ctxMenu) ctxMenu.style.display = 'none'; }
+  document.addEventListener('click', hideCtxMenu);
 
   function currentPoint() {
     return {
@@ -1186,10 +1294,34 @@ ${graphScript}
     popover.style.visibility = 'hidden';
     requestAnimationFrame(function() {
       var container = document.querySelector('.graph-container');
-      var containerRect = container ? container.getBoundingClientRect() : { width: 900, height: 600 };
+      var cw = container ? container.getBoundingClientRect().width : 900;
+      var ch = container ? container.getBoundingClientRect().height : 600;
       var cardRect = popoverCard.getBoundingClientRect();
-      var left = Math.min(Math.max(12, x + 18), Math.max(12, containerRect.width - cardRect.width - 12));
-      var top = Math.min(Math.max(12, y + 18), Math.max(12, containerRect.height - cardRect.height - 12));
+      var cardW = cardRect.width;
+      var cardH = cardRect.height;
+      var pad = 10;
+      var gap = 12;
+      var left, top;
+
+      // Pick side with more space horizontally
+      if (x + gap + cardW + pad < cw) {
+        left = x + gap;
+      } else if (x - gap - cardW > pad) {
+        left = x - gap - cardW;
+      } else {
+        left = Math.max(pad, (cw - cardW) / 2);
+      }
+      // Pick side with more space vertically
+      if (y - cardH / 2 > pad && y + cardH / 2 < ch - pad) {
+        top = y - cardH / 2; // center vertically on click
+      } else if (y + gap + cardH + pad < ch) {
+        top = y + gap;
+      } else if (y - gap - cardH > pad) {
+        top = y - gap - cardH;
+      } else {
+        top = Math.max(pad, (ch - cardH) / 2);
+      }
+
       popover.style.left = left + 'px';
       popover.style.top = top + 'px';
       popover.style.visibility = 'visible';
@@ -1224,6 +1356,10 @@ ${graphScript}
         + '</div>';
       if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
     } else if (node.kind === 'finding') {
+      var dateInfo = [];
+      if (node.date && node.date !== 'unknown') dateInfo.push(formatDate(node.date));
+      if (node.lastUsedAt) dateInfo.push('Seen ' + formatRelativeDate(node.lastUsedAt));
+      if (dateInfo.length) body += '<div class="node-date">' + esc(dateInfo.join(' \u00b7 ')) + '</div>';
       body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
       actions.push('<button type="button" class="btn" data-node-action="edit">Edit</button>');
       actions.push('<button type="button" class="btn btn-danger" data-node-action="delete">Delete</button>');
@@ -1245,8 +1381,8 @@ ${graphScript}
       body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
     }
 
-    return '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(nodeKindLabel(node)) + '</div>'
-      + '<div style="font-size:20px;font-weight:600;line-height:1.2">' + esc(title) + '</div>'
+    return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(nodeKindLabel(node)) + '</div>'
+      + '<div style="font-size:15px;font-weight:600;line-height:1.2">' + esc(title) + '</div>'
       + '<div class="node-chips">' + chips.join('') + '</div>'
       + body
       + (actions.length ? '<div class="node-actions">' + actions.join('') + '</div>' : '');
@@ -1256,8 +1392,8 @@ ${graphScript}
     var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
     var section = node.section || 'Queue';
     var priority = node.priority || '';
-    return '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
-      + '<div style="font-size:18px;font-weight:600;line-height:1.2">' + esc(node.projectName || nodeKindLabel(node)) + '</div>'
+    return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
+      + '<div style="font-size:14px;font-weight:600;line-height:1.2">' + esc(node.projectName || nodeKindLabel(node)) + '</div>'
       + '<textarea id="node-editor" class="node-editor">' + esc(node.text || node.label || '') + '</textarea>'
       + (node.kind === 'task'
         ? '<div class="node-select-grid">'
@@ -1315,7 +1451,6 @@ ${graphScript}
           return;
         }
         if (action === 'delete') {
-          if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
           if (currentNode.kind === 'task') {
             vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItemKey() });
           } else if (currentNode.kind === 'finding') {
@@ -1333,6 +1468,7 @@ ${graphScript}
         }
         if (action === 'move-queue') {
           vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Queue' });
+          return;
         }
       });
     });
@@ -1395,6 +1531,35 @@ ${graphScript}
   if (window.phrenGraph && window.phrenGraph.onSelectionClear) {
     window.phrenGraph.onSelectionClear(function() {
       hidePopover(true);
+    });
+  }
+
+  // --- Right-click context menu on graph ---
+  if (window.phrenGraph && window.phrenGraph.onRightClick) {
+    window.phrenGraph.onRightClick(function(node, x, y) {
+      hideCtxMenu();
+      if (!ctxMenu || !node) return;
+      var items = [];
+      if (node.kind === 'project') {
+        items.push('<button class="node-ctx-item" data-ctx-action="focus" data-ctx-node="' + esc(node.id) + '">Focus project</button>');
+      } else {
+        items.push('<button class="node-ctx-item" data-ctx-action="select" data-ctx-node="' + esc(node.id) + '">View details</button>');
+      }
+      if (!items.length) return;
+      ctxMenu.innerHTML = items.join('');
+      ctxMenu.style.left = x + 'px';
+      ctxMenu.style.top = y + 'px';
+      ctxMenu.style.display = 'block';
+      ctxMenu.querySelectorAll('[data-ctx-action]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var act = btn.getAttribute('data-ctx-action');
+          if (act === 'focus' || act === 'select') {
+            var nid = btn.getAttribute('data-ctx-node');
+            if (nid && window.phrenGraph) window.phrenGraph.selectNode(nid);
+          }
+          hideCtxMenu();
+        });
+      });
     });
   }
 

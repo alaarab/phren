@@ -17,6 +17,7 @@ import {
   removeTasks as removeTasksBatch,
   linkTaskIssue,
   pinTask,
+  unpinTask,
   workNextTask,
   tidyDoneTasks,
   readTasks,
@@ -594,6 +595,38 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         if (!dry_run) refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "pin_task",
+    {
+      title: "◆ phren · pin task",
+      description:
+        "Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, " +
+        "so they stay visible across every prompt.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text or task ID (A1, Q3) to match."),
+        unpin: z.boolean().optional().describe("If true, unpin instead of pin."),
+      }),
+    },
+    async ({ project: projectInput, item, unpin: shouldUnpin }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const denied = permissionDeniedError(targetPath, "pin_task", project);
+      if (denied) return mcpResponse({ ok: false, error: denied });
+
+      return withWriteQueue(async () => {
+        const result = shouldUnpin
+          ? unpinTask(targetPath, project, item)
+          : pinTask(targetPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item, pinned: !shouldUnpin } });
       });
     }
   );

@@ -125,22 +125,9 @@ export function checkPermission(
       return { verdict: "ask", reason: `Auto-confirm mode requires confirmation for "${toolName}".` };
 
     case "plan":
-      // Plan mode: same as auto-confirm for permissions, but agent loop enables plan-first flow
-      if (AUTO_CONFIRM_TOOLS.has(toolName)) {
-        return { verdict: "allow", reason: `Plan mode allows "${toolName}".` };
-      }
-      if (toolName === "shell") {
-        const cwd = (input.cwd as string) || config.projectRoot;
-        const cwdResult = validatePath(cwd, config.projectRoot, config.allowedPaths);
-        if (cwdResult.ok) {
-          const cmd = (input.command as string) || "";
-          const safety = checkShellSafety(cmd);
-          if (safety.safe) {
-            return { verdict: "allow", reason: "Safe shell command within sandbox (plan mode)." };
-          }
-        }
-      }
-      return { verdict: "ask", reason: `Plan mode requires confirmation for "${toolName}".` };
+      // Plan mode: require explicit approval for ALL tool calls so the user
+      // can review the full plan before anything executes.
+      return { verdict: "ask", reason: `Plan mode requires approval for "${toolName}".` };
 
     case "full-auto":
       // Full-auto: allow everything not denied or warned

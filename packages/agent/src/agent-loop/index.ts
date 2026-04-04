@@ -27,8 +27,10 @@ export async function runTurn(
   const useStream = typeof provider.chatStream === "function";
   const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
 
-  // Plan mode: modify system prompt for first turn
-  let planPending = config.plan && session.turns === 0;
+  // Plan mode: inject plan-first prompt and strip tools so the LLM
+  // describes its plan before executing anything.  Works on any turn,
+  // not just the first, so mid-session plan mode toggles also apply.
+  let planPending = !!config.plan;
   if (planPending) {
     systemPrompt = injectPlanPrompt(systemPrompt);
   }
@@ -137,7 +139,8 @@ export async function runTurn(
     // Plan mode gate: after first response, ask for approval
     if (planPending) {
       planPending = false;
-      const { approved, feedback } = await requestPlanApproval();
+      const approve = hooks?.onPlanApproval ?? requestPlanApproval;
+      const { approved, feedback } = await approve();
       if (!approved) {
         // Always restore original system prompt on rejection to prevent plan prompt leaking
         systemPrompt = config.systemPrompt;
