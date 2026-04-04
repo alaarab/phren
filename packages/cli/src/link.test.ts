@@ -619,6 +619,11 @@ describe("link", () => {
       phrenPath = path.join(tmpRoot, "phren");
       fs.mkdirSync(phrenPath, { recursive: true });
 
+      // Sandbox HOME so doctor --fix doesn't clobber the real ~/.claude/CLAUDE.md symlink
+      process.env.HOME = tmpRoot;
+      delete process.env.USERPROFILE;
+      fs.mkdirSync(path.join(tmpRoot, ".claude"), { recursive: true });
+
       // Create minimal governance
       const govDir = path.join(phrenPath, ".config");
       fs.mkdirSync(govDir, { recursive: true });
