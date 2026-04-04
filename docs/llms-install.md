@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings and tasks in a team store are v
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (53)
+## MCP Tools (54)
 
 ### Search and Browse
 
@@ -92,6 +92,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `remove_task` | `project`, `item: string \| string[]` | Remove one or more tasks by matching text or ID. Pass a string or array. |
 | `update_task` | `project`, `item?`, `updates` | Update text, priority, context, section, GitHub metadata, pin, promote, or work_next. Item optional when work_next is true. |
 | `tidy_done_tasks` | `project`, `keep?`, `dry_run?` | Archive completed tasks to keep the list clean. |
+| `pin_task` | `project`, `item`, `unpin?` | Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority. |
 
 ### Finding Capture
 
