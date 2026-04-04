@@ -9,7 +9,7 @@ type SessionBucket = "findings" | "tasks";
 
 interface RootSectionNode {
   kind: "rootSection";
-  section: "projects" | "machines" | "review" | "skills" | "hooks" | "graph" | "manage";
+  section: "projects" | "tasks" | "machines" | "review" | "skills" | "hooks" | "graph" | "manage";
   description?: string;
 }
 
@@ -79,6 +79,12 @@ interface TaskSectionGroupNode {
   kind: "taskSectionGroup";
   projectName: string;
   section: TaskSection;
+  count: number;
+}
+
+interface GlobalTaskSectionGroupNode {
+  kind: "globalTaskSectionGroup";
+  section: "Pinned" | TaskSection;
   count: number;
 }
 
@@ -230,6 +236,7 @@ type PhrenNode =
   | FindingDateGroupNode
   | FindingNode
   | TaskSectionGroupNode
+  | GlobalTaskSectionGroupNode
   | TaskNode
   | QueueSectionGroupNode
   | AggregateQueueSectionGroupNode
@@ -356,6 +363,51 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     this.onDidChangeTreeDataEmitter.fire(undefined);
   }
 
+  async getParent(element: PhrenNode): Promise<PhrenNode | undefined> {
+    if (element.kind === "rootSection") return undefined;
+
+    if (element.kind === "projectGroup" || element.kind === "storeGroup") {
+      return { kind: "rootSection", section: "projects" };
+    }
+
+    if (element.kind === "project") {
+      const stores = await this.fetchStores();
+      const projects = await this.fetchProjects();
+      const primaryStoreName = stores.find((s) => s.role === "primary")?.name ?? "personal";
+      const storeNames = [...new Set(projects.map((p) => p.store ?? primaryStoreName))];
+      if (storeNames.length > 1) {
+        const proj = projects.find((p) => p.name === element.projectName);
+        const storeName = proj?.store ?? primaryStoreName;
+        return { kind: "storeGroup", storeName, role: "team", count: 0 };
+      }
+      const ctx = this.readDeviceContext();
+      if (ctx.activeProjects.size === 0) return { kind: "rootSection", section: "projects" };
+      return { kind: "projectGroup", group: ctx.activeProjects.has(element.projectName.toLowerCase()) ? "device" : "other", count: 0 };
+    }
+
+    if (element.kind === "category") {
+      return { kind: "project", projectName: element.projectName };
+    }
+
+    if (element.kind === "findingDateGroup") {
+      return { kind: "category", projectName: element.projectName, category: "findings" };
+    }
+
+    if (element.kind === "finding") {
+      return { kind: "findingDateGroup", projectName: element.projectName, date: element.date, count: 0 };
+    }
+
+    if (element.kind === "taskSectionGroup") {
+      return { kind: "category", projectName: element.projectName, category: "task" };
+    }
+
+    if (element.kind === "task") {
+      return { kind: "taskSectionGroup", projectName: element.projectName, section: element.section, count: 0 };
+    }
+
+    return undefined;
+  }
+
   async getChildren(element?: PhrenNode): Promise<PhrenNode[]> {
     try {
       return await this.getChildrenInner(element);
@@ -373,6 +425,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "rootSection") {
       if (element.section === "projects") {
         return this.getProjectNodes();
+      }
+      if (element.section === "tasks") {
+        return this.getGlobalTaskBoard();
       }
       if (element.section === "machines") {
         return this.getMachineNodes();
@@ -465,6 +520,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       return this.getFindingsForDate(element.projectName, element.date);
     }
 
+    if (element.kind === "globalTaskSectionGroup") {
+      return this.getGlobalTasksForSection(element.section);
+    }
+
     if (element.kind === "taskSectionGroup") {
       return this.getTasksForSection(element.projectName, element.section);
     }
@@ -493,8 +552,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     }
     switch (element.kind) {
       case "rootSection": {
-        const labels: Record<string, string> = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
-        const icons: Record<string, string> = { projects: "hubot", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+        const labels: Record<string, string> = { projects: "Projects", tasks: "Tasks", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
+        const icons: Record<string, string> = { projects: "hubot", tasks: "checklist", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
         const label = labels[element.section] ?? element.section;
 
         if (element.section === "graph") {
@@ -590,12 +649,22 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
           item.description = "(conflict)";
         } else if (element.potentialDuplicates?.length) {
           item.description = "(possible duplicate)";
+        } else if (element.date) {
+          item.description = formatRelativeTime(element.date);
         }
         item.command = {
           command: "phren.openFinding",
           title: "Open Finding",
           arguments: [element],
         };
+        return item;
+      }
+      case "globalTaskSectionGroup": {
+        const globalSectionIcons: Record<string, string> = { Pinned: "pinned", Active: "play", Queue: "clock", Done: "check" };
+        const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
+        item.description = `${element.count}`;
+        item.iconPath = themeIcon(globalSectionIcons[element.section] ?? "list-flat");
+        item.id = `phren.globalTaskSectionGroup.${element.section}`;
         return item;
       }
       case "taskSectionGroup": {
@@ -608,7 +677,8 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       }
       case "task": {
         const item = new vscode.TreeItem(truncate(element.line, 120), vscode.TreeItemCollapsibleState.None);
-        item.tooltip = `${element.section} (${element.id})\n${element.line}`;
+        item.description = element.projectName;
+        item.tooltip = `[${element.projectName}] ${element.section} (${element.id})\n${element.line}`;
         item.iconPath = themeIcon(taskIconId(element));
         item.id = `phren.task.${element.projectName}.${element.id}`;
         item.contextValue = element.section !== "Done" ? "phren.task.active" : "phren.task.done";
@@ -845,9 +915,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
   private async getRootSections(): Promise<PhrenNode[]> {
     const nodes: PhrenNode[] = [];
     nodes.push({ kind: "rootSection", section: "projects" });
+    nodes.push({ kind: "rootSection", section: "tasks" });
+    nodes.push({ kind: "rootSection", section: "skills" });
     nodes.push({ kind: "rootSection", section: "machines" });
     nodes.push({ kind: "rootSection", section: "review" });
-    nodes.push({ kind: "rootSection", section: "skills" });
     nodes.push({ kind: "rootSection", section: "hooks", description: await this.getHookSectionDescription() });
     nodes.push({ kind: "rootSection", section: "graph" });
     nodes.push({ kind: "rootSection", section: "manage" });
@@ -954,6 +1025,106 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         }));
     } catch (error) {
       return [this.errorNode("Failed to load findings", error)];
+    }
+  }
+
+  private fetchAllTasks(): Promise<{ projectName: string; task: TaskSummary }[]> {
+    return this.cachedFetch("globalTasks:all", async () => {
+      const raw = await this.client.getAllTasks({ status: "active+queue", limit: 100 });
+      const data = responseData(raw);
+      const projects = asArray(data?.projects);
+
+      const allTasks: { projectName: string; task: TaskSummary }[] = [];
+      for (const proj of projects) {
+        const record = asRecord(proj);
+        const projectName = asString(record?.project) ?? "unknown";
+        const items = asRecord(record?.items);
+        for (const section of ["Active", "Queue"] as TaskSection[]) {
+          const sectionItems = asArray(items?.[section]);
+          for (const entry of sectionItems) {
+            const taskRecord = asRecord(entry);
+            const line = asString(taskRecord?.line);
+            if (!line) continue;
+            allTasks.push({
+              projectName,
+              task: {
+                id: asString(taskRecord?.id) ?? `${section}-${allTasks.length + 1}`,
+                line,
+                section,
+                checked: asBoolean(taskRecord?.checked) ?? false,
+                priority: asString(taskRecord?.priority),
+                pinned: asBoolean(taskRecord?.pinned),
+                issueUrl: asString(taskRecord?.githubUrl),
+                issueNumber: asNumber(taskRecord?.githubIssue),
+              },
+            });
+          }
+        }
+      }
+      return allTasks;
+    });
+  }
+
+  private async getGlobalTaskBoard(): Promise<PhrenNode[]> {
+    try {
+      const allTasks = await this.fetchAllTasks();
+
+      const pinned = allTasks.filter(t => t.task.pinned);
+      const active = allTasks.filter(t => !t.task.pinned && t.task.section === "Active");
+      const queue = allTasks.filter(t => !t.task.pinned && t.task.section === "Queue");
+
+      const groups: PhrenNode[] = [];
+      if (pinned.length > 0) {
+        groups.push({ kind: "globalTaskSectionGroup", section: "Pinned", count: pinned.length });
+      }
+      if (active.length > 0) {
+        groups.push({ kind: "globalTaskSectionGroup", section: "Active", count: active.length });
+      }
+      if (queue.length > 0) {
+        groups.push({ kind: "globalTaskSectionGroup", section: "Queue", count: queue.length });
+      }
+
+      if (groups.length === 0) {
+        return [{ kind: "message", label: "No tasks across any project", iconId: "checklist" }];
+      }
+      return groups;
+    } catch (error) {
+      return [this.errorNode("Failed to load global tasks", error)];
+    }
+  }
+
+  private async getGlobalTasksForSection(section: "Pinned" | TaskSection): Promise<PhrenNode[]> {
+    try {
+      const allTasks = await this.fetchAllTasks();
+
+      const tasks: PhrenNode[] = [];
+      for (const { projectName, task } of allTasks) {
+        const matches =
+          section === "Pinned" ? task.pinned :
+          section === task.section && !task.pinned;
+
+        if (matches) {
+          tasks.push({
+            kind: "task",
+            projectName,
+            id: task.id,
+            line: task.line,
+            section: task.section,
+            checked: task.checked,
+            priority: task.priority,
+            pinned: task.pinned,
+            issueUrl: task.issueUrl,
+            issueNumber: task.issueNumber,
+          });
+        }
+      }
+
+      if (tasks.length === 0) {
+        return [{ kind: "message", label: `No ${section.toLowerCase()} tasks`, iconId: "checklist" }];
+      }
+      return tasks;
+    } catch (error) {
+      return [this.errorNode("Failed to load tasks", error)];
     }
   }
 
@@ -1998,6 +2169,9 @@ function categoryIconId(category: PhrenCategory): string {
 function taskIconId(task: TaskNode): string {
   if (task.checked || task.section === "Done") {
     return "check";
+  }
+  if (task.pinned) {
+    return "pinned";
   }
   if (task.section === "Active") {
     return "play";

@@ -3,6 +3,15 @@
 <!-- Copy this file to your personal phren instance's global/CLAUDE.md and fill in your own preferences. -->
 <!-- This becomes ~/.claude/CLAUDE.md after syncing. Claude reads it at the start of every session. -->
 
+## Memory
+
+**Use Phren for all knowledge persistence, not Claude Code's built-in auto memory.** Do not write to `~/.claude/projects/.../memory/` files. Instead:
+
+- Save knowledge → `add_finding(project, finding)`
+- Recall knowledge → `search_knowledge(query)`
+- Track tasks → `add_task()` / `complete_task()` / `get_tasks()`
+- Track sessions → `session_start()` / `session_end()`
+
 ## How I Work
 
 <!-- Your non-negotiable rules. Examples: -->

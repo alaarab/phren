@@ -25,6 +25,7 @@ type RawNode = {
   priority?: string;
   section?: string;
   entityType?: string;
+  date?: string;
   refDocs?: Array<{ doc: string; project?: string; scoreKey?: string }>;
   connectedProjects?: string[];
   topicSlug?: string;
@@ -77,6 +78,7 @@ type PhrenGraphApi = {
   mount: (payload: GraphPayload) => void;
   onNodeSelect: (callback: SelectCallback) => void;
   onSelectionClear: (callback: ClearCallback) => void;
+  onRightClick: (callback: (node: NodeDetail, x: number, y: number) => void) => void;
   clearSelection: () => void;
   selectNode: (nodeId: string) => boolean;
   focusNode: (nodeId: string) => boolean;
@@ -206,6 +208,7 @@ const state = {
   cameraRatio: 1 as number,
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
+  rightClickCallbacks: [] as Array<(node: NodeDetail, x: number, y: number) => void>,
   filterTypes: {
     project: true,
     finding: true,
@@ -781,10 +784,23 @@ function showTooltip(nodeId: string, event: { x: number; y: number }): void {
   let preview = "";
 
   if (node.kind === "finding") {
-    // Show first 100 chars of the finding
+    // Show first 100 chars of the finding + date
     const text = node.fullLabel || node.label || "";
     const truncated = text.length > 100 ? text.slice(0, 97) + "..." : text;
     preview = truncated;
+    const score = scoreForNode(node);
+    const rawDate = node.date && node.date !== "unknown" ? node.date : "";
+    const dateStr = rawDate || score?.lastUsedAt || "";
+    if (dateStr) {
+      try {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+          const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+          const rel = days < 1 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
+          preview += `\n${node.date ? rel : "seen " + rel}`;
+        }
+      } catch { /* skip */ }
+    }
   } else if (node.kind === "task") {
     // Show task line + section + priority
     const line = node.fullLabel || node.label || "";
@@ -911,8 +927,9 @@ function refreshRenderer(resetCamera: boolean): void {
         } else if (focus) {
           const neighbors = state.visibleAdjacency.get(focus);
           if (neighbors?.has(nodeId)) {
+            const focusNode = state.nodeById.get(focus);
             next.zIndex = 10;
-            next.forceLabel = data.size >= 12;
+            next.forceLabel = focusNode?.kind === "project" || data.size >= 12;
           } else {
             next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.22 : 0.25);
             next.label = null;
@@ -1005,9 +1022,11 @@ function refreshRenderer(resetCamera: boolean): void {
       hideTooltip();
       state.renderer?.refresh();
       const detail = nodeDetail(payload.node);
+      let animating = false;
       if (detail && detail.kind !== "project" && state.renderer) {
         const graphPosition = state.renderer.getNodeDisplayData(payload.node);
         if (graphPosition) {
+          animating = true;
           state.renderer.getCamera().animate({
             x: graphPosition.x,
             y: graphPosition.y,
@@ -1015,11 +1034,24 @@ function refreshRenderer(resetCamera: boolean): void {
           }, { duration: 220 });
         }
       }
-      notifySelection(payload.node);
+      // Delay notification until after camera animation so popover lands next to the node
+      if (animating) {
+        setTimeout(() => notifySelection(payload.node), 240);
+      } else {
+        notifySelection(payload.node);
+      }
       // Send phren mascot to the clicked node
       if (mascot.initialized && payload.node !== mascot.currentNodeId) {
         mascotMoveTo(payload.node);
       }
+    });
+
+    state.renderer.on("rightClickNode", (payload) => {
+      payload.preventSigmaDefault();
+      (payload.event.original as Event).preventDefault();
+      const detail = nodeDetail(payload.node);
+      if (!detail) return;
+      state.rightClickCallbacks.forEach((cb) => cb(detail, payload.event.x, payload.event.y));
     });
 
     state.renderer.on("clickStage", () => {
@@ -1437,7 +1469,8 @@ function selectNode(nodeId: string): boolean {
         ratio: Math.max(state.renderer.getCamera().ratio * 0.8, 0.12),
       }, { duration: 280 });
     }
-    notifySelection(nodeId);
+    // Delay so popover lands at post-animation position
+    setTimeout(() => notifySelection(nodeId), 300);
     if (mascot.initialized && nodeId !== mascot.currentNodeId) {
       mascotMoveTo(nodeId);
     }
@@ -1449,15 +1482,21 @@ function selectNode(nodeId: string): boolean {
   state.selectedNodeId = nodeId;
   state.hoveredNodeId = nodeId;
   state.renderer?.refresh();
+  let hasAnim = false;
   const display = state.renderer?.getNodeDisplayData(nodeId);
   if (display && state.renderer) {
+    hasAnim = true;
     state.renderer.getCamera().animate({
       x: display.x,
       y: display.y,
       ratio: Math.max(state.renderer.getCamera().ratio * 0.9, 0.16),
     }, { duration: 220 });
   }
-  notifySelection(nodeId);
+  if (hasAnim) {
+    setTimeout(() => notifySelection(nodeId), 240);
+  } else {
+    notifySelection(nodeId);
+  }
   if (mascot.initialized && nodeId !== mascot.currentNodeId) {
     mascotMoveTo(nodeId);
   }
@@ -1827,6 +1866,9 @@ ROOT.phrenGraph = {
   },
   onSelectionClear(callback: ClearCallback) {
     state.selectionClearCallbacks.push(callback);
+  },
+  onRightClick(callback: (node: NodeDetail, x: number, y: number) => void) {
+    state.rightClickCallbacks.push(callback);
   },
   clearSelection,
   selectNode,

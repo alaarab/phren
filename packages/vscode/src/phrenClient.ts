@@ -173,6 +173,10 @@ export class PhrenClient {
     return this.callTool("get_tasks", { project, ...options });
   }
 
+  async getAllTasks(options: GetTasksOptions = {}): Promise<unknown> {
+    return this.callTool("get_tasks", { ...options });
+  }
+
   async sessionHistory(options: SessionHistoryOptions = {}): Promise<unknown> {
     return this.callTool("session_history", { ...options });
   }
@@ -252,7 +256,11 @@ export class PhrenClient {
   }
 
   async pinTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("update_task", { project, item, updates: { pin: true } });
+    return this.callTool("pin_task", { project, item });
+  }
+
+  async unpinTask(project: string, item: string): Promise<unknown> {
+    return this.callTool("pin_task", { project, item, unpin: true });
   }
 
   async promoteTaskToIssue(project: string, item: string): Promise<unknown> {

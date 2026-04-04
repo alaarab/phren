@@ -137,17 +137,23 @@ export function registerTaskCommands(ctx: ExtensionContext): vscode.Disposable[]
 
   const pinTask = vscode.commands.registerCommand(
     "phren.pinTask",
-    async (task?: { projectName: string; id: string; line: string; section: string; checked: boolean }) => {
+    async (task?: { projectName: string; id: string; line: string; section: string; checked: boolean; pinned?: boolean }) => {
       if (!task) {
         await vscode.window.showWarningMessage("Pin Task is available from the Phren explorer context menu.");
         return;
       }
       try {
-        await phrenClient.pinTask(task.projectName, task.line);
-        treeDataProvider.refresh();
-        await vscode.window.showInformationMessage(`Task "${task.id}" pinned.`);
+        if (task.pinned) {
+          await phrenClient.unpinTask(task.projectName, task.line);
+          treeDataProvider.refresh();
+          await vscode.window.showInformationMessage(`Task "${task.id}" unpinned.`);
+        } else {
+          await phrenClient.pinTask(task.projectName, task.line);
+          treeDataProvider.refresh();
+          await vscode.window.showInformationMessage(`Task "${task.id}" pinned.`);
+        }
       } catch (error) {
-        await vscode.window.showErrorMessage(`Failed to pin task: ${toErrorMessage(error)}`);
+        await vscode.window.showErrorMessage(`Failed to ${task.pinned ? "unpin" : "pin"} task: ${toErrorMessage(error)}`);
       }
     },
   );
