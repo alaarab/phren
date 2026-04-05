@@ -332,13 +332,26 @@ export function listProjectCards(phrenPath: string, profile?: string): ProjectCa
 
   const seen = new Set(dirs.map((d) => path.basename(d)));
 
-  // Include projects from team stores
+  // Include projects from team stores, filtered by active profile
   try {
+    // Resolve the profile's project allow-list (if any)
+    let profileProjectNames: Set<string> | undefined;
+    if (profile) {
+      const profiles = listProfiles(phrenPath);
+      if (profiles.ok) {
+        const active = profiles.data.find((p) => p.name === profile);
+        if (active && active.projects.length > 0) {
+          profileProjectNames = new Set(active.projects);
+        }
+      }
+    }
+
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (!fs.existsSync(store.path)) continue;
       for (const dir of getStoreProjectDirs(store)) {
         const name = path.basename(dir);
         if (seen.has(name) || name === "global") continue;
+        if (profileProjectNames && !profileProjectNames.has(name)) continue;
         seen.add(name);
         cards.push(buildProjectCard(dir));
       }

@@ -1810,6 +1810,27 @@ export async function handleStoreNamespace(args: string[]) {
           stdio: "pipe",
           timeout: 30_000,
         });
+
+        // Re-apply sparse-checkout after pull on primary store to avoid materializing all files
+        if (store.role === "primary") {
+          try {
+            const sparseList = execFileSync("git", ["sparse-checkout", "list"], {
+              cwd: store.path,
+              stdio: "pipe",
+              timeout: 10_000,
+            }).toString().trim();
+            if (sparseList) {
+              execFileSync("git", ["sparse-checkout", "reapply"], {
+                cwd: store.path,
+                stdio: "pipe",
+                timeout: 10_000,
+              });
+            }
+          } catch {
+            // sparse-checkout not configured — nothing to reapply
+          }
+        }
+
         console.log(`  ${store.name}: ok`);
       } catch (err: unknown) {
         console.log(`  ${store.name}: FAILED (${errorMessage(err).split("\n")[0]})`);

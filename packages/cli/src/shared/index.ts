@@ -40,10 +40,27 @@ async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Pro
   try {
     const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
     const otherStores = getNonPrimaryStores(phrenPath);
-    const dirs: string[] = [];
+    let dirs: string[] = [];
     for (const store of otherStores) {
       if (!fs.existsSync(store.path)) continue;
       dirs.push(...getStoreProjectDirs(store));
+    }
+    // Filter by active profile's project list, matching getProjectDirs behavior
+    if (profile) {
+      const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
+      if (fs.existsSync(profilePath)) {
+        try {
+          const yaml = await import("js-yaml");
+          const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown> | undefined;
+          const projects = data?.projects;
+          if (Array.isArray(projects)) {
+            const allowed = new Set(projects.map(String));
+            dirs = dirs.filter(dir => allowed.has(path.basename(dir)));
+          }
+        } catch {
+          // Profile parse error — include all dirs as fallback
+        }
+      }
     }
     _cachedStoreProjectDirs = dirs;
     _cachedStorePhrenPath = phrenPath;
@@ -505,8 +522,9 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
 
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
-    const config = readProjectConfig(phrenPath, projectName);
-    const ownership = getProjectOwnershipMode(phrenPath, projectName, config);
+    const storePath = path.dirname(dir);
+    const config = readProjectConfig(storePath, projectName);
+    const ownership = getProjectOwnershipMode(storePath, projectName, config);
     const mdFilesSet = new Set<string>();
     for (const pattern of indexPolicy.includeGlobs) {
       const dot = indexPolicy.includeHidden || pattern.startsWith(".") || pattern.includes("/.");
