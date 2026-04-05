@@ -11,6 +11,7 @@ import { addProjectFromPath } from "../core/project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "../project-config.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getMachineName } from "../machine-identity.js";
+import { resolveAllStores } from "../store-registry.js";
 
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { logger } from "../logger.js";
@@ -21,17 +22,49 @@ import { countUnsyncedCommits } from "../cli-hooks-git.js";
 
 async function handleAddProject(
   ctx: McpContext,
-  { path: targetPath, profile: requestedProfile, ownership }: {
+  { path: targetPath, profile: requestedProfile, ownership, store: storeName }: {
     path: string;
     profile?: string;
     ownership?: (typeof PROJECT_OWNERSHIP_MODES)[number];
+    store?: string;
   },
 ) {
   const { phrenPath, profile, withWriteQueue } = ctx;
   return withWriteQueue(async () => {
     try {
+      // Resolve the target store path: explicit store > auto-route by project claim > primary
+      let targetPhrenPath = phrenPath;
+      let storeRole = "primary";
+      if (storeName) {
+        const stores = resolveAllStores(phrenPath);
+        const store = stores.find((s) => s.name === storeName);
+        if (!store) {
+          return mcpResponse({ ok: false, error: `Store "${storeName}" not found` });
+        }
+        if (store.role === "readonly") {
+          return mcpResponse({ ok: false, error: `Store "${storeName}" is read-only` });
+        }
+        targetPhrenPath = store.path;
+        storeRole = store.role;
+      } else {
+        // Check if any non-primary writable store claims this project
+        const projectName = targetPath
+          ? path.basename(path.resolve(targetPath)).toLowerCase().replace(/[^a-z0-9_-]/g, "-")
+          : undefined;
+        if (projectName) {
+          const stores = resolveAllStores(phrenPath);
+          for (const store of stores) {
+            if (store.role !== "readonly" && store.role !== "primary" && store.projects?.includes(projectName)) {
+              targetPhrenPath = store.path;
+              storeRole = store.role;
+              break;
+            }
+          }
+        }
+      }
+
       const added = addProjectFromPath(
-        phrenPath,
+        targetPhrenPath,
         targetPath,
         requestedProfile || profile || undefined,
         parseProjectOwnershipMode(ownership) ?? undefined
@@ -45,7 +78,9 @@ async function handleAddProject(
       await ctx.rebuildIndex();
       return mcpResponse({
         ok: true,
-        message: `Added project "${added.data.project}" (${added.data.ownership}) from ${added.data.path}.`,
+        message: `Added project "${added.data.project}" (${added.data.ownership}) from ${added.data.path}` +
+          (storeRole !== "primary" ? ` [store: ${storeName || storeRole}]` : "") +
+          `.`,
         data: added.data,
       });
     } catch (err: unknown) {
@@ -480,6 +515,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
         ownership: z.enum(PROJECT_OWNERSHIP_MODES).optional()
           .describe("How Phren should treat repo-facing instruction files: phren-managed, detached, or repo-managed."),
+        store: z.string().optional()
+          .describe("Target store name (from stores.yaml). If omitted, auto-routes to the store that claims this project, or falls back to the primary store."),
       }),
     },
     (params) => handleAddProject(ctx, params),

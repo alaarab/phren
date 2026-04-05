@@ -7,6 +7,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
 import { isValidProjectName } from "../utils.js";
+import { addProjectToProfile, resolveActiveProfile } from "../profile-store.js";
 import {
   addStoreToRegistry,
   findStoreByName,
@@ -292,6 +293,17 @@ async function handleTeamAddProject(args: string[]): Promise<void> {
   const currentProjects = store.projects || [];
   if (!currentProjects.includes(projectName)) {
     updateStoreProjects(phrenPath, storeName, [...currentProjects, projectName]);
+  }
+
+  // Add project to active profile so it's visible to profile-filtered operations
+  const activeProfile = resolveActiveProfile(phrenPath);
+  if (activeProfile.ok && activeProfile.data) {
+    const addResult = addProjectToProfile(phrenPath, activeProfile.data, projectName);
+    if (!addResult.ok) {
+      throw new Error(addResult.error);
+    }
+  } else if (!activeProfile.ok && activeProfile.code !== "FILE_NOT_FOUND") {
+    throw new Error(activeProfile.error);
   }
 
   console.log(`Added project "${projectName}" to team store "${storeName}"`);
