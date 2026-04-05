@@ -627,19 +627,21 @@ export async function searchFederatedStores(
   localPhrenPath: string,
   options: Omit<SearchKnowledgeRowsOptions, "phrenPath">,
 ): Promise<FederatedDocRow[]> {
-  let nonPrimaryStores: Array<{ path: string; name: string; id: string }>;
+  // Registered non-primary stores are already included in the main FTS index
+  // by buildIndex (via refreshStoreProjectDirs). Only search unregistered
+  // federation paths from PHREN_FEDERATION_PATHS to avoid double indexing.
+  let registeredStorePaths: Set<string>;
   try {
     const { getNonPrimaryStores } = await import("../store-registry.js");
-    nonPrimaryStores = getNonPrimaryStores(localPhrenPath).map((s) => ({
-      path: s.path, name: s.name, id: s.id,
-    }));
+    registeredStorePaths = new Set(getNonPrimaryStores(localPhrenPath).map((s) => s.path));
   } catch {
-    // Fallback: parse PHREN_FEDERATION_PATHS directly (pre-registry compat)
-    const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
-    nonPrimaryStores = raw.split(":").map((p) => p.trim())
-      .filter((p) => p.length > 0 && p !== localPhrenPath && fs.existsSync(p))
-      .map((p) => ({ path: p, name: path.basename(p), id: "" }));
+    registeredStorePaths = new Set();
   }
+
+  const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
+  const nonPrimaryStores = raw.split(":").map((p) => p.trim())
+    .filter((p) => p.length > 0 && p !== localPhrenPath && !registeredStorePaths.has(p) && fs.existsSync(p))
+    .map((p) => ({ path: p, name: path.basename(p), id: "" }));
 
   if (nonPrimaryStores.length === 0) return [];
 
