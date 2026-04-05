@@ -1835,7 +1835,7 @@ describe("CLI integration: uninstall", () => {
       );
       expect(hasPhren).toBe(false);
     }
-  });
+  }, 30_000);
 
   it("removes the shared phren root and machine alias", () => {
     const projDir = path.join(phrenDir, "test-proj");

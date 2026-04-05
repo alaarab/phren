@@ -11,7 +11,7 @@ import {
   readTeamBootstrap,
   type StoreEntry,
 } from "../store-registry.js";
-import { getOptionValue, resolveProjectStorePath } from "./namespaces-utils.js";
+import { getOptionValue } from "./namespaces-utils.js";
 
 function printStoreUsage() {
   console.log("Usage:");

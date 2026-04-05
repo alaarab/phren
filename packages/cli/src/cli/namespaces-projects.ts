@@ -15,7 +15,6 @@ import { TASK_FILE_ALIASES } from "../data/tasks.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   parseProjectOwnershipMode,
-  readProjectConfig,
   writeProjectConfig,
   writeProjectHookConfig,
 } from "../project-config.js";

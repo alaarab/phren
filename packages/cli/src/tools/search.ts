@@ -520,14 +520,14 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     const store = resolveAllStores(ctx.phrenPath).find((s) => s.name === storeName);
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
-      const fsDocs: Array<{ filename: string; type: string; content: string; path: string }> = [];
+      const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
       for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], ["FINDINGS.md", "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
-          fsDocs.push({ filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
+          fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
         }
       }
-      if (fsDocs.length > 0) docs = fsDocs as any;
+      if (fsDocs.length > 0) docs = fsDocs;
     }
   }
 

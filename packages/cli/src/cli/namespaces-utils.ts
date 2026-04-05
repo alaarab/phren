@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { getPhrenPath } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 
