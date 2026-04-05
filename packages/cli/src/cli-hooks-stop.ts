@@ -464,32 +464,23 @@ export async function handleHookStop() {
     return;
   }
   // Check if HEAD has an upstream tracking branch before attempting sync.
-  // Detached HEAD or branches without upstream would cause silent push failures.
+  // If no upstream is set but a remote exists, auto-set it to avoid silent push failures.
   const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], phrenPath);
   if (!upstream.ok || !upstream.output) {
-    const unsyncedCommits = await countUnsyncedCommits(phrenPath);
-    const noUpstreamDetail = "commit created; no upstream tracking branch";
-    finalizeTaskSession({
-      phrenPath,
-      sessionId: taskSessionId,
-      status: "no-upstream",
-      detail: noUpstreamDetail,
-    });
-    updateRuntimeHealth(phrenPath, {
-      lastStopAt: now,
-      lastAutoSave: { at: now, status: "no-upstream", detail: noUpstreamDetail },
-      lastSync: {
-        lastPushAt: now,
-        lastPushStatus: "no-upstream",
-        lastPushDetail: noUpstreamDetail,
-        unsyncedCommits,
-      },
-    });
-    appendAuditLog(phrenPath, "hook_stop", "status=no-upstream");
-    if (unsyncedCommits > 3) {
-      process.stderr.write(`phren: ${unsyncedCommits} unsynced commits — no upstream tracking branch.\n`);
+    // Try to auto-set upstream: get current branch and set tracking to origin/<branch>
+    const branch = await runBestEffortGit(["rev-parse", "--abbrev-ref", "HEAD"], phrenPath);
+    if (branch.ok && branch.output) {
+      const branchName = branch.output.trim();
+      const setUpstream = await runBestEffortGit(
+        ["branch", "--set-upstream-to", `origin/${branchName}`, branchName],
+        phrenPath,
+      );
+      if (!setUpstream.ok) {
+        // Upstream auto-set failed — log and continue to sync anyway
+        logger.debug("hookStop", `failed to auto-set upstream for ${branchName}`);
+      }
     }
-    return;
+    // Fall through to scheduleBackgroundSync instead of returning early
   }
 
   const unsyncedCommits = await countUnsyncedCommits(phrenPath);

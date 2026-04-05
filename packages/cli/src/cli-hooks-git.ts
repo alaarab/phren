@@ -164,7 +164,14 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
 
 export async function countUnsyncedCommits(cwd: string): Promise<number> {
   const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
-  if (!upstream.ok || !upstream.output) return 0;
+  if (!upstream.ok || !upstream.output) {
+    // No upstream tracking branch — count all local commits as unsynced
+    // so the warning at the call site fires instead of silently returning 0
+    const allCommits = await runBestEffortGit(["rev-list", "--count", "HEAD"], cwd);
+    if (!allCommits.ok || !allCommits.output) return 0;
+    const parsed = Number.parseInt(allCommits.output.trim(), 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
   const ahead = await runBestEffortGit(["rev-list", "--count", `${upstream.output.trim()}..HEAD`], cwd);
   if (!ahead.ok || !ahead.output) return 0;
   const parsed = Number.parseInt(ahead.output.trim(), 10);
