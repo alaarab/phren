@@ -82,8 +82,9 @@ async function buildTestConfig(overrides?: Partial<AgentConfig>): Promise<AgentC
   };
 }
 
-describe("integration", () => {
-  // Skip the entire suite if no Codex token is available
+describe.skip("integration", () => {
+  // Skip: these tests hit real LLM APIs with real credentials.
+  // Run manually with `vitest run integration` when needed.
   const canRun = hasCodexToken();
   const testFn = canRun ? it : it.skip;
 
