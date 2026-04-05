@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to publish (must match package.json)
+        description: Version to publish (must match packages/cli/package.json)
         required: true
         type: string
 
@@ -21,17 +21,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Ensure version matches package.json
+      - name: Ensure version matches packages/cli/package.json
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
+          PKG_VERSION=$(node -p "require('./packages/cli/package.json').version")
           INPUT_VERSION="${{ github.event.inputs.version }}"
           if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
-            echo "Version mismatch: package.json=$PKG_VERSION, input=$INPUT_VERSION"
+            echo "Version mismatch: packages/cli/package.json=$PKG_VERSION, input=$INPUT_VERSION"
             exit 1
           fi
 
@@ -44,21 +48,22 @@ jobs:
           }
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: npm run build
+        run: pnpm build
 
       - name: Lint
-        run: npm run lint
+        run: pnpm lint
 
       - name: Test
-        run: npm test -- --coverage
+        run: pnpm test -- --coverage
 
       - name: Validate docs
-        run: npm run validate-docs
+        run: pnpm run validate-docs
 
       - name: Publish package
+        working-directory: packages/cli
         run: npm publish --access public --provenance
 
       - name: Create git tag

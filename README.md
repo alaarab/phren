@@ -148,7 +148,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (53 tools, FTS5, hooks) |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (54 tools, FTS5, hooks) |
 | [`@phren/agent`](packages/agent) | Coding agent with TUI (providers, tools, multi-agent) |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 
