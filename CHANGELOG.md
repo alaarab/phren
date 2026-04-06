@@ -3,6 +3,25 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.15] - 2026-04-05
+
+Comprehensive audit and cleanup. 54 files updated.
+
+### Fixed
+- All stale version references (capabilities, docs, init output)
+- All stale tool counts (53->54 across 10+ docs files)
+- Feature-flags.md embedding section (documented wrong env var)
+- api-reference.md: added pin_task + store_list, fixed param types
+- Profile YAML description field silently dropped on write
+
+### Changed
+- Centralized FINDINGS_FILENAME constant (34 source files updated)
+- Deduplicated enum constants (governance/policy.ts is single source)
+- CLI wrapper now has npx fallback for resilience
+- Lifecycle hooks prefer stable wrapper path over hardcoded node paths
+
+---
+
 ## [0.1.14] - 2026-04-05
 
 Refactoring pass: split large modules into focused files, fix lint warnings and flaky tests.
