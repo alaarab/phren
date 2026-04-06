@@ -3,6 +3,20 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.16] - 2026-04-05
+
+Remove finding source comment noise. Cleaner files, less metadata bloat.
+
+### Changed
+- Findings no longer write `source`, `machine`, `actor`, `tool`, `model`, `sessionId` metadata — none were used downstream
+- New standalone `<!-- scope:builder -->` comment format replaces scope embedded in source comment
+- Removed `source` parameter from `add_finding` MCP tool
+- Removed source-based confidence multiplier (findingType decay handles this better)
+- Cleaned `FindingItem` interface: 6 unused fields removed
+
+### Fixed
+- Old `<!-- source:... scope:X -->` format still parsed for backward compatibility
+
 ## [0.1.15] - 2026-04-05
 
 Comprehensive audit and cleanup. 54 files updated.
