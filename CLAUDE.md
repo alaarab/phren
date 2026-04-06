@@ -50,7 +50,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-0.1.16
+0.1.17
 
 ## Reference Documentation
 

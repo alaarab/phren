@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.17] - 2026-04-06
+
+### Fixed
+- Bulk `add_finding` (array input) now passes scope through correctly
+- Removed stale `source` parameter references from faq.md, architecture.md, llms-install.md
+
 ## [0.1.16] - 2026-04-05
 
 Remove finding source comment noise. Cleaner files, less metadata bloat.

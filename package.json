@@ -1,6 +1,6 @@
 {
   "name": "phren",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "Knowledge layer for AI agents with a built-in coding agent",
   "type": "module",
