@@ -109,11 +109,9 @@ Findings have explicit lifecycle and editing operations:
 
 Lifecycle metadata stays attached to finding entries, so history remains auditable instead of being silently deleted.
 
-## What is finding provenance and impact scoring?
+## What is finding impact scoring?
 
-`add_finding` accepts a `source` field (`human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`) so origin is explicit.
-
-Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost.
+Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost. Finding type tags (`[decision]`, `[pattern]`, `[observation]`, etc.) control decay rates — decisions never expire while observations fade after 14 days.
 
 ## How does cross-session resume work?
 

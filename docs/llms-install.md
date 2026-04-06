@@ -98,7 +98,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `add_finding` | `project`, `finding: string \| string[]`, `citation?`, `sessionId?`, `source?`, `findingType?`, `scope?` | Append one or more insights. Pass a string or array. Citation, provenance, type tag, and scope apply to single-string mode. |
+| `add_finding` | `project`, `finding: string \| string[]`, `citation?`, `sessionId?`, `findingType?`, `scope?` | Append one or more insights. Pass a string or array. Citation, type tag, and scope apply to single-string mode. |
 | `supersede_finding` | `project`, `finding_text`, `superseded_by` | Mark a finding as superseded by a newer one. |
 | `retract_finding` | `project`, `finding_text`, `reason` | Retract a finding and store lifecycle reason metadata. |
 | `resolve_contradiction` | `project`, `finding_text`, `finding_text_other`, `resolution` | Resolve contradiction status between two findings (`keep_a`, `keep_b`, `keep_both`, `retract_both`). |

@@ -193,6 +193,7 @@ async function handleAddFinding(
       const result = addFindingsToFile(phrenPath, project, findings, {
         extraAnnotationsByFinding,
         sessionId,
+        scope: normalizedScope,
       });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
       const { added, skipped, rejected } = result.data;

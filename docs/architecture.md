@@ -176,9 +176,8 @@ All state stays local as files (markdown/json), with git as transport in shared 
 
 Findings now carry richer state:
 
-- provenance source via `add_finding.source`:
-  - `human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`
 - lifecycle state stored inline (active/superseded/contradicted/retracted/stale/invalid_citation)
+- memory scope via `<!-- scope:builder -->` for multi-agent visibility control
 - contradiction and supersession handled by dedicated lifecycle tools
 
 Impact scoring pipeline:

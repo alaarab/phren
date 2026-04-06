@@ -132,7 +132,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Use addFindingsToFile so extracted findings go through the full pipeline:
         // secret scan, dedup check, validation, and index update.
-        const result = addFindingsToFile(targetPath, project, findings);
+        const result = addFindingsToFile(targetPath, project, findings, {
+          sessionId: undefined,
+          scope: undefined,
+        });
         if (!result.ok) {
           return mcpResponse({ ok: false, error: result.error });
         }
