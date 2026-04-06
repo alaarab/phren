@@ -31,7 +31,7 @@ import {
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
 import { logger } from "../logger.js";
-import { isToolHookEnabled } from "../hooks.js";
+import { isToolHookEnabled, runPrePromptHooks } from "../hooks.js";
 import { handleExtractMemories } from "./extract.js";
 import { appendAuditLog } from "../shared.js";
 import { updateRuntimeHealth } from "../shared/governance.js";
@@ -406,6 +406,10 @@ export async function handleHookPrompt() {
       debugLog(`slow-fs: hook-prompt took ${totalMs}ms (index=${stage.indexMs} search=${stage.searchMs} trust=${stage.trustMs} rank=${stage.rankMs} select=${stage.selectMs})`);
       process.stderr.write(`phren: hook-prompt took ${totalMs}ms, check if ~/.phren is on a slow or network filesystem\n`);
     }
+
+    // Run pre-prompt custom hooks and prepend their output
+    const prePromptOutput = runPrePromptHooks(getPhrenPath(), raw);
+    if (prePromptOutput) parts.unshift(prePromptOutput);
 
     console.log(parts.join("\n"));
   } catch (err: unknown) {

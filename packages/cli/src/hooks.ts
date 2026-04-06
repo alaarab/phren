@@ -474,7 +474,8 @@ export type CustomHookEvent =
   | "pre-index"        // Before FTS index rebuild
   | "post-index"       // After FTS index rebuild
   | "post-session-end" // After session_end completes
-  | "post-consolidate"; // After FINDINGS.md consolidation runs
+  | "post-consolidate" // After FINDINGS.md consolidation runs
+  | "pre-prompt";      // Before hook-prompt output; stdout is prepended to phren's response
 
 export interface CommandHookEntry {
   event: CustomHookEvent;
@@ -496,6 +497,7 @@ export const HOOK_EVENT_VALUES = [
   "pre-finding", "post-finding",
   "pre-index", "post-index",
   "post-session-end", "post-consolidate",
+  "pre-prompt",
 ] as const;
 
 const VALID_HOOK_EVENTS = new Set<string>(HOOK_EVENT_VALUES);
@@ -769,6 +771,64 @@ export function runCustomHooks(
   }
 
   return { ran: matching.length, errors };
+}
+
+/**
+ * Run pre-prompt custom hooks, piping stdinJson to each and capturing stdout.
+ * Returns concatenated stdout from all matching hooks (empty string if none).
+ */
+export function runPrePromptHooks(
+  phrenPath: string,
+  stdinJson: string,
+): string {
+  const hooks = readCustomHooks(phrenPath);
+  const matching = hooks.filter((h) => h.event === "pre-prompt" && "command" in h);
+  if (matching.length === 0) return "";
+
+  const isWindows = process.platform === "win32";
+  const shellCmd = isWindows ? "cmd" : "sh";
+  const outputs: string[] = [];
+
+  for (const hook of matching) {
+    if (!("command" in hook)) continue;
+    const cmdErr = validateCustomHookCommand(hook.command);
+    if (cmdErr) {
+      debugLog(`runPrePromptHooks: skipped (validation failed): ${cmdErr}`);
+      appendHookErrorLog(phrenPath, "pre-prompt", cmdErr);
+      continue;
+    }
+    const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
+    const mergedEnv: Record<string, string | undefined> = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: "pre-prompt" };
+    if (isWindows) {
+      for (const [key, val] of Object.entries(mergedEnv)) {
+        if (typeof val === "string") {
+          mergedEnv[key] = val.replace(/[&|<>^%]/g, "");
+        }
+      }
+    }
+    try {
+      const result = execFileSync(shellCmd, shellArgs, {
+        cwd: phrenPath,
+        encoding: "utf8",
+        input: stdinJson,
+        timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
+        env: mergedEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const trimmed = (result ?? "").trim();
+      if (trimmed) outputs.push(trimmed);
+    } catch (err: unknown) {
+      const message = `pre-prompt: ${hook.command}: ${errorMessage(err)}`;
+      debugLog(`runPrePromptHooks: ${message}`);
+      try {
+        appendHookErrorLog(phrenPath, "pre-prompt", errorMessage(err));
+      } catch (logErr: unknown) {
+        logger.debug("runPrePromptHooks hookErrorLog", errorMessage(logErr));
+      }
+    }
+  }
+
+  return outputs.join("\n");
 }
 
 export interface HookConfigOptions {
