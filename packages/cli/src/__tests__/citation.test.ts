@@ -281,7 +281,7 @@ describe("filterTrustedFindingsDetailed", () => {
     expect(filtered).not.toContain("Aging finding");
   });
 
-  it("boosts human-sourced findings", () => {
+  it("treats all sources equally for confidence", () => {
     const content = [
       "# Findings",
       "",
@@ -291,13 +291,14 @@ describe("filterTrustedFindingsDetailed", () => {
     ].join("\n");
 
     // Both are undated, so they get DEFAULT_UNDATED_CONFIDENCE.
-    // Human gets *1.1, extract gets *0.9 — with no citation both get *0.8.
-    // Set minConfidence between the two effective values to isolate the boost.
+    // No source-based multiplier — both get the same confidence.
+    // With no citation both get *0.8 (0.45 * 0.8 = 0.36). Use minConfidence below that.
     const { content: filtered } = filterTrustedFindingsDetailed(content, {
       ttlDays: 365,
-      minConfidence: 0.39,
+      minConfidence: 0.35,
     });
     expect(filtered).toContain("Human finding");
+    expect(filtered).toContain("Extract finding");
   });
 
   it("reduces confidence for uncited findings", () => {

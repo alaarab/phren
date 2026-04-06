@@ -23,8 +23,8 @@ import {
 import { isValidProjectName, queueFilePath, safeProjectPath } from "../utils.js";
 import {
   type FindingCitation,
-  type FindingProvenanceSource,
   parseCitationComment,
+  parseScopeComment,
   parseSourceComment,
 } from "../content/citation.js";
 import {
@@ -100,12 +100,6 @@ export interface FindingItem {
   citationData?: FindingCitation;
   taskItem?: string;
   confidence?: number;
-  source: FindingProvenanceSource;
-  machine?: string;
-  actor?: string;
-  tool?: string;
-  model?: string;
-  sessionId?: string;
   scope?: string;
   /** First 60 chars of the newer finding that supersedes this one. Set when this finding is stale. */
   supersededBy?: string;
@@ -316,7 +310,6 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
         id: `L${index}`,
         date,
         text: syntheticText,
-        source: "unknown",
         status: "active" as FindingLifecycleStatus,
         archived: inArchiveBlock,
         tier: inArchiveBlock ? "archived" : "current",
@@ -330,7 +323,7 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
     const next = lines[i + 1] || "";
     const citation = isCitationLine(next) ? next.trim() : undefined;
     const citationData = citation ? parseCitationComment(citation) ?? undefined : undefined;
-    const source = parseSourceComment(line) ?? undefined;
+    const scope = parseScopeComment(line) ?? parseSourceComment(line)?.scope;
     const stableId = parseFindingId(line);
     const rawText = line.replace(/^-\s+/, "").trim();
     const textWithoutComments = stripComments(rawText);
@@ -352,16 +345,10 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
       date,
       text,
       confidence,
-      source: source?.source ?? "unknown",
       citation,
       citationData,
       taskItem: citationData?.task_item,
-      machine: source?.machine,
-      actor: source?.actor,
-      tool: source?.tool,
-      model: source?.model,
-      sessionId: source?.session_id,
-      scope: source?.scope,
+      scope,
       supersededBy: supersededByMatch ? supersededByMatch[1] : undefined,
       supersedes: supersedesMatch ? supersedesMatch[1] : undefined,
       contradicts: contradictsMatches.length > 0 ? contradictsMatches : undefined,

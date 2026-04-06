@@ -357,20 +357,6 @@ export async function getSessionArtifacts(
       if (seen.has(proj)) return;
       seen.add(proj);
 
-      // Findings with matching sessionId
-      const findingsResult = readFindings(storePath, proj);
-      if (findingsResult.ok) {
-        for (const f of findingsResult.data) {
-          if (f.sessionId && (f.sessionId === sessionId || f.sessionId.startsWith(shortId))) {
-            findings.push({
-              project: proj,
-              id: f.id,
-              date: f.date,
-              text: f.text,
-            });
-          }
-        }
-      }
       // Tasks with matching sessionId
       const tasksResult = readTasks(storePath, proj);
       if (tasksResult.ok) {

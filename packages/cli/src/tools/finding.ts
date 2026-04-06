@@ -29,7 +29,6 @@ import { extractFragmentNames } from "../shared/fragment-graph.js";
 import { extractFactFromFinding } from "./extract-facts.js";
 import { appendChildFinding, editFinding as editFindingCore, readFindings, FINDINGS_FILENAME } from "../data/access.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
-import { FINDING_PROVENANCE_SOURCES } from "../content/citation.js";
 import {
   isInactiveFindingLine,
   supersedeFinding,
@@ -128,12 +127,11 @@ async function handleAddFinding(
     finding: string | string[];
     citation?: { file?: string; line?: number; repo?: string; commit?: string; supersedes?: string; task_item?: string };
     sessionId?: string;
-    source?: (typeof FINDING_PROVENANCE_SOURCES)[number];
     findingType?: (typeof FINDING_TYPES)[number];
     scope?: string;
   },
 ) {
-  const { finding, citation, sessionId, source, findingType, scope } = params;
+  const { finding, citation, sessionId, findingType, scope } = params;
 
   // Resolve store-qualified project names (e.g., "team/arc" → store path + "arc")
   let phrenPath: string;
@@ -230,7 +228,6 @@ async function handleAddFinding(
       runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
       const result = addFindingToFile(phrenPath, project, taggedFinding, citation, {
         sessionId,
-        source,
         scope: normalizedScope,
         extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
       });
@@ -719,9 +716,6 @@ export function register(server: McpServer, ctx: McpContext): void {
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
-        source: z.enum(FINDING_PROVENANCE_SOURCES)
-          .optional()
-          .describe("Optional finding provenance source: human, agent, hook, extract, consolidation, or unknown."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
           .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),

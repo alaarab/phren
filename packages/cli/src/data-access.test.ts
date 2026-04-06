@@ -485,16 +485,13 @@ describe("readFindings", () => {
     expect(result.data[0].date).toBe("2026-03-01");
     expect(result.data[0].text).toContain("auth middleware");
     expect(result.data[0].citation).toContain("phren:cite");
-    expect(result.data[0].source).toBe("unknown");
 
     expect(result.data[1].date).toBe("2026-03-01");
     expect(result.data[1].text).toContain("WAL mode");
     expect(result.data[1].citation).toBeUndefined();
-    expect(result.data[1].source).toBe("unknown");
 
     expect(result.data[2].date).toBe("2026-02-15");
     expect(result.data[2].text).toContain("vitest");
-    expect(result.data[2].source).toBe("unknown");
   });
 
   it("returns an empty array when no FINDINGS.md exists", () => {
@@ -537,12 +534,43 @@ describe("readFindings", () => {
     expect(result.data).toHaveLength(1);
     expect(result.data[0].text).toBe("Refactor slices should stay independently releasable");
     expect(result.data[0].taskItem).toBe("deadbeef");
-    expect(result.data[0].actor).toBe("codex");
-    expect(result.data[0].tool).toBe("codex");
-    expect(result.data[0].model).toBe("gpt-5");
-    expect(result.data[0].source).toBe("agent");
-    expect(result.data[0].sessionId).toBe("session-1234");
     expect(result.data[0].citationData?.task_item).toBe("deadbeef");
+  });
+
+  it("parses scope from old source comment format", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT} FINDINGS
+
+## 2026-03-09
+
+- Legacy finding with scope in source comment <!-- source:agent scope:builder -->
+`,
+    );
+    const result = readFindings(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].scope).toBe("builder");
+  });
+
+  it("parses scope from standalone scope comment", () => {
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT} FINDINGS
+
+## 2026-03-09
+
+- Modern finding with standalone scope <!-- scope:builder -->
+`,
+    );
+    const result = readFindings(tmpDir, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].scope).toBe("builder");
   });
 
   it("excludes archived details by default and includes them when requested", () => {

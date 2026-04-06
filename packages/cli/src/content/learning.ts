@@ -5,17 +5,13 @@ import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResu
 import { normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
-import { getMachineName } from "../machine-identity.js";
 import {
   type FindingCitation,
-  type FindingProvenanceSource,
-  type FindingProvenance,
   buildCitationComment,
-  buildSourceComment,
+  buildScopeComment,
   getHeadCommit,
   getRepoRoot,
   inferCitationLocation,
-  isFindingProvenanceSource,
 } from "./citation.js";
 import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./dedup.js";
 import { validateFindingsFormat, validateFinding } from "./validate.js";
@@ -23,7 +19,6 @@ import { countActiveFindings, autoArchiveToReference } from "./archive.js";
 import {
   resolveAutoFindingTaskItem,
   resolveFindingTaskReference,
-  resolveFindingSessionId,
 } from "../finding/context.js";
 import {
   buildLifecycleComments,
@@ -53,7 +48,6 @@ const LIFECYCLE_ANNOTATION_RE = METADATA_REGEX.lifecycleAnnotation;
 interface AddFindingOptions {
   extraAnnotations?: string[];
   sessionId?: string;
-  source?: FindingProvenanceSource;
   scope?: string;
 }
 
@@ -107,48 +101,8 @@ function resolveInferredCitationRepo(citationInput?: Partial<FindingCitation>): 
   return undefined;
 }
 
-function detectFindingModel(): string | undefined {
-  const candidates = [
-    (process.env.PHREN_MODEL),
-    process.env.OPENAI_MODEL,
-    process.env.CLAUDE_MODEL,
-    (process.env.PHREN_LLM_MODEL),
-    process.env.MODEL,
-  ];
-  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
-}
-
-function detectFindingTool(): string | undefined {
-  const candidates = [
-    (process.env.PHREN_TOOL),
-    (process.env.PHREN_HOOK_TOOL),
-  ];
-  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
-}
-
-function detectFindingProvenanceSource(explicitSource?: FindingProvenanceSource): FindingProvenanceSource {
-  if (explicitSource) return explicitSource;
-  const envSource = (process.env.PHREN_FINDING_SOURCE)?.trim().toLowerCase();
-  if (isFindingProvenanceSource(envSource)) return envSource;
-  if ((process.env.PHREN_CONSOLIDATION) === "1") return "consolidation";
-  if ((process.env.PHREN_AUTO_EXTRACT) === "1") return "extract";
-  if ((process.env.PHREN_HOOK_TOOL)) return "hook";
-  if (process.env.PHREN_ACTOR?.trim()) return "agent";
-  return "human";
-}
-
-function buildFindingSource(sessionId?: string, explicitSource?: FindingProvenanceSource, scope?: string): FindingProvenance {
-  const actor = process.env.PHREN_ACTOR?.trim() || undefined;
-  const source: FindingProvenance = {
-    source: detectFindingProvenanceSource(explicitSource),
-    machine: getMachineName(),
-    actor,
-    tool: detectFindingTool(),
-    model: detectFindingModel(),
-    session_id: sessionId,
-    scope: normalizeMemoryScope(scope),
-  };
-  return source;
+function buildFindingScope(scope?: string): string | undefined {
+  return normalizeMemoryScope(scope) || undefined;
 }
 
 function resolveFindingCitationInput(
@@ -192,7 +146,7 @@ interface PrepareFindingOpts {
   fullHistory: string;
   extraAnnotations?: string[];
   citationInput?: Partial<FindingCitation>;
-  source?: FindingProvenance;
+  scope?: string;
   nowIso?: string;
   inferredRepo?: string;
   headCommit?: string;
@@ -202,7 +156,7 @@ interface PrepareFindingOpts {
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, source, nowIso, inferredRepo, headCommit, phrenPath } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, nowIso, inferredRepo, headCommit, phrenPath } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -224,10 +178,10 @@ function prepareFinding(
   const fid = crypto.randomBytes(4).toString("hex");
   const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;
-  const sourceComment = source ? buildSourceComment(source) : "";
+  const scopeComment = buildScopeComment(scope);
   let lifecycle: FindingLifecycleMetadata = { status: "active", status_updated: today };
   let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${fidComment} ${createdComment}`;
-  if (sourceComment) bullet += ` ${sourceComment}`;
+  if (scopeComment) bullet += ` ${scopeComment}`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };
@@ -361,8 +315,7 @@ export function addFindingToFile(
   const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project, citationInput);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
-  const effectiveSessionId = resolveFindingSessionId(phrenPath, project, opts?.sessionId);
-  const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
+  const scope = buildFindingScope(opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
   const supersedesText = resolvedCitationInput?.supersedes;
@@ -384,7 +337,7 @@ export function addFindingToFile(
   const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
     const preparedForNewFile = prepareFinding({
       finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+      citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
     });
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
@@ -418,7 +371,7 @@ export function addFindingToFile(
       : content;
     const prepared = prepareFinding({
       finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+      citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
     });
     if (prepared.status === "rejected") {
       return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
@@ -513,7 +466,7 @@ export function addFindingsToFile(
   phrenPath: string,
   project: string,
   learnings: string[],
-  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; source?: FindingProvenanceSource; scope?: string }
+  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string }
 ): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
@@ -525,8 +478,7 @@ export function addFindingsToFile(
   const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
   const resolvedCitationInput = resolvedCitationInputResult.data;
-  const effectiveSessionId = resolveFindingSessionId(phrenPath, project, opts?.sessionId);
-  const source = buildFindingSource(effectiveSessionId, opts?.source, opts?.scope);
+  const scope = buildFindingScope(opts?.scope);
   const inferredRepo = resolveInferredCitationRepo(resolvedCitationInput);
   const headCommit = inferredRepo ? getHeadCommit(inferredRepo) : undefined;
 
@@ -549,7 +501,7 @@ export function addFindingsToFile(
         }
         const prepared = prepareFinding({
           finding: learning, project, fullHistory: content, extraAnnotations,
-          citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+          citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
         });
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
@@ -584,7 +536,7 @@ export function addFindingsToFile(
       }
       const prepared = prepareFinding({
         finding: learning, project, fullHistory: content, extraAnnotations,
-        citationInput: resolvedCitationInput, source, nowIso, inferredRepo, headCommit, phrenPath,
+        citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
       });
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });

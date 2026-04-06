@@ -123,6 +123,20 @@ export function buildSourceComment(source: FindingProvenance): string {
   return parts.length > 0 ? `<!-- source:${parts.join(" ")} -->` : "";
 }
 
+/** Build a standalone scope comment. Returns empty string if scope is unset or "shared". */
+export function buildScopeComment(scope: string | undefined): string {
+  if (!scope || scope === "shared") return "";
+  return `<!-- scope:${scope} -->`;
+}
+
+/** Parse a standalone `<!-- scope:VALUE -->` comment. */
+export function parseScopeComment(line: string): string | undefined {
+  const m = line.match(/<!--\s*scope:(".*?"|\S+)\s*-->/);
+  if (!m) return undefined;
+  const raw = m[1].replace(/^"|"$/g, "").trim();
+  return raw || undefined;
+}
+
 export function parseSourceComment(line: string): FindingProvenance | null {
   const sourceMatch = line.match(METADATA_REGEX.source);
   if (!sourceMatch) return null;
@@ -450,9 +464,6 @@ export function filterTrustedFindingsDetailed(content: string, opts: number | Tr
     }
 
     if (!citation) confidence *= 0.8;
-    const provenance = parseSourceComment(line)?.source ?? "unknown";
-    if (provenance === "human") confidence *= 1.1;
-    if (provenance === "extract") confidence *= 0.9;
     if (project && highImpactFindingIds?.size) {
       const findingId = findingIdFromLine(line);
       if (highImpactFindingIds.has(findingId)) confidence *= 1.15;

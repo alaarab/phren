@@ -731,7 +731,7 @@ describe("filterTrustedFindingsDetailed", () => {
     expect(result.content).toContain("- Finding with citation");
   });
 
-  it("gives human provenance a small confidence boost over extract", () => {
+  it("treats all provenance sources equally for confidence", () => {
     const d = new Date();
     d.setDate(d.getDate() - 50);
     const dateStr = d.toISOString().slice(0, 10);
@@ -744,9 +744,10 @@ describe("filterTrustedFindingsDetailed", () => {
       "- Extracted finding <!-- source:extract tool:auto-extract -->",
       "",
     ].join("\n");
-    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.75 });
+    // Both should survive at the same threshold since source no longer affects confidence
+    const result = filterTrustedFindingsDetailed(content, { ttlDays: 200, minConfidence: 0.3 });
     expect(result.content).toContain("Human finding");
-    expect(result.content).not.toContain("Extracted finding");
+    expect(result.content).toContain("Extracted finding");
   });
 
   it("accepts numeric ttlDays shorthand", () => {

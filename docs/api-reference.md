@@ -176,7 +176,6 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
-| `source` | enum | no | Optional finding provenance source: `human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 

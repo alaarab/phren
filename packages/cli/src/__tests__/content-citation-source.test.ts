@@ -43,7 +43,7 @@ describe("content-citation source provenance", () => {
     });
   });
 
-  it("boosts trust confidence for human-sourced findings", () => {
+  it("does not boost trust confidence based on source provenance", () => {
     const content = [
       "# demo Findings",
       "",
@@ -57,8 +57,10 @@ describe("content-citation source provenance", () => {
       minConfidence: 0.39,
     });
 
-    expect(filtered.content).toContain("Human source finding");
+    // Source-based confidence multiplier was removed; both undated uncited
+    // findings get the same confidence and are filtered at this threshold.
+    expect(filtered.content).not.toContain("Human source finding");
     expect(filtered.content).not.toContain("Unknown source finding");
-    expect(filtered.issues.length).toBeGreaterThanOrEqual(1);
+    expect(filtered.issues.length).toBeGreaterThanOrEqual(2);
   });
 });

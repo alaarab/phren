@@ -134,18 +134,27 @@ describe("supersession", () => {
 });
 
 describe("finding provenance", () => {
-  it("writes compact source annotations on finding bullets", () => {
+  it("writes scope comment instead of source comment on finding bullets", () => {
     const result = addFindingToFile(tmp.path, PROJECT, "Hook-generated context should be tracked", undefined, {
-      source: "hook",
+      scope: "builder",
     });
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("<!-- source:hook");
-    expect(content).not.toContain("<!-- source: source:hook");
+    expect(content).toContain("<!-- scope:builder -->");
+    expect(content).not.toContain("<!-- source:");
   });
 
-  it("auto-stamps active task and active session context", () => {
+  it("omits scope comment when scope is shared or unset", () => {
+    const result = addFindingToFile(tmp.path, PROJECT, "No scope comment needed for shared");
+    expect(result.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).not.toContain("<!-- scope:");
+    expect(content).not.toContain("<!-- source:");
+  });
+
+  it("auto-stamps active task citation", () => {
     grantAdmin(tmp.path, "codex-worker");
     process.env.PHREN_ACTOR = "codex-worker";
     writeFile(
@@ -162,16 +171,14 @@ describe("finding provenance", () => {
 `,
     );
     writeSession("session-1234");
-    process.env.OPENAI_MODEL = "gpt-5";
 
     const result = addFindingToFile(tmp.path, PROJECT, "Operator-surface refactor is safe to continue in smaller slices");
     expect(result.ok).toBe(true);
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
     expect(content).toContain('"task_item":"deadbeef"');
-    expect(content).toContain("actor:codex-worker");
-    expect(content).toContain("model:gpt-5");
-    expect(content).toContain("session:session-1234");
+    // Source metadata no longer written — only scope (if non-shared)
+    expect(content).not.toContain("<!-- source:");
   });
 
   it("resolves explicit task_item references to the stable ID", () => {

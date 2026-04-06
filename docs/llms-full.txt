@@ -24,8 +24,7 @@ MCP Tools (54 across 12 modules):
     tidy_done_tasks(project, keep?, dry_run?) - archive completed tasks to keep the list clean
 
   Finding capture:
-    add_finding(project, finding: string | string[], citation?, findingType?, sessionId?, source?) - append one or more findings; citation/type/provenance apply to single-string mode
-      source: "human" | "agent" | "hook" | "extract" | "consolidation" | "unknown"
+    add_finding(project, finding: string | string[], citation?, findingType?, sessionId?) - append one or more findings; citation/type apply to single-string mode
       findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
     supersede_finding(project, finding_text, superseded_by) - mark a finding as superseded
     retract_finding(project, finding_text, reason) - retract a finding with reason metadata

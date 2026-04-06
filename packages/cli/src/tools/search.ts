@@ -35,7 +35,7 @@ import { runCustomHooks } from "../hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "../shared/governance.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
-import { parseSourceComment } from "../content/citation.js";
+import { parseScopeComment, parseSourceComment } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
 
@@ -106,8 +106,7 @@ function filterFindingsContentByScope(content: string, activeScope: string): str
   let keepCitation = false;
   for (const line of lines) {
     if (line.startsWith("- ")) {
-      const source = parseSourceComment(line);
-      const itemScope = normalizeMemoryScope(source?.scope);
+      const itemScope = normalizeMemoryScope(parseScopeComment(line) ?? parseSourceComment(line)?.scope);
       keepCitation = isMemoryScopeVisible(itemScope, activeScope);
       if (keepCitation) out.push(line);
       continue;
@@ -721,11 +720,7 @@ async function handleGetFindings(
     const metadata: string[] = [];
     metadata.push(`status=${entry.status}`);
     if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
-    if (entry.sessionId) metadata.push(`session=${entry.sessionId.slice(0, 8)}`);
     if (entry.scope) metadata.push(`scope=${entry.scope}`);
-    if (entry.actor) metadata.push(`actor=${entry.actor}`);
-    if (entry.tool) metadata.push(`tool=${entry.tool}`);
-    if (entry.model) metadata.push(`model=${entry.model}`);
     if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
     if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
     if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);

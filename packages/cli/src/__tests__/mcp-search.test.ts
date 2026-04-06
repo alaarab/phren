@@ -507,10 +507,7 @@ describe("mcp-search: get_findings", () => {
     const res = parseResult(await server.call("get_findings", { project: "withmeta" }));
     expect(res.ok).toBe(true);
     expect(res.message).toContain("task=deadbeef");
-    expect(res.message).toContain("actor=codex");
-    expect(res.message).toContain("model=gpt-5");
     expect(res.data.findings[0].taskItem).toBe("deadbeef");
-    expect(res.data.findings[0].tool).toBe("codex");
   });
 
   it("hides historical findings by default and includes them when include_history=true", async () => {

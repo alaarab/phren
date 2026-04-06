@@ -123,7 +123,6 @@ export function compactFindingJournals(phrenPath: string, project?: string): Fin
           ...(entry.commit ? { commit: entry.commit } : {}),
           ...(entry.file ? { file: entry.file } : {}),
         }, {
-          source: entry.source,
           sessionId: entry.sessionId,
         });
         if (!write.ok) {
