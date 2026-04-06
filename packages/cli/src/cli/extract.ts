@@ -15,6 +15,7 @@ import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
 import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, resolveExecCommand } from "../utils.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { getProactivityLevelForTask, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as fs from "fs";
 import * as os from "os";
@@ -327,7 +328,7 @@ export async function handleExtractMemories(
     if (!shouldAutoCaptureFindingsForLevel(findingsLevel, c.sourceText ?? c.text)) continue;
     const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
-      const key = entryScoreKey(project, "FINDINGS.md", line);
+      const key = entryScoreKey(project, FINDINGS_FILENAME, line);
       recordFeedback(getPhrenPath(), key, "regression");
     }
     if (c.score >= threshold) {

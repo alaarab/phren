@@ -22,6 +22,7 @@ import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
 import { inspectTaskHygiene } from "../task/hygiene.js";
 import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { repairPreexistingInstall } from "../init/setup.js";
 import {
   getMachineName,
@@ -279,7 +280,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
       continue;
     }
-    for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
+    for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME]) {
       const src = path.join(phrenPath, project, f);
       if (!fs.existsSync(src)) continue;
       const dest = path.join(target, f);
@@ -586,7 +587,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
         });
       }
 
-      const findingsPath = path.join(projectDir, "FINDINGS.md");
+      const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
       if (fs.existsSync(findingsPath)) {
         const content = fs.readFileSync(findingsPath, "utf8");
         const issues = validateFindingsFormat(content);
@@ -603,7 +604,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of ["FINDINGS.md", ...TASK_FILE_ALIASES, "review.md", "CLAUDE.md", "REFERENCE.md"]) {
+      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "CLAUDE.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");

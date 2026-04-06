@@ -35,6 +35,7 @@ import {
 import {
   METADATA_REGEX,
 } from "./metadata.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 /** Default cap for active findings before auto-archiving is triggered. */
 const DEFAULT_FINDINGS_CAP = 20;
@@ -352,7 +353,7 @@ export function addFindingToFile(
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const learningsPath = path.join(resolvedDir, "FINDINGS.md");
+  const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 
   // Secret/PII scan — reject before anything else (before existence check, before lock)
   const nowIso = new Date().toISOString();
@@ -517,7 +518,7 @@ export function addFindingsToFile(
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const learningsPath = path.join(resolvedDir, "FINDINGS.md");
+  const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);

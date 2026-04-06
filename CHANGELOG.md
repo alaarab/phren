@@ -3,6 +3,54 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.14] - 2026-04-05
+
+Refactoring pass: split large modules into focused files, fix lint warnings and flaky tests.
+
+### Changed
+- **Split `hooks-session.ts`** — broken into smaller focused modules, fixed lint warnings and flaky test
+- **Split `namespaces.ts`** — CLI namespace module split into domain-specific modules
+- **Split VS Code `PhrenTreeProvider`** — tree provider broken into focused modules
+
+### Fixed
+- **Docs tool count** — updated to 54 tools, version to 0.1.14
+
+---
+
+## [0.1.13] - 2026-04-03
+
+Bug fix release: federated search, team store, upstream tracking, CI stabilization.
+
+### Fixed
+- **Double FTS indexing** — prevent duplicate indexing of team store projects in federated search
+- **Sparse-checkout after sync** — reapply sparse-checkout after store sync, profile-filter team store projects
+- **Auto-set upstream tracking** — set upstream tracking branch when missing, fix unsynced count
+- **Team `add-project` routing** — `team add-project` adds to profile and routes to correct store
+- **Windows wrapper tests** — skip wrapper existence tests on Windows
+- **CI failures** — stale lockfile, test date decay, unused import, docs tool count
+- **`@phren/agent` publish** — publish `@phren/agent@0.1.15` with resolved `workspace:*` dependency
+- **`runDoctor` sandbox** — sandbox HOME in runDoctor tests to stop clobbering `~/.claude/CLAUDE.md`
+
+### Changed
+- **Skip LLM integration tests** — integration tests that hit real LLM APIs now skipped in CI
+
+---
+
+## [0.1.12] - 2026-04-01
+
+Feature release: memory override, pin_task tool, plan mode, graph UX, and path fixes.
+
+### Added
+- **Memory override in CLAUDE.md** — memory instructions can be overridden per-project via CLAUDE.md
+- **`pin_task` MCP tool** — new tool to pin important tasks for persistent visibility
+- **Plan mode + graph UX** — plan mode for task planning and improved graph visualization
+
+### Fixed
+- **`findProjectDir` path resolution** — checks `sourcePath` and handles lowercase `~/projects`
+- **VS Code graph asset path** — corrected asset path from `mcp` to `cli`
+
+---
+
 ## [0.1.11] - 2026-03-30
 
 Major TUI overhaul based on Claude Code architecture study. 43 files changed, +1711/-605 lines.

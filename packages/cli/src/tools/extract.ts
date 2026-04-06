@@ -5,6 +5,7 @@ import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import { addFindingsToFile } from "../shared/content.js";
 import { checkOllamaAvailable, checkModelAvailable, generateText, getOllamaUrl, getExtractModel } from "../shared/ollama.js";
 import { debugLog } from "../shared.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as path from "path";
 
@@ -141,7 +142,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         // Update index for the findings file
         const resolvedDir = safeProjectPath(targetPath, project);
         if (resolvedDir) {
-          updateFileInIndex(path.join(resolvedDir, "FINDINGS.md"));
+          updateFileInIndex(path.join(resolvedDir, FINDINGS_FILENAME));
         }
 
         return mcpResponse({

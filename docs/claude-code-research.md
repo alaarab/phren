@@ -89,7 +89,7 @@ When MCP servers expose 100+ tools, `ToolSearch` loads tool schemas **on demand*
 
 ### Adaptable to phren-agent
 
-Phren already follows this pattern with 53 MCP tools. The key insight: tools should be JSON-in/JSON-out with clear descriptions. The model selects tools based on descriptions alone. Keep tool count manageable or use deferred loading.
+Phren already follows this pattern with 54 MCP tools. The key insight: tools should be JSON-in/JSON-out with clear descriptions. The model selects tools based on descriptions alone. Keep tool count manageable or use deferred loading.
 
 ---
 
@@ -353,7 +353,7 @@ for await (const msg of query({
 
 ### Adaptable to phren-agent
 
-The SDK is the most direct path to building phren-agent. Key insight: phren already has 53 MCP tools. An agent built with the SDK could use phren as an MCP server, gaining all knowledge operations while the SDK provides the loop, context management, and tool execution.
+The SDK is the most direct path to building phren-agent. Key insight: phren already has 54 MCP tools. An agent built with the SDK could use phren as an MCP server, gaining all knowledge operations while the SDK provides the loop, context management, and tool execution.
 
 ---
 
@@ -505,7 +505,7 @@ Phren already has excellent hook integration. For phren-agent, hooks provide the
 
 1. **Use the Claude Agent SDK directly**: Build phren-agent as a TypeScript application using `@anthropic-ai/claude-agent-sdk`. This gives you the TAOR loop, context management, and all built-in tools for free.
 
-2. **Phren as MCP server**: The agent uses phren's 53 MCP tools for knowledge operations (search, findings, tasks, sessions) while the SDK provides file/shell/web tools.
+2. **Phren as MCP server**: The agent uses phren's 54 MCP tools for knowledge operations (search, findings, tasks, sessions) while the SDK provides file/shell/web tools.
 
 3. **Hook integration**: Register phren hooks both as file-based (for CLI users) and as SDK callbacks (for programmatic agents). This ensures phren knowledge injection works regardless of how the agent runs.
 

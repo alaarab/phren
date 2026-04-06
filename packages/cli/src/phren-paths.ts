@@ -6,6 +6,7 @@ import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
 import { PhrenError, isRecord, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
+import { FINDINGS_FILENAME } from "./data/access.js";
 
 bootstrapPhrenDotEnv();
 
@@ -342,7 +343,7 @@ export function appendIndexEvent(phrenPath: string, event: Record<string, unknow
 
 /** Resolve the canonical findings file for a project directory. */
 export function resolveFindingsPath(projectDir: string): string | undefined {
-  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) return findingsPath;
   return undefined;
 }
@@ -509,7 +510,7 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md", "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
+    for (const file of ["CLAUDE.md", "summary.md", FINDINGS_FILENAME, "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));

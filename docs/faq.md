@@ -146,7 +146,7 @@ Project setup note:
 
 ## Does phren require MCP?
 
-No. MCP is recommended. It gives agents 53 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
+No. MCP is recommended. It gives agents 54 tools across 12 modules for reading and writing memory directly. But phren also works in hooks-only mode, where context injection still happens automatically via the prompt hook. The simpler default story is still markdown + git + local FTS5; semantic and LLM-assisted paths are optional layers, not prerequisites.
 
 ```bash
 phren init --mcp off

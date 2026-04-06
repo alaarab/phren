@@ -6,6 +6,7 @@ import { withFileLock } from "../shared/governance.js";
 import { addFindingToFile } from "../shared/content.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import type { FindingProvenanceSource } from "../content/citation.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 interface FindingJournalEntry {
   at: string;
@@ -234,7 +235,7 @@ export function materializeTeamFindings(
     lines.push("");
   }
 
-  const findingsPath = path.join(storePath, project, "FINDINGS.md");
+  const findingsPath = path.join(storePath, project, FINDINGS_FILENAME);
   try {
     atomicWriteText(findingsPath, lines.join("\n"));
     return phrenOk({ entryCount: count });

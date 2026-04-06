@@ -32,6 +32,7 @@ import {
   vscodeMcpCandidates,
 } from "./provider-adapters.js";
 import { DEFAULT_PHREN_PATH, log } from "./init/shared.js";
+import { FINDINGS_FILENAME } from "./data/access.js";
 
 const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
 
@@ -217,7 +218,7 @@ async function promptUninstallConfirm(phrenPath: string): Promise<boolean> {
     const projectCount = projectDirs.length;
     let findingCount = 0;
     for (const dir of projectDirs) {
-      const findingsFile = path.join(dir, "FINDINGS.md");
+      const findingsFile = path.join(dir, FINDINGS_FILENAME);
       if (fs.existsSync(findingsFile)) {
         const content = fs.readFileSync(findingsFile, "utf8");
         findingCount += content.split("\n").filter((l) => l.startsWith("- ")).length;

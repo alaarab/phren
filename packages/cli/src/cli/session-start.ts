@@ -28,6 +28,7 @@ import {
   resolveRuntimeProfile,
 } from "./hooks-context.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
 import {
@@ -45,7 +46,7 @@ const SYNC_WARN_MARKER = "sync-broken-warned-v1";
 
 function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
   const projectDir = path.join(phrenPath, project);
-  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) {
     const findings = fs.readFileSync(findingsPath, "utf8");
     if (/^-\s+/m.test(findings)) return true;

@@ -12,6 +12,7 @@ import {
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import { TASK_FILE_ALIASES } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   parseProjectOwnershipMode,
@@ -126,7 +127,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
     const learningsResult = readFindings(storePath, name);
     if (learningsResult.ok) exported.learnings = learningsResult.data;
-    const findingsPath = path.join(projectDir, "FINDINGS.md");
+    const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
     if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
     const taskResult = readTasks(storePath, name);
     if (taskResult.ok) {
@@ -200,8 +201,8 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
         imported.push("CLAUDE.md");
       }
       if (typeof decoded.findingsRaw === "string") {
-        fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), decoded.findingsRaw);
-        imported.push("FINDINGS.md");
+        fs.writeFileSync(path.join(stagedProjectDir, FINDINGS_FILENAME), decoded.findingsRaw);
+        imported.push(FINDINGS_FILENAME);
       } else if (Array.isArray(decoded.learnings) && decoded.learnings.length > 0) {
         const date = new Date().toISOString().slice(0, 10);
         const lines = [`# ${projectName} Findings`, "", `## ${date}`, ""];
@@ -209,8 +210,8 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
           if (item.text) lines.push(`- ${item.text}`);
         }
         lines.push("");
-        fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), lines.join("\n"));
-        imported.push("FINDINGS.md");
+        fs.writeFileSync(path.join(stagedProjectDir, FINDINGS_FILENAME), lines.join("\n"));
+        imported.push(FINDINGS_FILENAME);
       }
       if (typeof decoded.taskRaw === "string") {
         fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), decoded.taskRaw);
@@ -321,7 +322,7 @@ function handleProjectsList(profile: string) {
       dirFiles = new Set();
     }
     const tags: string[] = [];
-    if (dirFiles.has("FINDINGS.md")) tags.push("findings");
+    if (dirFiles.has(FINDINGS_FILENAME)) tags.push("findings");
     if (TASK_FILE_ALIASES.some((filename) => dirFiles.has(filename))) tags.push("tasks");
     const tagStr = tags.length ? `  [${tags.join(", ")}]` : "";
     console.log(`  ${name}${tagStr}`);

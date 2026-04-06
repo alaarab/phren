@@ -102,6 +102,33 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const quotedPhren = shellEscape(phrenPath);
 
+  // Prefer the stable wrapper at ~/.local/bin/phren — it survives nvm switches
+  // and npx cache clears because it has a built-in npx fallback.
+  const localBinDir = homePath(".local", "bin");
+  const wrapperPath = path.join(localBinDir, isWindows ? "phren.cmd" : "phren");
+  const wrapperExists = fs.existsSync(wrapperPath) && (() => {
+    try { return fs.readFileSync(wrapperPath, "utf8").includes("PHREN_CLI_WRAPPER"); } catch { return false; }
+  })();
+
+  if (wrapperExists) {
+    if (isWindows) {
+      return {
+        sessionStart: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-session-start`,
+        userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-prompt`,
+        stop: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-stop`,
+        hookTool: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-tool`,
+      };
+    }
+    const quotedWrapper = shellEscape(wrapperPath);
+    return {
+      sessionStart: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-session-start`,
+      userPromptSubmit: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-prompt`,
+      stop: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-stop`,
+      hookTool: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-tool`,
+    };
+  }
+
+  // Direct node path — used when wrapper hasn't been installed yet
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const quotedEntry = shellEscape(entry);
@@ -121,6 +148,7 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
     };
   }
 
+  // Last resort — npx
   const packageSpec = phrenPackageSpec();
   if (isWindows) {
     return {
@@ -297,14 +325,19 @@ export function installPhrenCliWrapper(phrenPath: string): boolean {
     }
   }
 
+  const packageSpec = phrenPackageSpec();
   const content = isWindows
-    ? `@echo off\r\nrem PHREN_CLI_WRAPPER — managed by phren init; safe to delete\r\nif not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r\nnode "${entry}" %*\r\n`
+    ? `@echo off\r\nrem PHREN_CLI_WRAPPER — managed by phren init; safe to delete\r\nif not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r\nif exist "${entry}" (node "${entry}" %*) else (npx -y ${packageSpec} %*)\r\n`
     : `#!/bin/sh
 # PHREN_CLI_WRAPPER — managed by phren init; safe to delete
 set -u
 PHREN_PATH="\${PHREN_PATH:-${phrenPath}}"
 export PHREN_PATH
-exec node ${shellEscape(entry)} "$@"
+if [ -f ${shellEscape(entry)} ]; then
+  exec node ${shellEscape(entry)} "$@"
+else
+  exec npx -y ${packageSpec} "$@"
+fi
 `;
 
   try {

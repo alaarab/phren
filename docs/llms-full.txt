@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (53 across 12 modules):
+MCP Tools (54 across 12 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -229,7 +229,7 @@ Environment Variables:
   PHREN_LLM_ENDPOINT            - OpenAI-compatible endpoint for semantic dedup/conflict
   PHREN_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
   PHREN_LLM_MODEL               - model name for LLM endpoint
-  PHREN_EMBEDDING_PROVIDER      - "api" or unset; enables semantic search fallback
+  PHREN_EMBEDDING_MODEL          - embedding model (default: nomic-embed-text for Ollama, text-embedding-3-small for API)
   PHREN_EMBEDDING_API_URL       - OpenAI-compatible /embeddings endpoint (e.g. https://api.openai.com/v1)
   PHREN_EMBEDDING_API_KEY       - Bearer token for PHREN_EMBEDDING_API_URL
   PHREN_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup

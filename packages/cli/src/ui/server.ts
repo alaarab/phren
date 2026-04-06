@@ -22,6 +22,7 @@ import {
   removeTask as removeTaskStore,
   updateTask as updateTaskStore,
   TASKS_FILENAME,
+  FINDINGS_FILENAME,
 } from "../data/access.js";
 import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "../utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
@@ -462,7 +463,7 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(qs.project || "");
   const file = String(qs.file || "");
   if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
-  const allowedFiles = ["FINDINGS.md", TASKS_FILENAME, "CLAUDE.md", "summary.md"];
+  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "CLAUDE.md", "summary.md"];
   if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
   const basePath = resolveProjectBasePath(ctx.phrenPath, project);
   const filePath = safeProjectPath(basePath, project, file);
@@ -594,7 +595,7 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
       const projectDir = path.join(ctx.phrenPath, settingsProject);
       const configFile = path.join(projectDir, "phren.project.yaml");
       const projConfig = readProjectConfig(ctx.phrenPath, settingsProject);
-      const findingsPath = path.join(projectDir, "FINDINGS.md");
+      const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
       const taskPath = path.join(projectDir, "tasks.md");
       let findingCount = 0;
       if (fs.existsSync(findingsPath)) findingCount = (fs.readFileSync(findingsPath, "utf8").match(/^- /gm) || []).length;

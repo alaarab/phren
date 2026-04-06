@@ -27,6 +27,7 @@ import { STOP_WORDS, errorMessage } from "../utils.js";
 import { ROOT, STARTER_DIR, VERSION, resolveEntryScript, commandVersion, versionAtLeast, nearestWritableTarget } from "./shared.js";
 import { readInstallPreferences } from "./preferences.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
@@ -1064,9 +1065,9 @@ export function ensureProjectScaffold(
     );
   }
 
-  if (!fs.existsSync(path.join(projectDir, "FINDINGS.md"))) {
+  if (!fs.existsSync(path.join(projectDir, FINDINGS_FILENAME))) {
     atomicWriteText(
-      path.join(projectDir, "FINDINGS.md"),
+      path.join(projectDir, FINDINGS_FILENAME),
       `# ${projectName} FINDINGS\n\n<!-- Findings are captured automatically during sessions and committed on exit -->\n`
     );
   }
@@ -1232,9 +1233,9 @@ export function bootstrapFromExisting(
     );
   }
 
-  if (!fs.existsSync(path.join(projDir, "FINDINGS.md"))) {
+  if (!fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) {
     atomicWriteText(
-      path.join(projDir, "FINDINGS.md"),
+      path.join(projDir, FINDINGS_FILENAME),
       `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${sourceRoot} -->\n`
     );
   }

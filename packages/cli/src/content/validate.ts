@@ -8,6 +8,7 @@ import { countActiveFindings } from "./archive.js";
 import { isTaskFileName } from "../data/tasks.js";
 import { METADATA_REGEX } from "./metadata.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 /** Maximum allowed length for a single finding entry (token budget protection). */
 export const MAX_FINDING_LENGTH = 2000;
@@ -48,7 +49,7 @@ export function validateFinding(text: string): string | null {
  * Returns null if the project has no FINDINGS.md.
  */
 export function getProjectConsolidationStatus(dir: string): ConsolidationStatus | null {
-  const learningsPath = path.join(dir, "FINDINGS.md");
+  const learningsPath = path.join(dir, FINDINGS_FILENAME);
   if (!fs.existsSync(learningsPath)) return null;
 
   const content = fs.readFileSync(learningsPath, "utf8");

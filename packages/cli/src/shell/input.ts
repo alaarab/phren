@@ -30,6 +30,7 @@ import {
   workNextTask,
   loadShellState,
   resolveTaskFilePath,
+  FINDINGS_FILENAME,
 } from "../data/access.js";
 import { runtimeFile } from "../shared.js";
 import { handleGovernMemories } from "../cli/govern.js";
@@ -270,7 +271,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
       const match = parts.slice(2).join(" ").trim();
       if (!match) { host.setMessage("  Usage: :find remove <id|match>"); return; }
       host.confirmThen(`Remove finding "${match}"?`, () => {
-        const file = path.join(host.phrenPath, project!, "FINDINGS.md");
+        const file = path.join(host.phrenPath, project!, FINDINGS_FILENAME);
         host.snapshotForUndo(`find remove "${match}"`, file);
         host.setMessage(`  ${resultMsg(removeFinding(host.phrenPath, project!, match))}`);
       });
@@ -654,7 +655,7 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       else if ((key === "d" || key === "\x7f") && item?.text) {
         if (!project) { host.setMessage("Select a project first."); return; }
         host.confirmThen(`Delete finding ${style.dim(item.id ?? "")}?`, () => {
-          const file = path.join(host.phrenPath, project!, "FINDINGS.md");
+          const file = path.join(host.phrenPath, project!, FINDINGS_FILENAME);
           host.snapshotForUndo(`remove finding ${item.id ?? ''}`, file);
           const r = removeFinding(host.phrenPath, project!, item.text!);
           host.setMessage(`  ${resultMsg(r)}`);

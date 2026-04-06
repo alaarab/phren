@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./extract.js";
 import { errorMessage } from "../utils.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { logger } from "../logger.js";
 import { compactFindingJournals } from "../finding/journal.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
@@ -105,7 +106,7 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
   let reviewCount = 0;
 
   for (const project of projects) {
-    const learningsPath = path.join(getPhrenPath(), project, "FINDINGS.md");
+    const learningsPath = path.join(getPhrenPath(), project, FINDINGS_FILENAME);
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const trust = filterTrustedFindingsDetailed(content, {
@@ -199,7 +200,7 @@ export async function handlePruneMemories(args: string[] = []) {
 
   let ttlExpired = 0;
   for (const project of projects) {
-    const learningsPath = path.join(getPhrenPath(), project, "FINDINGS.md");
+    const learningsPath = path.join(getPhrenPath(), project, FINDINGS_FILENAME);
     if (!fs.existsSync(learningsPath)) continue;
     const content = fs.readFileSync(learningsPath, "utf8");
     const lines = content.split("\n");

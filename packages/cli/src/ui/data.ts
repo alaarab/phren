@@ -16,6 +16,7 @@ import { hookConfigPaths, hookConfigRoots } from "../provider-adapters.js";
 import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "../project-config.js";
 import { getAllSkills } from "../skill/registry.js";
 import { resolveTaskFilePath, readTasks, TASKS_FILENAME } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
 import { readProjectTopics, classifyTopicForText } from "../project-topics.js";
@@ -272,7 +273,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       }
     }
 
-    const findingsPath = path.join(storePath, project, "FINDINGS.md");
+    const findingsPath = path.join(storePath, project, FINDINGS_FILENAME);
     const storeName = storePathToName.get(storePath) || "unknown";
     if (!fs.existsSync(findingsPath)) {
       if (!addedProjectNodeIds.has(project)) {
@@ -343,7 +344,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         if (text.length >= 10) {
           if (taggedCount >= MAX_TAGGED) continue;
           const topic = classifyTopicForText(`[${currentHeadingTag}] ${text}`, projectTopics);
-          const scoreKey = entryScoreKey(project, "FINDINGS.md", `[${currentHeadingTag}] ${text}`);
+          const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${currentHeadingTag}] ${text}`);
           const nodeId = stableId("finding", scoreKey);
           taggedCount++;
           nodes.push({
@@ -378,7 +379,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
         // Classify the finding using the project's topic system
         const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
-        const scoreKey = entryScoreKey(project, "FINDINGS.md", `[${tag}] ${text}`);
+        const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${tag}] ${text}`);
         const nodeId = stableId("finding", scoreKey);
         taggedCount++;
         nodes.push({
@@ -411,7 +412,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       const label = text.length > 55 ? `${text.slice(0, 52)}...` : text;
       // Classify using dynamic topics
       const topic = classifyTopicForText(text, projectTopics);
-      const scoreKey = entryScoreKey(project, "FINDINGS.md", text);
+      const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, text);
       const nodeId = stableId("finding", scoreKey);
       untaggedAdded++;
       nodes.push({
@@ -644,7 +645,7 @@ export function recentAccepted(phrenPath: string): string[] {
 
 function buildProjectInfo(basePath: string, project: string, store?: string): ProjectInfo {
   const dir = path.join(basePath, project);
-  const findingsPath = path.join(dir, "FINDINGS.md");
+  const findingsPath = path.join(dir, FINDINGS_FILENAME);
   const taskPath = resolveTaskFilePath(basePath, project);
   const claudeMdPath = path.join(dir, "CLAUDE.md");
   const summaryPath = path.join(dir, "summary.md");

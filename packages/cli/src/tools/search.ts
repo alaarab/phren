@@ -7,7 +7,7 @@ import { createHash } from "crypto";
 import { execFileSync } from "child_process";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { resolveAllStores } from "../store-registry.js";
-import { readFindings } from "../data/access.js";
+import { readFindings, FINDINGS_FILENAME } from "../data/access.js";
 import {
   debugLog,
   runtimeFile,
@@ -521,7 +521,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
-      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], ["FINDINGS.md", "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
+      for (const [file, type] of [["summary.md", "summary"], ["CLAUDE.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -646,7 +646,7 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     const badges: string[] = [];
     if (projDir) {
       if (fs.existsSync(path.join(projDir, "CLAUDE.md"))) badges.push("CLAUDE.md");
-      if (fs.existsSync(path.join(projDir, "FINDINGS.md"))) badges.push("FINDINGS");
+      if (fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) badges.push("FINDINGS");
       if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
       if (fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
     }

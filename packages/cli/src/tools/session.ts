@@ -12,7 +12,7 @@ import { runCustomHooks } from "../hooks.js";
 import { readExtractedFacts } from "./extract-facts.js";
 import { resolveFindingSessionId } from "../finding/context.js";
 import { readTasks } from "../data/tasks.js";
-import { readFindings } from "../data/access.js";
+import { readFindings, FINDINGS_FILENAME } from "../data/access.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import {
@@ -425,7 +425,7 @@ function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: 
   tasksCompleted: number;
 } {
   const projectDir = path.join(phrenPath, project);
-  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (!fs.existsSync(findingsPath)) return { newFindings: 0, superseded: 0, tasksCompleted: 0 };
 
   const content = fs.readFileSync(findingsPath, "utf8");

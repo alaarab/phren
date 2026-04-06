@@ -455,6 +455,10 @@ describe("hooks", () => {
 
     it("buildLifecycleCommands uses npx fallback when local entry script is missing", () => {
       if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
+      // Override HOME so the real ~/.local/bin/phren wrapper isn't discovered
+      const tmp = makeTempDir("hooks-npx-fallback-");
+      process.env.HOME = tmp.path;
+      process.env.USERPROFILE = tmp.path;
 
       const cmds = buildLifecycleCommands('/tmp/my "phren" path\\nested');
       expect(cmds.sessionStart).toMatch(/npx -y @phren\/cli@.+ hook-session-start/);
@@ -465,10 +469,15 @@ describe("hooks", () => {
       } else {
         expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path\\nested'`);
       }
+      tmp.cleanup();
     });
 
     it("buildLifecycleCommands uses local node entry script when available", () => {
       fs.writeFileSync(localEntryScript, "// test entry for hooks unit tests\n");
+      // Override HOME so the real ~/.local/bin/phren wrapper isn't discovered
+      const tmp = makeTempDir("hooks-node-entry-");
+      process.env.HOME = tmp.path;
+      process.env.USERPROFILE = tmp.path;
 
       const cmds = buildLifecycleCommands("/tmpphren");
       expect(cmds.sessionStart).toContain(" node ");
@@ -476,6 +485,7 @@ describe("hooks", () => {
       expect(cmds.stop).toContain(" node ");
       expect(cmds.sessionStart).toContain("index.js");
       expect(cmds.sessionStart).not.toContain("npx phren");
+      tmp.cleanup();
     });
 
     it("configureAllHooks() ignores stale cursor config without a real cursor binary", () => {

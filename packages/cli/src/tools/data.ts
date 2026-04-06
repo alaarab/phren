@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
-import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME } from "../data/access.js";
+import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME, FINDINGS_FILENAME } from "../data/access.js";
 import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "../shared.js";
 import { logger } from "../logger.js";
 
@@ -70,7 +70,7 @@ export function register(server: McpServer, ctx: McpContext): void {
 
       const learningsResult = readFindings(resolvedPhrenPath, project);
       if (learningsResult.ok) exported.learnings = learningsResult.data;
-      const findingsPath = safeProjectPath(projectDir, "FINDINGS.md");
+      const findingsPath = safeProjectPath(projectDir, FINDINGS_FILENAME);
       if (findingsPath && fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
 
       const taskResult = readTasks(resolvedPhrenPath, project);
@@ -209,8 +209,8 @@ export function register(server: McpServer, ctx: McpContext): void {
 
           const findingsContent = typeof parsed.findingsRaw === "string" ? parsed.findingsRaw : buildFindingsContent();
           if (findingsContent) {
-            fs.writeFileSync(path.join(stagedProjectDir, "FINDINGS.md"), findingsContent);
-            imported.push("FINDINGS.md");
+            fs.writeFileSync(path.join(stagedProjectDir, FINDINGS_FILENAME), findingsContent);
+            imported.push(FINDINGS_FILENAME);
           }
 
           const taskContent = buildTaskContent();

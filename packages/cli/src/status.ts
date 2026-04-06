@@ -17,7 +17,7 @@ import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
-import { readRuntimeHealth, resolveTaskFilePath } from "./data/access.js";
+import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
@@ -316,7 +316,7 @@ export async function runStatus() {
 
   for (const dir of projectDirs) {
     const projName = path.basename(dir);
-    totalFindings += countBullets(path.join(phrenPath, projName, "FINDINGS.md"));
+    totalFindings += countBullets(path.join(phrenPath, projName, FINDINGS_FILENAME));
     const taskPath = resolveTaskFilePath(phrenPath, projName);
     if (taskPath) totalTask += countBullets(taskPath);
     totalQueue += countQueueItems(phrenPath, projName);

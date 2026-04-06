@@ -341,12 +341,12 @@ export interface ResolvedConfig {
   workflowPolicy: WorkflowPolicy;
 }
 
-const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
+export const VALID_PROACTIVITY_LEVELS = ["high", "medium", "low"] as const;
 export const VALID_TASK_MODES = ["off", "manual", "suggest", "auto"] as const;
 export type TaskMode = typeof VALID_TASK_MODES[number];
 export const VALID_FINDING_SENSITIVITY = ["minimal", "conservative", "balanced", "aggressive"] as const;
 export type FindingSensitivityLevel = typeof VALID_FINDING_SENSITIVITY[number];
-const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
+export const VALID_RISKY_SECTIONS = ["Review", "Stale", "Conflicts"] as const;
 
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;

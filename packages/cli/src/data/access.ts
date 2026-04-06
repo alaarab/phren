@@ -88,6 +88,8 @@ export {
 } from "../shell/state-store.js";
 export { getRuntimeHealth as readRuntimeHealth } from "../shared/governance.js";
 
+export const FINDINGS_FILENAME = "FINDINGS.md";
+
 export interface FindingItem {
   id: string;
   /** Stable 8-char hex ID embedded as `<!-- fid:XXXXXXXX -->`. Survives reordering and consolidation. */
@@ -257,7 +259,7 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const findingsPath = path.join(ensured.data, 'FINDINGS.md');
+  const findingsPath = path.join(ensured.data, FINDINGS_FILENAME);
   const file = findingsPath;
   if (!fs.existsSync(file)) return phrenOk([]);
 
@@ -445,12 +447,12 @@ export function removeFinding(phrenPath: string, project: string, match: string)
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const findingsPath = path.resolve(path.join(ensured.data, 'FINDINGS.md'));
+  const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
   if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
-    return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+    return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
   const filePath = findingsPath;
-  if (!fs.existsSync(filePath)) return phrenErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
+  if (!fs.existsSync(filePath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(filePath, () => {
     const lines = fs.readFileSync(filePath, "utf8").split("\n");
@@ -484,11 +486,11 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const findingsPath = path.resolve(path.join(ensured.data, 'FINDINGS.md'));
+  const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
   if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
-    return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+    return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
-  if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
+  if (!fs.existsSync(findingsPath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
@@ -544,11 +546,11 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
   const newTextTrimmed = newText.trim();
   if (!newTextTrimmed) return phrenErr("New finding text cannot be empty.", PhrenError.EMPTY_INPUT);
 
-  const findingsPath = path.resolve(path.join(ensured.data, "FINDINGS.md"));
+  const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
   if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
-    return phrenErr(`FINDINGS.md path escapes phren store`, PhrenError.VALIDATION_ERROR);
+    return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
-  if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md file found for "${project}".`, PhrenError.FILE_NOT_FOUND);
+  if (!fs.existsSync(findingsPath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(findingsPath, () => {
     const lines = fs.readFileSync(findingsPath, "utf8").split("\n");

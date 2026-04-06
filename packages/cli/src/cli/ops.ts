@@ -8,7 +8,7 @@ import {
   normalizeProjectNameForCreate,
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import { readTasksAcrossProjects, TASKS_FILENAME } from "../data/access.js";
+import { readTasksAcrossProjects, TASKS_FILENAME, FINDINGS_FILENAME } from "../data/access.js";
 import { applyGravity } from "../data/tasks.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { resolveSubprocessArgs } from "./hooks.js";
@@ -149,7 +149,7 @@ export async function handleQuickstart() {
   const projectDir = path.join(phrenPath, normalizedProjectName);
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), `# ${normalizedProjectName} Findings\n`);
+    fs.writeFileSync(path.join(projectDir, FINDINGS_FILENAME), `# ${normalizedProjectName} Findings\n`);
     fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
 

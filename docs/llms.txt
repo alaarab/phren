@@ -4,7 +4,7 @@ Install: npm install -g @phren/cli && phren init
 
 Key features:
 - Automatic context injection into every prompt via lifecycle hooks
-- 53 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
+- 54 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
 - Finding lifecycle tooling (`supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`) with provenance and impact scoring
 - Session continuity via cross-session task checkpoints + `session_history`
 - Skill system with source precedence, alias-collision handling, visibility gating, and generated `skill-manifest.json`

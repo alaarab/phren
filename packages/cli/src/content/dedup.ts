@@ -6,6 +6,7 @@ import { isFeatureEnabled, safeProjectPath, errorMessage } from "../utils.js";
 import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "../phren-core.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { logger } from "../logger.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 // ── LLM provider abstraction ────────────────────────────────────────────────
 
@@ -258,7 +259,7 @@ interface ProjectEntityCache {
  */
 export function extractDynamicEntities(phrenPath: string, project: string): Set<string> {
   try {
-    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
+    const findingsPath = path.join(phrenPath, project, FINDINGS_FILENAME);
     if (!fs.existsSync(findingsPath)) return new Set();
 
     const findingsStat = fs.statSync(findingsPath);
@@ -539,7 +540,7 @@ export async function checkSemanticDedup(
 
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir) return false;
-  const findingsPath = path.join(resolvedDir, "FINDINGS.md");
+  const findingsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (!fs.existsSync(findingsPath)) return false;
 
   const existingContent = fs.readFileSync(findingsPath, "utf8");
@@ -603,14 +604,14 @@ export async function checkSemanticConflicts(
   const sources: Array<{ bullets: string[]; sourceProject: string | null }> = [];
 
   // Current project
-  const findingsPath = path.join(resolvedDir, "FINDINGS.md");
+  const findingsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) {
     const content = fs.readFileSync(findingsPath, "utf8");
     sources.push({ bullets: content.split("\n").filter((l) => l.startsWith("- ")), sourceProject: null });
   }
 
   // Global project findings
-  const globalFindingsPath = path.join(phrenPath, "global", "FINDINGS.md");
+  const globalFindingsPath = path.join(phrenPath, "global", FINDINGS_FILENAME);
   if (fs.existsSync(globalFindingsPath)) {
     const content = fs.readFileSync(globalFindingsPath, "utf8");
     const bullets = content.split("\n").filter((l) => l.startsWith("- "));
@@ -624,7 +625,7 @@ export async function checkSemanticConflicts(
     const otherProjects = entries
       .filter((e) => e.isDirectory() && e.name !== project && e.name !== "global" && !e.name.startsWith("."))
       .map((e) => {
-        const fp = path.join(phrenPath, e.name, "FINDINGS.md");
+        const fp = path.join(phrenPath, e.name, FINDINGS_FILENAME);
         if (!fs.existsSync(fp)) return null;
         try {
           return { name: e.name, mtime: fs.statSync(fp).mtimeMs, fp };

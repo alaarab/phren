@@ -27,6 +27,7 @@ import {
   atomicWriteText,
 } from "../shared.js";
 import { errorMessage } from "../utils.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { log } from "../init/shared.js";
 import {
   listMachines as listMachinesShared,
@@ -360,7 +361,7 @@ function linkProject(phrenPath: string, project: string, tools: Set<string>) {
 
   const excludeEntries: string[] = [];
 
-  for (const f of ["CLAUDE.md", "REFERENCE.md", "FINDINGS.md"]) {
+  for (const f of ["CLAUDE.md", "REFERENCE.md", FINDINGS_FILENAME]) {
     const src = path.join(phrenPath, project, f);
     if (fs.existsSync(src)) {
       if (symlinkFile(src, path.join(target, f), phrenPath)) excludeEntries.push(f);

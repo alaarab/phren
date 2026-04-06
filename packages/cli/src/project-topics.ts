@@ -5,6 +5,7 @@ import { debugLog } from "./shared.js";
 import { withFileLock } from "./shared/governance.js";
 import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName, safeProjectPath } from "./utils.js";
 import { walkDirectory } from "./shared/data-utils.js";
+import { FINDINGS_FILENAME } from "./data/access.js";
 
 export interface ProjectTopic {
   slug: string;
@@ -512,7 +513,7 @@ function countByTerm(terms: string[]): Map<string, number> {
 
 function readTopicInputContent(phrenPath: string, project: string): string[] {
   const parts: string[] = [];
-  for (const file of ["CLAUDE.md", "FINDINGS.md"]) {
+  for (const file of ["CLAUDE.md", FINDINGS_FILENAME]) {
     const filePath = safeProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8").trim();
@@ -993,11 +994,11 @@ function tokenizeSuggestionTerms(text: string): string[] {
 
 function collectSuggestionCorpus(phrenPath: string, project: string): string {
   const parts: string[] = [];
-  for (const file of ["CLAUDE.md", "summary.md", "FINDINGS.md"]) {
+  for (const file of ["CLAUDE.md", "summary.md", FINDINGS_FILENAME]) {
     const filePath = safeProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8");
-    if (file === "FINDINGS.md") {
+    if (file === FINDINGS_FILENAME) {
       const recentBullets = content.split("\n").filter((line) => line.startsWith("- ")).slice(-10).join("\n");
       parts.push(recentBullets);
       continue;

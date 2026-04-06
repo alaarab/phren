@@ -8,6 +8,7 @@ import { walkDirectory } from "../shared/data-utils.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { isCitationLine, isArchiveStart, isArchiveEnd, stripComments } from "./metadata.js";
 import { logger } from "../logger.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 /**
  * Count active (non-archived) finding entries in FINDINGS.md content.
@@ -112,7 +113,7 @@ export function autoArchiveToReference(
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
-  const learningsPath = path.join(resolvedDir, "FINDINGS.md");
+  const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (!fs.existsSync(learningsPath)) return phrenOk(0);
 
   // Consolidation lock to prevent concurrent runs for the same project (atomic create via wx flag).

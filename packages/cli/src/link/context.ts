@@ -4,6 +4,7 @@ import * as yaml from "js-yaml";
 import { isValidProjectName } from "../utils.js";
 import { homeDir, homePath } from "../shared.js";
 import { resolveTaskFilePath } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { log } from "../init/shared.js";
 
 function contextFilePath(): string {
@@ -92,7 +93,7 @@ export function writeContextDebugging(machine: string, profile: string, mcpStatu
   const MAX_FILE_BYTES = 50 * 1024;
   for (const project of projects) {
     if (project === "global") continue;
-    const findings = path.join(phrenPath, project, "FINDINGS.md");
+    const findings = path.join(phrenPath, project, FINDINGS_FILENAME);
     if (fs.existsSync(findings)) {
       let body = fs.readFileSync(findings, "utf8");
       if (body.length > MAX_FILE_BYTES) {

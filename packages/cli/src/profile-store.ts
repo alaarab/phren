@@ -14,9 +14,16 @@ import {
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
 import { TASK_FILE_ALIASES } from "./data/tasks.js";
+import { FINDINGS_FILENAME } from "./data/access.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
+import {
+  VALID_FINDING_SENSITIVITY,
+  VALID_PROACTIVITY_LEVELS,
+  VALID_TASK_MODES,
+  VALID_RISKY_SECTIONS,
+} from "./governance/policy.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "./store-registry.js";
 
 export interface ProfilePolicyDefaults {
@@ -34,6 +41,7 @@ export interface ProfilePolicyDefaults {
 
 export interface ProfileInfo {
   name: string;
+  description?: string;
   file: string;
   projects: string[];
   defaults?: ProfilePolicyDefaults;
@@ -141,10 +149,6 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   });
 }
 
-const VALID_FINDING_SENSITIVITY_VALS = ["minimal", "conservative", "balanced", "aggressive"] as const;
-const VALID_PROACTIVITY_VALS = ["high", "medium", "low"] as const;
-const VALID_TASK_MODE_VALS = ["off", "manual", "suggest", "auto"] as const;
-const VALID_RISKY_SECTION_VALS = ["Review", "Stale", "Conflicts"] as const;
 
 function pickEnumVal<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
@@ -171,15 +175,15 @@ function parseProfilePolicyDefaults(raw: unknown): ProfilePolicyDefaults | undef
 
   const result: ProfilePolicyDefaults = {};
 
-  const fs_ = pickEnumVal(data.findingSensitivity, VALID_FINDING_SENSITIVITY_VALS);
+  const fs_ = pickEnumVal(data.findingSensitivity, VALID_FINDING_SENSITIVITY);
   if (fs_) result.findingSensitivity = fs_;
-  const pr = pickEnumVal(data.proactivity, VALID_PROACTIVITY_VALS);
+  const pr = pickEnumVal(data.proactivity, VALID_PROACTIVITY_LEVELS);
   if (pr) result.proactivity = pr;
-  const prf = pickEnumVal(data.proactivityFindings, VALID_PROACTIVITY_VALS);
+  const prf = pickEnumVal(data.proactivityFindings, VALID_PROACTIVITY_LEVELS);
   if (prf) result.proactivityFindings = prf;
-  const prt = pickEnumVal(data.proactivityTask, VALID_PROACTIVITY_VALS);
+  const prt = pickEnumVal(data.proactivityTask, VALID_PROACTIVITY_LEVELS);
   if (prt) result.proactivityTask = prt;
-  const tm = pickEnumVal(data.taskMode, VALID_TASK_MODE_VALS);
+  const tm = pickEnumVal(data.taskMode, VALID_TASK_MODES);
   if (tm) result.taskMode = tm;
 
   if (retentionRaw) {
@@ -210,7 +214,7 @@ function parseProfilePolicyDefaults(raw: unknown): ProfilePolicyDefaults | undef
     if (Array.isArray(workflowRaw.riskySections)) {
       const rs = (workflowRaw.riskySections as unknown[])
         .filter((s): s is "Review" | "Stale" | "Conflicts" =>
-          typeof s === "string" && VALID_RISKY_SECTION_VALS.includes(s as "Review" | "Stale" | "Conflicts")
+          typeof s === "string" && VALID_RISKY_SECTIONS.includes(s as "Review" | "Stale" | "Conflicts")
         );
       if (rs.length > 0) wf.riskySections = rs;
     }
@@ -248,8 +252,9 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
       const projects = Array.isArray(data?.projects)
         ? (data.projects as unknown[]).map((project) => String(project)).filter(Boolean)
         : [];
+      const description = typeof data?.description === "string" ? data.description : undefined;
       const defaults = parseProfilePolicyDefaults(data?.defaults);
-      profiles.push({ name, file: full, projects, ...(defaults ? { defaults } : {}) });
+      profiles.push({ name, ...(description ? { description } : {}), file: full, projects, ...(defaults ? { defaults } : {}) });
     } catch (err: unknown) {
       logger.debug("profile-store", `listProfiles yamlParse: ${errorMessage(err)}`);
       return phrenErr(`profiles/${file}`, PhrenError.MALFORMED_YAML);
@@ -259,11 +264,11 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
   return phrenOk(profiles);
 }
 
-function writeProfile(file: string, name: string, projects: string[]): void {
+function writeProfile(file: string, name: string, projects: string[], description?: string): void {
   const backup = `${file}.bak`;
   if (fs.existsSync(file)) fs.copyFileSync(file, backup);
   const normalized = [...new Set(projects)].sort();
-  const out = yaml.dump({ name, projects: normalized }, { lineWidth: 1000 });
+  const out = yaml.dump({ name, ...(description ? { description } : {}), projects: normalized }, { lineWidth: 1000 });
   const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
   fs.writeFileSync(tmpPath, out);
   fs.renameSync(tmpPath, file);
@@ -283,7 +288,7 @@ export function addProjectToProfile(phrenPath: string, profile: string, project:
     if (!latest) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
     const projects = latest.projects.includes(project) ? latest.projects : [...latest.projects, project];
-    writeProfile(latest.file, latest.name, projects);
+    writeProfile(latest.file, latest.name, projects, latest.description);
     return phrenOk(`Added ${project} to profile ${profile}.`);
   });
 }
@@ -301,7 +306,7 @@ export function removeProjectFromProfile(phrenPath: string, profile: string, pro
     if (!latest) return phrenErr(`Profile "${profile}" not found.`, PhrenError.NOT_FOUND);
 
     const projects = latest.projects.filter((entry) => entry !== project);
-    writeProfile(latest.file, latest.name, projects);
+    writeProfile(latest.file, latest.name, projects, latest.description);
     return phrenOk(`Removed ${project} from profile ${profile}.`);
   });
 }
@@ -319,7 +324,7 @@ function buildProjectCard(dir: string): ProjectCard {
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("#")) || "";
-  const docs = ["CLAUDE.md", "FINDINGS.md", "summary.md", "review.md"]
+  const docs = ["CLAUDE.md", FINDINGS_FILENAME, "summary.md", "review.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
   const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
   if (taskFile) docs.push(taskFile);

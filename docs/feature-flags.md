@@ -62,30 +62,26 @@ When enabled, the `hook-prompt` lifecycle hook uses a 3-layer progressive disclo
 export PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1
 ```
 
-## PHREN_EMBEDDING_PROVIDER
+## PHREN_EMBEDDING_API_URL
 
 **Default:** unset (disabled)
 
-Controls the embedding provider for semantic search fallback. When FTS5 returns fewer than 3 results and this variable is set, phren computes embeddings for the query and corpus documents to find semantically similar matches.
+Controls the embedding endpoint for semantic search fallback. When `PHREN_EMBEDDING_API_URL` is set and FTS5 returns fewer than 3 results, phren computes embeddings for the query and corpus documents to find semantically similar matches. Takes priority over Ollama when set.
 
 **When to leave this disabled:** if you mostly search by exact identifiers, filenames, commands, project names, or other lexical code-work terms. The lexical path is usually the main path in that workflow, and it is also the faster path in the current measured code-memory benchmarks.
 
 **When it is worth enabling:** if your retrieval misses are mostly paraphrase-heavy, fuzzy, or concept-level queries that share weak lexical overlap with the stored memories.
 
-**Values:**
-- **unset** (default): No embedding fallback. Only FTS5 and TF-IDF cosine are used.
-- **`api`**: Use OpenAI-compatible embeddings API. Requires `OPENAI_API_KEY` to be set.
-- **`local`**: Reserved for future local ONNX embedding support. Currently throws an error.
-
 **Related variables:**
-- `OPENAI_API_KEY`: Required when `PHREN_EMBEDDING_PROVIDER=api`. Your OpenAI API key.
-- `PHREN_EMBEDDING_MODEL`: The embedding model to use (default: `text-embedding-3-small`). Supports any model available via the OpenAI embeddings endpoint.
+- `PHREN_EMBEDDING_API_URL`: OpenAI-compatible `/embeddings` endpoint (e.g. `https://api.openai.com/v1`). Used for both hook retrieval and MCP search.
+- `PHREN_EMBEDDING_API_KEY`: Bearer token for the embedding endpoint. Required when using a cloud embedding provider.
+- `PHREN_EMBEDDING_MODEL`: The embedding model to use (default: `nomic-embed-text`). When using a cloud API like OpenAI, set `PHREN_EMBEDDING_MODEL=text-embedding-3-small` explicitly. Supports any model available via the configured endpoint.
 
 Embedding results are cached in `.runtime/embed-cache.db` keyed by SHA-256 hash of the input text. This avoids redundant API calls for repeated queries.
 
 ```bash
-export PHREN_EMBEDDING_PROVIDER=api
-export OPENAI_API_KEY=sk-...
+export PHREN_EMBEDDING_API_URL=https://api.openai.com/v1
+export PHREN_EMBEDDING_API_KEY=sk-...
 export PHREN_EMBEDDING_MODEL=text-embedding-3-small  # optional
 ```
 

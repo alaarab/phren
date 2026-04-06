@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 53 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 54 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
@@ -86,22 +86,22 @@ Get tasks for a project (or all projects). Supports progressive disclosure: use 
 
 ### `add_task`
 
-Append a task to a project's task. Adds to the Queue section.
+Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Supports batch adds by passing an array.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name (must match a directory in your phren). |
-| `item` | string | yes | The task to add. |
+| `item` | string or string[] | yes | The task(s) to add. Pass a single string for one task, or an array of strings for batch add. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
 ### `complete_task`
 
-Move a task item to the Done section by matching text.
+Move one or more tasks to the Done section by matching text. Supports batch completion by passing an array.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `item` | string | yes | Exact or partial text of the item to complete. |
+| `item` | string or string[] | yes | The task(s) to complete. Pass a single string for one task, or an array of partial/exact text strings for batch completion. |
 | `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
 
 When a task is completed, phren clears any checkpoint file associated with that task.
@@ -152,6 +152,16 @@ Archive older Done items beyond a keep threshold to keep task lists short.
 | `keep` | number | no | Number of recent Done items to keep (default 30). |
 | `dry_run` | boolean | no | Preview what would change without writing. |
 
+### `pin_task`
+
+Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, so they stay visible across every prompt.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Partial text or task ID (A1, Q3) to match. |
+| `unpin` | boolean | no | If true, unpin instead of pin. |
+
 ---
 
 ## Finding Capture
@@ -163,7 +173,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `finding` | string | yes | The insight, as a single bullet point. Be specific enough to act on without extra context. |
+| `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `source` | enum | no | Optional finding provenance source: `human`, `agent`, `hook`, `extract`, `consolidation`, `unknown`. |
@@ -561,6 +571,12 @@ Run doctor self-heal checks and apply fixes (missing files, broken symlinks, sta
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `check_data` | boolean | no | Also validate data files (findings, tasks) for structural issues. |
+
+### `store_list`
+
+List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry.
+
+*No parameters — accepts an empty input.*
 
 ---
 

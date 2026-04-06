@@ -19,6 +19,7 @@ import {
   stripRelationMetadata,
   normalizeFindingText,
 } from "../content/metadata.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 
 export const FINDING_TYPE_DECAY: Record<string, { maxAgeDays: number; decayMultiplier: number }> = {
   'pattern':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay, long-lived
@@ -267,7 +268,7 @@ function findingsPathForProject(phrenPath: string, project: string): PhrenResult
   const projectDir = safeProjectPath(phrenPath, project);
   if (!projectDir) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
   if (!fs.existsSync(projectDir)) return phrenErr(`Project "${project}" not found.`, PhrenError.PROJECT_NOT_FOUND);
-  const findingsPath = path.join(projectDir, "FINDINGS.md");
+  const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (!fs.existsSync(findingsPath)) return phrenErr(`No FINDINGS.md found for "${project}".`, PhrenError.FILE_NOT_FOUND);
   return phrenOk(findingsPath);
 }

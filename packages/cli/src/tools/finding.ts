@@ -27,7 +27,7 @@ import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
 import { extractFragmentNames } from "../shared/fragment-graph.js";
 import { extractFactFromFinding } from "./extract-facts.js";
-import { appendChildFinding, editFinding as editFindingCore, readFindings } from "../data/access.js";
+import { appendChildFinding, editFinding as editFindingCore, readFindings, FINDINGS_FILENAME } from "../data/access.js";
 import { getActiveTaskForSession } from "../task/lifecycle.js";
 import { FINDING_PROVENANCE_SOURCES } from "../content/citation.js";
 import {
@@ -50,7 +50,7 @@ interface PotentialDuplicate {
 
 function findJaccardCandidates(phrenPath: string, project: string, finding: string): PotentialDuplicate[] {
   try {
-    const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
+    const findingsPath = path.join(phrenPath, project, FINDINGS_FILENAME);
     if (!fs.existsSync(findingsPath)) return [];
     const content = fs.readFileSync(findingsPath, "utf8");
     const newClean = stripMetadata(finding).trim();
@@ -113,7 +113,7 @@ function withLifecycleMutation<T>(
     const result = handler();
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
     const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-    if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+    if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     const mapped = mapResponse(result.data);
     return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
   });
@@ -201,7 +201,7 @@ async function handleAddFinding(
       if (added.length > 0) {
         runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
         incrementSessionFindings(phrenPath, added.length, sessionId, project);
-        updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
+        updateFileInIndex(path.join(phrenPath, project, FINDINGS_FILENAME));
       }
       const rejectedMsg = rejected.length > 0 ? `, ${rejected.length} rejected` : "";
       return mcpResponse({
@@ -241,7 +241,7 @@ async function handleAddFinding(
         return mcpResponse({ ok: true, message: result.data.message, data: { project, finding: taggedFinding, status: "skipped" } });
       }
 
-      updateFileInIndex(path.join(phrenPath, project, "FINDINGS.md"));
+      updateFileInIndex(path.join(phrenPath, project, FINDINGS_FILENAME));
       if (result.data.status === "added" || result.data.status === "created") {
         runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
         incrementSessionFindings(phrenPath, 1, sessionId, project);
@@ -253,7 +253,7 @@ async function handleAddFinding(
             const taskMatch = activeTask.stableId ? `bid:${activeTask.stableId}` : activeTask.line;
             // Extract fid from the last written line in FINDINGS.md
             try {
-              const findingsPath = path.join(phrenPath, project, "FINDINGS.md");
+              const findingsPath = path.join(phrenPath, project, FINDINGS_FILENAME);
               const findingsContent = fs.readFileSync(findingsPath, "utf8");
               const lines = findingsContent.split("\n");
               const taggedText = taggedFinding.replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
@@ -483,7 +483,7 @@ async function handleEditFinding(
     const result = editFindingCore(phrenPath, project, old_text, new_text);
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
     const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-    if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+    if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({
       ok: true,
       message: result.data,
@@ -515,7 +515,7 @@ async function handleRemoveFinding(
       const result = removeFindingsCore(phrenPath, project, finding);
       if (!result.ok) return mcpResponse({ ok: false, error: result.message });
       const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-      if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+      if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
       return mcpResponse({ ok: true, message: result.message, data: result.data });
     });
   }
@@ -524,7 +524,7 @@ async function handleRemoveFinding(
     const result = removeFindingCore(phrenPath, project, finding);
     if (!result.ok) return mcpResponse({ ok: false, error: result.message });
     const resolvedFindingsDir = safeProjectPath(phrenPath, project);
-    if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, "FINDINGS.md"));
+    if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({ ok: true, message: result.message, data: result.data });
   });
 }

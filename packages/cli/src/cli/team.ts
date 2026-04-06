@@ -6,6 +6,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
+import { TASKS_FILENAME } from "../data/tasks.js";
 import { isValidProjectName } from "../utils.js";
 import { addProjectToProfile, resolveActiveProfile } from "../profile-store.js";
 import {
@@ -107,7 +109,7 @@ async function handleTeamInit(args: string[]): Promise<void> {
     `# ${name} Team Store\n\nShared knowledge for the ${name} team.\n`,
   );
   atomicWriteText(
-    path.join(globalDir, "FINDINGS.md"),
+    path.join(globalDir, FINDINGS_FILENAME),
     `# global findings\n`,
   );
 
@@ -279,11 +281,11 @@ async function handleTeamAddProject(args: string[]): Promise<void> {
   fs.mkdirSync(journalDir, { recursive: true });
 
   // Scaffold project files
-  if (!fs.existsSync(path.join(projectDir, "FINDINGS.md"))) {
-    atomicWriteText(path.join(projectDir, "FINDINGS.md"), `# ${projectName} findings\n`);
+  if (!fs.existsSync(path.join(projectDir, FINDINGS_FILENAME))) {
+    atomicWriteText(path.join(projectDir, FINDINGS_FILENAME), `# ${projectName} findings\n`);
   }
-  if (!fs.existsSync(path.join(projectDir, "tasks.md"))) {
-    atomicWriteText(path.join(projectDir, "tasks.md"), `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+  if (!fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
+    atomicWriteText(path.join(projectDir, TASKS_FILENAME), `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
   if (!fs.existsSync(path.join(projectDir, "summary.md"))) {
     atomicWriteText(path.join(projectDir, "summary.md"), `# ${projectName}\n**What:** \n`);
