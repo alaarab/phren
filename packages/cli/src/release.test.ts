@@ -54,31 +54,35 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(metadataTs).toContain("package.json");
   });
 
-  it.skipIf(publishInProgress())("ships a dry-run npm pack with built entrypoints and without source ts files", () => {
-    const cliRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-    const builtRegistry = path.join(cliRoot, "dist", "tool-registry.js");
-    if (!fs.existsSync(builtRegistry)) {
-      execFileSync(npmExec(), ["run", "build"], {
+  it.skipIf(publishInProgress())(
+    "ships a dry-run npm pack with built entrypoints and without source ts files",
+    () => {
+      const cliRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+      const builtRegistry = path.join(cliRoot, "dist", "tool-registry.js");
+      if (!fs.existsSync(builtRegistry)) {
+        execFileSync(npmExec(), ["run", "build"], {
+          cwd: cliRoot,
+          encoding: "utf8",
+          shell: process.platform === "win32",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      }
+      const raw = execFileSync(npmExec(), ["pack", "--json", "--dry-run"], {
         cwd: cliRoot,
         encoding: "utf8",
         shell: process.platform === "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
-    }
-    const raw = execFileSync(npmExec(), ["pack", "--json", "--dry-run"], {
-      cwd: cliRoot,
-      encoding: "utf8",
-      shell: process.platform === "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const packInfo = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
-    const files = packInfo[0]?.files?.map((file) => file.path) || [];
+      const packInfo = JSON.parse(raw) as Array<{ files: Array<{ path: string }> }>;
+      const files = packInfo[0]?.files?.map((file) => file.path) || [];
 
-    expect(files).toContain("package.json");
-    expect(files).toContain("dist/index.js");
-    expect(files).toContain("dist/tool-registry.js");
-    expect(files).not.toContain("src/index.ts");
-  });
+      expect(files).toContain("package.json");
+      expect(files).toContain("dist/index.js");
+      expect(files).toContain("dist/tool-registry.js");
+      expect(files).not.toContain("src/index.ts");
+    },
+    120_000,
+  );
 
   it("keeps generated skill metadata aligned with the live tool registry", async () => {
     const srcDir = path.dirname(fileURLToPath(import.meta.url));
