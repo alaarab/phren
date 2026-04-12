@@ -853,43 +853,43 @@
     <div class="container">
       <div class="bento-header reveal" style="text-align:center;">
         <div class="section-label">Share with your team</div>
-        <h2 class="section-title">Team knowledge, one git repo away.</h2>
-        <p class="section-sub" style="max-width:640px;margin:16px auto 0;">Point phren at a shared git repo and your team's <span class="kw-finding">findings</span> flow in and out on every response. Add as many as you want &mdash; one for your squad, one for the whole company, one for a client. Personal knowledge stays in <code style="font-size:14px;color:var(--copper-mid)">~/.phren</code>. Nothing leaves unless you promote it.</p>
+        <h2 class="section-title">Team knowledge bases, built on git.</h2>
+        <p class="section-sub" style="max-width:640px;margin:16px auto 0;">A team store is a git repo with phren-structured <span class="kw-memory">knowledge</span> inside. Create one, share it with your teammates, and everyone's <span class="kw-finding">findings</span> flow through the same repo. Plug in as many as you want &mdash; one per team, one per company, one per client.</p>
       </div>
 
       <div class="steps-grid" style="margin-top:40px;">
         <div class="step reveal reveal-delay-1">
           <div class="step-num">01</div>
           <div class="step-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
           </div>
-          <div class="step-title">Personal stays personal</div>
-          <p class="step-desc">Your primary store is yours. Half-baked ideas, private notes, and client-specific context never leak into shared repos unless you explicitly promote them.</p>
+          <div class="step-title">Create a team knowledge base</div>
+          <p class="step-desc">Spin up a shared git repo and point phren at it. Findings, tasks, and <span class="kw-fragment">fragments</span> land there in the same format phren already uses locally.</p>
         </div>
         <div class="step reveal reveal-delay-2">
           <div class="step-num">02</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
-          <div class="step-title">Add as many team stores as you want</div>
-          <p class="step-desc">Each store is a git repo with phren-structured <span class="kw-memory">knowledge</span>. Mix and match &mdash; one team store for your squad, another for cross-team reference, a read-only one for company-wide docs.</p>
+          <div class="step-title">Share it with teammates</div>
+          <p class="step-desc">Anyone with repo access runs one command to join. Their phren pulls the store on open and pushes new findings after each response &mdash; the git repo is the sync layer.</p>
         </div>
         <div class="step reveal reveal-delay-3">
           <div class="step-num">03</div>
           <div class="step-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
           </div>
-          <div class="step-title">Search spans every store</div>
-          <p class="step-desc">Hooks pull from remotes on open, commit and push after each response, and the search path spans every store at once. What your teammate figured out this morning is waiting for you when you start.</p>
+          <div class="step-title">Plug in as many as you want</div>
+          <p class="step-desc">Stack multiple team stores side by side &mdash; different repos for different circles. Search spans them all at once, so what a teammate figured out this morning is already there when you start.</p>
         </div>
       </div>
 
       <div class="reveal" style="max-width:720px;margin:44px auto 0;">
         <div class="code-block" style="background:var(--bg-1);border:1px solid rgba(255,255,255,0.09);border-radius:14px;padding:22px 24px;font-family:var(--font-mono,monospace);font-size:13px;line-height:1.9;">
-          <div style="color:var(--text-muted)"># clone a team store from a shared git repo</div>
-          <div><span style="color:var(--indigo)">phren store add</span> arc-team <span style="color:var(--copper-mid)">git@github.com:qualus/phren-arc.git</span></div>
-          <div><span style="color:var(--indigo)">phren store add</span> company <span style="color:var(--copper-mid)">git@github.com:qualus/phren-company.git</span> --role readonly</div>
-          <div style="margin-top:10px;color:var(--text-muted)"># list everything phren reads from</div>
+          <div style="color:var(--text-muted)"># plug in a shared team knowledge base</div>
+          <div><span style="color:var(--indigo)">phren store add</span> team <span style="color:var(--copper-mid)">git@github.com:your-org/team-knowledge.git</span></div>
+          <div><span style="color:var(--indigo)">phren store add</span> reference <span style="color:var(--copper-mid)">git@github.com:your-org/reference.git</span> --role readonly</div>
+          <div style="margin-top:10px;color:var(--text-muted)"># list everything phren is hooked up to</div>
           <div><span style="color:var(--indigo)">phren store list</span></div>
         </div>
       </div>
