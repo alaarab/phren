@@ -3,6 +3,18 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.18] - 2026-04-12
+
+### Added
+- Custom hook event `pre-prompt`: registered hooks run during `hook-prompt` with stdin piped through, and their stdout is prepended to phren's context output. Works around Claude Code dropping output from multiple hooks on the same event.
+
+### Security
+- Bumped transitive `hono` 4.12.9 → 4.12.12 and `@hono/node-server` 1.19.11 → 1.19.13 (clears 6 moderate advisories: path traversal, IPv4-mapped IPv6 matching, `serveStatic` middleware bypass).
+- Bumped `vitest` to 4.1.4 with a pnpm override pinning `vite ^8.0.8` (clears 3 high + 2 moderate advisories: `server.fs.deny` bypass, arbitrary file read, optimized-deps path traversal).
+
+### Fixed
+- `release.test.ts` npm-pack dry-run timeout raised to 120s so cold Windows CI runners stop flaking.
+
 ## [0.1.17] - 2026-04-06
 
 ### Fixed
