@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks } from "./hooks.js";
+import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks, runPrePromptHooks, getRegisteredPrePromptSiblingCommands, clearHookPrefsCache } from "./hooks.js";
+import { upsertCustomPrePromptSiblings, type HookMap } from "./init/config.js";
+import { readInstallPreferences } from "./init/preferences.js";
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
 import { PhrenError, type PhrenErrorCode } from "./shared.js";
@@ -783,6 +785,204 @@ describe("hooks", () => {
         else process.env.PHREN_PATH = origPhrenPath;
       }
     });
+  });
+});
+
+// ── Pre-prompt sibling sync ─────────────────────────────────────────────────
+
+describe("upsertCustomPrePromptSiblings", () => {
+  let phrenPath: string;
+
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("phren-sibling-sync-test-");
+    phrenPath = tmp.path;
+    cleanup = tmp.cleanup;
+    initTestPhrenRoot(phrenPath);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("adds a sibling UserPromptSubmit entry for each pre-prompt custom hook", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/usr/local/bin/ss-hook" },
+        { event: "pre-prompt", command: "/home/me/bin/another-hook", timeout: 8000 },
+        { event: "post-finding", command: "/should/not/sync" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(result.added).toBe(2);
+    expect(result.removed).toBe(0);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+
+    const entries = hooksMap.UserPromptSubmit ?? [];
+    const commands = entries.map((e) => e.hooks?.[0]?.command);
+    expect(commands).toContain("/usr/local/bin/ss-hook");
+    expect(commands).toContain("/home/me/bin/another-hook");
+
+    // The 8000ms timeout from prefs is rounded up to 8 seconds for Claude Code.
+    const customTimeoutEntry = entries.find((e) => e.hooks?.[0]?.command === "/home/me/bin/another-hook");
+    expect(customTimeoutEntry?.hooks?.[0]?.timeout).toBe(8);
+
+    // The default timeout (when prefs hook has none) is 15 seconds.
+    const defaultTimeoutEntry = entries.find((e) => e.hooks?.[0]?.command === "/usr/local/bin/ss-hook");
+    expect(defaultTimeoutEntry?.hooks?.[0]?.timeout).toBe(15);
+  });
+
+  it("tracks managed sibling commands in install preferences", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/bin/a" },
+        { event: "pre-prompt", command: "/bin/b" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    const prefs = readInstallPreferences(phrenPath);
+    expect(prefs.managedPrePromptSiblingCommands).toEqual(["/bin/a", "/bin/b"]);
+  });
+
+  it("is idempotent — re-running with the same prefs makes no changes", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/keep-me" }],
+    }));
+
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+
+    const second = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(second.added).toBe(0);
+    expect(second.removed).toBe(0);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it("removes sibling entries for commands that were dropped from prefs", () => {
+    // First sync: register two siblings
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/bin/keep" },
+        { event: "pre-prompt", command: "/bin/drop" },
+      ],
+    }));
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+
+    // User removes /bin/drop from prefs (e.g., via remove_custom_hook)
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/keep" }],
+      // Preserve the bookkeeping from the first sync
+      managedPrePromptSiblingCommands: ["/bin/drop", "/bin/keep"],
+    }));
+    // The in-process mtime cache may return stale data when two writes
+    // happen within the same mtime resolution window. In production the
+    // cache is invalidated by mtime advance between separate process
+    // invocations; tests need to force the invalidation explicitly.
+    clearHookPrefsCache();
+
+    // Resync should remove the stale sibling
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(result.removed).toBe(1);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+    expect(hooksMap.UserPromptSubmit?.[0].hooks?.[0].command).toBe("/bin/keep");
+
+    // Bookkeeping is updated to the new state
+    const prefs = readInstallPreferences(phrenPath);
+    expect(prefs.managedPrePromptSiblingCommands).toEqual(["/bin/keep"]);
+  });
+
+  it("does not touch user-authored UserPromptSubmit entries", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/phren-managed" }],
+    }));
+
+    // Pre-existing user entry that phren has never managed
+    const hooksMap: HookMap = {
+      UserPromptSubmit: [
+        { matcher: "", hooks: [{ type: "command", command: "/usr/local/bin/user-own-hook", timeout: 5 }] },
+      ],
+    };
+
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+    const userEntry = hooksMap.UserPromptSubmit?.find((e) => e.hooks?.[0]?.command === "/usr/local/bin/user-own-hook");
+    expect(userEntry).toBeDefined();
+    expect(userEntry?.hooks?.[0]?.timeout).toBe(5); // unchanged
+  });
+
+  it("ignores webhook custom hooks (only mirrors command hooks)", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", webhook: "https://example.com/hook" },
+        { event: "pre-prompt", command: "/bin/cmd-only" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(result.added).toBe(1);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+    expect(hooksMap.UserPromptSubmit?.[0].hooks?.[0].command).toBe("/bin/cmd-only");
+  });
+});
+
+describe("getRegisteredPrePromptSiblingCommands", () => {
+  it("returns an empty set when settings.json doesn't exist (best-effort)", () => {
+    // We don't override the path here — just verify the function tolerates
+    // a missing/unreadable settings.json by returning empty rather than throwing.
+    const result = getRegisteredPrePromptSiblingCommands();
+    expect(result).toBeInstanceOf(Set);
+  });
+});
+
+describe("runPrePromptHooks skip behavior", () => {
+  let phrenPath: string;
+
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("phren-sibling-sync-test-");
+    phrenPath = tmp.path;
+    cleanup = tmp.cleanup;
+    initTestPhrenRoot(phrenPath);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("skips hooks whose command is registered as a sibling", () => {
+    if (process.platform === "win32") return; // POSIX shell semantics for the marker file.
+
+    const markerSibling = path.join(phrenPath, "should-not-run-sibling.txt");
+    const markerOther = path.join(phrenPath, "should-run-other.txt");
+    const sibCmd = `touch ${markerSibling}`;
+    const otherCmd = `touch ${markerOther}`;
+
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: sibCmd },
+        { event: "pre-prompt", command: otherCmd },
+      ],
+    }));
+
+    // sibCmd is "registered as a sibling" — runPrePromptHooks should skip it.
+    runPrePromptHooks(phrenPath, "{}", new Set([sibCmd]));
+
+    expect(fs.existsSync(markerSibling)).toBe(false);
+    expect(fs.existsSync(markerOther)).toBe(true);
   });
 });
 

@@ -20,8 +20,9 @@ import {
   resolveCursorMcpConfig,
 } from "../provider-adapters.js";
 
-import { getMcpEnabledPreference, getHooksEnabledPreference } from "./preferences.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference, readInstallPreferences, updateInstallPreferences } from "./preferences.js";
 import { resolveEntryScript, log, VERSION } from "./shared.js";
+import { readCustomHooks } from "../hooks.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
 export type McpRootKey = "mcpServers" | "servers";
@@ -200,6 +201,94 @@ export function isPhrenCommand(command: string): boolean {
   if (HOOK_MARKERS.some(m => command.includes(m))) return true;
   return false;
 }
+/**
+ * Reconcile the set of pre-prompt custom hook commands in `customHooks` with
+ * sibling `UserPromptSubmit` entries in Claude Code's settings.json hooks map.
+ *
+ * Why: phren's chained `runPrePromptHooks` runs custom hooks sequentially
+ * inside its own UserPromptSubmit handler, so a slow custom hook (e.g. one
+ * that does an `ls` against a OneDrive-backed WSL mount) eats phren's whole
+ * response budget and times out before injecting anything. Registering each
+ * pre-prompt custom hook as a peer `UserPromptSubmit` entry lets Claude Code
+ * dispatch it in parallel with phren's own hook — they get independent
+ * timeout budgets and one cannot block the other.
+ *
+ * Identification: phren tracks "managed" sibling commands in
+ * `prefs.managedPrePromptSiblingCommands`. On each sync we (a) append a new
+ * sibling for each pre-prompt command not already in settings.json, (b)
+ * remove sibling entries whose command was previously managed but is no
+ * longer in `customHooks`, and (c) leave any user-authored hook entries
+ * (entries whose command never appeared in the managed list) untouched.
+ *
+ * Webhook custom hooks are not affected — they're already async/fire-and-
+ * forget and don't compete for hook event time.
+ *
+ * Idempotent.
+ */
+export function upsertCustomPrePromptSiblings(hooksMap: HookMap, phrenPath: string): { added: number; removed: number } {
+  const customHooks = readCustomHooks(phrenPath);
+  const desired: Array<{ command: string; timeoutSec: number }> = [];
+  for (const h of customHooks) {
+    if (h.event !== "pre-prompt") continue;
+    if (!("command" in h)) continue;
+    const cmd = h.command.trim();
+    if (!cmd) continue;
+    const timeoutSec = h.timeout != null ? Math.max(1, Math.ceil(h.timeout / 1000)) : 15;
+    desired.push({ command: cmd, timeoutSec });
+  }
+  const desiredCommands = new Set(desired.map((d) => d.command));
+
+  const prefs = readInstallPreferences(phrenPath);
+  const previouslyManaged = new Set(Array.isArray(prefs.managedPrePromptSiblingCommands) ? prefs.managedPrePromptSiblingCommands : []);
+
+  if (!Array.isArray(hooksMap.UserPromptSubmit)) hooksMap.UserPromptSubmit = [];
+  const eventHooks = hooksMap.UserPromptSubmit as HookEntry[];
+
+  // Remove stale siblings: previously managed but no longer desired
+  let removed = 0;
+  for (let i = eventHooks.length - 1; i >= 0; i--) {
+    const entry = eventHooks[i];
+    const inner = entry?.hooks;
+    if (!Array.isArray(inner) || inner.length !== 1) continue;
+    const cmd = typeof inner[0]?.command === "string" ? inner[0].command : "";
+    if (!cmd) continue;
+    if (previouslyManaged.has(cmd) && !desiredCommands.has(cmd)) {
+      eventHooks.splice(i, 1);
+      removed++;
+    }
+  }
+
+  // Compute set of commands currently present in settings.json (any entry)
+  const presentCommands = new Set<string>();
+  for (const entry of eventHooks) {
+    const inner = entry?.hooks;
+    if (!Array.isArray(inner)) continue;
+    for (const h of inner) {
+      if (typeof h?.command === "string") presentCommands.add(h.command);
+    }
+  }
+
+  // Append new siblings for each desired command not already present
+  let added = 0;
+  for (const d of desired) {
+    if (presentCommands.has(d.command)) continue;
+    eventHooks.push({
+      matcher: "",
+      hooks: [{ type: "command", command: d.command, timeout: d.timeoutSec }],
+    });
+    added++;
+  }
+
+  // Update bookkeeping: managed = current desired set
+  const newManaged = Array.from(desiredCommands).sort();
+  const oldManaged = Array.from(previouslyManaged).sort();
+  if (newManaged.length !== oldManaged.length || newManaged.some((c, i) => c !== oldManaged[i])) {
+    updateInstallPreferences(phrenPath, () => ({ managedPrePromptSiblingCommands: newManaged }));
+  }
+
+  return { added, removed };
+}
+
 export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean; hooksEnabled?: boolean } = {}): McpConfigStatus {
   const settingsPath = hookConfigPath("claude");
   const claudeJsonPath = homePath(".claude.json");
@@ -270,6 +359,18 @@ export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean;
         command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
         timeout: 3,
       });
+
+      // Mirror pre-prompt custom hooks into Claude's settings.json as
+      // peer UserPromptSubmit entries so they run in parallel with phren
+      // and don't share its 3-second timeout budget. See
+      // upsertCustomPrePromptSiblings docstring for details.
+      try {
+        upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+      } catch (err: unknown) {
+        // Sync is best-effort: a malformed prefs file should not break
+        // the rest of configureClaude. Surface a warning and continue.
+        console.warn(`configureClaude: pre-prompt sibling sync failed: ${errorMessage(err)}`);
+      }
 
       upsertPhrenHook("Stop", {
         type: "command",

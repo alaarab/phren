@@ -774,15 +774,64 @@ export function runCustomHooks(
 }
 
 /**
+ * Read the set of pre-prompt command strings already registered as sibling
+ * UserPromptSubmit entries in Claude Code's settings.json. Used by
+ * runPrePromptHooks to avoid double-running a hook that Claude Code is
+ * already invoking directly (in parallel with phren's own hook).
+ *
+ * Returns an empty set on any error or if the settings file doesn't exist.
+ */
+export function getRegisteredPrePromptSiblingCommands(): Set<string> {
+  const out = new Set<string>();
+  try {
+    const settingsPath = hookConfigPath("claude");
+    if (!fs.existsSync(settingsPath)) return out;
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return out;
+    const hooksObj = (parsed as Record<string, unknown>).hooks;
+    if (!hooksObj || typeof hooksObj !== "object") return out;
+    const ups = (hooksObj as Record<string, unknown>).UserPromptSubmit;
+    if (!Array.isArray(ups)) return out;
+    for (const entry of ups) {
+      if (!entry || typeof entry !== "object") continue;
+      const inner = (entry as Record<string, unknown>).hooks;
+      if (!Array.isArray(inner)) continue;
+      for (const h of inner) {
+        if (h && typeof h === "object") {
+          const cmd = (h as Record<string, unknown>).command;
+          if (typeof cmd === "string" && cmd.length > 0) out.add(cmd);
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`getRegisteredPrePromptSiblingCommands: ${errorMessage(err)}`);
+  }
+  return out;
+}
+
+/**
  * Run pre-prompt custom hooks, piping stdinJson to each and capturing stdout.
  * Returns concatenated stdout from all matching hooks (empty string if none).
+ *
+ * Skips any hook whose command is already registered as a sibling
+ * UserPromptSubmit entry in Claude Code's settings.json — those are dispatched
+ * directly by Claude Code in parallel with phren's hook, so re-running them
+ * here would duplicate their work and (worse) re-import their slow latency
+ * into phren's response budget.
  */
 export function runPrePromptHooks(
   phrenPath: string,
   stdinJson: string,
+  siblingCommandsOverride?: Set<string>,
 ): string {
   const hooks = readCustomHooks(phrenPath);
-  const matching = hooks.filter((h) => h.event === "pre-prompt" && "command" in h);
+  const siblingCommands = siblingCommandsOverride ?? getRegisteredPrePromptSiblingCommands();
+  const matching = hooks.filter(
+    (h) =>
+      h.event === "pre-prompt" &&
+      "command" in h &&
+      !siblingCommands.has(h.command)
+  );
   if (matching.length === 0) return "";
 
   const isWindows = process.platform === "win32";

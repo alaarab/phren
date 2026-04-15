@@ -3,6 +3,20 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- `pre-prompt` custom hooks are now mirrored into Claude Code's `~/.claude/settings.json` as **sibling `UserPromptSubmit` entries** instead of being chained inside phren's own `hook-prompt` invocation. Claude Code dispatches them in parallel with phren's hook, so a slow custom hook (e.g. one that walks a OneDrive-backed WSL mount) no longer eats phren's response budget or blocks phren's context injection. Each sibling gets its own Claude-side timeout (defaults to 15s, overridable per hook via the prefs `timeout` field).
+- `runPrePromptHooks` now skips any custom hook command that is already registered as a sibling, so hooks never double-run during the rollout window.
+- `add_custom_hook` and `remove_custom_hook` MCP tools auto-sync siblings into `settings.json` after they update prefs — no `phren init` rerun required.
+- `configureClaude` runs the same sync at init time, picking up any pre-existing pre-prompt hooks from prefs.
+
+### Added
+- `InstallPreferences.managedPrePromptSiblingCommands` field tracks which siblings phren has written so stale ones can be cleanly removed when a hook is deleted from prefs. Internal bookkeeping; do not edit by hand.
+- `upsertCustomPrePromptSiblings(hooksMap, phrenPath)` exported from `init/config.ts` — patch helper that reconciles a `HookMap` with the current pre-prompt custom hooks. Idempotent. Returns `{added, removed}`.
+- `getRegisteredPrePromptSiblingCommands(): Set<string>` exported from `hooks.ts` — read-only inspection of which commands are currently in `~/.claude/settings.json` `UserPromptSubmit` entries.
+- 8 new tests in `hooks.test.ts` covering the sync helper (add, remove, idempotency, user-authored entry preservation, webhook filtering, in-process cache invalidation) and the skip behavior in `runPrePromptHooks`.
+
 ## [0.1.18] - 2026-04-12
 
 ### Added

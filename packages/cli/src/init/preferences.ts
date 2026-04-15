@@ -22,6 +22,14 @@ export interface InstallPreferences {
   installedVersion?: string;
   updatedAt?: string;
   customHooks?: CustomHookEntry[];
+  /**
+   * Pre-prompt custom hook commands that have been mirrored into Claude
+   * Code's settings.json as sibling UserPromptSubmit entries. Used to detect
+   * stale siblings on resync so we can remove commands that were deleted
+   * from `customHooks`. Internal bookkeeping — managed by
+   * `syncPrePromptSiblingsToClaudeSettings`. Do not edit by hand.
+   */
+  managedPrePromptSiblingCommands?: string[];
   /** Whether the user intended cross-machine sync ("sync") or local-only ("local"). */
   syncIntent?: "sync" | "local";
 }

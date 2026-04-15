@@ -6,6 +6,9 @@ import * as path from "path";
 import { readInstallPreferences, updateInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { readCustomHooks, getHookTarget, HOOK_EVENT_VALUES, validateCustomHookCommand, validateCustomWebhookUrl, type CustomHookEntry, type CommandHookEntry, type WebhookHookEntry } from "../hooks.js";
 import { hookConfigPath } from "../shared.js";
+import { patchJsonFile, upsertCustomPrePromptSiblings, type HookMap } from "../init/config.js";
+import { isRecord } from "../shared.js";
+import { errorMessage } from "../utils.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig, writeProjectHookConfig, clearProjectHookOverride } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
 
@@ -13,6 +16,27 @@ const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookTool = typeof HOOK_TOOLS[number];
 
 const VALID_CUSTOM_EVENTS = HOOK_EVENT_VALUES;
+
+/**
+ * Sync pre-prompt custom hooks into Claude's settings.json as siblings.
+ * Best-effort: errors are logged but do not fail the calling MCP tool.
+ * Called after add_custom_hook and remove_custom_hook update prefs so that
+ * the live Claude config reflects the new state without requiring `phren init`.
+ */
+function syncPrePromptSiblingsBestEffort(phrenPath: string): void {
+  try {
+    const settingsPath = hookConfigPath("claude", phrenPath);
+    if (!fs.existsSync(settingsPath)) return; // Claude not initialized; nothing to sync
+    patchJsonFile(settingsPath, (data) => {
+      const hooksMap = isRecord(data.hooks) ? (data.hooks as HookMap) : (data.hooks = {} as HookMap);
+      upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    });
+  } catch (err: unknown) {
+    // Don't crash the MCP tool — sync is a convenience, not a contract.
+    // The next `phren init` will re-attempt the sync from a clean slate.
+    console.warn(`syncPrePromptSiblingsBestEffort: ${errorMessage(err)}`);
+  }
+}
 
 function normalizeHookTool(input: string | undefined): HookTool | null {
   if (!input) return null;
@@ -243,6 +267,12 @@ export function register(server: McpServer, ctx: McpContext): void {
           totalAfter = existing.length + 1;
           return { customHooks: [...existing, newHook] };
         });
+        // Mirror the new hook (if pre-prompt) into Claude's settings.json
+        // immediately, so users don't have to re-run `phren init` for the
+        // sibling-hook fix to take effect.
+        if (event === "pre-prompt" && "command" in newHook) {
+          syncPrePromptSiblingsBestEffort(phrenPath);
+        }
         return mcpResponse({ ok: true, message: `Added custom hook for "${event}": ${"webhook" in newHook ? "[webhook] " : ""}${getHookTarget(newHook)}`, data: { hook: newHook, total: totalAfter } });
       });
     }
@@ -273,6 +303,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         });
         if (removed === 0) {
           return mcpResponse({ ok: false, error: `No custom hooks matched event="${event}"${command ? ` command containing "${command}"` : ""}.` });
+        }
+        // If we just removed any pre-prompt hooks, drop their sibling
+        // entries from Claude's settings.json. The sync function diffs the
+        // current prefs against the previously-managed list and removes
+        // anything that disappeared.
+        if (event === "pre-prompt") {
+          syncPrePromptSiblingsBestEffort(phrenPath);
         }
         return mcpResponse({ ok: true, message: `Removed ${removed} custom hook(s) for "${event}".`, data: { removed, remaining: remainingCount } });
       });
