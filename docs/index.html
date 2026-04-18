@@ -81,6 +81,48 @@
       margin-top: 10px; font-size: 10px; color: #5a4a7a; letter-spacing: 1px;
     }
 
+    /* Mini writing scene (skills section footer) --------------------------- */
+    .writing-mini {
+      display: flex; align-items: flex-end; gap: 14px;
+      justify-content: flex-end; flex-wrap: wrap;
+      margin: 28px 0 0;
+    }
+    .writing-mini .mini-phren { position: relative; flex: 0 0 auto; }
+    .writing-mini .mini-phren img { display: block; image-rendering: pixelated; }
+    .writing-mini .mini-phren .pencil {
+      position: absolute; top: 58%; right: -8px;
+      width: 18px; height: 4px;
+      background: linear-gradient(90deg, #2a1a3e 0 4px, #FFE066 4px 14px, #E8404E 14px 18px);
+      transform-origin: left center;
+      animation: pencil-scribble 0.3s ease-in-out infinite;
+    }
+    .writing-mini .mini-card {
+      background: #fff; color: var(--navy, #12122a);
+      width: min(260px, 72vw);
+      padding: 10px 12px 12px;
+      border-radius: 3px;
+      border: 1px solid #12122a;
+      box-shadow: 4px 4px 0 rgba(0,0,0,0.35);
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      transform: rotate(-1.2deg);
+      flex: 0 0 auto;
+    }
+    .writing-mini .mini-tag {
+      font-size: 9px; letter-spacing: 1.5px; font-weight: 700;
+      color: #7C3AED; margin-bottom: 6px;
+    }
+    .writing-mini .mini-line {
+      font-size: 11px; line-height: 1.5;
+      overflow: hidden; white-space: nowrap;
+      border-right: 2px solid #12122a;
+      animation:
+        phren-type 7s steps(46, end) infinite,
+        phren-caret 0.7s step-end infinite;
+    }
+    .writing-mini .mini-meta {
+      margin-top: 8px; font-size: 9px; color: #5a4a7a; letter-spacing: 1px;
+    }
+
     /* Running Phren strip -------------------------------------------------- */
     .run-strip {
       position: relative; height: 88px; overflow: hidden;
@@ -101,7 +143,8 @@
       image-rendering: pixelated;
       filter: drop-shadow(0 2px 0 rgba(40,211,242,0.2));
     }
-    .runner .body img { width:100%; height:100%; display:block; image-rendering: pixelated; }
+    /* face the direction of travel (left → right) */
+    .runner .body img { width:100%; height:100%; display:block; image-rendering: pixelated; transform: scaleX(-1); }
     .runner .dust {
       position: absolute; bottom: 4px; width: 10px; height: 10px;
       background: rgba(156,143,248,0.35); border-radius: 50%;
@@ -122,22 +165,25 @@
 
     /* Celebrating / "task complete" jumping Phren -------------------------- */
     .cta-celebrate {
-      position: absolute; top: 18px; right: 24px;
-      width: 110px; height: 110px; pointer-events: none;
+      position: absolute; top: 50%; right: 28px;
+      transform: translateY(-50%);
+      width: 104px; height: 104px; pointer-events: none;
       z-index: 3;
     }
-    @media (max-width: 780px) { .cta-celebrate { width: 82px; height: 82px; top: 8px; right: 8px; } }
+    @media (max-width: 780px) {
+      .cta-celebrate { width: 76px; height: 76px; right: 12px; top: 50%; }
+    }
     .cta-celebrate .jumper {
       width: 100%; height: 100%;
-      animation: phren-jump 1.6s ease-in-out infinite, phren-flash 1.6s ease-in-out infinite;
+      animation: phren-jump 1.8s ease-in-out infinite, phren-flash 1.8s ease-in-out infinite;
       image-rendering: pixelated;
     }
     .cta-celebrate .jumper img { width:100%; height:100%; display:block; image-rendering: pixelated; }
     @keyframes phren-jump {
       0%, 100% { transform: translateY(0) scale(1); }
-      30% { transform: translateY(-18px) scale(1.02, 0.96); }
-      60% { transform: translateY(-2px) scale(0.98, 1.04); }
-      80% { transform: translateY(-10px) scale(1.01, 0.99); }
+      30% { transform: translateY(-8px) scale(1.015, 0.98); }
+      60% { transform: translateY(-1px) scale(0.99, 1.02); }
+      80% { transform: translateY(-5px) scale(1.005, 0.995); }
     }
     @keyframes phren-flash {
       0%, 100% { filter: brightness(1); }
@@ -148,7 +194,7 @@
       width: 4px; height: 4px;
       border-radius: 1px;
       opacity: 0;
-      animation: confetti-burst 1.6s ease-out infinite;
+      animation: confetti-burst 1.8s ease-out infinite;
     }
     @keyframes confetti-burst {
       0% { opacity: 0; transform: translate(0,0) rotate(0); }
@@ -162,7 +208,7 @@
       font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
       color: var(--cyan); opacity: 0.85;
       white-space: nowrap;
-      animation: done-pulse 1.6s ease-in-out infinite;
+      animation: done-pulse 1.8s ease-in-out infinite;
     }
     @keyframes done-pulse {
       0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
@@ -171,10 +217,12 @@
 
     @media (prefers-reduced-motion: reduce) {
       .writing-phren, .writing-card .card-line, .writing-phren .pencil,
-      .runner, .runner .body, .runner .dust, .cta-celebrate .jumper, .cta-celebrate .confetti, .cta-celebrate .done-label {
+      .writing-mini .mini-phren .pencil, .writing-mini .mini-line,
+      .runner, .runner .body, .runner .dust,
+      .cta-celebrate .jumper, .cta-celebrate .confetti, .cta-celebrate .done-label {
         animation: none !important;
       }
-      .writing-card .card-line { white-space: normal; border-right: none; }
+      .writing-card .card-line, .writing-mini .mini-line { white-space: normal; border-right: none; }
       .runner { display: none; }
     }
   </style>
@@ -1111,6 +1159,19 @@
         <div class="skill-card reveal" style="border-style:dashed;opacity:0.7;">
           <div class="skill-name" style="color:var(--text-dim)">+ your own</div>
           <div class="skill-desc">Global: <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code><br>Per-project: <code style="font-size:11px;color:var(--text-muted)">~/.phren/&lt;project&gt;/skills/</code></div>
+        </div>
+      </div>
+
+      <!-- mini writing-a-finding vignette, bottom-right -->
+      <div class="writing-mini phren-motion reveal" aria-label="Phren jotting down a new skill finding">
+        <div class="mini-phren">
+          <img src="phren-hero.svg" alt="" width="84" height="98" />
+          <span class="pencil" aria-hidden="true"></span>
+        </div>
+        <div class="mini-card">
+          <div class="mini-tag">[PATTERN]</div>
+          <div class="mini-line">skills override global by name; scope to project first</div>
+          <div class="mini-meta">phren &middot; just now &middot; trust 0.88</div>
         </div>
       </div>
     </div>
