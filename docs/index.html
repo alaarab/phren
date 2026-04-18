@@ -81,11 +81,20 @@
       margin-top: 10px; font-size: 10px; color: #5a4a7a; letter-spacing: 1px;
     }
 
-    /* Mini writing scene (skills section footer) --------------------------- */
+    /* Mini writing scene — sits next to the Skills header text ------------ */
+    .skills-intro {
+      display: flex; align-items: center; gap: 32px;
+      margin-bottom: 56px;
+    }
+    .skills-intro .skills-header { margin-bottom: 0; flex: 1 1 auto; min-width: 0; }
+    .skills-intro .writing-mini { margin: 0; flex: 0 0 auto; }
+    @media (max-width: 880px) {
+      .skills-intro { flex-direction: column; align-items: stretch; gap: 24px; }
+      .skills-intro .writing-mini { justify-content: flex-start; }
+    }
     .writing-mini {
       display: flex; align-items: flex-end; gap: 14px;
       justify-content: flex-end; flex-wrap: wrap;
-      margin: 28px 0 0;
     }
     .writing-mini .mini-phren { position: relative; flex: 0 0 auto; }
     .writing-mini .mini-phren img { display: block; image-rendering: pixelated; }
@@ -165,11 +174,12 @@
 
     /* Celebrating / "task complete" jumping Phren -------------------------- */
     .cta-celebrate {
-      position: absolute; top: 50%; right: 28px;
+      position: absolute; top: 50%; right: 140px;
       transform: translateY(-50%);
       width: 104px; height: 104px; pointer-events: none;
       z-index: 3;
     }
+    @media (max-width: 1024px) { .cta-celebrate { right: 80px; } }
     @media (max-width: 780px) {
       .cta-celebrate { width: 76px; height: 76px; right: 12px; top: 50%; }
     }
@@ -1133,10 +1143,25 @@
   <!-- SKILLS -->
   <section class="skills-section" id="skills">
     <div class="container">
-      <div class="skills-header reveal">
-        <div class="section-label">Phren's tricks</div>
-        <h2 class="section-title">54 MCP tools built in.<br>Skills for the bigger stuff.</h2>
-        <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Global skills live in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>, project skills in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/&lt;project&gt;/skills/</code>. Project skills override global ones with the same name.</p>
+      <div class="skills-intro">
+        <div class="skills-header reveal">
+          <div class="section-label">Phren's tricks</div>
+          <h2 class="section-title">54 MCP tools built in.<br>Skills for the bigger stuff.</h2>
+          <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Global skills live in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>, project skills in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/&lt;project&gt;/skills/</code>. Project skills override global ones with the same name.</p>
+        </div>
+
+        <!-- phren scribbles a finding alongside the header text -->
+        <div class="writing-mini phren-motion reveal" aria-label="Phren jotting down a new skill finding">
+          <div class="mini-phren">
+            <img src="phren-hero.svg" alt="" width="84" height="98" />
+            <span class="pencil" aria-hidden="true"></span>
+          </div>
+          <div class="mini-card">
+            <div class="mini-tag">[PATTERN]</div>
+            <div class="mini-line">skills override global by name; scope to project first</div>
+            <div class="mini-meta">phren &middot; just now &middot; trust 0.88</div>
+          </div>
+        </div>
       </div>
 
       <div class="skills-grid">
@@ -1159,19 +1184,6 @@
         <div class="skill-card reveal" style="border-style:dashed;opacity:0.7;">
           <div class="skill-name" style="color:var(--text-dim)">+ your own</div>
           <div class="skill-desc">Global: <code style="font-size:11px;color:var(--text-muted)">~/.phren/global/skills/</code><br>Per-project: <code style="font-size:11px;color:var(--text-muted)">~/.phren/&lt;project&gt;/skills/</code></div>
-        </div>
-      </div>
-
-      <!-- mini writing-a-finding vignette, bottom-right -->
-      <div class="writing-mini phren-motion reveal" aria-label="Phren jotting down a new skill finding">
-        <div class="mini-phren">
-          <img src="phren-hero.svg" alt="" width="84" height="98" />
-          <span class="pencil" aria-hidden="true"></span>
-        </div>
-        <div class="mini-card">
-          <div class="mini-tag">[PATTERN]</div>
-          <div class="mini-line">skills override global by name; scope to project first</div>
-          <div class="mini-meta">phren &middot; just now &middot; trust 0.88</div>
         </div>
       </div>
     </div>
