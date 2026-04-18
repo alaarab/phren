@@ -14,60 +14,10 @@
     /* ─── Phren Motion Lab — inspired poses (writing / running / celebrate) ─── */
     .phren-motion { --body-purple:#9c8ff8; --cyan:#28D3F2; --navy:#12122a; }
 
-    /* Writing-a-finding scene ---------------------------------------------- */
-    .writing-section { padding: 40px 0 8px; }
-    .writing-scene {
-      display: flex; align-items: flex-end; justify-content: center;
-      gap: 28px; flex-wrap: wrap; padding: 28px 24px;
-      background: linear-gradient(180deg, rgba(124,58,237,0.06), transparent);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      position: relative; overflow: hidden;
-    }
-    .writing-scene::before {
-      content: ""; position: absolute; inset: 0; opacity: 0.1; pointer-events: none;
-      background-image:
-        linear-gradient(to right, rgba(156,143,248,0.5) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(156,143,248,0.5) 1px, transparent 1px);
-      background-size: 22px 22px;
-    }
-    .writing-phren {
-      position: relative; z-index: 1;
-    }
-    .writing-phren img { display:block; image-rendering: pixelated; }
-    .writing-phren .pencil {
-      position: absolute; top: 58%; right: -10px;
-      width: 26px; height: 6px;
-      background: linear-gradient(90deg, #2a1a3e 0 6px, #FFE066 6px 22px, #E8404E 22px 26px);
-      transform-origin: left center;
-      animation: pencil-scribble 0.3s ease-in-out infinite;
-    }
+    /* Shared typewriter + pencil keyframes (used by mini writing scene) ---- */
     @keyframes pencil-scribble {
       0%, 100% { transform: rotate(-14deg) translateX(0); }
       50% { transform: rotate(-4deg) translateX(2px); }
-    }
-    .writing-card {
-      position: relative; z-index: 1;
-      background: #fff; color: var(--navy);
-      width: min(360px, 80vw);
-      padding: 16px 18px 18px;
-      border-radius: 3px;
-      border: 1px solid var(--navy);
-      box-shadow: 5px 5px 0 rgba(0,0,0,0.35);
-      font-family: ui-monospace, "JetBrains Mono", monospace;
-      transform: rotate(-1.6deg);
-    }
-    .writing-card .card-tag {
-      font-size: 10px; letter-spacing: 1.5px; color: var(--indigo, #7C3AED);
-      font-weight: 700; margin-bottom: 8px;
-    }
-    .writing-card .card-line {
-      font-size: 13px; line-height: 1.55;
-      overflow: hidden; white-space: nowrap;
-      border-right: 2px solid var(--navy);
-      animation:
-        phren-type 6.5s steps(52, end) infinite,
-        phren-caret 0.7s step-end infinite;
     }
     @keyframes phren-type {
       0%   { width: 0; }
@@ -77,9 +27,6 @@
       100% { width: 0; }
     }
     @keyframes phren-caret { 50% { border-right-color: transparent; } }
-    .writing-card .card-meta {
-      margin-top: 10px; font-size: 10px; color: #5a4a7a; letter-spacing: 1px;
-    }
 
     /* Mini writing scene — sits next to the Skills header text ------------ */
     .skills-intro {
@@ -226,13 +173,12 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .writing-phren, .writing-card .card-line, .writing-phren .pencil,
       .writing-mini .mini-phren .pencil, .writing-mini .mini-line,
       .runner, .runner .body, .runner .dust,
       .cta-celebrate .jumper, .cta-celebrate .confetti, .cta-celebrate .done-label {
         animation: none !important;
       }
-      .writing-card .card-line, .writing-mini .mini-line { white-space: normal; border-right: none; }
+      .writing-mini .mini-line { white-space: normal; border-right: none; }
       .runner { display: none; }
     }
   </style>
@@ -534,23 +480,6 @@
           </div>
           <div class="step-title">Browse it all</div>
           <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- WRITING A FINDING — phren scribbles a new finding onto a card -->
-  <section class="writing-section phren-motion reveal">
-    <div class="container" style="max-width: 900px;">
-      <div class="writing-scene" aria-label="Phren writing a new finding">
-        <div class="writing-phren">
-          <img src="phren-hero.svg" alt="" width="130" height="150" />
-          <span class="pencil" aria-hidden="true"></span>
-        </div>
-        <div class="writing-card">
-          <div class="card-tag">[PATTERN]</div>
-          <div class="card-line">use FTS5 for search; fall back to semantic on miss</div>
-          <div class="card-meta">phren &middot; just now &middot; trust 0.82</div>
         </div>
       </div>
     </div>
