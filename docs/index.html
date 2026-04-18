@@ -10,6 +10,174 @@
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* ─── Phren Motion Lab — inspired poses (writing / running / celebrate) ─── */
+    .phren-motion { --body-purple:#9c8ff8; --cyan:#28D3F2; --navy:#12122a; }
+
+    /* Writing-a-finding scene ---------------------------------------------- */
+    .writing-section { padding: 40px 0 8px; }
+    .writing-scene {
+      display: flex; align-items: flex-end; justify-content: center;
+      gap: 28px; flex-wrap: wrap; padding: 28px 24px;
+      background: linear-gradient(180deg, rgba(124,58,237,0.06), transparent);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      position: relative; overflow: hidden;
+    }
+    .writing-scene::before {
+      content: ""; position: absolute; inset: 0; opacity: 0.1; pointer-events: none;
+      background-image:
+        linear-gradient(to right, rgba(156,143,248,0.5) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(156,143,248,0.5) 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+    .writing-phren {
+      position: relative; z-index: 1;
+    }
+    .writing-phren img { display:block; image-rendering: pixelated; }
+    .writing-phren .pencil {
+      position: absolute; top: 58%; right: -10px;
+      width: 26px; height: 6px;
+      background: linear-gradient(90deg, #2a1a3e 0 6px, #FFE066 6px 22px, #E8404E 22px 26px);
+      transform-origin: left center;
+      animation: pencil-scribble 0.3s ease-in-out infinite;
+    }
+    @keyframes pencil-scribble {
+      0%, 100% { transform: rotate(-14deg) translateX(0); }
+      50% { transform: rotate(-4deg) translateX(2px); }
+    }
+    .writing-card {
+      position: relative; z-index: 1;
+      background: #fff; color: var(--navy);
+      width: min(360px, 80vw);
+      padding: 16px 18px 18px;
+      border-radius: 3px;
+      border: 1px solid var(--navy);
+      box-shadow: 5px 5px 0 rgba(0,0,0,0.35);
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      transform: rotate(-1.6deg);
+    }
+    .writing-card .card-tag {
+      font-size: 10px; letter-spacing: 1.5px; color: var(--indigo, #7C3AED);
+      font-weight: 700; margin-bottom: 8px;
+    }
+    .writing-card .card-line {
+      font-size: 13px; line-height: 1.55;
+      overflow: hidden; white-space: nowrap;
+      border-right: 2px solid var(--navy);
+      animation:
+        phren-type 6.5s steps(52, end) infinite,
+        phren-caret 0.7s step-end infinite;
+    }
+    @keyframes phren-type {
+      0%   { width: 0; }
+      50%  { width: 100%; }
+      80%  { width: 100%; }
+      85%  { width: 0; }
+      100% { width: 0; }
+    }
+    @keyframes phren-caret { 50% { border-right-color: transparent; } }
+    .writing-card .card-meta {
+      margin-top: 10px; font-size: 10px; color: #5a4a7a; letter-spacing: 1px;
+    }
+
+    /* Running Phren strip -------------------------------------------------- */
+    .run-strip {
+      position: relative; height: 88px; overflow: hidden;
+      margin: 8px 0; pointer-events: none;
+    }
+    .run-strip .ground {
+      position: absolute; left: 0; right: 0; bottom: 18px; height: 1px;
+      background: rgba(156,143,248,0.22);
+    }
+    .runner {
+      position: absolute; bottom: 14px; left: -140px;
+      width: 70px; height: 70px;
+      animation: phren-run 9s linear infinite;
+    }
+    .runner .body {
+      width: 100%; height: 100%;
+      animation: phren-run-bounce 0.32s steps(2) infinite;
+      image-rendering: pixelated;
+      filter: drop-shadow(0 2px 0 rgba(40,211,242,0.2));
+    }
+    .runner .body img { width:100%; height:100%; display:block; image-rendering: pixelated; }
+    .runner .dust {
+      position: absolute; bottom: 4px; width: 10px; height: 10px;
+      background: rgba(156,143,248,0.35); border-radius: 50%;
+      animation: phren-dust 0.9s ease-out infinite;
+    }
+    .runner .dust-1 { left: -10px; animation-delay: 0s; }
+    .runner .dust-2 { left: -22px; animation-delay: 0.18s; width: 8px; height: 8px; }
+    .runner .dust-3 { left: -34px; animation-delay: 0.36s; width: 6px; height: 6px; }
+    @keyframes phren-run { from { left: -140px; } to { left: 100%; } }
+    @keyframes phren-run-bounce {
+      0%, 100% { transform: translateY(0) rotate(-3deg); }
+      50% { transform: translateY(-6px) rotate(3deg); }
+    }
+    @keyframes phren-dust {
+      0% { opacity: 0.55; transform: scale(0.3); }
+      100% { opacity: 0; transform: translate(-14px, -6px) scale(1.2); }
+    }
+
+    /* Celebrating / "task complete" jumping Phren -------------------------- */
+    .cta-celebrate {
+      position: absolute; top: 18px; right: 24px;
+      width: 110px; height: 110px; pointer-events: none;
+      z-index: 3;
+    }
+    @media (max-width: 780px) { .cta-celebrate { width: 82px; height: 82px; top: 8px; right: 8px; } }
+    .cta-celebrate .jumper {
+      width: 100%; height: 100%;
+      animation: phren-jump 1.6s ease-in-out infinite, phren-flash 1.6s ease-in-out infinite;
+      image-rendering: pixelated;
+    }
+    .cta-celebrate .jumper img { width:100%; height:100%; display:block; image-rendering: pixelated; }
+    @keyframes phren-jump {
+      0%, 100% { transform: translateY(0) scale(1); }
+      30% { transform: translateY(-18px) scale(1.02, 0.96); }
+      60% { transform: translateY(-2px) scale(0.98, 1.04); }
+      80% { transform: translateY(-10px) scale(1.01, 0.99); }
+    }
+    @keyframes phren-flash {
+      0%, 100% { filter: brightness(1); }
+      30% { filter: brightness(1.5) drop-shadow(0 0 10px rgba(40,211,242,0.7)); }
+    }
+    .cta-celebrate .confetti {
+      position: absolute; top: 50%; left: 50%;
+      width: 4px; height: 4px;
+      border-radius: 1px;
+      opacity: 0;
+      animation: confetti-burst 1.6s ease-out infinite;
+    }
+    @keyframes confetti-burst {
+      0% { opacity: 0; transform: translate(0,0) rotate(0); }
+      20% { opacity: 1; }
+      100% { opacity: 0; transform: translate(var(--dx, 40px), var(--dy, 40px)) rotate(var(--rot, 360deg)); }
+    }
+    .cta-celebrate .done-label {
+      position: absolute; left: 50%; bottom: -14px;
+      transform: translateX(-50%);
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--cyan); opacity: 0.85;
+      white-space: nowrap;
+      animation: done-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes done-pulse {
+      0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+      30% { opacity: 1; transform: translateX(-50%) scale(1.04); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .writing-phren, .writing-card .card-line, .writing-phren .pencil,
+      .runner, .runner .body, .runner .dust, .cta-celebrate .jumper, .cta-celebrate .confetti, .cta-celebrate .done-label {
+        animation: none !important;
+      }
+      .writing-card .card-line { white-space: normal; border-right: none; }
+      .runner { display: none; }
+    }
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   <script>
     mermaid.initialize({
@@ -308,6 +476,23 @@
           </div>
           <div class="step-title">Browse it all</div>
           <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WRITING A FINDING — phren scribbles a new finding onto a card -->
+  <section class="writing-section phren-motion reveal">
+    <div class="container" style="max-width: 900px;">
+      <div class="writing-scene" aria-label="Phren writing a new finding">
+        <div class="writing-phren">
+          <img src="phren-hero.svg" alt="" width="130" height="150" />
+          <span class="pencil" aria-hidden="true"></span>
+        </div>
+        <div class="writing-card">
+          <div class="card-tag">[PATTERN]</div>
+          <div class="card-line">use FTS5 for search; fall back to semantic on miss</div>
+          <div class="card-meta">phren &middot; just now &middot; trust 0.82</div>
         </div>
       </div>
     </div>
@@ -848,6 +1033,17 @@
     </div>
   </section>
 
+  <!-- running phren sneaks across the page -->
+  <div class="run-strip phren-motion" aria-hidden="true">
+    <div class="ground"></div>
+    <div class="runner">
+      <span class="dust dust-3"></span>
+      <span class="dust dust-2"></span>
+      <span class="dust dust-1"></span>
+      <div class="body"><img src="phren-hero.svg" alt="" /></div>
+    </div>
+  </div>
+
   <!-- TEAM STORES -->
   <section class="bento-section" id="teams">
     <div class="container">
@@ -944,7 +1140,18 @@
   <!-- CTA FOOTER -->
   <section class="cta-section">
     <div class="cta-content">
-      <div class="cta-panel reveal">
+      <div class="cta-panel reveal" style="position:relative;">
+        <div class="cta-celebrate phren-motion" aria-hidden="true">
+          <div class="jumper"><img src="phren-hero.svg" alt="" /></div>
+          <span class="confetti" style="--dx:-38px;--dy:-42px;--rot:-280deg;background:#7C3AED;animation-delay:0s"></span>
+          <span class="confetti" style="--dx:42px;--dy:-38px;--rot:300deg;background:#28D3F2;animation-delay:0.1s"></span>
+          <span class="confetti" style="--dx:48px;--dy:36px;--rot:180deg;background:#fff;animation-delay:0.2s"></span>
+          <span class="confetti" style="--dx:-44px;--dy:34px;--rot:-200deg;background:#9c8ff8;animation-delay:0.3s"></span>
+          <span class="confetti" style="--dx:-54px;--dy:-6px;--rot:160deg;background:#28D3F2;animation-delay:0.4s"></span>
+          <span class="confetti" style="--dx:56px;--dy:4px;--rot:-240deg;background:#7C3AED;animation-delay:0.5s"></span>
+          <span class="confetti" style="--dx:0;--dy:-58px;--rot:360deg;background:#fff;animation-delay:0.15s"></span>
+          <span class="done-label">task complete</span>
+        </div>
         <div class="cta-brand">
           <div class="cta-brand-copy">
             <div class="section-label">Ready?</div>
