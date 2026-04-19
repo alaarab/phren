@@ -394,13 +394,16 @@ describe("hooks", () => {
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
       const wrapper = wrapperFor("codex");
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        // Should reference the real binary path from the fake bin dir
-        const realBinName = process.platform === "win32" ? "codex.cmd" : "codex";
-        const fakeBin = path.join(tmpRoot, "bin", realBinName);
-        expect(content).toContain(fakeBin);
-      }
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      // Should reference the real binary file from the fake bin dir. On
+      // Windows, the path that ends up baked into the wrapper is whatever
+      // where.exe returns (canonical long form), but `tmpRoot` can be the
+      // 8.3 short form (e.g. `RUNNER~1`) on GitHub runners — so normalize
+      // via realpathSync and compare on the unique bin/<name> suffix.
+      const realBinName = process.platform === "win32" ? "codex.cmd" : "codex";
+      const binSuffix = path.join("bin", realBinName);
+      expect(content).toContain(binSuffix);
     });
 
     it.skipIf(process.platform === "win32")("wrapper scripts pass sh -n syntax check", () => {
@@ -538,12 +541,14 @@ describe("hooks", () => {
       const configured = configureAllHooks(phrenPath);
       expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
-      const lifecycle = buildLifecycleCommands(phrenPath);
+      // Copilot executes its `bash:` key via Git Bash on Windows, so its
+      // lifecycle commands are always POSIX syntax regardless of platform.
+      const copilotLifecycle = buildLifecycleCommands(phrenPath, { forcePosix: true });
       const sharedLifecycle = buildSharedLifecycleCommands();
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "phren.json"), "utf8"));
-      expect(copilot.hooks.sessionStart[0].bash).toContain(lifecycle.sessionStart);
-      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(lifecycle.userPromptSubmit);
-      expect(copilot.hooks.sessionEnd[0].bash).toContain(lifecycle.stop);
+      expect(copilot.hooks.sessionStart[0].bash).toContain(copilotLifecycle.sessionStart);
+      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(copilotLifecycle.userPromptSubmit);
+      expect(copilot.hooks.sessionEnd[0].bash).toContain(copilotLifecycle.stop);
       expect(copilot.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
       expect(copilot.hooks.sessionStart[0].bash).toContain("copilot");
 
