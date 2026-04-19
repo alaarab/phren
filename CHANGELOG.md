@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-04-19
+
+### Fixed
+- Stop-hook `git add -A` failed in sparse-checkout stores when untracked paths fell outside the sparse patterns, which silently stalled commit+push across all managed stores. All three call sites now pass `--sparse` so git skips non-sparse paths instead of erroring: `cli-hooks-stop.ts`, `cli/session-stop.ts`, `tools/finding.ts`.
+
+### Changed
+- Team-store sync pathspec now also stages `*/reference/**`, `*/skills/**`, `*/CLAUDE.md`, `*/review.md`, `*/summary.md`, `*/topic-config.json`, `*/phren.project.yaml`, `*/FINDINGS.md.bak` in both `cli-hooks-stop.ts` team-store loop and `tools/finding.ts` `push_changes` tool. Previously topic-reference edits and skill files silently never committed.
+
 ## [0.1.19] - 2026-04-19
 
 ### Added
