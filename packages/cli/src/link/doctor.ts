@@ -40,17 +40,23 @@ import { logger } from "../logger.js";
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
 function isWrapperActive(tool: string): boolean {
-  const wrapperPath = homePath(".local", "bin", tool);
+  const isWindows = process.platform === "win32";
+  const wrapperName = isWindows ? `${tool}.cmd` : tool;
+  const wrapperPath = homePath(".local", "bin", wrapperName);
   if (!fs.existsSync(wrapperPath)) return false;
   try {
-    const resolved = execFileSync("which", [tool], {
+    const whichCmd = isWindows ? "where.exe" : "which";
+    const whichArgs = isWindows ? [tool] : [tool];
+    const raw = execFileSync(whichCmd, whichArgs, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
-    return path.resolve(resolved) === path.resolve(wrapperPath);
+    // `where.exe` can print multiple paths, one per line; check the first hit.
+    const first = raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
+    return path.resolve(first).toLowerCase() === path.resolve(wrapperPath).toLowerCase();
   } catch (err: unknown) {
-    debugLog(`isWrapperActive: which ${tool} failed: ${errorMessage(err)}`);
+    debugLog(`isWrapperActive: resolve ${tool} failed: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -473,6 +479,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       detail: codexWritable ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
     });
   }
+  const wrapperSuffix = process.platform === "win32" ? ".cmd" : "";
   for (const tool of ["copilot", "cursor", "codex"]) {
     if (!detected.has(tool)) continue;
     const active = isWrapperActive(tool);
@@ -480,7 +487,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       name: `wrapper:${tool}`,
       ok: active,
       detail: active
-        ? `${tool} wrapper active via ~/.local/bin/${tool}`
+        ? `${tool} wrapper active via ~/.local/bin/${tool}${wrapperSuffix}`
         : `${tool} wrapper missing or not first in PATH`,
     });
   }
@@ -491,7 +498,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     name: "wrapper:phren-cli",
     ok: phrenCliActive,
     detail: phrenCliActive
-      ? "phren CLI wrapper active via ~/.local/bin/phren"
+      ? `phren CLI wrapper active via ~/.local/bin/phren${wrapperSuffix}`
       : "phren CLI wrapper missing — run 'npx @phren/cli init' to install",
   });
 

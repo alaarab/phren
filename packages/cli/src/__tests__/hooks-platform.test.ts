@@ -281,38 +281,71 @@ describe("hooks platform compatibility", () => {
   describe("wrapper script structure", () => {
     const wrapperExt = process.platform === "win32" ? ".cmd" : "";
 
-    it.skipIf(process.platform === "win32")("wrapper contains run_with_timeout function", () => {
+    it("wrapper carries a run_with_timeout mechanism on every platform", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
       const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        expect(content).toContain("run_with_timeout");
-        expect(content).toContain("PHREN_HOOK_TIMEOUT_S");
-        expect(content).toContain("14}");
-      }
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      // POSIX wrapper: shell function. Windows wrapper: :run_with_timeout label.
+      expect(content).toContain("run_with_timeout");
+      expect(content).toContain("PHREN_HOOK_TIMEOUT_S");
     });
 
-    it.skipIf(process.platform === "win32")("wrapper passes through help/version/completion flags", () => {
+    it("wrapper passes through help/version/completion flags", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
       const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        expect(content).toContain("--help");
-        expect(content).toContain("--version");
-        expect(content).toContain("completion");
-      }
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      expect(content).toContain("--help");
+      expect(content).toContain("--version");
+      expect(content).toContain("completion");
     });
 
     it.skipIf(process.platform === "win32")("wrapper uses set -u for undefined variable safety", () => {
       setupFakeBinaries(["codex"]);
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
       const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        expect(content).toContain("set -u");
-      }
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      expect(content).toContain("set -u");
+    });
+
+    it.skipIf(process.platform !== "win32")("Windows wrapper bounds hook calls via PowerShell Start-Job", () => {
+      setupFakeBinaries(["codex"]);
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
+      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      expect(content).toContain("PHREN_HOOK_CMD");
+      expect(content).toContain("Start-Job");
+      expect(content).toContain("Wait-Job");
+    });
+  });
+
+  describe("forcePosix output (Copilot's bash: key) works on Windows", () => {
+    it("forcePosix=true yields POSIX-style env prefixing even on Windows", () => {
+      const cmds = buildLifecycleCommands(phrenPath, { forcePosix: true });
+      // Should use POSIX `VAR=value command` prefix, not cmd `set "VAR=..." && ...`.
+      expect(cmds.sessionStart.startsWith("set \"")).toBe(false);
+      expect(cmds.sessionStart).toMatch(/^PHREN_PATH=/);
+      expect(cmds.userPromptSubmit).toMatch(/^PHREN_PATH=/);
+      expect(cmds.stop).toMatch(/^PHREN_PATH=/);
+    });
+
+    it.skipIf(process.platform !== "win32")("Copilot hook config ships bash-compatible commands on Windows", () => {
+      setupFakeBinaries(["copilot"]);
+      configureAllHooks(phrenPath, { tools: new Set(["copilot"]) });
+      const copilotFile = path.join(homeDir, ".github", "hooks", "phren.json");
+      expect(fs.existsSync(copilotFile)).toBe(true);
+      const cfg = JSON.parse(fs.readFileSync(copilotFile, "utf8"));
+      const bash = cfg.hooks.sessionStart[0].bash as string;
+      // cmd's `set "VAR=..." && ...` would not parse in Git Bash — reject it.
+      expect(bash.startsWith("set \"")).toBe(false);
+      // Should look like: PHREN_HOOK_TOOL='copilot' PHREN_PATH='...' ... hook-session-start
+      expect(bash).toMatch(/PHREN_HOOK_TOOL=/);
+      expect(bash).toContain("hook-session-start");
     });
   });
 });

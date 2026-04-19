@@ -92,16 +92,21 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(getToolCount()).toBe(54);
   });
 
-  it.skipIf(process.platform === "win32")("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {
+  it("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {
     const fakeBin = path.join(tmpRoot, "bin");
     fs.mkdirSync(fakeBin, { recursive: true });
 
     for (const tool of ["copilot", "cursor", "codex"]) {
-      const file = path.join(fakeBin, tool);
-      fs.writeFileSync(file, "#!/usr/bin/env bash\nexit 0\n");
-      fs.chmodSync(file, 0o755);
+      if (process.platform === "win32") {
+        // where.exe only resolves files with a PATHEXT-registered suffix.
+        fs.writeFileSync(path.join(fakeBin, `${tool}.cmd`), `@echo off\r\nexit /b 0\r\n`);
+      } else {
+        const file = path.join(fakeBin, tool);
+        fs.writeFileSync(file, "#!/usr/bin/env bash\nexit 0\n");
+        fs.chmodSync(file, 0o755);
+      }
     }
-    process.env.PATH = `${fakeBin}:${origPath || ""}`;
+    process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
 
     const configured = configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
     expect(configured).toContain("Copilot CLI");
@@ -123,8 +128,9 @@ describe.sequential("1.10.x release hardening gates", () => {
     expect(codexHooks).toContain("UserPromptSubmit");
     expect(codexHooks).toContain("Stop");
 
+    const wrapperExt = process.platform === "win32" ? ".cmd" : "";
     for (const tool of ["copilot", "cursor", "codex"]) {
-      const wrapper = path.join(homeDir, ".local", "bin", tool);
+      const wrapper = path.join(homeDir, ".local", "bin", `${tool}${wrapperExt}`);
       expect(fs.existsSync(wrapper)).toBe(true);
       const wrapperBody = fs.readFileSync(wrapper, "utf8");
       expect(wrapperBody).toContain("hook-session-start");
@@ -171,7 +177,7 @@ describe.sequential("1.10.x release hardening gates", () => {
 
     configureClaude(phrenPath, { mcpEnabled: true, hooksEnabled: false });
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(cfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.mcpServers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     const hooksBlob = JSON.stringify(cfg.hooks || {});
     expect(hooksBlob).not.toContain("hook-prompt");
     expect(hooksBlob).not.toContain("hook-stop");
