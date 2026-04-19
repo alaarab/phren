@@ -206,19 +206,6 @@ export const CLI_COMMANDS = [
   "promote",
 ];
 
-const DIRECT_MANAGE_COMMANDS = new Set([
-  "add",
-  "init",
-  "uninstall",
-  "status",
-  "verify",
-  "mcp-mode",
-  "hooks-mode",
-  "link",
-  "--health",
-  ...CLI_COMMANDS,
-]);
-
 export type TopLevelInvocation =
   | { kind: "manage"; argv: string[] }
   | { kind: "mcp"; phrenArg: string }

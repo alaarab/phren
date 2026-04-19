@@ -170,7 +170,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureClaude(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
@@ -222,7 +222,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureVSCode(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.servers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.servers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(onCfg.servers?.phren?.args).toContain(phrenPath);
   });
 
@@ -235,7 +235,7 @@ describe.sequential("mcp mode configuration", () => {
     expect(onStatus).toBe("installed");
 
     const cfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(cfg.servers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(cfg.servers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(cfg.servers?.phren?.args).toContain(phrenPath);
   });
 
@@ -264,7 +264,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureCursorMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
@@ -293,7 +293,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureCopilotMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
-    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
   });
 
@@ -402,7 +402,7 @@ describe.sequential("mcp mode configuration", () => {
     const onStatus = configureCodexMcp(phrenPath, { mcpEnabled: true });
     expect(onStatus).toBe("installed");
     const onCfg = JSON.parse(fs.readFileSync(codexConfig, "utf8"));
-    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx)$/);
+    expect(onCfg.mcpServers?.phren?.command).toMatch(/^(node|npx(\.cmd)?)$/);
     expect(onCfg.mcpServers?.phren?.args).toContain(phrenPath);
     expect(Array.isArray(onCfg.hooks?.Stop)).toBe(true);
   });

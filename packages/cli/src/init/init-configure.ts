@@ -14,7 +14,7 @@ import {
   writeRootManifest,
 } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { configureAllHooks, installPhrenCliWrapper } from "../hooks.js";
+import { configureAllHooks, installPhrenCliWrapper, ensureLocalBinOnWindowsPath } from "../hooks.js";
 import { updateWorkflowPolicy } from "../shared/governance.js";
 import {
   configureClaude,
@@ -121,6 +121,18 @@ export function configureHooksIfEnabled(phrenPath: string, hooksEnabled: boolean
     log(`  ${verb} CLI wrapper: ~/.local/bin/phren`);
   } else {
     log(`  Note: phren CLI wrapper not installed (existing non-managed binary, or no entry script found)`);
+  }
+
+  // Windows: ensure %USERPROFILE%\.local\bin is on the user PATH so the
+  // wrapper is actually discoverable from new terminals.
+  if (wrapperInstalled && process.platform === "win32") {
+    const pathResult = ensureLocalBinOnWindowsPath();
+    if (pathResult === "added") {
+      log(`  Added %USERPROFILE%\\.local\\bin to your user PATH — open a new terminal to use 'phren' directly.`);
+    } else if (pathResult === "failed") {
+      log(`  Note: could not update PATH automatically. Add '%USERPROFILE%\\.local\\bin' to your user PATH manually,`);
+      log(`        or use 'npx @phren/cli <command>' until then.`);
+    }
   }
 }
 

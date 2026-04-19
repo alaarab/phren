@@ -71,8 +71,11 @@ function buildMcpServerConfig(phrenPath: string) {
       args: [entryScript, phrenPath],
     };
   }
+  // MCP clients spawn servers with { shell: false } on Windows, so the bare
+  // `npx` name can't resolve the `npx.cmd` shim and the server fails to start.
+  // Using `npx.cmd` on win32 matches how child_process resolves Windows binaries.
   return {
-    command: "npx",
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
     args: ["-y", `phren@${VERSION}`, phrenPath],
   };
 }

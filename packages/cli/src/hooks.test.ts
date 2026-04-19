@@ -144,6 +144,12 @@ describe("hooks", () => {
       process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
     }
 
+    // Wrapper path: phren installs <tool>.cmd on Windows, <tool> on POSIX.
+    function wrapperFor(tool: string): string {
+      const name = process.platform === "win32" ? `${tool}.cmd` : tool;
+      return path.join(homeDir, ".local", "bin", name);
+    }
+
     it("writes valid Copilot hook config with correct schema", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["copilot"]) });
@@ -218,33 +224,52 @@ describe("hooks", () => {
       expect(config.version).toBe(1);
     });
 
-    it("session wrappers use POSIX shebang", () => {
+    it.skipIf(process.platform === "win32")("session wrappers use POSIX shebang", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       for (const tool of ["copilot", "cursor", "codex"]) {
-        const wrapper = path.join(homeDir, ".local", "bin", tool);
-        if (fs.existsSync(wrapper)) {
-          const content = fs.readFileSync(wrapper, "utf8");
-          expect(content.startsWith("#!/bin/sh\n")).toBe(true);
-          expect(content).not.toContain("#!/usr/bin/env bash");
-          // No bash-only syntax
-          expect(content).not.toContain("${@:"); // bash array slicing
-          expect(content).not.toContain("[[");    // bash double bracket
-        }
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        const content = fs.readFileSync(wrapper, "utf8");
+        expect(content.startsWith("#!/bin/sh\n")).toBe(true);
+        expect(content).not.toContain("#!/usr/bin/env bash");
+        // No bash-only syntax
+        expect(content).not.toContain("${@:"); // bash array slicing
+        expect(content).not.toContain("[[");    // bash double bracket
       }
     });
 
-    it("session wrappers use shift instead of bash array slicing", () => {
+    it.skipIf(process.platform !== "win32")("Windows session wrappers are .cmd scripts with @echo off and PHREN_HOOK_CMD", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        expect(wrapper.endsWith(".cmd")).toBe(true);
+        const content = fs.readFileSync(wrapper, "utf8");
+        // Windows wrappers are batch scripts with a timeout subroutine.
+        expect(content.startsWith("@echo off")).toBe(true);
+        expect(content).toContain("PHREN_HOOK_CMD");
+        expect(content).toContain(":run_with_timeout");
+        expect(content).toContain("Start-Job");
+        expect(content).toContain("Wait-Job");
+        // No POSIX shebang or sh syntax on the Windows wrapper.
+        expect(content).not.toContain("#!/bin/sh");
+        expect(content).not.toContain("shift\n");
+      }
+    });
+
+    it.skipIf(process.platform === "win32")("session wrappers use shift instead of bash array slicing", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        expect(content).toContain("shift");
-        expect(content).toContain("_timeout_val");
-      }
+      const wrapper = wrapperFor("codex");
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      expect(content).toContain("shift");
+      expect(content).toContain("_timeout_val");
     });
 
     it("skips wrapper installation when hooks are disabled", () => {
@@ -262,12 +287,11 @@ describe("hooks", () => {
 
       // But wrappers should NOT be installed
       for (const tool of ["copilot", "cursor", "codex"]) {
-        const wrapper = path.join(homeDir, ".local", "bin", tool);
-        expect(fs.existsSync(wrapper)).toBe(false);
+        expect(fs.existsSync(wrapperFor(tool))).toBe(false);
       }
     });
 
-    it.skipIf(process.platform === "win32")("per-tool hookTools disables wrapper for specific tool only", () => {
+    it("per-tool hookTools disables wrapper for specific tool only", () => {
       setupFakeBinaries();
 
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
@@ -280,12 +304,12 @@ describe("hooks", () => {
       expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
 
       // Wrapper installed for copilot and codex but NOT cursor
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(true);
+      expect(fs.existsSync(wrapperFor("copilot"))).toBe(true);
+      expect(fs.existsSync(wrapperFor("cursor"))).toBe(false);
+      expect(fs.existsSync(wrapperFor("codex"))).toBe(true);
     });
 
-    it.skipIf(process.platform === "win32")("hookTools defaults to hooksEnabled when key is missing", () => {
+    it("hookTools defaults to hooksEnabled when key is missing", () => {
       setupFakeBinaries();
 
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
@@ -293,9 +317,9 @@ describe("hooks", () => {
       configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor"]) });
 
       // copilot not in hookTools, defaults to hooksEnabled=true
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(true);
+      expect(fs.existsSync(wrapperFor("copilot"))).toBe(true);
       // cursor explicitly disabled
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);
+      expect(fs.existsSync(wrapperFor("cursor"))).toBe(false);
     });
 
     it("hookTools ignored when hooksEnabled is false", () => {
@@ -307,11 +331,11 @@ describe("hooks", () => {
 
       // All wrappers skipped because hooksEnabled is false
       for (const tool of ["copilot", "cursor", "codex"]) {
-        expect(fs.existsSync(path.join(homeDir, ".local", "bin", tool))).toBe(false);
+        expect(fs.existsSync(wrapperFor(tool))).toBe(false);
       }
     });
 
-    it.skipIf(process.platform === "win32")("installs wrappers when hooks are enabled", () => {
+    it("installs wrappers when hooks are enabled", () => {
       setupFakeBinaries();
 
       // Write preferences with hooks enabled
@@ -319,8 +343,7 @@ describe("hooks", () => {
 
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
-      expect(fs.existsSync(wrapper)).toBe(true);
+      expect(fs.existsSync(wrapperFor("codex"))).toBe(true);
     });
 
     it("Set param only configures the specified tools", () => {
@@ -346,45 +369,55 @@ describe("hooks", () => {
       expect(configured).toContain("Codex");
     });
 
-    it.skipIf(process.platform === "win32")("wrappers are written to ~/.local/bin/<tool>", () => {
+    it("wrappers are written to ~/.local/bin/<tool>", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       for (const tool of ["copilot", "cursor", "codex"]) {
-        const expected = path.join(homeDir, ".local", "bin", tool);
+        const expected = wrapperFor(tool);
         expect(fs.existsSync(expected)).toBe(true);
-        const stat = fs.statSync(expected);
-        // Should be executable
+      }
+    });
+
+    it.skipIf(process.platform === "win32")("POSIX wrappers carry exec bits", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const stat = fs.statSync(wrapperFor(tool));
         expect(stat.mode & 0o111).toBeGreaterThan(0);
       }
     });
 
-    it.skipIf(process.platform === "win32")("wrapper content references the real binary", () => {
+    it("wrapper content references the real binary", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
 
-      const wrapper = path.join(homeDir, ".local", "bin", "codex");
-      if (fs.existsSync(wrapper)) {
-        const content = fs.readFileSync(wrapper, "utf8");
-        // Should reference the real binary path from the fake bin dir
-        const fakeBin = path.join(tmpRoot, "bin", "codex");
-        expect(content).toContain(fakeBin);
-      }
+      const wrapper = wrapperFor("codex");
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      // Should reference the real binary file from the fake bin dir. On
+      // Windows, the path that ends up baked into the wrapper is whatever
+      // where.exe returns (canonical long form), but `tmpRoot` can be the
+      // 8.3 short form (e.g. `RUNNER~1`) on GitHub runners — so normalize
+      // via realpathSync and compare on the unique bin/<name> suffix.
+      const realBinName = process.platform === "win32" ? "codex.cmd" : "codex";
+      const binSuffix = path.join("bin", realBinName);
+      expect(content).toContain(binSuffix);
     });
 
-    it("wrapper scripts pass sh -n syntax check", () => {
+    it.skipIf(process.platform === "win32")("wrapper scripts pass sh -n syntax check", () => {
       setupFakeBinaries();
       configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
 
       const { execFileSync } = require("child_process");
       for (const tool of ["copilot", "cursor", "codex"]) {
-        const wrapper = path.join(homeDir, ".local", "bin", tool);
-        if (fs.existsSync(wrapper)) {
-          // sh -n checks syntax without executing
-          expect(() => {
-            execFileSync("sh", ["-n", wrapper], { stdio: "ignore" });
-          }).not.toThrow();
-        }
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        // sh -n checks syntax without executing
+        expect(() => {
+          execFileSync("sh", ["-n", wrapper], { stdio: "ignore" });
+        }).not.toThrow();
       }
     });
 
@@ -508,12 +541,14 @@ describe("hooks", () => {
       const configured = configureAllHooks(phrenPath);
       expect(configured).toEqual(["Copilot CLI", "Codex"]);
 
-      const lifecycle = buildLifecycleCommands(phrenPath);
+      // Copilot executes its `bash:` key via Git Bash on Windows, so its
+      // lifecycle commands are always POSIX syntax regardless of platform.
+      const copilotLifecycle = buildLifecycleCommands(phrenPath, { forcePosix: true });
       const sharedLifecycle = buildSharedLifecycleCommands();
       const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "phren.json"), "utf8"));
-      expect(copilot.hooks.sessionStart[0].bash).toContain(lifecycle.sessionStart);
-      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(lifecycle.userPromptSubmit);
-      expect(copilot.hooks.sessionEnd[0].bash).toContain(lifecycle.stop);
+      expect(copilot.hooks.sessionStart[0].bash).toContain(copilotLifecycle.sessionStart);
+      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(copilotLifecycle.userPromptSubmit);
+      expect(copilot.hooks.sessionEnd[0].bash).toContain(copilotLifecycle.stop);
       expect(copilot.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
       expect(copilot.hooks.sessionStart[0].bash).toContain("copilot");
 
