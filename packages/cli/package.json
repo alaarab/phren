@@ -74,12 +74,12 @@
     "preuninstall": "node scripts/preuninstall.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^5.6.2",
     "glob": "^13.0.6",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
-    "inquirer": "^13.3.2",
+    "inquirer": "^13.4.1",
     "js-yaml": "^4.1.1",
     "sigma": "^3.0.2",
     "sql.js-fts5": "^1.4.0",

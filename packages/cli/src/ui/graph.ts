@@ -6,9 +6,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function graphAssetCandidates(): string[] {
+  const distRoot = path.resolve(__dirname, "..");
   return [
     path.join(__dirname, "generated", "memory-ui-graph.browser.js"),
     path.join(__dirname, "memory-ui-graph.runtime.js"),
+    path.join(distRoot, "generated", "memory-ui-graph.browser.js"),
+    path.join(distRoot, "memory-ui-graph.runtime.js"),
     path.join(process.cwd(), "mcp", "dist", "generated", "memory-ui-graph.browser.js"),
     path.join(process.cwd(), "mcp", "dist", "memory-ui-graph.runtime.js"),
   ];

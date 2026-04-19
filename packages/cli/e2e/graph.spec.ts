@@ -415,22 +415,25 @@ test.describe.serial("graph visualization e2e", () => {
   test("popover shows correct kind label for different node types", async ({ page }) => {
     await openGraphTab(page);
 
-    // Select a project node
-    const projectId = await selectNodeOfKind(page, "project");
-    if (projectId) {
-      const content = await page.locator("#graph-node-content").textContent();
-      expect(content?.toLowerCase()).toContain("project");
+    // Project selection delays popover by ~300ms (focus-mode camera animation).
+    // Poll the popover content rather than reading immediately.
+    async function expectPopoverContains(fragment: string): Promise<void> {
+      await expect
+        .poll(
+          async () => (await page.locator("#graph-node-content").textContent() || "").toLowerCase(),
+          { timeout: 2000 },
+        )
+        .toContain(fragment);
     }
 
-    // Clear and select a finding node
+    const projectId = await selectNodeOfKind(page, "project");
+    if (projectId) await expectPopoverContains("project");
+
     await page.evaluate(() => (window as any).graphClearSelection());
     await page.waitForTimeout(200);
 
     const findingId = await selectNodeOfKind(page, "finding");
-    if (findingId) {
-      const content = await page.locator("#graph-node-content").textContent();
-      expect(content?.toLowerCase()).toContain("finding");
-    }
+    if (findingId) await expectPopoverContains("finding");
   });
 
   // ── Interaction tests ──────────────────────────────────────────────────
@@ -656,6 +659,151 @@ test.describe.serial("graph visualization e2e", () => {
     const nodeId2 = await selectFirstNode(page);
     expect(nodeId2).toBeTruthy();
     await expect(popover).not.toHaveCSS("display", "none");
+  });
+
+  test("phrenGraph.removeNode removes a finding in place without remount", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGraphTab(page);
+
+    // API must be exposed
+    const hasRemove = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      return pg && typeof pg.removeNode === "function";
+    });
+    expect(hasRemove).toBe(true);
+
+    // Pick a finding node to delete
+    const target = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.kind === "finding");
+      return node ? { id: node.id, label: node.label } : null;
+    });
+    expect(target).not.toBeNull();
+
+    // Select it first — popover should appear
+    await page.evaluate((id: string) => (window as any).phrenGraph.selectNode(id), target!.id);
+    const popover = page.locator("#graph-node-popover");
+    await expect(popover).not.toHaveCSS("display", "none");
+
+    const initial = await page.evaluate(() => (window as any).phrenGraph.getData().nodes.length);
+
+    // Capture the sigma canvas element identity to prove there's no full remount
+    const canvasIdBefore = await page.evaluate(() => {
+      const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
+      if (!canvas) return null;
+      (canvas as any).__phrenIdentity = "pre-delete-" + Date.now();
+      return (canvas as any).__phrenIdentity;
+    });
+    expect(canvasIdBefore).not.toBeNull();
+
+    // Fire the in-place removal (this is what the extension calls after a successful delete)
+    const returned = await page.evaluate((id: string) => {
+      return (window as any).phrenGraph.removeNode(id);
+    }, target!.id);
+    expect(returned).toBe(true);
+
+    // During animation (~280ms) the node should still exist but be shrinking
+    await page.waitForTimeout(80);
+    const midAnim = await page.evaluate((id: string) => {
+      const pg = (window as any).phrenGraph;
+      const data = pg.getData();
+      // Internal: check sigma-level attrs if still attached
+      return {
+        stillInData: data.nodes.some((n: any) => n.id === id),
+        count: data.nodes.length,
+      };
+    }, target!.id);
+
+    // Wait past the animation tail
+    await page.waitForTimeout(320);
+
+    // Node should be fully gone from the graph data
+    const afterIds = await getNodeIds(page);
+    expect(afterIds).not.toContain(target!.id);
+    expect(afterIds.length).toBe(initial - 1);
+
+    // Canvas element should be the same instance — no full remount
+    const canvasIdAfter = await page.evaluate(() => {
+      const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
+      return canvas ? (canvas as any).__phrenIdentity || null : null;
+    });
+    expect(canvasIdAfter).toBe(canvasIdBefore);
+
+    // Selection should be cleared (popover hidden)
+    await expect(popover).toHaveCSS("display", "none");
+
+    // Sigma still alive
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    expect(alive).toBe(true);
+
+    // removeNode on an unknown id returns false
+    const bogus = await page.evaluate(() => (window as any).phrenGraph.removeNode("finding:nope:does-not-exist"));
+    expect(bogus).toBe(false);
+
+    const errorTexts = errors.map((e) => e.text());
+    expect(errorTexts).toEqual([]);
+
+    // mid-animation assertion is informational but sanity-check: at t~80ms node is typically still there
+    if (midAnim.stillInData) {
+      expect(midAnim.count).toBe(initial);
+    }
+  });
+
+  test("phrenGraph.updateNode mutates attrs in place without remount", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await openGraphTab(page);
+
+    const hasUpdate = await page.evaluate(() => typeof (window as any).phrenGraph?.updateNode === "function");
+    expect(hasUpdate).toBe(true);
+
+    // Pick a task node (the fixture seeds one queue task)
+    const target = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.kind === "task");
+      return node ? { id: node.id, label: node.label, section: node.section } : null;
+    });
+    expect(target).not.toBeNull();
+
+    const canvasBefore = await page.evaluate(() => {
+      const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
+      if (!canvas) return null;
+      (canvas as any).__phrenIdentity = "update-" + Date.now();
+      return (canvas as any).__phrenIdentity;
+    });
+
+    const countBefore = (await getNodeIds(page)).length;
+
+    const result = await page.evaluate((id: string) => {
+      return (window as any).phrenGraph.updateNode(id, {
+        text: "Renamed by in-place update test",
+        section: "Done",
+      });
+    }, target!.id);
+    expect(result).toBe(true);
+
+    const after = await page.evaluate((id: string) => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.id === id);
+      return node ? { label: node.label, section: node.section, fullLabel: node.fullLabel } : null;
+    }, target!.id);
+    expect(after).not.toBeNull();
+    expect(after!.section).toBe("Done");
+    expect(after!.label).toContain("Renamed");
+
+    const countAfter = (await getNodeIds(page)).length;
+    expect(countAfter).toBe(countBefore);
+
+    const canvasAfter = await page.evaluate(() => {
+      const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
+      return canvas ? (canvas as any).__phrenIdentity || null : null;
+    });
+    expect(canvasAfter).toBe(canvasBefore);
+
+    const bogus = await page.evaluate(() => (window as any).phrenGraph.updateNode("task:nope:xyz", { section: "Done" }));
+    expect(bogus).toBe(false);
+
+    const errorTexts = errors.map((e) => e.text());
+    expect(errorTexts).toEqual([]);
   });
 
   test("no console errors across full graph interaction", async ({ page }) => {

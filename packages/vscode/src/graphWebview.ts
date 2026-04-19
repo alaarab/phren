@@ -152,6 +152,43 @@ interface GraphPayload {
 
 /* ── Main entry ──────────────────────────────────────────── */
 
+interface GraphCacheEntry {
+  key: string;
+  payload: GraphPayload;
+}
+let graphCache: GraphCacheEntry | null = null;
+
+function resolveStorePath(): string {
+  const configured = vscode.workspace.getConfiguration("phren").get<string>("storePath", "");
+  if (configured && configured.trim()) {
+    const expanded = configured.startsWith("~") ? path.join(os.homedir(), configured.slice(1)) : configured;
+    return path.resolve(expanded);
+  }
+  return path.join(os.homedir(), ".phren");
+}
+
+function computeMtimeKey(storePath: string): string {
+  try {
+    const entries = fs.readdirSync(storePath, { withFileTypes: true });
+    const parts: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      for (const file of ["FINDINGS.md", "tasks.md", "summary.md"]) {
+        const fp = path.join(storePath, entry.name, file);
+        try {
+          const stat = fs.statSync(fp);
+          parts.push(`${entry.name}/${file}:${stat.mtimeMs}`);
+        } catch {
+          // missing file is fine
+        }
+      }
+    }
+    return parts.sort().join("|");
+  } catch {
+    return "";
+  }
+}
+
 export async function showGraphWebview(client: PhrenClient, context: vscode.ExtensionContext): Promise<void> {
   const panel = vscode.window.createWebviewPanel(
     "phren.fragmentGraph",
@@ -163,10 +200,18 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
   panel.iconPath = vscode.Uri.file(path.join(context.extensionPath, "media", "icon.svg"));
   panel.webview.html = renderLoadingHtml(panel.webview);
 
+  const storePath = resolveStorePath();
   let graphData: GraphPayload | undefined;
+  let suppressWatcherUntil = 0;
 
   try {
-    graphData = await loadGraphData(client);
+    const mtimeKey = computeMtimeKey(storePath);
+    if (graphCache && graphCache.key === mtimeKey && mtimeKey !== "") {
+      graphData = graphCache.payload;
+    } else {
+      graphData = await loadGraphData(client);
+      graphCache = { key: mtimeKey, payload: graphData };
+    }
     panel.webview.html = renderGraphHtml(panel.webview, graphData);
   } catch (error) {
     panel.webview.html = renderErrorHtml(panel.webview, toErrorMessage(error));
@@ -180,20 +225,42 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     const command = asString(message.command);
 
     async function refreshGraph(): Promise<void> {
+      suppressWatcherUntil = Date.now() + 1500;
       graphData = await loadGraphData(client);
+      graphCache = { key: computeMtimeKey(storePath), payload: graphData };
       panel.webview.html = renderGraphHtml(panel.webview, graphData);
+    }
+
+    async function mutate<T>(fn: () => Promise<T>): Promise<T> {
+      suppressWatcherUntil = Date.now() + 1500;
+      try {
+        return await fn();
+      } finally {
+        suppressWatcherUntil = Date.now() + 1500;
+        graphCache = null;
+      }
+    }
+
+    if (command === "requestRefresh") {
+      await refreshGraph();
+      return;
     }
 
     if (command === "saveFindingEdit") {
       const projectName = asString(message.projectName);
       const oldText = asString(message.oldText);
       const newText = asString(message.newText);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !oldText || !newText) return;
       if (!isValidProjectName(projectName)) return;
 
       try {
-        await client.editFinding(projectName, oldText, newText);
-        await refreshGraph();
+        await mutate(() => client.editFinding(projectName, oldText, newText));
+        if (nodeId) {
+          panel.webview.postMessage({ type: "nodeUpdated", id: nodeId, changes: { text: newText } });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to update finding: ${toErrorMessage(err)}`);
       }
@@ -203,6 +270,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     if (command === "deleteFinding") {
       const projectName = asString(message.projectName);
       const text = asString(message.text);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !text) return;
       if (!isValidProjectName(projectName)) return;
 
@@ -214,10 +282,32 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (confirmed !== "Delete") return;
 
       try {
-        await client.removeFinding(projectName, text);
-        await refreshGraph();
+        await mutate(() => client.removeFinding(projectName, text));
+        if (nodeId) {
+          panel.webview.postMessage({
+            type: "nodeRemoved",
+            id: nodeId,
+            undo: { kind: "finding", projectName, text, label: "Finding deleted" },
+          });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to delete finding: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "undoDeleteFinding") {
+      const projectName = asString(message.projectName);
+      const text = asString(message.text);
+      if (!projectName || !text) return;
+      if (!isValidProjectName(projectName)) return;
+      try {
+        await mutate(() => client.addFinding(projectName, text));
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to restore finding: ${toErrorMessage(err)}`);
       }
       return;
     }
@@ -228,16 +318,25 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const nextText = asString(message.text);
       const section = asString(message.section);
       const priority = asString(message.priority);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !item || !nextText) return;
       if (!isValidProjectName(projectName)) return;
 
       try {
-        await client.updateTask(projectName, item, {
+        await mutate(() => client.updateTask(projectName, item, {
           text: nextText,
           section,
           priority,
-        });
-        await refreshGraph();
+        }));
+        if (nodeId) {
+          panel.webview.postMessage({
+            type: "nodeUpdated",
+            id: nodeId,
+            changes: { text: nextText, section, priority },
+          });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to update task: ${toErrorMessage(err)}`);
       }
@@ -247,12 +346,21 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     if (command === "completeTask") {
       const projectName = asString(message.projectName);
       const item = asString(message.item);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !item) return;
       if (!isValidProjectName(projectName)) return;
 
       try {
-        await client.completeTask(projectName, item);
-        await refreshGraph();
+        await mutate(() => client.completeTask(projectName, item));
+        if (nodeId) {
+          panel.webview.postMessage({
+            type: "nodeUpdated",
+            id: nodeId,
+            changes: { section: "Done" },
+          });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to complete task: ${toErrorMessage(err)}`);
       }
@@ -263,12 +371,21 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       const projectName = asString(message.projectName);
       const item = asString(message.item);
       const section = asString(message.section);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !item || !section) return;
       if (!isValidProjectName(projectName)) return;
 
       try {
-        await client.updateTask(projectName, item, { section });
-        await refreshGraph();
+        await mutate(() => client.updateTask(projectName, item, { section }));
+        if (nodeId) {
+          panel.webview.postMessage({
+            type: "nodeUpdated",
+            id: nodeId,
+            changes: { section },
+          });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to move task: ${toErrorMessage(err)}`);
       }
@@ -278,6 +395,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
     if (command === "deleteTask") {
       const projectName = asString(message.projectName);
       const item = asString(message.item);
+      const nodeId = asString(message.nodeId);
       if (!projectName || !item) return;
       if (!isValidProjectName(projectName)) return;
 
@@ -289,14 +407,71 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (confirmed !== "Delete") return;
 
       try {
-        await client.removeTask(projectName, item);
-        await refreshGraph();
+        await mutate(() => client.removeTask(projectName, item));
+        if (nodeId) {
+          panel.webview.postMessage({
+            type: "nodeRemoved",
+            id: nodeId,
+            undo: { kind: "task", projectName, item, label: "Task deleted" },
+          });
+        } else {
+          await refreshGraph();
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Failed to delete task: ${toErrorMessage(err)}`);
       }
       return;
     }
 
+    if (command === "undoDeleteTask") {
+      const projectName = asString(message.projectName);
+      const item = asString(message.item);
+      if (!projectName || !item) return;
+      if (!isValidProjectName(projectName)) return;
+      try {
+        await mutate(() => client.addTask(projectName, item));
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to restore task: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+  });
+
+  // Watch FINDINGS.md / tasks.md under the phren store and refresh on external edits.
+  let watcher: vscode.FileSystemWatcher | null = null;
+  let refreshDebounce: NodeJS.Timeout | null = null;
+  try {
+    const pattern = new vscode.RelativePattern(storePath, "**/{FINDINGS,tasks}.md");
+    watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    const onExternalChange = () => {
+      if (Date.now() < suppressWatcherUntil) return;
+      if (refreshDebounce) clearTimeout(refreshDebounce);
+      refreshDebounce = setTimeout(() => {
+        graphCache = null;
+        void (async () => {
+          try {
+            graphData = await loadGraphData(client);
+            graphCache = { key: computeMtimeKey(storePath), payload: graphData };
+            panel.webview.html = renderGraphHtml(panel.webview, graphData);
+          } catch (err) {
+            // Surface silently — user still sees the last-known graph.
+            console.error("phren: failed to refresh graph on external change", err);
+          }
+        })();
+      }, 300);
+    };
+    watcher.onDidChange(onExternalChange);
+    watcher.onDidCreate(onExternalChange);
+    watcher.onDidDelete(onExternalChange);
+  } catch {
+    // Watcher unavailable — fail silently.
+  }
+
+  panel.onDidDispose(() => {
+    if (refreshDebounce) clearTimeout(refreshDebounce);
+    watcher?.dispose();
   });
 }
 
@@ -1035,6 +1210,38 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       cursor: pointer;
     }
     .node-ctx-item:hover { background: var(--surface-sunken); }
+    .graph-toast {
+      position: absolute;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 16px);
+      opacity: 0;
+      transition: opacity 180ms ease, transform 180ms ease;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      z-index: 30;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      font-size: 12px;
+      max-width: 480px;
+      pointer-events: auto;
+    }
+    .graph-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    .graph-toast button {
+      border: 1px solid var(--border);
+      background: var(--surface-sunken);
+      color: var(--ink);
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .graph-toast button:hover { background: var(--surface); }
   </style>
 </head>
 <body>
@@ -1060,6 +1267,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
         </div>
       </div>
       <div id="node-ctx-menu" class="node-ctx-menu" style="display:none"></div>
+      <div id="graph-toast" class="graph-toast" role="status" aria-live="polite" style="display:none"></div>
     </section>
   </main>
   <script nonce="${nonce}">
@@ -1218,8 +1426,14 @@ ${graphScript}
     popoverHandle.addEventListener('mousedown', function(e) {
       if (!popover) return;
       isDraggingPopover = true;
-      dragOffsetX = e.clientX - parseFloat(popover.style.left || '0');
-      dragOffsetY = e.clientY - parseFloat(popover.style.top || '0');
+      var container = document.querySelector('.graph-container');
+      var containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 };
+      var popRect = popover.getBoundingClientRect();
+      // Prefer explicit style values (subsequent drags) over computed rect (first drag).
+      var currentLeft = popover.style.left ? parseFloat(popover.style.left) : (popRect.left - containerRect.left);
+      var currentTop = popover.style.top ? parseFloat(popover.style.top) : (popRect.top - containerRect.top);
+      dragOffsetX = e.clientX - currentLeft;
+      dragOffsetY = e.clientY - currentTop;
       e.preventDefault();
     });
   }
@@ -1436,6 +1650,7 @@ ${graphScript}
               command: 'saveTaskEdit',
               projectName: currentNode.projectName,
               item: taskItemKey(),
+              nodeId: currentNode.id,
               text: nextText,
               section: sectionEl ? sectionEl.value : currentNode.section,
               priority: priorityEl ? priorityEl.value : currentNode.priority
@@ -1444,30 +1659,33 @@ ${graphScript}
             vscode.postMessage({
               command: 'saveFindingEdit',
               projectName: currentNode.projectName,
+              nodeId: currentNode.id,
               oldText: currentNode.text,
               newText: nextText
             });
           }
+          editMode = null;
           return;
         }
         if (action === 'delete') {
           if (currentNode.kind === 'task') {
-            vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItemKey() });
+            vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItemKey(), nodeId: currentNode.id });
           } else if (currentNode.kind === 'finding') {
-            vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text });
+            vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text, nodeId: currentNode.id });
           }
+          hidePopover(true);
           return;
         }
         if (action === 'complete') {
-          vscode.postMessage({ command: 'completeTask', projectName: currentNode.projectName, item: taskItemKey() });
+          vscode.postMessage({ command: 'completeTask', projectName: currentNode.projectName, item: taskItemKey(), nodeId: currentNode.id });
           return;
         }
         if (action === 'move-active') {
-          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Active' });
+          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Active', nodeId: currentNode.id });
           return;
         }
         if (action === 'move-queue') {
-          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Queue' });
+          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Queue', nodeId: currentNode.id });
           return;
         }
       });
@@ -1505,15 +1723,42 @@ ${graphScript}
   }
 
   document.addEventListener('pointerdown', outsidePointer, true);
+
+  function isEditableTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    var tag = target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (target.isContentEditable) return true;
+    return false;
+  }
+
   document.addEventListener('keydown', function(event) {
-    if (event.key !== 'Escape' || !currentNode) return;
-    if (editMode) {
-      editMode = null;
-      var point = currentPoint();
-      renderPopover(currentNode, point.x, point.y);
+    if (event.key === 'Escape' && currentNode) {
+      if (editMode) {
+        editMode = null;
+        var point = currentPoint();
+        renderPopover(currentNode, point.x, point.y);
+        return;
+      }
+      hidePopover();
       return;
     }
-    hidePopover();
+
+    if (isEditableTarget(event.target) || editMode) return;
+
+    // Delete / Backspace on a selected finding or task → fire delete action
+    if ((event.key === 'Delete' || event.key === 'Backspace') && currentNode) {
+      if (currentNode.kind === 'finding') {
+        event.preventDefault();
+        vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text, nodeId: currentNode.id });
+        hidePopover(true);
+      } else if (currentNode.kind === 'task') {
+        event.preventDefault();
+        var taskItem = (currentNode.taskItemId || currentNode.text) || '';
+        vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItem, nodeId: currentNode.id });
+        hidePopover(true);
+      }
+    }
   });
 
   if (window.phrenGraph && window.phrenGraph.onNodeSelect) {
@@ -1527,6 +1772,94 @@ ${graphScript}
       renderPopover(currentNode, x, y);
     });
   }
+
+  var toastEl = document.getElementById('graph-toast');
+  var toastTimer = 0;
+
+  function hideToast() {
+    if (!toastEl) return;
+    toastEl.classList.remove('visible');
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = 0; }
+    setTimeout(function() {
+      if (toastEl && !toastEl.classList.contains('visible')) toastEl.style.display = 'none';
+    }, 220);
+  }
+
+  function showUndoToast(label, onUndo) {
+    if (!toastEl) return;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastEl.innerHTML = '';
+    var msg = document.createElement('span');
+    msg.textContent = label;
+    var undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.textContent = 'Undo';
+    undoBtn.addEventListener('click', function() {
+      hideToast();
+      onUndo();
+    });
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = 'Dismiss';
+    closeBtn.addEventListener('click', hideToast);
+    toastEl.appendChild(msg);
+    toastEl.appendChild(undoBtn);
+    toastEl.appendChild(closeBtn);
+    toastEl.style.display = 'flex';
+    requestAnimationFrame(function() { toastEl.classList.add('visible'); });
+    toastTimer = setTimeout(hideToast, 8000);
+  }
+
+  window.addEventListener('message', function(event) {
+    var data = event && event.data;
+    if (!data) return;
+    if (data.type === 'nodeUpdated' && typeof data.id === 'string' && data.changes) {
+      if (window.phrenGraph && typeof window.phrenGraph.updateNode === 'function') {
+        window.phrenGraph.updateNode(data.id, data.changes);
+      }
+      var cached = nodeLookup[data.id];
+      if (cached) {
+        Object.keys(data.changes).forEach(function(key) {
+          if (data.changes[key] !== undefined) cached[key] = data.changes[key];
+        });
+        if (typeof data.changes.text === 'string') {
+          cached.text = data.changes.text;
+          cached.label = data.changes.text.slice(0, 40) + (data.changes.text.length > 40 ? '…' : '');
+        }
+      }
+      if (currentNode && currentNode.id === data.id) {
+        Object.assign(currentNode, cached || {});
+        if (!editMode) {
+          var point = currentPoint();
+          renderPopover(currentNode, point.x, point.y);
+        }
+      }
+      return;
+    }
+    if (data.type === 'nodeRemoved' && typeof data.id === 'string') {
+      if (window.phrenGraph && typeof window.phrenGraph.removeNode === 'function') {
+        var removed = window.phrenGraph.removeNode(data.id);
+        delete nodeLookup[data.id];
+        if (currentNode && currentNode.id === data.id) {
+          hidePopover(true);
+          currentNode = null;
+        }
+        if (!removed) {
+          vscode.postMessage({ command: 'requestRefresh' });
+        }
+      }
+      if (data.undo) {
+        var undo = data.undo;
+        showUndoToast(undo.label || 'Deleted', function() {
+          if (undo.kind === 'finding') {
+            vscode.postMessage({ command: 'undoDeleteFinding', projectName: undo.projectName, text: undo.text });
+          } else if (undo.kind === 'task') {
+            vscode.postMessage({ command: 'undoDeleteTask', projectName: undo.projectName, item: undo.item });
+          }
+        });
+      }
+    }
+  });
 
   if (window.phrenGraph && window.phrenGraph.onSelectionClear) {
     window.phrenGraph.onSelectionClear(function() {
@@ -1565,6 +1898,9 @@ ${graphScript}
 
   // Ambient particle animation overlay
   (function() {
+    var reducedMotion = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) return;
     var canvas = document.getElementById('ambient-canvas');
     if (!canvas || typeof canvas.getContext !== 'function') return;
     var ctx = canvas.getContext('2d');

@@ -85,6 +85,20 @@ type PhrenGraphApi = {
   getNodeAt: (x: number, y: number) => NodeDetail | null;
   getNodeDetail: (nodeId: string) => NodeDetail | null;
   getData: () => { nodes: NodeDetail[]; links: RawLink[]; topics: RawTopic[]; total: number };
+  removeNode: (nodeId: string, opts?: { animate?: boolean }) => boolean;
+  updateNode: (
+    nodeId: string,
+    changes: {
+      label?: string;
+      fullLabel?: string;
+      text?: string;
+      section?: string;
+      priority?: string;
+      topicSlug?: string;
+      topicLabel?: string;
+      color?: string;
+    },
+  ) => boolean;
   destroy: () => void;
 };
 
@@ -872,10 +886,15 @@ function refreshRenderer(resetCamera: boolean): void {
         const kind = node?.kind ?? "finding";
         const ratio = state.cameraRatio;
 
-        // Semantic zoom: fade nodes based on zoom level
-        // Skip semantic zoom if user has actively filtered types (explicit choice overrides zoom)
+        // Semantic zoom: fade nodes based on zoom level.
+        // Skip semantic zoom if:
+        //   - the user actively filtered types (their explicit choice overrides zoom), or
+        //   - they narrowed to a specific project (they want to see that project's
+        //     full network, not a dimmed overview), or
+        //   - they are hovering/selecting/focusing a specific node.
         const allTypesOn = state.filterTypes.project && state.filterTypes.finding && state.filterTypes.task && state.filterTypes.entity && state.filterTypes.reference;
-        if (allTypesOn && !state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
+        const projectFilterActive = state.filterProject !== "all";
+        if (allTypesOn && !projectFilterActive && !state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
           if (ratio > 0.65 && kind !== "project") {
             const fade = kind === "finding" || kind === "task" ? 0.12 : 0.04;
             next.color = hexToRgba(String(data.color), fade);
@@ -1177,11 +1196,63 @@ function refreshRenderer(resetCamera: boolean): void {
       state.container?.removeEventListener("mouseleave", endDrag);
     });
 
-    // --- CSS glow filter on sigma WebGL canvas ---
+    // --- Atmospheric glow: per-theme bloom + slow breathe.
+    // Single drop-shadow pass (cheaper than stacking two); will-change: filter
+    // promotes the canvas to its own compositor layer so the filter doesn't
+    // re-rasterize the scene each frame.
     const sigmaCanvases = state.container.querySelectorAll<HTMLCanvasElement>("canvas");
-    sigmaCanvases.forEach((canvas) => {
-      canvas.style.filter = "brightness(1.08) saturate(1.15)";
-    });
+    const glowFilterDark = "brightness(1.12) saturate(1.4) drop-shadow(0 0 14px rgba(124, 58, 237, 0.42))";
+    const glowFilterLight = "brightness(1.02) saturate(1.15)";
+    const applyGlow = () => {
+      const filter = currentTheme() === "dark" ? glowFilterDark : glowFilterLight;
+      sigmaCanvases.forEach((canvas) => {
+        canvas.style.filter = filter;
+        canvas.style.willChange = "filter";
+        canvas.style.transition = "filter 400ms ease-out";
+      });
+    };
+    applyGlow();
+    // Re-apply after theme flips so dark bloom disappears in light mode.
+    const glowObserver = new MutationObserver(applyGlow);
+    glowObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+    // Ambient nebula that breathes behind the graph (dark mode only).
+    // Rendered with a pre-baked blur on a single element and animated via
+    // transform so it stays on the GPU compositor and never reflows.
+    if (!state.container.querySelector(".graph-nebula")) {
+      const nebula = document.createElement("div");
+      nebula.className = "graph-nebula";
+      nebula.setAttribute("aria-hidden", "true");
+      nebula.style.cssText = [
+        "position: absolute",
+        "inset: 0",
+        "pointer-events: none",
+        "z-index: 0",
+        "background:" +
+          " radial-gradient(600px 420px at 25% 35%, rgba(124,58,237,0.22), transparent 62%)," +
+          " radial-gradient(520px 380px at 78% 62%, rgba(40,211,242,0.15), transparent 62%)," +
+          " radial-gradient(700px 500px at 58% 12%, rgba(156,143,248,0.12), transparent 60%)",
+        "filter: blur(24px)",
+        "opacity: 0",
+        "transition: opacity 600ms ease",
+        "will-change: transform, opacity",
+        "transform: translateZ(0)",
+        "animation: graphNebulaBreathe 14s ease-in-out infinite",
+      ].join(";");
+      state.container.insertBefore(nebula, state.container.firstChild);
+      const syncNebula = () => { nebula.style.opacity = currentTheme() === "dark" ? "1" : "0"; };
+      syncNebula();
+      const nebulaObserver = new MutationObserver(syncNebula);
+      nebulaObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+      if (!document.getElementById("graph-nebula-keyframes")) {
+        const style = document.createElement("style");
+        style.id = "graph-nebula-keyframes";
+        style.textContent =
+          "@keyframes graphNebulaBreathe { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(12px,-8px,0) scale(1.08); } }";
+        document.head.appendChild(style);
+      }
+    }
 
     const observer = new MutationObserver(() => {
       const nextTheme = currentTheme();
@@ -1444,6 +1515,173 @@ function clearSelection(): void {
   hideTooltip();
   state.renderer?.refresh();
   notifyClear();
+}
+
+function pruneNodeState(nodeId: string): void {
+  state.rawNodes = state.rawNodes.filter((node) => node.id !== nodeId);
+  state.rawLinks = state.rawLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
+  state.visibleNodes = state.visibleNodes.filter((node) => node.id !== nodeId);
+  state.visibleLinks = state.visibleLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
+  state.hostNodes = state.hostNodes.filter((node) => node.id !== nodeId);
+  state.nodeById.delete(nodeId);
+  state.fullAdjacency.forEach((set) => set.delete(nodeId));
+  state.fullAdjacency.delete(nodeId);
+  state.visibleAdjacency.forEach((set) => set.delete(nodeId));
+  state.visibleAdjacency.delete(nodeId);
+  if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
+  if (state.hoveredNodeId === nodeId) state.hoveredNodeId = null;
+  if (state.focusedProjectId === nodeId) state.focusedProjectId = null;
+  if (state.draggedNode === nodeId) state.draggedNode = null;
+  if (mascot.currentNodeId === nodeId) mascot.currentNodeId = null;
+  if (mascot.targetNodeId === nodeId) mascot.targetNodeId = null;
+  if (mascot.lastVisited === nodeId) mascot.lastVisited = null;
+}
+
+function updateNode(
+  nodeId: string,
+  changes: {
+    label?: string;
+    fullLabel?: string;
+    text?: string;
+    section?: string;
+    priority?: string;
+    topicSlug?: string;
+    topicLabel?: string;
+    color?: string;
+  },
+): boolean {
+  const node = state.nodeById.get(nodeId);
+  if (!node) return false;
+
+  if (typeof changes.section === "string") node.section = changes.section;
+  if (typeof changes.priority === "string") node.priority = changes.priority;
+  if (typeof changes.topicSlug === "string") node.topicSlug = changes.topicSlug;
+  if (typeof changes.topicLabel === "string") node.topicLabel = changes.topicLabel;
+
+  if (typeof changes.text === "string") {
+    node.fullLabel = changes.text;
+    if (!changes.label) {
+      node.label = changes.text.slice(0, 40) + (changes.text.length > 40 ? "…" : "");
+    }
+  }
+  if (typeof changes.fullLabel === "string") node.fullLabel = changes.fullLabel;
+  if (typeof changes.label === "string") node.label = changes.label;
+
+  // If caller didn't pin a color, re-derive from the new section/topic.
+  const nextColor = changes.color || baseColorForNode(node);
+  node.baseColor = nextColor;
+  node.searchText = searchTextForNode(node);
+
+  const nodeDetailEntry = state.hostNodes.find((host) => host.id === nodeId);
+  if (nodeDetailEntry) {
+    Object.assign(nodeDetailEntry, {
+      section: node.section,
+      priority: node.priority,
+      topicSlug: node.topicSlug,
+      topicLabel: node.topicLabel,
+      label: node.label,
+      fullLabel: node.fullLabel,
+      baseColor: node.baseColor,
+    });
+  }
+
+  if (state.graph?.hasNode(nodeId)) {
+    state.graph.mergeNodeAttributes(nodeId, {
+      label: node.label,
+      color: nextColor,
+    });
+    const rawAttr = state.graph.getNodeAttribute(nodeId, "raw") as RuntimeNode | undefined;
+    if (rawAttr) {
+      rawAttr.section = node.section;
+      rawAttr.priority = node.priority;
+      rawAttr.topicSlug = node.topicSlug;
+      rawAttr.topicLabel = node.topicLabel;
+      rawAttr.label = node.label;
+      rawAttr.fullLabel = node.fullLabel;
+      rawAttr.baseColor = node.baseColor;
+    }
+    state.renderer?.refresh();
+  }
+  return true;
+}
+
+function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
+  const hasRaw = state.nodeById.has(nodeId);
+  const hasGraphNode = Boolean(state.graph?.hasNode(nodeId));
+  if (!hasRaw && !hasGraphNode) return false;
+
+  const reducedMotion = typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const animate = opts?.animate !== false && !reducedMotion;
+  const wasSelected = state.selectedNodeId === nodeId;
+
+  const finalize = () => {
+    if (state.graph?.hasNode(nodeId)) {
+      try { state.graph.dropNode(nodeId); } catch { /* ignore */ }
+    }
+    pruneNodeState(nodeId);
+    hideTooltip();
+    updateFilterBarCounter();
+    state.renderer?.refresh();
+    if (wasSelected) notifyClear();
+  };
+
+  if (!animate || !state.graph || !state.graph.hasNode(nodeId) || !state.renderer) {
+    finalize();
+    return true;
+  }
+
+  const graph = state.graph;
+  const renderer = state.renderer;
+  const baseAttrs = graph.getNodeAttributes(nodeId);
+  const startSize = typeof baseAttrs.size === "number" ? baseAttrs.size : 8;
+  const startColor = typeof baseAttrs.color === "string" ? baseAttrs.color : "#888888";
+
+  const edgeKeys: string[] = [];
+  const edgeStart: Record<string, { size: number; color: string }> = {};
+  graph.forEachEdge(nodeId, (edgeKey, attrs) => {
+    edgeKeys.push(edgeKey);
+    edgeStart[edgeKey] = {
+      size: typeof attrs.size === "number" ? attrs.size : 1,
+      color: typeof attrs.color === "string" ? attrs.color : "rgba(140,160,182,0.25)",
+    };
+  });
+
+  // Hide tooltip / clear selection during animation so popover doesn't hang on a vanishing node.
+  if (wasSelected) clearSelection();
+  hideTooltip();
+
+  const duration = 280;
+  const start = performance.now();
+
+  function step(now: number): void {
+    const elapsed = now - start;
+    const t = Math.min(1, elapsed / duration);
+    const eased = 1 - (1 - t) * (1 - t) * (1 - t); // easeOutCubic
+    const scale = 1 - eased;
+
+    if (graph.hasNode(nodeId)) {
+      graph.setNodeAttribute(nodeId, "size", Math.max(0.01, startSize * scale));
+      graph.setNodeAttribute(nodeId, "color", hexToRgba(startColor, Math.max(0, 1 - eased)));
+    }
+    for (const edgeKey of edgeKeys) {
+      if (!graph.hasEdge(edgeKey)) continue;
+      const baseline = edgeStart[edgeKey];
+      graph.setEdgeAttribute(edgeKey, "size", Math.max(0.01, baseline.size * scale));
+      graph.setEdgeAttribute(edgeKey, "color", hexToRgba(baseline.color, Math.max(0, 1 - eased) * 0.6));
+    }
+
+    renderer.refresh();
+
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else {
+      finalize();
+    }
+  }
+
+  requestAnimationFrame(step);
+  return true;
 }
 
 function selectNode(nodeId: string): boolean {
@@ -1883,5 +2121,7 @@ ROOT.phrenGraph = {
       total: state.rawNodes.length,
     };
   },
+  removeNode,
+  updateNode,
   destroy,
 };

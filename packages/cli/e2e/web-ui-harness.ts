@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, "../..");
-const CLI_PATH = path.join(REPO_ROOT, "mcp", "dist", "index.js");
+const CLI_PKG_ROOT = path.resolve(__dirname, "..");
+const REPO_ROOT = path.resolve(CLI_PKG_ROOT, "../..");
+const CLI_PATH = path.join(CLI_PKG_ROOT, "dist", "index.js");
 const START_TIMEOUT_MS = 20_000;
 const FALLBACK_ACTOR = "playwright-admin";
 
@@ -34,11 +35,11 @@ export interface WebUiHarness {
 
 function ensureCliBuilt(): void {
   if (fs.existsSync(CLI_PATH)) return;
-  execFileSync("npm", ["run", "build"], {
+  execFileSync("pnpm", ["--filter", "@phren/cli", "build"], {
     cwd: REPO_ROOT,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30_000,
+    timeout: 120_000,
   });
 }
 
