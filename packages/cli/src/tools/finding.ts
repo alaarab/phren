@@ -561,7 +561,7 @@ async function handlePushChanges(
 
       runCustomHooks(phrenPath, "pre-save");
       // Stage all files including untracked (new project dirs, first FINDINGS.md, etc.)
-      runGit(["add", "-A"]);
+      runGit(["add", "--sparse", "-A"]);
       runGit(["commit", "-m", commitMsg]);
 
       let hasRemote = false;
@@ -659,7 +659,7 @@ async function handlePushChanges(
           if (!storeStatus) { teamResults.push({ store: store.name, pushed: false }); continue; }
 
           // Only stage team-safe files: journal/, tasks.md, truths.md, FINDINGS.md, summary.md
-          runStoreGit(["add", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/summary.md"]);
+          runStoreGit(["add", "--sparse", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/FINDINGS.md.bak", "*/summary.md", "*/review.md", "*/CLAUDE.md", "*/topic-config.json", "*/phren.project.yaml", "*/reference/**", "*/skills/**"]);
           const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
           runStoreGit(["commit", "-m", `phren: ${actor} team sync`]);
 
