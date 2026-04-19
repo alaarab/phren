@@ -379,7 +379,7 @@ export async function handleHookStop() {
   // Stage all changes first, then unstage any sensitive files that slipped
   // through. Using pathspec exclusions with `git add -A` can fail when
   // excluded paths are also gitignored (git treats the pathspec as an error).
-  let add = await runBestEffortGit(["add", "-A"], phrenPath);
+  let add = await runBestEffortGit(["add", "--sparse", "-A"], phrenPath);
   if (add.ok) {
     // Belt-and-suspenders: unstage sensitive files that .gitignore should
     // already block. Failures here are non-fatal (files may not exist).
@@ -521,7 +521,7 @@ export async function handleHookStop() {
           const storeStatus = await runBestEffortGit(["status", "--porcelain"], store.path);
           if (storeStatus.ok && storeStatus.output) {
             // Only stage journal/, tasks.md, truths.md, FINDINGS.md, summary.md — NOT .runtime/
-            await runBestEffortGit(["add", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/summary.md", ".phren-team.yaml"], store.path);
+            await runBestEffortGit(["add", "--sparse", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/FINDINGS.md.bak", "*/summary.md", "*/review.md", "*/CLAUDE.md", "*/topic-config.json", "*/phren.project.yaml", "*/reference/**", "*/skills/**", ".phren-team.yaml"], store.path);
             const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
             const teamCommit = await runBestEffortGit(["commit", "-m", `phren: ${actor} team sync`], store.path);
             if (teamCommit.ok) {

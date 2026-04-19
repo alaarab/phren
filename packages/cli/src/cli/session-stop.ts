@@ -328,7 +328,7 @@ export async function handleHookStop() {
   // Stage all changes first, then unstage any sensitive files that slipped
   // through. Using pathspec exclusions with `git add -A` can fail when
   // excluded paths are also gitignored (git treats the pathspec as an error).
-  let add = await runBestEffortGit(["add", "-A"], phrenPath);
+  let add = await runBestEffortGit(["add", "--sparse", "-A"], phrenPath);
   if (add.ok) {
     // Belt-and-suspenders: unstage sensitive files that .gitignore should
     // already block. Failures here are non-fatal (files may not exist).
