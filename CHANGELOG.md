@@ -5,17 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-04-19
+
+### Added
+- Windows parity: MCP config now emits `npx.cmd` on win32 so clients spawning servers with `shell: false` resolve the shim correctly.
+- `phren init` on Windows auto-appends `%USERPROFILE%\.local\bin` to the user `PATH` (PowerShell, user scope — no admin required) so the freshly-installed `phren.cmd` wrapper is discoverable from fresh terminals. Exposed via `ensureLocalBinOnWindowsPath()`.
+- `buildLifecycleCommands(phrenPath, { forcePosix })` option: returns POSIX-syntax hook commands even on Windows. Used for GitHub Copilot CLI's `bash:` field, which is dispatched through Git Bash.
+- Windows session wrappers bound each hook call with PowerShell `Start-Job` + `Wait-Job -Timeout ${PHREN_HOOK_TIMEOUT_S}`, so a hung hook can't stall the wrapped command.
+- Doctor's `isWrapperActive` is Windows-aware: uses `where.exe`, resolves `.cmd` wrappers, and reports the correct wrapper filename in its detail messages.
+- New Windows-specific test coverage: `.cmd` wrapper shape, Copilot bash-compatible command assertion, `Start-Job`/`Wait-Job` timeout plumbing.
+
 ### Changed
+- Previously POSIX-only wrapper-install tests now run on Windows using a `wrapperFor(tool)` helper that picks the right suffix per platform.
+
+### Fixed
+- `configureAllHooks()` — Copilot's `bash:` commands were unusable on Windows because they carried cmd-syntax (`set "VAR=..."`). Now always emits POSIX env-prefixing for Copilot regardless of platform.
+- Removed dead `DIRECT_MANAGE_COMMANDS` set in `entrypoint.ts` so the lint job is green.
+
+### Previously unreleased (now shipped in 0.1.19)
 - `pre-prompt` custom hooks are now mirrored into Claude Code's `~/.claude/settings.json` as **sibling `UserPromptSubmit` entries** instead of being chained inside phren's own `hook-prompt` invocation. Claude Code dispatches them in parallel with phren's hook, so a slow custom hook (e.g. one that walks a OneDrive-backed WSL mount) no longer eats phren's response budget or blocks phren's context injection. Each sibling gets its own Claude-side timeout (defaults to 15s, overridable per hook via the prefs `timeout` field).
 - `runPrePromptHooks` now skips any custom hook command that is already registered as a sibling, so hooks never double-run during the rollout window.
 - `add_custom_hook` and `remove_custom_hook` MCP tools auto-sync siblings into `settings.json` after they update prefs — no `phren init` rerun required.
 - `configureClaude` runs the same sync at init time, picking up any pre-existing pre-prompt hooks from prefs.
-
-### Added
-- `InstallPreferences.managedPrePromptSiblingCommands` field tracks which siblings phren has written so stale ones can be cleanly removed when a hook is deleted from prefs. Internal bookkeeping; do not edit by hand.
-- `upsertCustomPrePromptSiblings(hooksMap, phrenPath)` exported from `init/config.ts` — patch helper that reconciles a `HookMap` with the current pre-prompt custom hooks. Idempotent. Returns `{added, removed}`.
-- `getRegisteredPrePromptSiblingCommands(): Set<string>` exported from `hooks.ts` — read-only inspection of which commands are currently in `~/.claude/settings.json` `UserPromptSubmit` entries.
-- 8 new tests in `hooks.test.ts` covering the sync helper (add, remove, idempotency, user-authored entry preservation, webhook filtering, in-process cache invalidation) and the skip behavior in `runPrePromptHooks`.
+- `InstallPreferences.managedPrePromptSiblingCommands` field tracks which siblings phren has written so stale ones can be cleanly removed when a hook is deleted from prefs.
+- `upsertCustomPrePromptSiblings(hooksMap, phrenPath)` exported from `init/config.ts` — idempotent patch helper. Returns `{added, removed}`.
+- `getRegisteredPrePromptSiblingCommands(): Set<string>` exported from `hooks.ts` — read-only inspection.
 
 ## [0.1.18] - 2026-04-12
 
