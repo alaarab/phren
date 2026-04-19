@@ -88,37 +88,19 @@ Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user pro
 
 ---
 
-## Integrated Agent
-
-Phren now uses `phren` itself as the primary coding-agent entrypoint. Memory operations remain available under `phren manage ...`, and `phren-agent` remains an explicit alias for the standalone agent runtime. [Read the agent docs →](docs/agent.md)
-
-```bash
-npm i -g @phren/agent
-phren -i                               # interactive TUI
-phren "fix the login bug"              # one-shot task
-phren --reasoning high "audit auth"    # same GPT-5.4 default, higher reasoning
-phren --yolo "add tests"               # full-auto, no confirmations
-phren manage search auth               # memory/search surface
-```
-
----
-
 ## CLI quick reference
 
 ```bash
-phren                                   Interactive coding agent
-phren "task"                            Run a one-shot coding task
-phren -i                                Interactive agent (TUI/REPL)
-phren manage shell                      Interactive memory shell
-phren manage search <query>             Full-text search with FTS5
-phren manage add-finding <project> "insight"
-phren manage task add <project> "item"  Add a task
-phren manage session_start <project>    Start a session
-phren manage store list                 List personal + team stores
-phren manage team init <name> --remote <url>
-phren manage team join <url>            Join a team store
-phren manage web-ui [--port 3499]       Launch the web UI
-phren manage doctor                     Health check & auto-fix
+phren                                   Interactive memory shell
+phren search <query>                    Full-text search with FTS5
+phren add-finding <project> "insight"
+phren task add <project> "item"         Add a task
+phren session_start <project>           Start a session
+phren store list                        List personal + team stores
+phren team init <name> --remote <url>
+phren team join <url>                   Join a team store
+phren web-ui [--port 3499]              Launch the web UI
+phren doctor                            Health check & auto-fix
 ```
 
 See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).
@@ -149,7 +131,6 @@ All use the same phren store. No vendor lock-in.
 | Package | Description |
 |---------|-------------|
 | [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (54 tools, FTS5, hooks) |
-| [`@phren/agent`](packages/agent) | Coding agent with TUI (providers, tools, multi-agent) |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 
 ---

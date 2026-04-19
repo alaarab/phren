@@ -39,7 +39,6 @@ import {
 import { startEmbeddingWarmup } from "./startup-embedding.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { VERSION as PACKAGE_VERSION } from "./package-metadata.js";
-import { runBundledAgentCli } from "./agent-launch.js";
 const invocation = resolveTopLevelInvocation(process.argv.slice(2));
 
 if (invocation.kind === "help") {
@@ -53,12 +52,11 @@ if (invocation.kind === "version") {
 }
 
 if (invocation.kind === "manage") {
-  await runTopLevelCommand(invocation.argv, { allowDefaultShell: false });
-  process.exit(process.exitCode ?? 0);
-}
-
-if (invocation.kind === "agent") {
-  await runBundledAgentCli(invocation.argv);
+  const handled = await runTopLevelCommand(invocation.argv, { allowDefaultShell: true });
+  if (!handled) {
+    console.error(`Unknown command: ${invocation.argv[0]}\nRun 'phren --help' for available commands.`);
+    process.exit(1);
+  }
   process.exit(process.exitCode ?? 0);
 }
 

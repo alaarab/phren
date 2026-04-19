@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { resolveProvider } from "../providers/resolve.js";
-import { makeTempDir } from "../../../cli/src/test-helpers.js";
+import { makeTempDir } from "../../../../packages/cli/src/test-helpers.js";
 
 describe("resolveProvider auth profiles", () => {
   let tmp: { path: string; cleanup: () => void };

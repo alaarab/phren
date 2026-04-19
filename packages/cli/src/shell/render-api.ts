@@ -1,6 +1,6 @@
 /**
  * Read-only rendering API for the shell views, consumable by external packages
- * (e.g. @phren/agent) via the "@phren/cli/shell/render-api" subpath export.
+ * via the "@phren/cli/shell/render-api" subpath export.
  *
  * Exposes renderMenuFrame (render a full shell view frame) and handleMenuKey
  * (pure navigation logic) without pulling in mutation or MCP dependencies.

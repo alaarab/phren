@@ -9,13 +9,18 @@ Source lives at `~phren`. Published to npm. Starter templates are bundled in the
 
 ## Monorepo Structure
 
-pnpm workspace with turborepo. Three packages:
+pnpm workspace with turborepo. Shipped packages:
 
 | Package | Path | npm | Description |
 |---------|------|-----|-------------|
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
-| `@phren/agent` | `packages/agent/` | Published | Standalone coding agent |
 | `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension |
+
+Experimental (not published, not wired into the `phren` CLI):
+
+| Package | Path | Status | Description |
+|---------|------|--------|-------------|
+| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Kept in the monorepo for local iteration. Run directly via `pnpm --filter @phren/agent ...` or the built `phren-agent` binary — **not** via `phren`. |
 
 ## Key Files
 
@@ -57,7 +62,6 @@ pnpm lint          # lint all packages
 See `reference/topics/` for detailed documentation:
 - `mcp-tools.md` -- all 54 MCP tools
 - `cli-commands.md` -- full CLI command reference
-- `agent.md` -- built-in coding agent, providers, multi-agent
 - `hooks.md` -- lifecycle hooks, consolidation system, key patterns
 - `environment.md` -- environment variables, directory structure, finding quality rules
 - `architecture.md` -- system architecture and design patterns

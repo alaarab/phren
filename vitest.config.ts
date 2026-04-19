@@ -8,7 +8,7 @@ export default defineConfig({
     testTimeout: 15000,
     include: [
       "packages/cli/src/**/*.test.ts",
-      "packages/agent/src/**/*.test.ts",
+      "experimental/agent/src/**/*.test.ts",
     ],
   },
 });

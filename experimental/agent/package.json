@@ -1,7 +1,8 @@
 {
   "name": "@phren/agent",
   "version": "0.1.15",
-  "description": "Coding agent with persistent memory — powered by phren",
+  "private": true,
+  "description": "Experimental coding agent — not part of the shipped phren product. Source kept for local iteration only.",
   "type": "module",
   "bin": {
     "phren-agent": "dist/bin.js"
@@ -19,7 +20,7 @@
   "dependencies": {
     "@phren/cli": "workspace:*",
     "ink": "^6.8.0",
-    "react": "^19.2.4"
+    "react": "^19.2.5"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -36,7 +37,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alaarab/phren.git",
-    "directory": "packages/agent"
+    "directory": "experimental/agent"
   },
   "devDependencies": {
     "@types/react": "^19.2.14"

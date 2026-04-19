@@ -86,7 +86,6 @@ import {
 } from "./actions.js";
 import { handleGraphNamespace } from "./graph.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import { runBundledAgentCli } from "../agent-launch.js";
 
 // ── CLI router ───────────────────────────────────────────────────────────────
 
@@ -196,9 +195,6 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleTeamNamespace(args);
     case "promote":
       return handlePromoteNamespace(args);
-    case "agent": {
-      return runBundledAgentCli(args);
-    }
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
       process.exit(1);

@@ -2,7 +2,7 @@
   "name": "phren",
   "version": "0.1.17",
   "private": true,
-  "description": "Knowledge layer for AI agents with a built-in coding agent",
+  "description": "Knowledge layer for AI agents",
   "type": "module",
   "scripts": {
     "build": "turbo run build",
@@ -14,14 +14,14 @@
     "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.1.0",
-    "@playwright/test": "^1.58.2",
+    "@biomejs/biome": "^2.4.12",
+    "@playwright/test": "^1.59.1",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.6.0",
     "@vitest/coverage-v8": "^4.1.4",
-    "esbuild": "^0.27.4",
+    "esbuild": "^0.27.7",
     "tsx": "^4.21.0",
-    "turbo": "^2.5.4",
+    "turbo": "^2.9.6",
     "typescript": "^6.0.2",
     "vitest": "^4.1.4"
   },

@@ -1,0 +1,297 @@
+/**
+ * Agent spawner — forks child agent processes and manages their lifecycle.
+ *
+ * Usage:
+ *   const spawner = new AgentSpawner();
+ *   const id = spawner.spawn({ task: "fix the bug", ... });
+ *   spawner.on("done", (agentId, result) => { ... });
+ *   spawner.cancel(id);
+ *   await spawner.shutdown();
+ */
+import { fork } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { EventEmitter } from "node:events";
+import { createWorktree, hasWorktreeChanges, removeWorktree } from "./worktree.js";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+/** Resolved path to the child-entry module. */
+const CHILD_ENTRY = join(__dirname, "child-entry.js");
+/** Keys forwarded from the parent env into child processes. */
+const ENV_FORWARD_KEYS = [
+    "OPENROUTER_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "PHREN_AGENT_PROVIDER",
+    "PHREN_AGENT_MODEL",
+    "PHREN_OLLAMA_URL",
+    "PHREN_PATH",
+    "PHREN_PROFILE",
+    "PHREN_DEBUG",
+    "HOME",
+    "USERPROFILE",
+    "PATH",
+    "NODE_EXTRA_CA_CERTS",
+];
+export class AgentSpawner extends EventEmitter {
+    agents = new Map();
+    processes = new Map();
+    nextId = 1;
+    /** Spawn a new child agent. Returns the agent ID. */
+    spawn(opts) {
+        const agentId = `agent-${this.nextId++}`;
+        // Build forwarded env
+        const childEnv = {};
+        for (const key of ENV_FORWARD_KEYS) {
+            if (process.env[key])
+                childEnv[key] = process.env[key];
+        }
+        if (opts.env)
+            Object.assign(childEnv, opts.env);
+        const payload = {
+            type: "spawn",
+            agentId,
+            task: opts.task,
+            cwd: opts.cwd ?? process.cwd(),
+            provider: opts.provider,
+            model: opts.model,
+            project: opts.project,
+            permissions: opts.permissions ?? "auto-confirm",
+            maxTurns: opts.maxTurns ?? 50,
+            budget: opts.budget ?? null,
+            plan: opts.plan ?? false,
+            verbose: opts.verbose ?? false,
+            env: childEnv,
+            agentType: opts.agentType,
+        };
+        const entry = {
+            id: agentId,
+            task: opts.task,
+            displayName: opts.displayName,
+            status: "starting",
+            startedAt: Date.now(),
+        };
+        this.agents.set(agentId, entry);
+        // Fork the child process
+        const child = fork(CHILD_ENTRY, [], {
+            stdio: ["pipe", "pipe", "pipe", "ipc"],
+            env: { ...childEnv, FORCE_COLOR: "0" },
+            cwd: opts.cwd ?? process.cwd(),
+        });
+        this.processes.set(agentId, child);
+        entry.pid = child.pid;
+        entry.status = "running";
+        // If worktree isolation requested, create a worktree and redirect cwd
+        if (opts.isolation === "worktree") {
+            try {
+                const wt = createWorktree(payload.cwd, agentId);
+                entry.worktree = wt;
+                payload.cwd = wt.path;
+                payload.worktreePath = wt.path;
+            }
+            catch (err) {
+                this.emit("status", agentId, `Worktree creation failed: ${err}`);
+            }
+        }
+        // Send the spawn payload
+        child.send(payload);
+        // Handle IPC messages from child
+        child.on("message", (msg) => {
+            this.handleChildMessage(msg);
+        });
+        // Handle child exit
+        child.on("exit", (code) => {
+            const agent = this.agents.get(agentId);
+            if (agent && agent.status === "running") {
+                agent.status = code === 0 ? "done" : "error";
+                agent.finishedAt = Date.now();
+                if (code !== 0 && !agent.error) {
+                    agent.error = `Process exited with code ${code}`;
+                }
+            }
+            // Clean up worktree if no uncommitted changes remain
+            if (agent?.worktree) {
+                const wt = agent.worktree;
+                if (!hasWorktreeChanges(wt.path)) {
+                    removeWorktree(opts.cwd ?? process.cwd(), wt.path, wt.branch);
+                    agent.worktree = undefined;
+                }
+                else {
+                    this.emit("status", agentId, `Worktree preserved with changes: ${wt.path} (branch: ${wt.branch})`);
+                }
+            }
+            this.processes.delete(agentId);
+            this.emit("exit", agentId, code);
+        });
+        // Capture stderr for error reporting
+        child.stderr?.on("data", (data) => {
+            const text = data.toString();
+            if (opts.verbose) {
+                this.emit("status", agentId, text);
+            }
+        });
+        return agentId;
+    }
+    handleChildMessage(msg) {
+        // DirectMessageEvent has from/to instead of agentId — handle before accessing msg.agentId
+        if (msg.type === "direct_message") {
+            this.routeDirectMessage(msg.from, msg.to, msg.content);
+            return;
+        }
+        const agent = this.agents.get(msg.agentId);
+        switch (msg.type) {
+            case "text_delta":
+                this.emit("text_delta", msg.agentId, msg.text);
+                break;
+            case "text_block":
+                this.emit("text_block", msg.agentId, msg.text);
+                break;
+            case "tool_start":
+                this.emit("tool_start", msg.agentId, msg.toolName, msg.input, msg.count);
+                break;
+            case "tool_end":
+                this.emit("tool_end", msg.agentId, msg.toolName, msg.input, msg.output, msg.isError, msg.durationMs);
+                break;
+            case "status":
+                this.emit("status", msg.agentId, msg.message);
+                break;
+            case "done":
+                if (agent) {
+                    // Don't mark as "done" status — child stays alive and will go idle
+                    agent.result = msg.result;
+                }
+                this.emit("done", msg.agentId, msg.result);
+                break;
+            case "error":
+                if (agent) {
+                    agent.error = msg.error;
+                }
+                this.emit("error", msg.agentId, msg.error);
+                break;
+            case "idle":
+                if (agent) {
+                    agent.status = "idle";
+                }
+                this.emit("idle", msg.agentId, msg.idleReason, msg.dmSummaries);
+                break;
+            case "shutdown_approved":
+                if (agent) {
+                    agent.status = "done";
+                    agent.finishedAt = Date.now();
+                }
+                this.emit("shutdown_approved", msg.agentId);
+                break;
+        }
+    }
+    /** Route a direct message from one agent to another. */
+    routeDirectMessage(from, to, content) {
+        this.emit("message", from, to, content);
+        this.sendToAgent(to, content, from);
+    }
+    /** Cancel a running agent. */
+    cancel(agentId) {
+        const child = this.processes.get(agentId);
+        if (!child)
+            return false;
+        child.send({ type: "cancel", agentId, reason: "Cancelled by parent" });
+        // Give it a moment to clean up, then force kill
+        setTimeout(() => {
+            if (this.processes.has(agentId)) {
+                child.kill();
+            }
+        }, 5000);
+        const agent = this.agents.get(agentId);
+        if (agent) {
+            agent.status = "cancelled";
+            agent.finishedAt = Date.now();
+        }
+        return true;
+    }
+    /** Send a direct message to a child agent via IPC. Returns true if delivered. */
+    sendToAgent(agentId, message, from) {
+        const child = this.processes.get(agentId);
+        if (!child)
+            return false;
+        child.send({ type: "deliver_message", from: from ?? "user", content: message });
+        return true;
+    }
+    /** Wake an idle agent with a new task or message. */
+    wakeAgent(agentId, opts) {
+        const child = this.processes.get(agentId);
+        const agent = this.agents.get(agentId);
+        if (!child || !agent || agent.status !== "idle")
+            return false;
+        agent.status = "running";
+        child.send({ type: "wake", task: opts?.task, message: opts?.message, from: opts?.from });
+        return true;
+    }
+    /** Request graceful shutdown — waits for ShutdownApproved or force kills after timeout. */
+    requestShutdown(agentId, timeoutMs = 10_000) {
+        const child = this.processes.get(agentId);
+        if (!child)
+            return Promise.resolve(false);
+        child.send({ type: "shutdown_request" });
+        return new Promise((resolve) => {
+            const onApproved = (id) => {
+                if (id === agentId) {
+                    clearTimeout(timer);
+                    this.removeListener("shutdown_approved", onApproved);
+                    resolve(true);
+                }
+            };
+            const timer = setTimeout(() => {
+                this.removeListener("shutdown_approved", onApproved);
+                // Force kill
+                if (this.processes.has(agentId)) {
+                    child.kill();
+                }
+                resolve(false);
+            }, timeoutMs);
+            this.on("shutdown_approved", onApproved);
+        });
+    }
+    /** Get the current state of an agent. */
+    getAgent(agentId) {
+        return this.agents.get(agentId);
+    }
+    /** List all agents. */
+    listAgents() {
+        return [...this.agents.values()];
+    }
+    /** Get agents by status. */
+    getAgentsByStatus(status) {
+        return [...this.agents.values()].filter((a) => a.status === status);
+    }
+    /** Shut down all running and idle agents gracefully, then force-kill stragglers. */
+    async shutdown() {
+        // Request graceful shutdown for idle agents (they can exit cleanly)
+        const idle = this.getAgentsByStatus("idle");
+        const shutdownPromises = idle.map((a) => this.requestShutdown(a.id, 5_000));
+        // Cancel running agents (they're mid-task, can't wait)
+        const running = this.getAgentsByStatus("running");
+        for (const agent of running) {
+            this.cancel(agent.id);
+        }
+        // Wait for graceful shutdowns
+        await Promise.all(shutdownPromises);
+        // Wait for all processes to exit (max 10s)
+        if (this.processes.size > 0) {
+            await new Promise((resolve) => {
+                const check = () => {
+                    if (this.processes.size === 0)
+                        return resolve();
+                    setTimeout(check, 100);
+                };
+                setTimeout(() => {
+                    // Force kill remaining
+                    for (const [, child] of this.processes) {
+                        child.kill();
+                    }
+                    this.processes.clear();
+                    resolve();
+                }, 10_000);
+                check();
+            });
+        }
+    }
+}

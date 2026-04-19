@@ -24,15 +24,8 @@ afterEach(() => {
 });
 
 describe("resolveTopLevelInvocation", () => {
-  it("routes empty argv to interactive agent mode", () => {
-    expect(resolveTopLevelInvocation([])).toEqual({ kind: "agent", argv: ["-i"] });
-  });
-
-  it("routes freeform input to the agent", () => {
-    expect(resolveTopLevelInvocation(["fix", "the", "login", "bug"])).toEqual({
-      kind: "agent",
-      argv: ["fix", "the", "login", "bug"],
-    });
+  it("routes empty argv to manage mode (interactive shell default)", () => {
+    expect(resolveTopLevelInvocation([])).toEqual({ kind: "manage", argv: [] });
   });
 
   it("routes legacy management commands to manage mode", () => {
@@ -53,17 +46,10 @@ describe("resolveTopLevelInvocation", () => {
     });
   });
 
-  it("routes explicit agent alias to agent mode", () => {
-    expect(resolveTopLevelInvocation(["agent", "--provider", "codex", "-i"])).toEqual({
-      kind: "agent",
-      argv: ["--provider", "codex", "-i"],
-    });
-  });
-
-  it("routes auth commands to agent mode", () => {
-    expect(resolveTopLevelInvocation(["auth", "status"])).toEqual({
-      kind: "agent",
-      argv: ["auth", "status"],
+  it("routes unknown commands to manage mode for error handling", () => {
+    expect(resolveTopLevelInvocation(["fix", "the", "login", "bug"])).toEqual({
+      kind: "manage",
+      argv: ["fix", "the", "login", "bug"],
     });
   });
 

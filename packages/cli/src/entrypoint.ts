@@ -14,64 +14,31 @@ import {
 } from "./project-config.js";
 
 
-const HELP_TEXT = `phren manage - memory, setup, and store operations
+const HELP_TEXT = `phren - persistent memory for AI agents
 
-  phren manage init                Set up phren
-  phren manage quickstart          Quick setup: init + project scaffold
-  phren manage add [path]          Register a project
-  phren manage search <query>      Search what phren knows
-  phren manage status              Health check
-  phren manage doctor [--fix]      Diagnose and repair
-  phren manage web-ui              Open the knowledge graph
-  phren manage tasks               Cross-project task view
-  phren manage graph               Fragment knowledge graph
-  phren manage shell               Interactive memory shell
+  phren                            Interactive memory shell
+  phren init                       Set up phren
+  phren quickstart                 Quick setup: init + project scaffold
+  phren add [path]                 Register a project
+  phren search <query>             Search what phren knows
+  phren status                     Health check
+  phren doctor [--fix]             Diagnose and repair
+  phren web-ui                     Open the knowledge graph
+  phren tasks                      Cross-project task view
+  phren graph                      Fragment knowledge graph
+  phren shell                      Interactive memory shell
 
-Agent shortcuts:
-  phren                            Interactive coding agent
-  phren "fix the login bug"        One-shot coding task
-  phren --provider openai-codex -i Interactive agent with explicit provider
-  phren --reasoning high "..."     Run GPT-5.4 with higher reasoning
+  phren manage <command>           Alias for the top-level commands above
+  phren mem <command>              Alias for \`phren manage\`
 
 Legacy shortcuts still work:
   phren init, phren search, phren task, phren config, ...
 
-  phren manage help <topic>        Detailed management help
+  phren help <topic>               Detailed help
 Topics: projects, skills, hooks, config, maintain, setup, stores, team, env, all
 `;
 
-const INTEGRATED_HELP_TEXT = `phren - persistent memory with an integrated coding agent
-
-Agent:
-  phren                            Interactive coding agent
-  phren "fix the login bug"        One-shot coding task
-  phren -i                         Interactive agent TUI
-  phren --provider openai-codex "..."  Run the agent with an explicit provider
-  phren --reasoning high "..."         Override the default medium thinking level
-  phren agent ...                  Explicit alias for agent mode
-  phren auth status                Show configured provider auth
-  phren auth login                 Sign in with your Codex subscription
-
-Memory and management:
-  phren manage <command>           Memory/store/setup/config operations
-  phren mem <command>              Alias for \`phren manage\`
-  phren manage shell               Interactive memory shell
-  phren manage search <query>      Search what phren knows
-  phren manage task add <project> "..."
-  phren manage config ...
-  phren manage init
-
-Legacy shortcuts still work:
-  phren init
-  phren search <query>
-  phren task ...
-  phren config ...
-  phren store ...
-
-Machine-facing mode:
-  phren <phren-root-path>          Start the MCP server over stdio
-
-Use \`phren manage help\` for the full management command reference.`;
+const INTEGRATED_HELP_TEXT = HELP_TEXT;
 
 const HELP_TOPICS: Record<string, string> = {
   projects: `Projects:
@@ -237,7 +204,6 @@ export const CLI_COMMANDS = [
   "store",
   "team",
   "promote",
-  "agent",
 ];
 
 const DIRECT_MANAGE_COMMANDS = new Set([
@@ -254,7 +220,6 @@ const DIRECT_MANAGE_COMMANDS = new Set([
 ]);
 
 export type TopLevelInvocation =
-  | { kind: "agent"; argv: string[] }
   | { kind: "manage"; argv: string[] }
   | { kind: "mcp"; phrenArg: string }
   | { kind: "help" }
@@ -295,26 +260,14 @@ export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
   }
 
   if (argvCommand === "manage" || argvCommand === "mem") {
-    return { kind: "manage", argv: argv.slice(1).length > 0 ? argv.slice(1) : ["help"] };
-  }
-
-  if (argvCommand === "agent") {
-    return { kind: "agent", argv: argv.slice(1) };
-  }
-
-  if (argvCommand === "auth") {
-    return { kind: "agent", argv };
+    return { kind: "manage", argv: argv.slice(1).length > 0 ? argv.slice(1) : [] };
   }
 
   if (!argvCommand) {
-    return { kind: "agent", argv: ["-i"] };
+    return { kind: "manage", argv: [] };
   }
 
-  if (DIRECT_MANAGE_COMMANDS.has(argvCommand)) {
-    return { kind: "manage", argv };
-  }
-
-  return { kind: "agent", argv };
+  return { kind: "manage", argv };
 }
 
 export function printIntegratedHelp(): void {

@@ -1108,14 +1108,13 @@ describe("CLI integration: unknown command", () => {
 
   afterEach(() => cleanup());
 
-  it("exits cleanly for unknown manage command", () => {
-    // Unknown commands now route to the agent by default.
-    // 'manage nonexistent-command' falls through gracefully.
-    const { exitCode } = runCli(
+  it("exits with an error for unknown manage command", () => {
+    const { exitCode, stderr } = runCli(
       ["manage", "nonexistent-command"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
     );
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Unknown command");
   });
 });
 

@@ -1,0 +1,2 @@
+/** Agent tool types. */
+export {};

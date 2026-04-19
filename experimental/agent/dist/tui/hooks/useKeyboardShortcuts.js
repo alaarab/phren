@@ -1,0 +1,169 @@
+import { useInput } from "ink";
+import { COMMAND_NAMES } from "../../commands.js";
+export function useKeyboardShortcuts(opts) {
+    useInput((input, key) => {
+        // Reset Ctrl+C count on any non-Ctrl+C keypress
+        if (!(input === "c" && key.ctrl)) {
+            if (opts.ctrlCCount > 0)
+                opts.onSetCtrlCCount(0);
+        }
+        // ── Tab bar navigation ────────────────────────────────────
+        if (opts.tabFocused) {
+            if (key.leftArrow) {
+                opts.onTabLeft?.();
+                return;
+            }
+            if (key.rightArrow) {
+                opts.onTabRight?.();
+                return;
+            }
+            if (key.return) {
+                opts.onTabSelect?.();
+                return;
+            }
+            if (key.upArrow) {
+                opts.onExitTabBar?.();
+                return;
+            }
+            if (key.escape) {
+                opts.onExitTabBar?.();
+                return;
+            }
+            // Any other key: exit tab bar and fall through
+            opts.onExitTabBar?.();
+        }
+        // Shift+Down → cycle through agent tabs
+        if (key.downArrow && key.shift && opts.onCycleAgent) {
+            opts.onCycleAgent();
+            return;
+        }
+        // Down arrow (empty input) → enter tab bar
+        if (key.downArrow && opts.inputValue === "" && opts.onEnterTabBar && !opts.tabFocused) {
+            opts.onEnterTabBar();
+            return;
+        }
+        // Ctrl+G -- open external editor for input
+        if (key.ctrl && input === "g") {
+            opts.onOpenEditor?.();
+            return;
+        }
+        // Ctrl+S -- stash/unstash input
+        if (key.ctrl && input === "s") {
+            if (opts.inputValue && opts.onStash) {
+                opts.onStash(opts.inputValue);
+                opts.onSetInput("");
+            }
+            else if (!opts.inputValue && opts.onUnstash) {
+                const stashed = opts.onUnstash();
+                if (stashed)
+                    opts.onSetInput(stashed);
+            }
+            return;
+        }
+        // Ctrl+R -- history search
+        if (key.ctrl && input === "r") {
+            opts.onHistorySearch?.();
+            return;
+        }
+        // Ctrl+F -- content search
+        if (key.ctrl && input === "f") {
+            opts.onContentSearch?.();
+            return;
+        }
+        // Ctrl+O -- expand/collapse last tool call output
+        if (key.ctrl && input === "o") {
+            opts.onExpandTool?.();
+            return;
+        }
+        // Ctrl+T -- toggle task list display
+        if (key.ctrl && input === "t") {
+            opts.onToggleTaskList?.();
+            return;
+        }
+        // Ctrl+D -- exit cleanly
+        if (key.ctrl && input === "d") {
+            opts.onExit();
+            return;
+        }
+        // Ctrl+L -- clear screen
+        if (key.ctrl && input === "l") {
+            process.stdout.write("\x1b[2J\x1b[H");
+            return;
+        }
+        // Shift+Tab -- cycle permission mode
+        if (key.shift && key.tab) {
+            opts.onCyclePermissions();
+            return;
+        }
+        // Ctrl+C -- progressive: cancel turn / clear input / warn / quit
+        if (key.ctrl && input === "c") {
+            if (opts.isRunning) {
+                opts.onCancelTurn();
+                return;
+            }
+            if (opts.inputValue) {
+                opts.onSetInput("");
+                opts.onSetCtrlCCount(0);
+                return;
+            }
+            if (opts.ctrlCCount >= 1) {
+                opts.onExit();
+                return;
+            }
+            opts.onSetCtrlCCount(opts.ctrlCCount + 1);
+            return;
+        }
+        // Escape -- cancel running turn, exit bash mode, clear input, or cancel agent
+        if (key.escape) {
+            if (opts.isRunning) {
+                opts.onCancelTurn();
+                return;
+            }
+            if (opts.bashMode) {
+                opts.onSetBashMode(false);
+                opts.onSetInput("");
+            }
+            else if (opts.inputValue) {
+                opts.onSetInput("");
+            }
+            else if (opts.onEscCancelAgent) {
+                opts.onEscCancelAgent();
+            }
+            return;
+        }
+        // Up arrow -- recall older history
+        if (key.upArrow && !opts.isRunning) {
+            const history = opts.inputHistory;
+            if (history.length === 0)
+                return;
+            const newIndex = Math.min(opts.historyIndex + 1, history.length - 1);
+            opts.onSetHistoryIndex(newIndex);
+            opts.onSetInput(history[history.length - 1 - newIndex]);
+            return;
+        }
+        // Down arrow -- recall newer history
+        if (key.downArrow && !opts.isRunning) {
+            const history = opts.inputHistory;
+            if (opts.historyIndex <= 0) {
+                opts.onSetHistoryIndex(-1);
+                opts.onSetInput("");
+                return;
+            }
+            const newIndex = opts.historyIndex - 1;
+            opts.onSetHistoryIndex(newIndex);
+            opts.onSetInput(history[history.length - 1 - newIndex]);
+            return;
+        }
+        // Tab -- slash command completion when input starts with /
+        if (key.tab && !key.shift && !opts.isRunning) {
+            const val = opts.inputValue;
+            if (val.startsWith("/") && val.length > 1) {
+                const matches = COMMAND_NAMES.filter(c => c.startsWith(val));
+                if (matches.length === 1) {
+                    opts.onSetInput(matches[0]);
+                }
+            }
+            return;
+        }
+    });
+}
