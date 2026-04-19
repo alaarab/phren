@@ -84,6 +84,13 @@
       position: relative; height: 88px; overflow: hidden;
       margin: 8px 0; pointer-events: none;
     }
+    /* Overlay variant: pinned to the bottom of its nearest positioned ancestor,
+       so the runner can cross a section without adding vertical space to it. */
+    .run-strip--overlay {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      margin: 0; z-index: 0;
+    }
+    .run-strip--overlay .ground { display: none; }
     .run-strip .ground {
       position: absolute; left: 0; right: 0; bottom: 18px; height: 1px;
       background: rgba(156,143,248,0.22);
@@ -486,7 +493,17 @@
   </section>
 
   <!-- HOOKS + CONFIG — two-column: trace left, knobs right -->
-  <section class="trace-section" id="hooks">
+  <section class="trace-section" id="hooks" style="position:relative;">
+    <!-- phren sneaks across the bottom of the hooks section (absolute, no extra height) -->
+    <div class="run-strip phren-motion run-strip--overlay" aria-hidden="true">
+      <div class="ground"></div>
+      <div class="runner">
+        <span class="dust dust-3"></span>
+        <span class="dust dust-2"></span>
+        <span class="dust dust-1"></span>
+        <div class="body"><div class="phren-sprite-mount" data-props='{"size":70,"pose":"run","facing":"right","blinkEvery":14,"bobEvery":1,"armBack":true,"mouth":"open"}'></div></div>
+      </div>
+    </div>
     <div class="container">
       <div class="trace-header reveal">
         <div class="section-label">Under the hood</div>
@@ -1020,16 +1037,6 @@
     </div>
   </section>
 
-  <!-- running phren sneaks across the page -->
-  <div class="run-strip phren-motion" aria-hidden="true">
-    <div class="ground"></div>
-    <div class="runner">
-      <span class="dust dust-3"></span>
-      <span class="dust dust-2"></span>
-      <span class="dust dust-1"></span>
-      <div class="body"><img src="phren-hero.svg" alt="" /></div>
-    </div>
-  </div>
 
   <!-- TEAM STORES -->
   <section class="bento-section" id="teams">
@@ -1072,25 +1079,10 @@
   <!-- SKILLS -->
   <section class="skills-section" id="skills">
     <div class="container">
-      <div class="skills-intro">
-        <div class="skills-header reveal">
-          <div class="section-label">Phren's tricks</div>
-          <h2 class="section-title">54 MCP tools built in.<br>Skills for the bigger stuff.</h2>
-          <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Global skills live in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>, project skills in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/&lt;project&gt;/skills/</code>. Project skills override global ones with the same name.</p>
-        </div>
-
-        <!-- phren scribbles a finding alongside the header text -->
-        <div class="writing-mini phren-motion reveal" aria-label="Phren jotting down a new skill finding">
-          <div class="mini-phren">
-            <img src="phren-hero.svg" alt="" width="84" height="98" />
-            <span class="pencil" aria-hidden="true"></span>
-          </div>
-          <div class="mini-card">
-            <div class="mini-tag">[PATTERN]</div>
-            <div class="mini-line">skills override global by name; scope to project first</div>
-            <div class="mini-meta">phren &middot; just now &middot; trust 0.88</div>
-          </div>
-        </div>
+      <div class="skills-header reveal">
+        <div class="section-label">Phren's tricks</div>
+        <h2 class="section-title">54 MCP tools built in.<br>Skills for the bigger stuff.</h2>
+        <p class="section-sub" style="margin-top:12px"><span class="kw">MCP tools</span> handle search, capture, review, and sync. <span class="kw-skill">Skills</span> are shortcuts for larger jobs. Global skills live in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/global/skills/</code>, project skills in <code style="font-size:14px;color:var(--copper-mid)">~/.phren/&lt;project&gt;/skills/</code>. Project skills override global ones with the same name.</p>
       </div>
 
       <div class="skills-grid">
@@ -1124,8 +1116,23 @@
       <div class="bento-header reveal" style="text-align:center;">
         <div class="section-label">Works everywhere</div>
         <h2 class="section-title">One brain. Every agent.</h2>
-        <p class="section-sub" style="max-width:560px;margin:0 auto;">MCP and hooks. Same <span class="kw-memory">knowledge</span>, same <span class="kw-finding">findings</span>, no matter which tool you're in.</p>
+
+        <!-- phren explains the shared brain, tucked between the title and the tagline -->
+        <div class="writing-mini phren-motion" aria-label="Phren explaining the shared brain" style="justify-content:center;margin:20px auto;">
+          <div class="mini-phren">
+            <div class="phren-sprite-mount" data-props='{"size":84,"pose":"idle","facing":"right","armOut":true,"lookDown":true,"mouth":"smile","blinkEvery":18,"bobEvery":0}'></div>
+            <span class="pencil" aria-hidden="true"></span>
+          </div>
+          <div class="mini-card">
+            <div class="mini-tag">[PATTERN]</div>
+            <div class="mini-line">fts5.search: sub-ms lookup, same hits in every agent</div>
+            <div class="mini-meta">phren &middot; just now &middot; trust 0.92</div>
+          </div>
+        </div>
+
+        <p class="section-sub" style="max-width:560px;margin:40px auto 0;">MCP and hooks. Same <span class="kw-memory">knowledge</span>, same <span class="kw-finding">findings</span>, no matter which tool you're in.</p>
       </div>
+
       <div class="agent-carousel reveal" style="position:relative;height:52px;overflow:hidden;margin-top:40px;">
         <div class="agent-carousel-track" id="agent-carousel">
           <span class="agent-pill">Claude Code</span>
@@ -1144,7 +1151,7 @@
     <div class="cta-content">
       <div class="cta-panel reveal" style="position:relative;">
         <div class="cta-celebrate phren-motion" aria-hidden="true">
-          <div class="jumper"><img src="phren-hero.svg" alt="" /></div>
+          <div class="jumper"><div class="phren-sprite-mount" data-props='{"size":104,"armsOverhead":true,"mouth":"smile","blinkEvery":22,"bobEvery":0}'></div></div>
           <span class="confetti" style="--dx:-38px;--dy:-42px;--rot:-280deg;background:#7C3AED;animation-delay:0s"></span>
           <span class="confetti" style="--dx:42px;--dy:-38px;--rot:300deg;background:#28D3F2;animation-delay:0.1s"></span>
           <span class="confetti" style="--dx:48px;--dy:36px;--rot:180deg;background:#fff;animation-delay:0.2s"></span>
@@ -1299,6 +1306,47 @@
       });
       if (mq.matches) handleMotion(mq);
       mq.addEventListener('change', handleMotion);
+    })();
+  </script>
+
+  <!-- ── Phren Motion Lab sprite renderer ── -->
+  <!-- Replaces static phren-hero.svg at .phren-sprite-mount nodes with live, rigged sprites. -->
+  <script src="vendor/react.production.min.js"></script>
+  <script src="vendor/react-dom.production.min.js"></script>
+  <script src="vendor/babel.min.js"></script>
+  <script src="motion-lab/sprite-data.js"></script>
+  <script type="text/babel" src="motion-lab/sprite.jsx"></script>
+  <script type="text/babel" data-presets="react">
+    (function () {
+      const { useEffect, useState } = React;
+      const { createRoot } = ReactDOM;
+      function LiveSprite({ blinkEvery = 18, bobEvery = 2, tickMs = 160, ...rest }) {
+        const [t, setT] = useState(0);
+        useEffect(() => {
+          const id = setInterval(() => setT((v) => v + 1), tickMs);
+          return () => clearInterval(id);
+        }, [tickMs]);
+        const blinking = blinkEvery > 0 && t % blinkEvery === 0;
+        const bob = bobEvery > 0 ? (t % (bobEvery * 2) < bobEvery ? 0 : 1) : 0;
+        return <PhrenSprite blinking={blinking} bob={bob} {...rest} />;
+      }
+      function mountAll() {
+        document.querySelectorAll('.phren-sprite-mount').forEach((el) => {
+          if (el.dataset.mounted === '1') return;
+          el.dataset.mounted = '1';
+          let props = {};
+          try { props = JSON.parse(el.dataset.props || '{}'); }
+          catch (e) { console.warn('phren-sprite-mount: bad data-props', e); }
+          createRoot(el).render(<LiveSprite {...props} />);
+        });
+      }
+      // sprite.jsx declares PhrenSprite as a top-level function that becomes
+      // a global after Babel transform. It loads before this script.
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mountAll);
+      } else {
+        mountAll();
+      }
     })();
   </script>
 </body>
