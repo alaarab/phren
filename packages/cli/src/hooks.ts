@@ -96,22 +96,34 @@ function buildPackageLifecycleCommands(): LifecycleCommands {
   };
 }
 
-export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
+export interface BuildLifecycleOptions {
+  /**
+   * Force POSIX shell syntax even on Windows. Used for tools that execute
+   * hook commands via Git Bash (e.g. GitHub Copilot CLI's `bash:` key).
+   */
+  forcePosix?: boolean;
+}
+
+export function buildLifecycleCommands(
+  phrenPath: string,
+  options: BuildLifecycleOptions = {},
+): LifecycleCommands {
   const entry = resolveCliEntryScript();
-  const isWindows = process.platform === "win32";
+  const nativeWindows = process.platform === "win32" && !options.forcePosix;
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const quotedPhren = shellEscape(phrenPath);
 
   // Prefer the stable wrapper at ~/.local/bin/phren — it survives nvm switches
   // and npx cache clears because it has a built-in npx fallback.
   const localBinDir = homePath(".local", "bin");
-  const wrapperPath = path.join(localBinDir, isWindows ? "phren.cmd" : "phren");
+  const wrapperBaseName = process.platform === "win32" ? "phren.cmd" : "phren";
+  const wrapperPath = path.join(localBinDir, wrapperBaseName);
   const wrapperExists = fs.existsSync(wrapperPath) && (() => {
     try { return fs.readFileSync(wrapperPath, "utf8").includes("PHREN_CLI_WRAPPER"); } catch { return false; }
   })();
 
   if (wrapperExists) {
-    if (isWindows) {
+    if (nativeWindows) {
       return {
         sessionStart: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-session-start`,
         userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-prompt`,
@@ -132,7 +144,7 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
   if (entry) {
     const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const quotedEntry = shellEscape(entry);
-    if (isWindows) {
+    if (nativeWindows) {
       return {
         sessionStart: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-session-start`,
         userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-prompt`,
@@ -150,7 +162,7 @@ export function buildLifecycleCommands(phrenPath: string): LifecycleCommands {
 
   // Last resort — npx
   const packageSpec = phrenPackageSpec();
-  if (isWindows) {
+  if (nativeWindows) {
     return {
       sessionStart: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-session-start`,
       userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-prompt`,
@@ -170,8 +182,12 @@ export function buildSharedLifecycleCommands(): LifecycleCommands {
   return buildPackageLifecycleCommands();
 }
 
-function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" | "codex"): string {
-  if (process.platform === "win32") {
+function withHookToolEnv(
+  command: string,
+  tool: "claude" | "copilot" | "cursor" | "codex",
+  forcePosix = false,
+): string {
+  if (process.platform === "win32" && !forcePosix) {
     return `set "PHREN_HOOK_TOOL=${tool}" && ${command}`;
   }
   return `PHREN_HOOK_TOOL=${shellEscape(tool)} ${command}`;
@@ -180,12 +196,13 @@ function withHookToolEnv(command: string, tool: "claude" | "copilot" | "cursor" 
 function withHookToolLifecycleCommands(
   lifecycle: LifecycleCommands,
   tool: "claude" | "copilot" | "cursor" | "codex",
+  forcePosix = false,
 ): LifecycleCommands {
   return {
-    sessionStart: withHookToolEnv(lifecycle.sessionStart, tool),
-    userPromptSubmit: withHookToolEnv(lifecycle.userPromptSubmit, tool),
-    stop: withHookToolEnv(lifecycle.stop, tool),
-    hookTool: withHookToolEnv(lifecycle.hookTool, tool),
+    sessionStart: withHookToolEnv(lifecycle.sessionStart, tool, forcePosix),
+    userPromptSubmit: withHookToolEnv(lifecycle.userPromptSubmit, tool, forcePosix),
+    stop: withHookToolEnv(lifecycle.stop, tool, forcePosix),
+    hookTool: withHookToolEnv(lifecycle.hookTool, tool, forcePosix),
   };
 }
 
@@ -208,11 +225,16 @@ function installSessionWrapper(tool: string, phrenPath: string): boolean {
     const stopCmd = entry
       ? `node "${entry}" hook-stop`
       : `npx -y ${packageSpec} hook-stop`;
+    const timeoutSec = Math.ceil(HOOK_TIMEOUT_MS / 1000);
+    // Bound hook execution with PowerShell Start-Job + Wait-Job so a hung
+    // hook can never stall the user's real command. The hook command is
+    // passed via env var to avoid nested-quote escaping hell in cmd.
     const content = `@echo off\r
 setlocal\r
 set "REAL_BIN=${realBinary}"\r
 if not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r
 set "PHREN_HOOK_TOOL=${tool}"\r
+if not defined PHREN_HOOK_TIMEOUT_S set "PHREN_HOOK_TIMEOUT_S=${timeoutSec}"\r
 \r
 if "%~1"=="-h" goto :passthrough\r
 if "%~1"=="--help" goto :passthrough\r
@@ -222,14 +244,21 @@ if "%~1"=="--version" goto :passthrough\r
 if "%~1"=="version" goto :passthrough\r
 if "%~1"=="completion" goto :passthrough\r
 \r
-${sessionStartCmd} >nul 2>&1\r
+set "PHREN_HOOK_CMD=${sessionStartCmd}"\r
+call :run_with_timeout\r
 "%REAL_BIN%" %*\r
 set "EXIT_STATUS=%ERRORLEVEL%"\r
-${stopCmd} >nul 2>&1\r
+set "PHREN_HOOK_CMD=${stopCmd}"\r
+call :run_with_timeout\r
 exit /b %EXIT_STATUS%\r
 \r
 :passthrough\r
 "%REAL_BIN%" %*\r
+exit /b %ERRORLEVEL%\r
+\r
+:run_with_timeout\r
+powershell -NoProfile -NonInteractive -Command "$j = Start-Job -ScriptBlock { & cmd /c $env:PHREN_HOOK_CMD *> $null }; if (-not (Wait-Job $j -Timeout ([int]$env:PHREN_HOOK_TIMEOUT_S))) { Stop-Job $j -ErrorAction SilentlyContinue }; Remove-Job $j -Force -ErrorAction SilentlyContinue | Out-Null" >nul 2>&1\r
+exit /b 0\r
 `;
 
     try {
@@ -298,6 +327,62 @@ exit $status
   } catch (err: unknown) {
     debugLog(`installSessionWrapper: failed for ${tool}: ${errorMessage(err)}`);
     return false;
+  }
+}
+
+/**
+ * Windows-only: append `%USERPROFILE%\.local\bin` to the user's persistent
+ * PATH if it isn't already there. On Linux/macOS `~/.local/bin` is on PATH by
+ * default (XDG / `.profile`); on Windows nothing adds it, so the `phren.cmd`
+ * wrapper is invisible to cmd/PowerShell/Git Bash until we fix PATH.
+ *
+ * Returns:
+ *   "added"      — PATH was updated (user must open a new terminal).
+ *   "already"    — dir was already on the user PATH.
+ *   "skipped"    — not Windows (nothing to do).
+ *   "failed"     — PowerShell call failed; caller should surface a manual hint.
+ */
+export function ensureLocalBinOnWindowsPath(): "added" | "already" | "skipped" | "failed" {
+  if (process.platform !== "win32") return "skipped";
+  const target = homePath(".local", "bin");
+
+  // Current session PATH check — cheap early-out to avoid spawning PowerShell
+  // on re-runs in a terminal that already inherits the updated PATH.
+  const currentEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const alreadyOnSessionPath = currentEntries.some((entry) => path.resolve(entry).toLowerCase() === target.toLowerCase());
+
+  // Always read persistent user PATH — session PATH can be stale in other terminals.
+  const readScript =
+    `$p = [Environment]::GetEnvironmentVariable('Path','User'); if ($null -eq $p) { '' } else { $p }`;
+  let userPath = "";
+  try {
+    userPath = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", readScript], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+  } catch (err: unknown) {
+    debugLog(`ensureLocalBinOnWindowsPath: read failed: ${errorMessage(err)}`);
+    return "failed";
+  }
+
+  const userEntries = userPath.split(";").filter(Boolean);
+  const alreadyPersisted = userEntries.some((entry) => entry.toLowerCase() === target.toLowerCase());
+
+  if (alreadyPersisted) return alreadyOnSessionPath ? "already" : "already";
+
+  const newUserPath = userEntries.length > 0 ? `${userPath};${target}` : target;
+  const escaped = newUserPath.replace(/'/g, "''");
+  const writeScript = `[Environment]::SetEnvironmentVariable('Path','${escaped}','User')`;
+  try {
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", writeScript], {
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return "added";
+  } catch (err: unknown) {
+    debugLog(`ensureLocalBinOnWindowsPath: write failed: ${errorMessage(err)}`);
+    return "failed";
   }
 }
 
@@ -897,7 +982,12 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
 
   // ── GitHub Copilot CLI (user-level: ~/.github/hooks/phren.json) ──────────
   if (detected.has("copilot")) {
-    const copilotLifecycle = withHookToolLifecycleCommands(lifecycle, "copilot");
+    // Copilot CLI invokes the `bash` key through Git Bash on Windows, so the
+    // lifecycle commands must use POSIX shell syntax (not cmd's `set "VAR="`).
+    const copilotLifecycleBase = process.platform === "win32"
+      ? buildLifecycleCommands(phrenPath, { forcePosix: true })
+      : lifecycle;
+    const copilotLifecycle = withHookToolLifecycleCommands(copilotLifecycleBase, "copilot", true);
     const copilotFile = hookConfigPath("copilot", phrenPath);
     const copilotHooksDir = path.dirname(copilotFile);
     try {
