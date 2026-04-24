@@ -296,10 +296,12 @@ describe("detectProject", () => {
 
   it("uses the stored project name when sourcePath matches", () => {
     const phren = makePhren();
-    makeProject(phren, "MyProject", { "SUMMARY.md": "# Summary" });
-    writeFile(path.join(phren, "MyProject", "phren.project.yaml"), yaml.dump({ sourcePath: "/home/user/myproject" }, { lineWidth: 1000 }));
-    const result = detectProject(phren, "/home/user/myproject/src");
-    expect(result).toBe("MyProject");
+    // Stored name intentionally differs from sourcePath basename to prove
+    // detectProject returns the stored name rather than deriving from cwd.
+    makeProject(phren, "stored-name", { "SUMMARY.md": "# Summary" });
+    writeFile(path.join(phren, "stored-name", "phren.project.yaml"), yaml.dump({ sourcePath: "/home/user/other-location" }, { lineWidth: 1000 }));
+    const result = detectProject(phren, "/home/user/other-location/src");
+    expect(result).toBe("stored-name");
   });
 });
 

@@ -70,6 +70,7 @@ export {
   findProjectNameCaseInsensitive,
   findArchivedProjectNameCaseInsensitive,
   getProjectDirs,
+  listInvalidProjectDirs,
   collectNativeMemoryFiles,
   computePhrenLiveStateToken,
   getPhrenPath,
