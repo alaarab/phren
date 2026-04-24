@@ -37,9 +37,32 @@ try it. break it. tell me.
 
 ## visual
 
-use `docs/phren-graph-walk.gif`. it's already in the repo, it's the fragment graph in motion, and it's the single most "what does this thing actually do" asset you have. linkedin auto-plays gifs in the feed, which is the whole point.
+a 20-second branded reel that strings together: cold open with the mascot, the pain, the install, claude remembering, supersede/retract, team stores, "own your data", cta with the wordmark and install command.
 
-if you want a second image as a carousel, screenshot the vscode sidebar with a memory open and the supersede/retract buttons visible. that one shot makes "manage your memories" concrete.
+built as code so it stays in sync with the brand and you can re-render whenever the message shifts.
+
+```bash
+# one-time setup
+pnpm exec playwright install chromium     # if you haven't yet
+brew install ffmpeg                       # or: apt install ffmpeg
+
+# render
+pnpm record:post-reel                     # square 1080x1080 mp4 + gif
+pnpm record:post-reel -- --portrait       # 1080x1350 (linkedin portrait)
+pnpm record:post-reel -- --duration=15    # tighter cut
+```
+
+outputs land in `dist/post-reel/post-reel.mp4` and `dist/post-reel/post-reel.gif`.
+
+preview the reel live (no recording, just loops in your browser):
+
+```bash
+# from repo root
+python3 -m http.server 4173 --directory docs
+# then open http://localhost:4173/motion-lab/post-reel.html
+```
+
+mp4 outperforms gif in the linkedin feed (better quality, autoplays muted), but the gif is handy for embedding in the readme or replying to comments. fallback if you want zero effort: `docs/phren-graph-walk.gif` is already in the repo and works on its own.
 
 ---
 
