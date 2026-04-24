@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "pnpm --filter @phren/cli run build && playwright test",
     "validate-docs": "bash scripts/validate-docs.sh",
-    "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
+    "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit",
+    "record:post-reel": "node scripts/record-post-reel.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",

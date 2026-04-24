@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>phren · post reel</title>
+<meta name="viewport" content="width=1080,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a1a;
+  --panel: #12122a;
+  --panel-border: rgba(156,143,248,0.18);
+  --fg: #ece9f5;
+  --muted: rgba(236,233,245,0.55);
+  --accent: #7C3AED;
+  --cyan: #28D3F2;
+  --green: #4ade80;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --sans: "Space Grotesk", system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); font-family: var(--sans); overflow: hidden; }
+
+/* Square 1080x1080 stage. Recorder sets window size to match. */
+.stage {
+  position: relative;
+  width: 1080px;
+  height: 1080px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, #1a1538 0%, #0a0a1a 70%);
+}
+
+/* Soft vignette + grain */
+.stage::after {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(124,58,237,0.18), transparent 60%),
+    radial-gradient(ellipse at 50% 0%, rgba(40,211,242,0.10), transparent 50%);
+  pointer-events: none;
+}
+
+.beat {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 80px 64px;
+  opacity: 0;
+  transition: opacity 380ms ease;
+}
+.beat.on { opacity: 1; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 28px;
+}
+.headline {
+  font-size: 72px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.0;
+  text-align: center;
+  max-width: 880px;
+}
+.headline .dim { color: var(--muted); font-weight: 400; }
+.subline {
+  margin-top: 28px;
+  font-size: 26px;
+  color: var(--muted);
+  text-align: center;
+  max-width: 760px;
+  line-height: 1.4;
+}
+
+.mascot {
+  width: 360px; height: 360px;
+  display: grid; place-items: center;
+  margin-bottom: 32px;
+}
+.mascot.small { width: 220px; height: 220px; margin-bottom: 24px; }
+
+.terminal {
+  width: 820px;
+  background: #08081a;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  font-family: var(--mono);
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+}
+.terminal-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 18px;
+  background: #11112a;
+  border-bottom: 1px solid var(--panel-border);
+}
+.terminal-bar .dot {
+  width: 12px; height: 12px; border-radius: 50%;
+}
+.dot.r { background: #ff5f56; }
+.dot.y { background: #ffbd2e; }
+.dot.g { background: #27c93f; }
+.terminal-bar .title {
+  margin-left: 10px; color: var(--muted); font-size: 13px;
+}
+.terminal-body {
+  padding: 28px 30px 32px;
+  font-size: 22px;
+  line-height: 1.55;
+  min-height: 320px;
+  color: var(--fg);
+}
+.prompt { color: var(--cyan); }
+.cmd { color: var(--fg); }
+.ok { color: var(--green); }
+.dim { color: var(--muted); }
+.cursor::after {
+  content: "▌";
+  color: var(--cyan);
+  animation: blink 1s steps(2, start) infinite;
+  margin-left: 2px;
+}
+@keyframes blink { to { visibility: hidden; } }
+
+.scene-frame {
+  width: 880px;
+  height: 560px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+}
+.scene-frame > div { width: 100%; height: 100%; }
+
+.bullets {
+  margin-top: 32px;
+  display: flex; flex-direction: column; gap: 14px;
+  font-family: var(--mono); font-size: 22px;
+  color: var(--fg);
+}
+.bullets .row { display: flex; align-items: center; gap: 14px; opacity: 0; transform: translateY(6px); transition: opacity 260ms ease, transform 260ms ease; }
+.bullets .row.on { opacity: 1; transform: none; }
+.bullets .check { color: var(--green); width: 22px; }
+
+.cta {
+  margin-top: 36px;
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+}
+.cta .install {
+  font-family: var(--mono);
+  font-size: 30px;
+  padding: 18px 28px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(124,58,237,0.08);
+  color: var(--fg);
+}
+.cta .install .accent { color: var(--cyan); }
+.cta .url { font-family: var(--mono); font-size: 18px; color: var(--muted); }
+
+.wordmark {
+  font-size: 140px; font-weight: 700; letter-spacing: -0.04em;
+  background: linear-gradient(180deg, #fff 30%, var(--cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  line-height: 1;
+}
+
+/* progress bar (debug only, hidden in record mode) */
+.progress {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 4px; background: rgba(255,255,255,0.05);
+  z-index: 10;
+}
+.progress .bar { height: 100%; background: var(--accent); width: 0%; transition: width 100ms linear; }
+body.record .progress { display: none; }
+</style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+
+  <!-- Beat 0: Cold open -->
+  <section class="beat" data-beat="0">
+    <div class="mascot" id="mascot-hero"></div>
+    <div class="eyebrow">memory for ai agents</div>
+    <div class="headline">phren</div>
+  </section>
+
+  <!-- Beat 1: The pain -->
+  <section class="beat" data-beat="1">
+    <div class="headline">your agent forgets <span class="dim">everything.</span></div>
+    <div class="subline">every new chat, you re-explain the same project. burning tokens to teach it what it already knew yesterday.</div>
+  </section>
+
+  <!-- Beat 2: Install -->
+  <section class="beat" data-beat="2">
+    <div class="eyebrow">one command</div>
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="title">~/projects/your-repo</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="prompt">$</span> <span class="cmd" id="install-cmd"></span><span class="cursor" id="install-cursor"></span></div>
+        <div class="bullets" id="install-bullets">
+          <div class="row" data-i="0"><span class="check">✓</span><span>wired claude code</span></div>
+          <div class="row" data-i="1"><span class="check">✓</span><span>wired copilot</span></div>
+          <div class="row" data-i="2"><span class="check">✓</span><span>wired cursor</span></div>
+          <div class="row" data-i="3"><span class="check">✓</span><span>wired codex</span></div>
+          <div class="row" data-i="4"><span class="check">✓</span><span class="dim">phren is listening.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Beat 3: Memory in action -->
+  <section class="beat" data-beat="3">
+    <div class="eyebrow">claude remembers</div>
+    <div class="scene-frame" id="scene-chat"></div>
+    <div class="subline">findings inject into every prompt. automatically.</div>
+  </section>
+
+  <!-- Beat 4: Manage memories -->
+  <section class="beat" data-beat="4">
+    <div class="eyebrow">supersede · retract · decay</div>
+    <div class="scene-frame" id="scene-write"></div>
+    <div class="subline">your knowledge gets <em>more</em> accurate over time, not less.</div>
+  </section>
+
+  <!-- Beat 5: Team -->
+  <section class="beat" data-beat="5">
+    <div class="eyebrow">team stores</div>
+    <div class="scene-frame" id="scene-team"></div>
+    <div class="subline">one git repo. everyone's agents get smarter together.</div>
+  </section>
+
+  <!-- Beat 6: Own your data -->
+  <section class="beat" data-beat="6">
+    <div class="headline">your data lives as <span class="dim">markdown</span><br/>in <span class="dim">your own</span> git repo.</div>
+    <div class="subline">no database. no saas. no lock-in.</div>
+  </section>
+
+  <!-- Beat 7: CTA -->
+  <section class="beat" data-beat="7">
+    <div class="mascot small" id="mascot-end"></div>
+    <div class="wordmark">phren</div>
+    <div class="cta">
+      <div class="install"><span class="accent">npx</span> @phren/cli init</div>
+      <div class="url">github.com/alaarab/phren · mit</div>
+    </div>
+  </section>
+
+  <div class="progress"><div class="bar" id="bar"></div></div>
+</div>
+
+<!-- Inherits sprite + scene engine from the motion lab -->
+<script>
+  // Determinism + recording controls.
+  const params = new URLSearchParams(location.search);
+  window.__RECORD = params.has("record");
+  window.__FPS = parseInt(params.get("fps") || "30", 10);
+  window.__DURATION = parseFloat(params.get("duration") || "20"); // seconds
+  if (window.__RECORD) document.body.classList.add("record");
+</script>
+<script src="vendor/react.development.js"></script>
+<script src="vendor/react-dom.development.js"></script>
+<script src="vendor/babel.min.js"></script>
+<script src="sprite-data.js"></script>
+<script type="text/babel" src="sprite.jsx"></script>
+<script type="text/babel" src="scenes.jsx"></script>
+<script type="text/babel" src="scenes-extra.jsx"></script>
+
+<script type="text/babel">
+  // Mount the existing motion-lab scenes into the reel slots.
+  const { createRoot } = ReactDOM;
+
+  function HeroBob() {
+    const [t, setT] = React.useState(0);
+    React.useEffect(() => {
+      const id = setInterval(() => setT(v => v + 1), 380);
+      return () => clearInterval(id);
+    }, []);
+    const bob = t % 2 === 0 ? 0 : -6;
+    return (
+      <div style={{ transform: `translateY(${bob}px)`, transition: "transform 320ms ease" }}>
+        <PhrenSprite size={320} blinking={t % 9 === 0} pose="idle" sparkle />
+      </div>
+    );
+  }
+
+  function HeroWave() {
+    const [t, setT] = React.useState(0);
+    React.useEffect(() => {
+      const id = setInterval(() => setT(v => v + 1), 280);
+      return () => clearInterval(id);
+    }, []);
+    return <PhrenSprite size={200} pose="idle" armUp blinking={t % 6 === 0} sparkle mouth="smile" />;
+  }
+
+  createRoot(document.getElementById("mascot-hero")).render(<HeroBob />);
+  createRoot(document.getElementById("mascot-end")).render(<HeroWave />);
+
+  // Drop the existing scenes into the reel slots. They're full panels already.
+  createRoot(document.getElementById("scene-chat")).render(<window.SceneChat speed={1.4} />);
+  createRoot(document.getElementById("scene-write")).render(<window.SceneWrite speed={1.4} />);
+  createRoot(document.getElementById("scene-team")).render(<window.SceneTeam speed={1.4} />);
+</script>
+
+<script>
+  // Timeline. Each entry: { at: seconds, beat: index, action?: fn }
+  // Total duration = window.__DURATION.
+  const TIMELINE = [
+    { at: 0.0,  beat: 0 },
+    { at: 2.4,  beat: 1 },
+    { at: 4.8,  beat: 2, action: typeInstall },
+    { at: 8.6,  beat: 3 },
+    { at: 11.4, beat: 4 },
+    { at: 14.2, beat: 5 },
+    { at: 16.8, beat: 6 },
+    { at: 18.6, beat: 7 },
+  ];
+  const DURATION = window.__DURATION;
+
+  const beats = [...document.querySelectorAll(".beat")];
+  const bar = document.getElementById("bar");
+
+  function showBeat(idx) {
+    beats.forEach((b, i) => b.classList.toggle("on", i === idx));
+  }
+
+  // Beat 2 helper: type the install command, then cascade checks
+  let typedAt = -1;
+  function typeInstall(t0) {
+    if (typedAt === t0) return;
+    typedAt = t0;
+    const cmd = document.getElementById("install-cmd");
+    const cursor = document.getElementById("install-cursor");
+    const target = "npx @phren/cli init";
+    cmd.textContent = "";
+    cursor.style.display = "";
+    let i = 0;
+    const typeId = setInterval(() => {
+      i++;
+      cmd.textContent = target.slice(0, i);
+      if (i >= target.length) {
+        clearInterval(typeId);
+        cursor.style.display = "none";
+        const rows = document.querySelectorAll("#install-bullets .row");
+        rows.forEach((r, idx) => {
+          setTimeout(() => r.classList.add("on"), 220 + idx * 380);
+        });
+      }
+    }, 55);
+  }
+
+  function resetBeat2() {
+    document.getElementById("install-cmd").textContent = "";
+    document.getElementById("install-cursor").style.display = "";
+    document.querySelectorAll("#install-bullets .row").forEach(r => r.classList.remove("on"));
+    typedAt = -1;
+  }
+
+  // Drive the timeline by elapsed seconds. Two modes:
+  //   1. live: requestAnimationFrame using performance.now() since start.
+  //   2. record: external driver calls window.__seekTo(t) for every frame.
+  let lastBeat = -1;
+  function applyTime(t) {
+    // pick current beat
+    let cur = 0;
+    for (let i = 0; i < TIMELINE.length; i++) {
+      if (t >= TIMELINE[i].at) cur = i;
+    }
+    if (cur !== lastBeat) {
+      // entering a new beat
+      if (TIMELINE[cur].beat === 2) resetBeat2();
+      showBeat(TIMELINE[cur].beat);
+      lastBeat = cur;
+    }
+    if (TIMELINE[cur].action) TIMELINE[cur].action(TIMELINE[cur].at);
+    bar.style.width = `${Math.min(100, (t / DURATION) * 100)}%`;
+  }
+
+  if (window.__RECORD) {
+    // Recording mode: external driver controls time via window.__seekTo.
+    showBeat(0);
+    window.__totalDuration = DURATION;
+    window.__seekTo = (t) => applyTime(t);
+    window.__ready = true;
+  } else {
+    // Live preview, loops forever.
+    const start = performance.now();
+    function tick() {
+      const t = ((performance.now() - start) / 1000) % (DURATION + 0.5);
+      applyTime(t);
+      requestAnimationFrame(tick);
+    }
+    showBeat(0);
+    requestAnimationFrame(tick);
+  }
+</script>
+
+</body>
+</html>
