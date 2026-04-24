@@ -355,6 +355,27 @@ function isProjectDirEntry(entry: fs.Dirent): boolean {
     && !RESERVED_PROJECT_DIR_NAMES.has(entry.name);
 }
 
+// Like isProjectDirEntry, but also rejects names that would fail downstream
+// validation (e.g. uppercase). These dirs exist on disk but can't be read by
+// the UI or CLI read paths, so enumeration surfaces must skip them. Collision
+// detection still uses isProjectDirEntry so we can *see* the stragglers.
+function isIndexableProjectEntry(entry: fs.Dirent): boolean {
+  return isProjectDirEntry(entry) && isValidProjectName(entry.name);
+}
+
+// Project directories whose names exist on disk but fail isValidProjectName.
+// Used by `phren doctor` to surface silent half-working state.
+export function listInvalidProjectDirs(phrenPath: string): string[] {
+  try {
+    return fs.readdirSync(phrenPath, { withFileTypes: true })
+      .filter((entry) => isProjectDirEntry(entry) && !isValidProjectName(entry.name))
+      .map((entry) => entry.name);
+  } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG)) stderrLog(`listInvalidProjectDirs: ${errorMessage(err)}`);
+    return [];
+  }
+}
+
 export function normalizeProjectNameForCreate(name: string): string {
   return name.trim().toLowerCase();
 }
@@ -391,7 +412,7 @@ function getLocalProjectDirs(phrenPath: string, manifest: PhrenRootManifest): st
   if (!primaryProject || !isValidProjectName(primaryProject)) return [];
   const projectPath = safeProjectPath(phrenPath, primaryProject);
   if (!projectPath || !fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) return [];
-  const visible = fs.readdirSync(phrenPath, { withFileTypes: true }).filter(isProjectDirEntry).map((entry) => entry.name);
+  const visible = fs.readdirSync(phrenPath, { withFileTypes: true }).filter(isIndexableProjectEntry).map((entry) => entry.name);
   if (visible.length !== 1 || visible[0] !== primaryProject) return [];
   return [projectPath];
 }
@@ -445,7 +466,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
 
   try {
     return fs.readdirSync(phrenPath, { withFileTypes: true })
-      .filter(isProjectDirEntry)
+      .filter(isIndexableProjectEntry)
       .map((entry) => path.join(phrenPath, entry.name));
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`getProjectDirs: ${errorMessage(err)}`);
