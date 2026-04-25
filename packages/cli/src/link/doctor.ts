@@ -9,8 +9,10 @@ import {
   homeDir,
   homePath,
   hookConfigPath,
+  listInvalidProjectDirs,
   runtimeHealthFile,
 } from "../shared.js";
+import { migrateInvalidProjectNames, formatMigrationSummary } from "../project-migrate.js";
 import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/shared.js";
 import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
@@ -200,6 +202,15 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     name: "profile-projects",
     ok: projects.length > 0,
     detail: projects.length ? `${projects.length} projects in profile` : "no projects listed",
+  });
+
+  const invalidProjectDirs = listInvalidProjectDirs(phrenPath);
+  checks.push({
+    name: "project-names-valid",
+    ok: invalidProjectDirs.length === 0,
+    detail: invalidProjectDirs.length === 0
+      ? "all project directories use valid names"
+      : `${invalidProjectDirs.length} invalid project dir(s): ${invalidProjectDirs.join(", ")}. These are ignored by the UI and indexer. Run \`phren doctor --fix\` to rename to lowercase.`,
   });
 
   // Filesystem speed check
@@ -510,6 +521,16 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
     if (details.length === 0) details.push("baseline repair complete");
     checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
+  }
+
+  if (fix && invalidProjectDirs.length > 0) {
+    const migration = migrateInvalidProjectNames(phrenPath);
+    const unresolved = migration.outcomes.filter((o) => o.action !== "renamed");
+    checks.push({
+      name: "project-names-migrate",
+      ok: unresolved.length === 0,
+      detail: formatMigrationSummary(migration),
+    });
   }
 
   if (fix && profile && profileFile) {
