@@ -807,10 +807,11 @@ async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
     const raw = await client.readGraph();
     const data = responseData(raw);
     const parsed: EntityData[] = [];
-    for (const entry of asArray(data?.entities)) {
+    for (const entry of asArray(data?.fragments)) {
       const record = asRecord(entry);
       if (!record) continue;
       parsed.push({
+        id: asString(record.id),
         name: asString(record.name) ?? "",
         type: asString(record.type) ?? "unknown",
         refCount: typeof record.refCount === "number" ? record.refCount : 0,
