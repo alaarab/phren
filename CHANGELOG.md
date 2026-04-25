@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-04-25
+
+### Fixed
+- Project dirs whose names fail `isValidProjectName` (typically uppercase, e.g. `MYPROJECT`) were silently half-indexed: enumeration surfaces saw them but every read endpoint rejected the name at the validation gate, leaving the UI empty. `getProjectDirs`/`getLocalProjectDirs` now skip invalid-name entries; `phren doctor` reports a `project-names-valid` check; `phren doctor --fix` runs `migrateInvalidProjectNames`, which lowercases fixable names in place (handling case-insensitive filesystems via two-step rename) and rewrites profile yaml references.
+- `ensureLocalBinOnWindowsPath` previously read PATH via `[Environment]::GetEnvironmentVariable`, which silently expands `%VAR%` references, then wrote it back as `REG_SZ` — baking expansions into literal paths and downgrading the registry value type from `REG_EXPAND_SZ` so future `%VAR%` entries no longer expanded at logon. Now opens `HKCU\Environment` directly with `DoNotExpandEnvironmentNames`, captures the original `RegistryValueKind`, and writes back with the same kind. Broadcasts `WM_SETTINGCHANGE` so newly-launched processes pick up the update without a logoff.
+- VS Code graph webview's `fetchEntities()` iterated `data.entities`, but the `read_graph` MCP tool returns the list under `data.fragments` — leaving the entities array empty so no fragment nodes (or derived project / cross-project / reference-doc edges) ever rendered. Now reads from `data.fragments` and populates `EntityData.id` from the response.
+- Memory-UI graph project filter dropdown stored project node ids (`project:phren`) but `nodeMatchesFilters` built `connectedProjects` from bare project names (`phren`), so selecting a project hid every finding, task, fragment, and reference. Filter now uses bare project names as the canonical value; dropdown labels no longer show the `project:` prefix.
+
 ## [0.1.20] - 2026-04-19
 
 ### Fixed
