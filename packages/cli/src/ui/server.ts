@@ -9,6 +9,7 @@ import {
   computePhrenLiveStateToken,
   getProjectDirs,
 } from "../shared.js";
+import { isMemoryTraceEnabled, tailMemoryTrace } from "../memory-trace.js";
 import { getNonPrimaryStores, subscribeStoreProjects, unsubscribeStoreProjects } from "../store-registry.js";
 import {
   editFinding,
@@ -547,6 +548,46 @@ async function handleGetSearch(res: Res, url: string, ctx: RouteCtx): Promise<vo
 async function handleGetGraph(res: Res, url: string, ctx: RouteCtx): Promise<void> {
   const graphParams = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?") + 1) : "");
   jsonOk(res, await buildGraph(ctx.phrenPath, ctx.profile, graphParams.get("project") || undefined));
+}
+
+function handleGetMemoryTraceStatus(res: Res): void {
+  jsonOk(res, { ok: true, enabled: isMemoryTraceEnabled() });
+}
+
+function handleGetMemoryTraceStream(req: Req, res: Res, ctx: RouteCtx): void {
+  if (!isMemoryTraceEnabled()) {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.end("memory-trace disabled");
+    return;
+  }
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    "connection": "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  res.write("retry: 2000\n\n");
+  res.write(": memory-trace stream open\n\n");
+
+  const tail = tailMemoryTrace(ctx.phrenPath, (event) => {
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      // Client gone — cleanup happens via 'close' below.
+    }
+  });
+
+  const keepalive = setInterval(() => {
+    try { res.write(": keepalive\n\n"); } catch { /* socket closed */ }
+  }, 15000);
+
+  const cleanup = () => {
+    clearInterval(keepalive);
+    tail.close();
+    try { res.end(); } catch { /* already ended */ }
+  };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
 }
 
 function handleGetScores(res: Res, ctx: RouteCtx): void {
@@ -1127,6 +1168,8 @@ export function createWebUiHttpServer(
         case "/api/csrf-token": return handleGetCsrfToken(res, ctx);
         case "/api/profiles": return handleGetProfiles(res, ctx);
         case "/api/search": return await handleGetSearch(res, url, ctx);
+        case "/api/memory-trace/status": return handleGetMemoryTraceStatus(res);
+        case "/api/memory-trace/stream": return handleGetMemoryTraceStream(req, res, ctx);
       }
       // Prefix-matched GET routes
       if (pathname.startsWith("/api/project-content")) return handleGetProjectContent(res, url, ctx);

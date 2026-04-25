@@ -32,6 +32,7 @@ import {
   normalizeMemoryId,
 } from "../shared/index.js";
 import { runCustomHooks } from "../hooks.js";
+import { recordMemoryTrace } from "../memory-trace.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "../shared/governance.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
@@ -190,6 +191,13 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId }: { id: strin
   // Get quality score if available
   const scoreKey = entryScoreKey(doc.project, doc.filename, doc.content);
   const qualityMultiplier = getQualityMultiplier(phrenPath, scoreKey);
+
+  recordMemoryTrace(phrenPath, {
+    ts: Date.now(),
+    tool: "get_memory_detail",
+    query: id,
+    results: [{ project: doc.project, filename: doc.filename, type: doc.type, path: doc.path }],
+  });
 
   return mcpResponse({
     ok: true,
@@ -495,6 +503,18 @@ async function handleSearchKnowledge(
     const fragmentNote = relatedFragments.length > 0 ? `\n\nRelated fragments: ${relatedFragments.join(", ")}` : "";
     const synthesisBlock = synthesis ? `\n\n${synthesis}\n\n---\n\n` : "\n\n";
     runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: query, PHREN_RESULT_COUNT: String(results.length) });
+    recordMemoryTrace(phrenPath, {
+      ts: Date.now(),
+      tool: "search_knowledge",
+      query,
+      results: results.map((r) => ({
+        project: r.project,
+        filename: r.filename,
+        type: r.type,
+        path: r.path,
+        snippet: r.snippet,
+      })),
+    });
     return mcpResponse({
       ok: true,
       message: `Found ${results.length} result(s) for "${query}"${fallbackNote}:${synthesisBlock}${formatted.join("\n\n---\n\n")}${fragmentNote}`,

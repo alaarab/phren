@@ -85,3 +85,4 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 | `PHREN_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `1` to enable LLM-based paraphrase dedup when adding findings. |
 | `PHREN_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `1` to enable LLM-based contradiction detection when adding findings. |
 | `PHREN_FEATURE_GH_MINING` | disabled | Set to `1` to mine GitHub signals in `phren maintain extract`. |
+| `PHREN_FEATURE_MEMORY_TRACE` | disabled | Set to `1` to stream memory accesses (search/get) to the web-ui graph; the phren mascot walks to each accessed node in real time. Requires `phren web-ui` running with the same flag set. |

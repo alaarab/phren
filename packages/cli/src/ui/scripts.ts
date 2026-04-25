@@ -2220,6 +2220,135 @@ export function renderGraphHostScript(): string {
 })();`;
 }
 
+// Subscribes to /api/memory-trace/stream (when enabled server-side via
+// PHREN_FEATURE_MEMORY_TRACE) and animates phrenGraph.focusNode for each
+// memory access so the mascot walks across the graph in real time.
+export function renderMemoryTraceScript(): string {
+  return `(function() {
+  var token = '';
+  try { token = new URL(window.location.href).searchParams.get('_auth') || ''; } catch (e) { token = ''; }
+  function authUrl(path) {
+    if (!token) return path;
+    return path + (path.indexOf('?') === -1 ? '?' : '&') + '_auth=' + encodeURIComponent(token);
+  }
+
+  var queue = [];
+  var walking = false;
+  var STEP_MS = 1400;
+
+  function api() { return window.phrenGraph || null; }
+
+  function findNodeId(target) {
+    var graph = api();
+    if (!graph || !graph.getData || !target || !target.project) return null;
+    var data = graph.getData();
+    var nodes = (data && data.nodes) || [];
+    var docPath = target.filename ? (target.project + '/' + target.filename) : '';
+    var matches = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      if (node.project !== target.project) continue;
+      var refs = node.refDocs || [];
+      for (var j = 0; j < refs.length; j++) {
+        if (refs[j] && refs[j].doc === docPath) { matches.push(node); break; }
+      }
+    }
+    if (matches.length) {
+      // Prefer non-project matches (findings/tasks/refs are visually richer hops).
+      for (var k = 0; k < matches.length; k++) {
+        if (matches[k].kind && matches[k].kind !== 'project') return matches[k].id;
+      }
+      return matches[0].id;
+    }
+    if (target.type === 'reference' && target.filename) {
+      var refId = target.project + ':ref:' + target.filename;
+      for (var r = 0; r < nodes.length; r++) {
+        if (nodes[r].id === refId) return refId;
+      }
+    }
+    for (var p = 0; p < nodes.length; p++) {
+      if (nodes[p].id === target.project) return nodes[p].id;
+    }
+    return null;
+  }
+
+  function pump() {
+    if (walking) return;
+    if (queue.length === 0) return;
+    var graph = api();
+    if (!graph || !graph.focusNode) {
+      // Graph not yet rendered — retry shortly.
+      setTimeout(pump, 400);
+      return;
+    }
+    walking = true;
+    var nodeId = queue.shift();
+    try { graph.focusNode(nodeId); } catch (e) { /* node may have been removed */ }
+    setTimeout(function() { walking = false; pump(); }, STEP_MS);
+  }
+
+  function showBanner(event) {
+    var bar = document.getElementById('memory-trace-banner');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'memory-trace-banner';
+      bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:60;padding:8px 14px;border-radius:999px;background:color-mix(in srgb, var(--accent-dim) 90%, transparent);border:1px solid var(--accent);color:var(--ink);font-size:12px;font-family:var(--font);box-shadow:var(--shadow-md);max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0;transition:opacity .2s';
+      document.body.appendChild(bar);
+    }
+    var label = event.tool === 'get_memory_detail' ? 'opened memory' : 'searching';
+    var query = event.query ? ': ' + event.query : '';
+    bar.textContent = '✦ phren ' + label + query;
+    bar.style.opacity = '1';
+    clearTimeout(bar._hideTimer);
+    bar._hideTimer = setTimeout(function() { bar.style.opacity = '0'; }, 2400);
+  }
+
+  function handleEvent(event) {
+    if (!event || !Array.isArray(event.results) || event.results.length === 0) return;
+    showBanner(event);
+    var ids = [];
+    var seen = {};
+    for (var i = 0; i < event.results.length; i++) {
+      var id = findNodeId(event.results[i]);
+      if (id && !seen[id]) { seen[id] = true; ids.push(id); }
+    }
+    if (!ids.length) return;
+    // Drop pending walks if the queue is getting stale; keep the most recent.
+    if (queue.length > 8) queue.length = 0;
+    for (var k = 0; k < ids.length; k++) queue.push(ids[k]);
+    pump();
+  }
+
+  function connect() {
+    if (typeof window.EventSource !== 'function') return;
+    var src;
+    try { src = new EventSource(authUrl('/api/memory-trace/stream')); } catch (e) { return; }
+    src.onmessage = function(msg) {
+      try { handleEvent(JSON.parse(msg.data)); } catch (e) { /* ignore malformed */ }
+    };
+    src.onerror = function() {
+      // Browser auto-reconnects on transient errors; if the endpoint is 404
+      // (feature disabled) the EventSource will retry harmlessly. Close it
+      // explicitly when the page is hidden for a long time isn't necessary.
+    };
+    window.addEventListener('beforeunload', function() { try { src.close(); } catch (e) {} });
+  }
+
+  function start() {
+    fetch(authUrl('/api/memory-trace/status'))
+      .then(function(r) { return r.json(); })
+      .then(function(data) { if (data && data.ok && data.enabled) connect(); })
+      .catch(function() { /* status endpoint missing — ignore */ });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();`;
+}
+
 export function renderReviewQueueKeyboardScript(_authToken: string): string {
   return `(function() {
     var _reviewHighlightIndex = -1;
