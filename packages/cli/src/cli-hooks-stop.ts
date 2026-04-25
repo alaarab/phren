@@ -37,6 +37,7 @@ import {
   runBestEffortGit,
   countUnsyncedCommits,
   recoverPushConflict,
+  addTeamPathspecs,
 } from "./cli-hooks-git.js";
 import { logger } from "./logger.js";
 
@@ -520,8 +521,9 @@ export async function handleHookStop() {
         try {
           const storeStatus = await runBestEffortGit(["status", "--porcelain"], store.path);
           if (storeStatus.ok && storeStatus.output) {
-            // Only stage journal/, tasks.md, truths.md, FINDINGS.md, summary.md — NOT .runtime/
-            await runBestEffortGit(["add", "--sparse", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/FINDINGS.md.bak", "*/summary.md", "*/review.md", "*/CLAUDE.md", "*/topic-config.json", "*/phren.project.yaml", "*/reference/**", "*/skills/**", ".phren-team.yaml"], store.path);
+            // Stage each team-safe pathspec individually — a single no-match
+            // (e.g. no */truths.md in this store) used to abort the whole add.
+            await addTeamPathspecs(store.path);
             const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
             const teamCommit = await runBestEffortGit(["commit", "-m", `phren: ${actor} team sync`], store.path);
             if (teamCommit.ok) {

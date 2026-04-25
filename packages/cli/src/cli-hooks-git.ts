@@ -162,6 +162,44 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
   return { ok: false, error: "git command failed" };
 }
 
+/**
+ * Files phren is allowed to auto-stage in a team store. Anything not in this
+ * list (notably `.runtime/`, secrets, build output) is skipped on session-stop
+ * and `push_changes`.
+ */
+export const TEAM_STORE_PATHSPECS = [
+  "*/journal/*",
+  "*/tasks.md",
+  "*/truths.md",
+  "*/FINDINGS.md",
+  "*/FINDINGS.md.bak",
+  "*/summary.md",
+  "*/review.md",
+  "*/CLAUDE.md",
+  "*/topic-config.json",
+  "*/phren.project.yaml",
+  "*/reference/**",
+  "*/skills/**",
+  ".phren-team.yaml",
+] as const;
+
+/**
+ * Stage each team pathspec individually so a single no-match (e.g. a store
+ * with no `truths.md` anywhere) doesn't abort the entire `git add` and strand
+ * every other change. Errors are swallowed by `runBestEffortGit` already.
+ *
+ * Returns the number of pathspecs that staged successfully — useful for
+ * telemetry, not gating.
+ */
+export async function addTeamPathspecs(cwd: string): Promise<number> {
+  let staged = 0;
+  for (const spec of TEAM_STORE_PATHSPECS) {
+    const result = await runBestEffortGit(["add", "--sparse", "--", spec], cwd);
+    if (result.ok) staged++;
+  }
+  return staged;
+}
+
 export async function countUnsyncedCommits(cwd: string): Promise<number> {
   const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
   if (!upstream.ok || !upstream.output) {

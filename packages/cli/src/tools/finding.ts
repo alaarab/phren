@@ -36,6 +36,7 @@ import {
   resolveFindingContradiction,
 } from "../finding/lifecycle.js";
 import { permissionDeniedError } from "../governance/rbac.js";
+import { TEAM_STORE_PATHSPECS } from "../cli-hooks-git.js";
 
 
 
@@ -658,8 +659,11 @@ async function handlePushChanges(
           const storeStatus = runStoreGit(["status", "--porcelain"]);
           if (!storeStatus) { teamResults.push({ store: store.name, pushed: false }); continue; }
 
-          // Only stage team-safe files: journal/, tasks.md, truths.md, FINDINGS.md, summary.md
-          runStoreGit(["add", "--sparse", "--", "*/journal/*", "*/tasks.md", "*/truths.md", "*/FINDINGS.md", "*/FINDINGS.md.bak", "*/summary.md", "*/review.md", "*/CLAUDE.md", "*/topic-config.json", "*/phren.project.yaml", "*/reference/**", "*/skills/**"]);
+          // Stage each team-safe pathspec individually — a single no-match
+          // (e.g. no */truths.md in this store) used to abort the whole add.
+          for (const spec of TEAM_STORE_PATHSPECS) {
+            try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
+          }
           const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
           runStoreGit(["commit", "-m", `phren: ${actor} team sync`]);
 
