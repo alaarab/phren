@@ -331,10 +331,21 @@ exit $status
 }
 
 /**
- * Windows-only: append `%USERPROFILE%\.local\bin` to the user's persistent
- * PATH if it isn't already there. On Linux/macOS `~/.local/bin` is on PATH by
- * default (XDG / `.profile`); on Windows nothing adds it, so the `phren.cmd`
- * wrapper is invisible to cmd/PowerShell/Git Bash until we fix PATH.
+ * Windows-only: append `~/.local/bin` to the user's persistent PATH if it
+ * isn't already there. On Linux/macOS `~/.local/bin` is on PATH by default
+ * (XDG / `.profile`); on Windows nothing adds it, so the `phren.cmd` wrapper
+ * is invisible to cmd/PowerShell/Git Bash until we fix PATH.
+ *
+ * Reads/writes the User PATH directly from the registry under
+ * `HKCU\Environment` so we (a) keep the original value kind — `REG_EXPAND_SZ`
+ * vs `REG_SZ` — intact, and (b) preserve any `%VAR%` references the user has
+ * in their PATH. Going through `[Environment]::GetEnvironmentVariable` /
+ * `SetEnvironmentVariable` would silently expand `%VAR%` on read and write
+ * the result back as `REG_SZ`, baking expansions in permanently and
+ * downgrading the registry type — corrupting unrelated PATH entries.
+ *
+ * After writing, broadcasts `WM_SETTINGCHANGE` so newly-launched processes
+ * pick up the change without waiting for a logoff.
  *
  * Returns:
  *   "added"      — PATH was updated (user must open a new terminal).
@@ -345,45 +356,60 @@ exit $status
 export function ensureLocalBinOnWindowsPath(): "added" | "already" | "skipped" | "failed" {
   if (process.platform !== "win32") return "skipped";
   const target = homePath(".local", "bin");
+  const escapedTarget = target.replace(/'/g, "''");
 
-  // Current session PATH check — cheap early-out to avoid spawning PowerShell
-  // on re-runs in a terminal that already inherits the updated PATH.
-  const currentEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
-  const alreadyOnSessionPath = currentEntries.some((entry) => path.resolve(entry).toLowerCase() === target.toLowerCase());
+  const script = `
+$ErrorActionPreference = 'Stop'
+try {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+  if ($null -eq $key) { Write-Output 'FAILED'; exit 1 }
+  if (@($key.GetValueNames()) -contains 'Path') {
+    $rawPath = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $kind = $key.GetValueKind('Path')
+  } else {
+    $rawPath = ''
+    $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+  }
+  $target = '${escapedTarget}'
+  $targetNorm = ([Environment]::ExpandEnvironmentVariables($target)).TrimEnd('\\').ToLowerInvariant()
+  $present = $false
+  if ($rawPath) {
+    foreach ($entry in ($rawPath -split ';')) {
+      if (-not $entry) { continue }
+      $expanded = ([Environment]::ExpandEnvironmentVariables($entry)).TrimEnd('\\').ToLowerInvariant()
+      if ($expanded -eq $targetNorm) { $present = $true; break }
+    }
+  }
+  if ($present) { $key.Close(); Write-Output 'ALREADY'; exit 0 }
+  $newRaw = if ($rawPath) { $rawPath.TrimEnd(';') + ';' + $target } else { $target }
+  $key.SetValue('Path', $newRaw, $kind)
+  $key.Close()
+  Add-Type -Namespace PhrenInit -Name PathBroadcast -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError=true, CharSet=System.Runtime.InteropServices.CharSet.Auto)] public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out System.UIntPtr lpdwResult);' | Out-Null
+  $r = [System.UIntPtr]::Zero
+  [void][PhrenInit.PathBroadcast]::SendMessageTimeout([System.IntPtr]0xFFFF, 0x1A, [System.UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$r)
+  Write-Output 'ADDED'
+} catch {
+  Write-Output ('FAILED: ' + $_.Exception.Message)
+  exit 1
+}
+`;
 
-  // Always read persistent user PATH — session PATH can be stale in other terminals.
-  const readScript =
-    `$p = [Environment]::GetEnvironmentVariable('Path','User'); if ($null -eq $p) { '' } else { $p }`;
-  let userPath = "";
+  let out = "";
   try {
-    userPath = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", readScript], {
+    out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       timeout: EXEC_TIMEOUT_QUICK_MS,
     }).trim();
   } catch (err: unknown) {
-    debugLog(`ensureLocalBinOnWindowsPath: read failed: ${errorMessage(err)}`);
+    debugLog(`ensureLocalBinOnWindowsPath: ${errorMessage(err)}`);
     return "failed";
   }
-
-  const userEntries = userPath.split(";").filter(Boolean);
-  const alreadyPersisted = userEntries.some((entry) => entry.toLowerCase() === target.toLowerCase());
-
-  if (alreadyPersisted) return alreadyOnSessionPath ? "already" : "already";
-
-  const newUserPath = userEntries.length > 0 ? `${userPath};${target}` : target;
-  const escaped = newUserPath.replace(/'/g, "''");
-  const writeScript = `[Environment]::SetEnvironmentVariable('Path','${escaped}','User')`;
-  try {
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", writeScript], {
-      stdio: ["ignore", "ignore", "pipe"],
-      timeout: EXEC_TIMEOUT_QUICK_MS,
-    });
-    return "added";
-  } catch (err: unknown) {
-    debugLog(`ensureLocalBinOnWindowsPath: write failed: ${errorMessage(err)}`);
-    return "failed";
-  }
+  const lastLine = out.split(/\r?\n/).pop()?.trim() ?? "";
+  if (lastLine === "ADDED") return "added";
+  if (lastLine === "ALREADY") return "already";
+  debugLog(`ensureLocalBinOnWindowsPath: unexpected output: ${out}`);
+  return "failed";
 }
 
 /**
