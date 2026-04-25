@@ -12,6 +12,7 @@ import {
   renderSearchScript,
   renderEventWiringScript,
   renderGraphHostScript,
+  renderMemoryTraceScript,
 } from "./scripts.js";
 
 function h(s: string): string {
@@ -391,6 +392,9 @@ ${renderSearchScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderEventWiringScript()}
+</script>
+<script${nonceAttr}>
+${renderMemoryTraceScript()}
 </script>
 </body>
 </html>`;
