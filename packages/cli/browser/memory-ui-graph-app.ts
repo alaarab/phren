@@ -502,7 +502,7 @@ function nodeMatchesFilters(node: RuntimeNode): boolean {
       else if (ref.doc.includes("/")) connectedProjects.add(ref.doc.slice(0, ref.doc.indexOf("/")));
     });
     if (node.kind === "project") {
-      if (node.id !== project) return false;
+      if ((node.project || "") !== project) return false;
     } else if (!connectedProjects.has(project)) {
       return false;
     }
@@ -571,7 +571,7 @@ function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
   });
   // Keep nodes if: not a project, OR has visible connections, OR is the selected project, OR project type is filtered but has no connections
   const prunedNodes = limitedNodes.filter((node) =>
-    node.kind !== "project" || connectedIds.has(node.id) || node.id === state.filterProject || state.filterTypes.project
+    node.kind !== "project" || connectedIds.has(node.id) || (node.project || "") === state.filterProject || state.filterTypes.project
   );
   return { nodes: prunedNodes, links: visibleLinks };
 }
@@ -1283,10 +1283,11 @@ function buildFilterBar(): void {
   const limitRow = document.getElementById("graph-limit-row");
   if (!filterEl) return;
 
-  const projectNames = state.rawNodes
-    .filter((node) => node.kind === "project")
-    .map((node) => node.id)
-    .sort((a, b) => a.localeCompare(b));
+  const projectNames = Array.from(new Set(
+    state.rawNodes
+      .filter((node) => node.kind === "project")
+      .map((node) => node.project || node.id)
+  )).sort((a, b) => a.localeCompare(b));
 
   const storeNames = Array.from(new Set(
     state.rawNodes
