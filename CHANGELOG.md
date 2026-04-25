@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-04-25
+
+### Fixed
+- **Critical**: Team-store auto-sync (Stop hook + `push_changes` MCP tool) silently no-op'd in any team store missing one of the listed pathspecs. The single `git add --sparse -- "*/journal/*" "*/tasks.md" "*/truths.md" ...` aborts with `fatal: pathspec '*/truths.md' did not match any files` if **any** pattern matches nothing — staging is then empty, the follow-up `git commit` says "nothing to commit", and journal/findings/tasks edits silently never reach the team remote. Bug shipped in 0.1.20 when the pathspec was expanded; users with team stores have been losing arc/qualus daily journals for ~6 days. Fix: extracted `TEAM_STORE_PATHSPECS` constant + `addTeamPathspecs(cwd)` helper in `cli-hooks-git.ts` that runs each pathspec individually so a single no-match doesn't sink the rest. Both call sites (`cli-hooks-stop.ts` and `tools/finding.ts`) now use it. Regression test in `cli-hooks-git.test.ts`.
+
 ## [0.1.21] - 2026-04-25
 
 ### Fixed
