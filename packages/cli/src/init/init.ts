@@ -84,6 +84,7 @@ import {
   runProjectLocalInit,
 } from "./init-configure.js";
 import { runWalkthrough, createWalkthroughPrompts, createWalkthroughStyle } from "./init-walkthrough.js";
+import { assertNoGlobalWiringConflict } from "./guard-globals.js";
 
 
 import {
@@ -172,6 +173,14 @@ export interface InitOptions {
   yes?: boolean;
   /** Skip walkthrough entirely with recommended defaults (express mode) */
   express?: boolean;
+  /**
+   * Allow init to repoint global wiring (~/.local/bin/phren wrapper and
+   * Claude settings.json hooks/mcpServers.phren) at a different phren root
+   * than the one currently in use. Without this, init refuses when an
+   * existing global file references a different valid phren root — protects
+   * against tests/smoke runs that forget to sandbox $HOME.
+   */
+  force?: boolean;
   // Built-in template names are directory-based under starter/templates/.
   // Keep string-compatible so custom package templates continue to work.
   template?: "python-project" | "monorepo" | "library" | "frontend" | string;
@@ -240,6 +249,10 @@ export async function runInit(opts: InitOptions = {}) {
   }
   let phrenPath = resolveInitPhrenPath(opts);
   const dryRun = Boolean(opts.dryRun);
+
+  if (!dryRun) {
+    assertNoGlobalWiringConflict(phrenPath, Boolean(opts.force));
+  }
 
   // Migrate the legacy hidden store directory into ~/.phren when upgrading
   // from the previous product name. Only runs when the resolved phrenPath
