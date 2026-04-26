@@ -428,22 +428,28 @@ export async function runTopLevelCommand(
       return finish(1);
     }
     const cloneUrl = getOptionValue(initArgs, "--clone-url");
-    await runInit({
-      mode: modeArg as "shared" | "project-local" | undefined,
-      machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
-      profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
-      mcp: mcpMode,
-      projectOwnershipDefault: ownershipMode,
-      taskMode,
-      findingsProactivity,
-      taskProactivity,
-      template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
-      applyStarterUpdate: initArgs.includes("--apply-starter-update"),
-      dryRun: initArgs.includes("--dry-run"),
-      yes: initArgs.includes("--yes") || initArgs.includes("-y"),
-      express: initArgs.includes("--express"),
-      _walkthroughCloneUrl: cloneUrl,
-    });
+    try {
+      await runInit({
+        mode: modeArg as "shared" | "project-local" | undefined,
+        machine: machineIdx !== -1 ? initArgs[machineIdx + 1] : undefined,
+        profile: profileIdx !== -1 ? initArgs[profileIdx + 1] : undefined,
+        mcp: mcpMode,
+        projectOwnershipDefault: ownershipMode,
+        taskMode,
+        findingsProactivity,
+        taskProactivity,
+        template: templateIdx !== -1 ? initArgs[templateIdx + 1] : undefined,
+        applyStarterUpdate: initArgs.includes("--apply-starter-update"),
+        dryRun: initArgs.includes("--dry-run"),
+        yes: initArgs.includes("--yes") || initArgs.includes("-y"),
+        express: initArgs.includes("--express"),
+        force: initArgs.includes("--force"),
+        _walkthroughCloneUrl: cloneUrl,
+      });
+    } catch (err: unknown) {
+      console.error(errorMessage(err));
+      return finish(1);
+    }
     return finish();
   }
 
