@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-04-25
+
+### Fixed
+- **Critical**: `phren init` silently rewrote `~/.local/bin/phren` and `~/.claude/settings.json` (4 lifecycle hooks + `mcpServers.phren`) to point at whatever `PHREN_PATH` was set in the invoking environment, even when those files already pointed at a valid different root. A smoke or test invocation like `PHREN_PATH=/tmp/foo phren init --yes` would clobber the real wiring; once `/tmp/foo` was cleaned up the user's next session got `NOT_FOUND: phren root not found. Run 'phren init'.` from every session-start, prompt, stop, and tool hook, plus the phren MCP server. Init now scans the wrapper and Claude hooks/MCP entry up-front, and aborts with a clear list of conflicts when any references a different path that still resolves to a valid phren root (`phren.root.yaml`, `machines.yaml`, or `global/`). Stale wiring (existing path missing or not a phren root) is intentionally not treated as a conflict so init can still repair it. Tests/smoke runs that intentionally install into a fresh root must isolate `HOME` (and `USERPROFILE` on Windows) to a sandbox dir, or pass `--force`.
+
+### Added
+- `phren init --force` overrides the new global-wiring conflict guard for intentional re-points (machine moves, real test environments).
+
 ## [0.1.22] - 2026-04-25
 
 ### Fixed
