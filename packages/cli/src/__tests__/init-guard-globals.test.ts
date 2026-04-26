@@ -18,19 +18,30 @@ function makeRealRoot(parent: string, name = "real-phren"): string {
 function writeWrapper(homeDir: string, defaultPhrenPath: string): string {
   const binDir = path.join(homeDir, ".local", "bin");
   fs.mkdirSync(binDir, { recursive: true });
-  const wrapperPath = path.join(binDir, "phren");
-  const content = [
-    "#!/bin/sh",
-    "# PHREN_CLI_WRAPPER — managed by phren init; safe to delete",
-    "set -u",
-    `PHREN_PATH="\${PHREN_PATH:-${defaultPhrenPath}}"`,
-    "export PHREN_PATH",
-    'exec node /tmp/index.js "$@"',
-    "",
-  ].join("\n");
+  const isWindows = process.platform === "win32";
+  const wrapperPath = path.join(binDir, isWindows ? "phren.cmd" : "phren");
+  const content = isWindows
+    ? [
+        "@echo off",
+        "rem PHREN_CLI_WRAPPER — managed by phren init; safe to delete",
+        `if not defined PHREN_PATH set "PHREN_PATH=${defaultPhrenPath}"`,
+        'node "C:\\tmp\\index.js" %*',
+        "",
+      ].join("\r\n")
+    : [
+        "#!/bin/sh",
+        "# PHREN_CLI_WRAPPER — managed by phren init; safe to delete",
+        "set -u",
+        `PHREN_PATH="\${PHREN_PATH:-${defaultPhrenPath}}"`,
+        "export PHREN_PATH",
+        'exec node /tmp/index.js "$@"',
+        "",
+      ].join("\n");
   fs.writeFileSync(wrapperPath, content);
   return wrapperPath;
 }
+
+const wrapperLocationLabel = `~/.local/bin/${process.platform === "win32" ? "phren.cmd" : "phren"} wrapper`;
 
 function writeClaudeSettings(homeDir: string, phrenPathInWiring: string): string {
   const dir = path.join(homeDir, ".claude");
@@ -112,8 +123,8 @@ describe("init guard against repointing global wiring", () => {
     expect(locations).toEqual([
       "~/.claude/settings.json hooks.UserPromptSubmit",
       "~/.claude/settings.json mcpServers.phren",
-      "~/.local/bin/phren wrapper",
-    ]);
+      wrapperLocationLabel,
+    ].sort());
     for (const c of conflicts) {
       expect(path.resolve(c.existingPath)).toBe(path.resolve(realRoot));
     }
@@ -131,7 +142,8 @@ describe("init guard against repointing global wiring", () => {
     const realRoot = makeRealRoot(tmp);
     const binDir = path.join(tmp, ".local", "bin");
     fs.mkdirSync(binDir, { recursive: true });
-    fs.writeFileSync(path.join(binDir, "phren"), "#!/bin/sh\necho not ours\n");
+    const wrapperName = process.platform === "win32" ? "phren.cmd" : "phren";
+    fs.writeFileSync(path.join(binDir, wrapperName), "#!/bin/sh\necho not ours\n");
     expect(findConflictingGlobalWiring(path.join(tmp, "new-phren"))).toEqual([]);
     void realRoot; // ensure realRoot isn't garbage collected/unused warning
   });
