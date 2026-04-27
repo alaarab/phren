@@ -412,7 +412,270 @@ function SceneDance({ speed = 1 }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// DJ — overhead DJ controller. Phren sits right on top of the booth (big,
+// front-facing, looking at us). No stick arms — his hands come out from
+// directly beneath him onto the decks. Pad grids on each deck, faders on
+// each side, crossfader in the middle.
+function SceneDJ({ speed = 1 }) {
+  const t = tickEx(120 / speed);
+  const beat = t % 4;
+  const kick = beat === 0 || beat === 2;
+  const bob = kick ? -2 : 0;
+
+  const leftRot = (t * 20) % 360;
+  const rightRot = (-t * 20) % 360;
+  const leftScratch = Math.sin(t * 0.9) * 12;
+
+  const leftHandX = Math.sin(t * 0.9) * 2;
+  const rightHandY = kick ? -2 : 0;
+
+  const activePadL = t % 8;
+  const activePadR = (t + 3) % 8;
+
+  return (
+    <SceneFrame label="dj">
+      {/* dark club floor */}
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 50% 100%, rgba(124,58,237,0.2), transparent 70%)" }} />
+
+      {/* ── DJ CONTROLLER — wide, centered, takes up most of the bottom ── */}
+      <div style={{
+        position: "absolute",
+        left: "50%", bottom: 6,
+        transform: "translateX(-50%)",
+        width: 310, height: 140,
+        background: "#18182e",
+        border: "2px solid #0a0a1a",
+        borderRadius: 8,
+        boxShadow: "inset 0 0 12px rgba(0,0,0,0.5)",
+      }}>
+        {/* ═══ LEFT DECK ═══ */}
+        {/* Jog wheel */}
+        <div style={{ position: "absolute", left: 12, top: 8, width: 68, height: 68 }}>
+          <div style={{ position: "absolute", inset: 0, background: "#2a2a44", borderRadius: "50%", border: "1.5px solid #0a0a1a" }} />
+          <div style={{
+            position: "absolute", inset: 5,
+            background: "radial-gradient(circle at 40% 40%, #4a4a66, #1a1a2e 75%)",
+            borderRadius: "50%",
+            border: "1px solid #0a0a1a",
+            transform: `rotate(${leftRot + leftScratch}deg)`,
+          }}>
+            <div style={{ position: "absolute", inset: 4, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", inset: 10, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", inset: 20, background: "#0a0a1a", borderRadius: "50%", border: "1px solid #2a2a44" }}>
+              <div style={{ position: "absolute", top: 2, left: "50%", width: 2, height: 7, background: "#F5A5A5", transform: "translateX(-50%)" }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Left deck performance pads — 2 rows of 4, under the jog wheel */}
+        {[0, 1].map((row) => (
+          <div key={row} style={{
+            position: "absolute",
+            left: 14,
+            top: 84 + row * 12,
+            display: "flex", gap: 2,
+          }}>
+            {[0, 1, 2, 3].map((col) => {
+              const idx = row * 4 + col;
+              const active = idx === activePadL;
+              const colors = ["#F5A5A5", "#28D3F2", "#7C3AED", "#F5DC5A"];
+              return (
+                <div key={col} style={{
+                  width: 14, height: 10,
+                  background: active ? colors[col] : "#2a2a44",
+                  border: "1px solid #0a0a1a",
+                  borderRadius: 1,
+                  boxShadow: active ? `0 0 5px ${colors[col]}` : "none",
+                }} />
+              );
+            })}
+          </div>
+        ))}
+
+        {/* ═══ RIGHT DECK ═══ */}
+        <div style={{ position: "absolute", right: 12, top: 8, width: 68, height: 68 }}>
+          <div style={{ position: "absolute", inset: 0, background: "#2a2a44", borderRadius: "50%", border: "1.5px solid #0a0a1a" }} />
+          <div style={{
+            position: "absolute", inset: 5,
+            background: "radial-gradient(circle at 40% 40%, #4a4a66, #1a1a2e 75%)",
+            borderRadius: "50%",
+            border: "1px solid #0a0a1a",
+            transform: `rotate(${rightRot}deg)`,
+          }}>
+            <div style={{ position: "absolute", inset: 4, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", inset: 10, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", inset: 20, background: "#0a0a1a", borderRadius: "50%", border: "1px solid #2a2a44" }}>
+              <div style={{ position: "absolute", top: 2, left: "50%", width: 2, height: 7, background: "#28D3F2", transform: "translateX(-50%)" }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Right deck pads */}
+        {[0, 1].map((row) => (
+          <div key={row} style={{
+            position: "absolute",
+            right: 14,
+            top: 84 + row * 12,
+            display: "flex", gap: 2,
+          }}>
+            {[0, 1, 2, 3].map((col) => {
+              const idx = row * 4 + col;
+              const active = idx === activePadR;
+              const colors = ["#F5A5A5", "#28D3F2", "#7C3AED", "#F5DC5A"];
+              return (
+                <div key={col} style={{
+                  width: 14, height: 10,
+                  background: active ? colors[col] : "#2a2a44",
+                  border: "1px solid #0a0a1a",
+                  borderRadius: 1,
+                  boxShadow: active ? `0 0 5px ${colors[col]}` : "none",
+                }} />
+              );
+            })}
+          </div>
+        ))}
+
+        {/* ═══ CENTER MIXER ═══ */}
+        {/* EQ knobs row 1 (highs) */}
+        <div style={{ position: "absolute", left: "50%", top: 10, transform: "translateX(-50%)", display: "flex", gap: 6 }}>
+          {[0, 1].map((i) => (
+            <div key={i} style={{
+              width: 12, height: 12, borderRadius: "50%",
+              background: "#3a3a56",
+              border: "1px solid #0a0a1a",
+              position: "relative",
+            }}>
+              <div style={{
+                position: "absolute", top: 1, left: "50%",
+                width: 1.5, height: 5,
+                background: "#F5A5A5",
+                transform: `translateX(-50%) rotate(${40 + Math.sin(t / 5 + i) * 40}deg)`,
+                transformOrigin: "50% 100%",
+              }} />
+            </div>
+          ))}
+        </div>
+        {/* EQ row 2 (mids) */}
+        <div style={{ position: "absolute", left: "50%", top: 26, transform: "translateX(-50%)", display: "flex", gap: 6 }}>
+          {[0, 1].map((i) => (
+            <div key={i} style={{
+              width: 12, height: 12, borderRadius: "50%",
+              background: "#3a3a56",
+              border: "1px solid #0a0a1a",
+              position: "relative",
+            }}>
+              <div style={{
+                position: "absolute", top: 1, left: "50%",
+                width: 1.5, height: 5,
+                background: "#28D3F2",
+                transform: `translateX(-50%) rotate(${-30 + Math.sin(t / 4 + i) * 30}deg)`,
+                transformOrigin: "50% 100%",
+              }} />
+            </div>
+          ))}
+        </div>
+        {/* EQ row 3 (lows) */}
+        <div style={{ position: "absolute", left: "50%", top: 42, transform: "translateX(-50%)", display: "flex", gap: 6 }}>
+          {[0, 1].map((i) => (
+            <div key={i} style={{
+              width: 12, height: 12, borderRadius: "50%",
+              background: "#3a3a56",
+              border: "1px solid #0a0a1a",
+              position: "relative",
+            }}>
+              <div style={{
+                position: "absolute", top: 1, left: "50%",
+                width: 1.5, height: 5,
+                background: "#7CFFB2",
+                transform: `translateX(-50%) rotate(${20 + Math.sin(t / 6 + i) * 20}deg)`,
+                transformOrigin: "50% 100%",
+              }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Channel faders — 2 vertical in middle */}
+        <div style={{ position: "absolute", left: "50%", top: 62, transform: "translateX(-50%)", display: "flex", gap: 8 }}>
+          {[0, 1].map((i) => {
+            const pos = Math.sin(t / (4 + i)) * 10 + 14;
+            return (
+              <div key={i} style={{ position: "relative", width: 6, height: 36, background: "#0a0a1a", border: "1px solid #2a2a44" }}>
+                <div style={{
+                  position: "absolute", bottom: pos, left: -2, right: -2, height: 6,
+                  background: i === 0 ? "#F5A5A5" : "#28D3F2",
+                  border: "1px solid #0a0a1a",
+                }} />
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Crossfader — horizontal bottom center */}
+        <div style={{
+          position: "absolute", left: "50%", bottom: 10,
+          transform: "translateX(-50%)",
+          width: 60, height: 5,
+          background: "#0a0a1a", border: "1px solid #2a2a44",
+        }}>
+          <div style={{
+            position: "absolute",
+            left: `calc(50% + ${Math.sin(t / 3) * 20}px - 5px)`,
+            top: -3, width: 10, height: 9,
+            background: "#f0f0f0", border: "1px solid #0a0a1a", borderRadius: 1,
+          }} />
+        </div>
+      </div>
+
+      {/* ── PHREN — front-facing with built-in arms reaching out to the decks ── */}
+      <div style={{
+        position: "absolute",
+        left: "50%", bottom: 60 + bob,
+        transform: "translateX(-50%)",
+        transition: "bottom 0.08s",
+        zIndex: 3,
+      }}>
+        <PhrenSprite
+          size={260}
+          pose="dj"
+          headphones
+          mouth="open"
+          blinking={t % 9 === 0}
+          sparkle={false}
+        />
+      </div>
+
+      {/* label */}
+      <div style={{
+        position: "absolute", left: 10, top: 8,
+        fontFamily: "ui-monospace, monospace",
+        fontSize: 8, color: "#28D3F2", opacity: 0.7, letterSpacing: 2,
+        zIndex: 5,
+      }}>PHREN · DDJ-400</div>
+
+      {/* floating music notes */}
+      {[0, 1].map((i) => {
+        const age = (t * 2 + i * 14) % 28;
+        const p = age / 28;
+        const x = 20 + i * 340 + Math.sin(p * 6) * 4;
+        const y = 140 - p * 120;
+        return (
+          <div key={i} style={{
+            position: "absolute",
+            left: x, top: y,
+            color: i === 0 ? "#F5A5A5" : "#28D3F2",
+            fontFamily: "serif",
+            fontSize: 14, fontWeight: 700,
+            opacity: 0.8 * (1 - p),
+            zIndex: 1,
+          }}>{i === 0 ? "♪" : "♫"}</div>
+        );
+      })}
+    </SceneFrame>
+  );
+}
+
 Object.assign(window, {
   SceneParachute, SceneJuggle, SceneBuild, ScenePlant,
-  SceneBed, SceneAstro, SceneDance,
+  SceneBed, SceneAstro, SceneDance, SceneDJ,
 });

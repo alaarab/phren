@@ -34,3 +34,6 @@ LEARNINGS.md
 # User config
 *.local.yaml
 docs/wp*.png
+
+# Design handoff bundles (local only)
+.design-bundles/
