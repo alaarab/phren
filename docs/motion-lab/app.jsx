@@ -12,6 +12,7 @@ const SCENES = [
   { key: "team",       name: "team sync",   Comp: SceneTeam,      desc: "findings flit between stores. dashed trail shows the wire." },
   { key: "celebrate",  name: "celebrate",   Comp: SceneCelebrate, desc: "task done. confetti, jump, flash." },
   { key: "parachute",  name: "parachute",   Comp: SceneParachute, desc: "drifting down on a purple chute, canopy sways." },
+  { key: "dj",         name: "DJing",       Comp: SceneDJ,        desc: "behind the decks, headphones on, scratching to the beat." },
   { key: "juggle",     name: "juggle",      Comp: SceneJuggle,    desc: "hands catch and throw, head tracks the top ball." },
   { key: "build",      name: "compiling",   Comp: SceneBuild,     desc: "progress bar creeping toward 100%." },
   { key: "plant",      name: "growing",     Comp: ScenePlant,     desc: "waters a plant — seed to flower and back." },

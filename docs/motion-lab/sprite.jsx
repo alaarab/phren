@@ -131,6 +131,158 @@ function PhrenSprite({
     px.push({ c: 9, r: 19, color: PURPLE_FOOT });
     px.push({ c: 14, r: 19, color: PURPLE_FOOT });
     px.push({ c: 15, r: 19, color: PURPLE_FOOT });
+  } else if (pose === "front") {
+    // Front-facing brain head — symmetric about c=11.5, with brain folds
+    // and speckled dark navy texture like the pixel-art original.
+    px = [];
+
+    // Silhouette fill map: which (c,r) cells are INSIDE the head
+    const inHead = (c, r) => {
+      // symmetric brain blob
+      if (r === 5) return c === 9 || c === 10 || c === 13 || c === 14;
+      if (r === 6) return c >= 8 && c <= 15 && c !== 11.5;
+      if (r === 7) return c >= 7 && c <= 16;
+      if (r >= 8 && r <= 13) return c >= 6 && c <= 17;
+      if (r === 14) return c >= 7 && c <= 16;
+      if (r === 15) return c >= 7 && c <= 16;
+      if (r === 16) return c >= 8 && c <= 15;
+      return false;
+    };
+
+    // Outline: cells that are in-head but have a neighbor outside
+    const isOutline = (c, r) => {
+      if (!inHead(c, r)) return false;
+      return !inHead(c - 1, r) || !inHead(c + 1, r) || !inHead(c, r - 1) || !inHead(c, r + 1);
+    };
+
+    for (let r = 5; r <= 16; r++) {
+      for (let c = 5; c <= 18; c++) {
+        if (!inHead(c, r)) continue;
+        if (isOutline(c, r)) {
+          px.push({ c, r, color: PURPLE_DARK });
+        } else {
+          // Upper-left highlight
+          const isHighlight = (r <= 8 && c <= 10) || (r === 9 && c <= 8);
+          px.push({ c, r, color: isHighlight ? PURPLE_LIGHT : PURPLE_MID });
+        }
+      }
+    }
+
+    // Brain-fold speckles — symmetric dark navy dots
+    const folds = [
+      // central sulcus (down the middle)
+      [11, 7], [12, 7],
+      [11, 9], [12, 9],
+      [11, 13], [12, 13],
+      // mirrored hemisphere wrinkles
+      [8, 8], [15, 8],
+      [9, 10], [14, 10],
+      [7, 11], [16, 11],
+      [8, 13], [15, 13],
+      [9, 14], [14, 14],
+    ];
+    folds.forEach(([c, r]) => {
+      px = px.filter((p) => !(p.c === c && p.r === r));
+      px.push({ c, r, color: EYE_NAVY });
+    });
+
+    // Eyes — symmetric, r=11 primary
+    const eyeCells = [[8, 11], [9, 11], [14, 11], [15, 11], [8, 12], [9, 12], [14, 12], [15, 12]];
+    eyeCells.forEach(([c, r]) => {
+      px = px.filter((p) => !(p.c === c && p.r === r));
+      px.push({ c, r, color: EYE_NAVY });
+    });
+  } else if (pose === "dj") {
+    // Same as front, PLUS stub arms extending out to where hands rest on decks.
+    // Reuse the front pose body first.
+    px = [];
+    const inHead = (c, r) => {
+      if (r === 5) return c === 9 || c === 10 || c === 13 || c === 14;
+      if (r === 6) return c >= 8 && c <= 15;
+      if (r === 7) return c >= 7 && c <= 16;
+      if (r >= 8 && r <= 13) return c >= 6 && c <= 17;
+      if (r === 14) return c >= 7 && c <= 16;
+      if (r === 15) return c >= 7 && c <= 16;
+      if (r === 16) return c >= 8 && c <= 15;
+      return false;
+    };
+    const isOutline = (c, r) => {
+      if (!inHead(c, r)) return false;
+      return !inHead(c - 1, r) || !inHead(c + 1, r) || !inHead(c, r - 1) || !inHead(c, r + 1);
+    };
+    for (let r = 5; r <= 16; r++) {
+      for (let c = 5; c <= 18; c++) {
+        if (!inHead(c, r)) continue;
+        if (isOutline(c, r)) {
+          px.push({ c, r, color: PURPLE_DARK });
+        } else {
+          const isHighlight = (r <= 8 && c <= 10) || (r === 9 && c <= 8);
+          px.push({ c, r, color: isHighlight ? PURPLE_LIGHT : PURPLE_MID });
+        }
+      }
+    }
+    // Brain folds
+    const djFolds = [
+      [11, 7], [12, 7], [11, 9], [12, 9], [11, 13], [12, 13],
+      [8, 8], [15, 8], [9, 10], [14, 10], [7, 11], [16, 11],
+      [8, 13], [15, 13], [9, 14], [14, 14],
+    ];
+    djFolds.forEach(([c, r]) => {
+      px = px.filter((p) => !(p.c === c && p.r === r));
+      px.push({ c, r, color: EYE_NAVY });
+    });
+    // Eyes
+    const djEyes = [[8, 11], [9, 11], [14, 11], [15, 11], [8, 12], [9, 12], [14, 12], [15, 12]];
+    djEyes.forEach(([c, r]) => {
+      px = px.filter((p) => !(p.c === c && p.r === r));
+      px.push({ c, r, color: EYE_NAVY });
+    });
+
+    // ── ARMS stretching out to the sides and DOWN onto the decks ──
+    // Left arm: from shoulder (c=6, r=14) diagonally down-left then straight down
+    // to hand cluster at c=0-1, r=20-22.
+    const leftArm = [
+      // shoulder/upper arm going down-left
+      [5, 14], [4, 15], [3, 16],
+      [2, 17], [1, 18],
+      // forearm going straight down
+      [1, 19], [1, 20], [2, 20],
+      // hand (wider block with knuckles)
+      [0, 20], [0, 21], [1, 21], [2, 21], [3, 21],
+      [0, 22], [1, 22], [2, 22], [3, 22],
+    ];
+    const rightArm = [
+      [18, 14], [19, 15], [20, 16],
+      [21, 17], [22, 18],
+      [22, 19], [22, 20], [21, 20],
+      [23, 20], [23, 21], [22, 21], [21, 21], [20, 21],
+      [23, 22], [22, 22], [21, 22], [20, 22],
+    ];
+    leftArm.concat(rightArm).forEach(([c, r]) => {
+      px.push({ c, r, color: PURPLE_MID });
+    });
+    // Outline the arms — dark cells where arm meets empty space
+    const isArmCell = (c, r) => leftArm.concat(rightArm).some(([cc, rr]) => cc === c && rr === r);
+    for (const [c, r] of leftArm.concat(rightArm)) {
+      const isArmOutline = !isArmCell(c - 1, r) || !isArmCell(c + 1, r) || !isArmCell(c, r - 1) || !isArmCell(c, r + 1);
+      if (isArmOutline) {
+        px = px.filter((p) => !(p.c === c && p.r === r && p.color === PURPLE_MID));
+        px.push({ c, r, color: PURPLE_DARK });
+      }
+    }
+    // Re-fill interior cells of arms with mid-purple
+    for (const [c, r] of leftArm.concat(rightArm)) {
+      const isInner = isArmCell(c - 1, r) && isArmCell(c + 1, r) && isArmCell(c, r - 1) && isArmCell(c, r + 1);
+      if (isInner) {
+        px = px.filter((p) => !(p.c === c && p.r === r));
+        px.push({ c, r, color: PURPLE_MID });
+      }
+    }
+    // Hand knuckle highlights — lighter cells inside hand
+    [[1, 21], [2, 21], [21, 21], [22, 21]].forEach(([c, r]) => {
+      px = px.filter((p) => !(p.c === c && p.r === r));
+      px.push({ c, r, color: PURPLE_LIGHT });
+    });
   }
 
   if (sit) {
@@ -170,7 +322,10 @@ function PhrenSprite({
   }
 
   // ── Eyes ────────────────────────────────────────────────────────────────
-  const isEye = (p) => p.r === 12 && (p.c === 7 || p.c === 11);
+  const isFront = pose === "front" || pose === "dj";
+  const isEye = isFront
+    ? (p) => (p.r === 11 || p.r === 12) && (p.c === 8 || p.c === 9 || p.c === 14 || p.c === 15)
+    : (p) => p.r === 12 && (p.c === 7 || p.c === 11);
   const shiftEye = (p, dr, dc) => ({ ...p, r: p.r + dr, c: p.c + dc });
 
   if (pose === "sleep" || blinking) {
@@ -348,14 +503,25 @@ function PhrenSprite({
 
   // ── Accessories ─────────────────────────────────────────────────────────
   if (headphones) {
-    // band across top + cups on sides
-    for (let c = 6; c <= 13; c++) px.push({ c, r: 5, color: BLACK });
-    for (let r = 6; r <= 9; r++) {
-      px.push({ c: 4, r, color: BLACK });
-      px.push({ c: 15, r, color: BLACK });
+    if (pose === "front" || pose === "dj") {
+      // Symmetric headphones for front-facing head (head is cols 7-16, centered)
+      for (let c = 8; c <= 15; c++) px.push({ c, r: 5, color: BLACK });
+      for (let r = 6; r <= 9; r++) {
+        px.push({ c: 6, r, color: BLACK });
+        px.push({ c: 17, r, color: BLACK });
+      }
+      px.push({ c: 7, r: 7, color: CYAN });
+      px.push({ c: 16, r: 7, color: CYAN });
+    } else {
+      // band across top + cups on sides
+      for (let c = 6; c <= 13; c++) px.push({ c, r: 5, color: BLACK });
+      for (let r = 6; r <= 9; r++) {
+        px.push({ c: 4, r, color: BLACK });
+        px.push({ c: 15, r, color: BLACK });
+      }
+      px.push({ c: 5, r: 7, color: CYAN });
+      px.push({ c: 14, r: 7, color: CYAN });
     }
-    px.push({ c: 5, r: 7, color: CYAN });
-    px.push({ c: 14, r: 7, color: CYAN });
   }
   if (shades) {
     for (let c = 5; c <= 13; c++) px.push({ c, r: 11, color: BLACK });
