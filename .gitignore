@@ -17,6 +17,7 @@ packages/vscode/out/
 coverage/
 .benchmarks/
 docs/benchmark-*.json
+test-results/
 
 # Runtime / ephemeral
 .runtime/
