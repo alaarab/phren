@@ -101,6 +101,10 @@ export interface FindingItem {
   taskItem?: string;
   confidence?: number;
   scope?: string;
+  /** Machine hostname where this finding was originally recorded. */
+  machine?: string;
+  /** Actor (username) who recorded this finding. */
+  actor?: string;
   /** First 60 chars of the newer finding that supersedes this one. Set when this finding is stale. */
   supersededBy?: string;
   /** First 60 chars of the older finding this one replaces. */
@@ -323,7 +327,10 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
     const next = lines[i + 1] || "";
     const citation = isCitationLine(next) ? next.trim() : undefined;
     const citationData = citation ? parseCitationComment(citation) ?? undefined : undefined;
-    const scope = parseScopeComment(line) ?? parseSourceComment(line)?.scope;
+    const provenance = parseSourceComment(line);
+    const scope = parseScopeComment(line) ?? provenance?.scope;
+    const machine = provenance?.machine;
+    const actor = provenance?.actor;
     const stableId = parseFindingId(line);
     const rawText = line.replace(/^-\s+/, "").trim();
     const textWithoutComments = stripComments(rawText);
@@ -349,6 +356,8 @@ export function readFindings(phrenPath: string, project: string, opts: ReadFindi
       citationData,
       taskItem: citationData?.task_item,
       scope,
+      machine,
+      actor,
       supersededBy: supersededByMatch ? supersededByMatch[1] : undefined,
       supersedes: supersedesMatch ? supersedesMatch[1] : undefined,
       contradicts: contradictsMatches.length > 0 ? contradictsMatches : undefined,

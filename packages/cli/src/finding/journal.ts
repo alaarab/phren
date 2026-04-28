@@ -5,7 +5,8 @@ import { runtimeDir, PhrenResult, phrenOk, phrenErr, PhrenError, atomicWriteText
 import { withFileLock } from "../shared/governance.js";
 import { addFindingToFile } from "../shared/content.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import type { FindingProvenanceSource } from "../content/citation.js";
+import { buildSourceComment, type FindingProvenanceSource } from "../content/citation.js";
+import { getCurrentActor } from "../machine-identity.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 
 interface FindingJournalEntry {
@@ -154,8 +155,9 @@ export function appendTeamJournal(
   project: string,
   finding: string,
   actor?: string,
+  machine?: string,
 ): PhrenResult<string> {
-  const resolvedActor = actor || process.env.PHREN_ACTOR || process.env.USER || "unknown";
+  const resolvedActor = actor || getCurrentActor();
   const date = new Date().toISOString().slice(0, 10);
   const journalDir = path.join(storePath, project, TEAM_JOURNAL_DIR);
   const journalFile = `${date}-${resolvedActor}.md`;
@@ -163,7 +165,8 @@ export function appendTeamJournal(
 
   try {
     fs.mkdirSync(journalDir, { recursive: true });
-    const entry = `- ${finding}\n`;
+    const sourceComment = buildSourceComment({ source: "human", machine, actor: resolvedActor });
+    const entry = `- ${finding}${sourceComment ? ` ${sourceComment}` : ""}\n`;
     if (fs.existsSync(journalPath)) {
       fs.appendFileSync(journalPath, entry);
     } else {
@@ -227,7 +230,9 @@ export function materializeTeamFindings(
     lines.push(`## ${date}`);
     for (const { actor, entries } of actors) {
       for (const entry of entries) {
-        lines.push(`- ${entry} <!-- author:${actor} -->`);
+        const hasSource = /<!--\s*source:.*?-->/.test(entry);
+        const fallback = hasSource ? "" : ` ${buildSourceComment({ source: "human", actor })}`;
+        lines.push(`- ${entry}${fallback}`);
         count++;
       }
     }

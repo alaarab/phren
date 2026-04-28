@@ -75,6 +75,7 @@ import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { invalidateDfCache } from "./search-fallback.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import { formatActorAttribution, parseSourceComment } from "../content/citation.js";
 import {
   beginUserFragmentBuildCache,
   endUserFragmentBuildCache,
@@ -583,7 +584,10 @@ export function normalizeIndexedContent(content: string, type: string, phrenPath
     .replace(/<!-- phren:archive:start -->[\s\S]*?<!-- phren:archive:end -->/g, "")
     .replace(/<details>[\s\S]*?<\/details>/gi, "")
     .replace(/<!--\s*created:\s*.*?-->/g, "")
-    .replace(/<!--\s*source:\s*.*?-->/g, "")
+    .replace(/<!--\s*source:.*?-->/g, (match) => {
+      const parsed = parseSourceComment(match);
+      return formatActorAttribution(parsed?.actor, parsed?.machine);
+    })
     .replace(/<!--\s*phren:cite\s+\{[\s\S]*?\}\s*-->/g, "");
   normalized = resolveImports(normalized, phrenPath);
   if (type === "task") {

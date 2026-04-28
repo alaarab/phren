@@ -7,8 +7,10 @@ import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
 import {
   type FindingCitation,
+  type FindingProvenance,
   buildCitationComment,
   buildScopeComment,
+  buildSourceComment,
   getHeadCommit,
   getRepoRoot,
   inferCitationLocation,
@@ -49,6 +51,7 @@ interface AddFindingOptions {
   extraAnnotations?: string[];
   sessionId?: string;
   scope?: string;
+  provenance?: FindingProvenance;
 }
 
 export interface AddFindingResult {
@@ -147,6 +150,7 @@ interface PrepareFindingOpts {
   extraAnnotations?: string[];
   citationInput?: Partial<FindingCitation>;
   scope?: string;
+  provenance?: FindingProvenance;
   nowIso?: string;
   inferredRepo?: string;
   headCommit?: string;
@@ -156,7 +160,7 @@ interface PrepareFindingOpts {
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, nowIso, inferredRepo, headCommit, phrenPath } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, phrenPath } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -182,6 +186,8 @@ function prepareFinding(
   let lifecycle: FindingLifecycleMetadata = { status: "active", status_updated: today };
   let bullet = `${normalizedLearning.startsWith("- ") ? normalizedLearning : `- ${normalizedLearning}`} ${fidComment} ${createdComment}`;
   if (scopeComment) bullet += ` ${scopeComment}`;
+  const sourceComment = provenance ? buildSourceComment(provenance) : "";
+  if (sourceComment) bullet += ` ${sourceComment}`;
 
   if (isDuplicateFinding(fullHistory, bullet)) {
     return { status: "duplicate" };
@@ -337,7 +343,7 @@ export function addFindingToFile(
   const result: PhrenResult<AddFindingWriteResult | string> = withFileLock(learningsPath, () => {
     const preparedForNewFile = prepareFinding({
       finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
+      citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
     });
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
@@ -371,7 +377,7 @@ export function addFindingToFile(
       : content;
     const prepared = prepareFinding({
       finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
-      citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
+      citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
     });
     if (prepared.status === "rejected") {
       return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
@@ -466,7 +472,7 @@ export function addFindingsToFile(
   phrenPath: string,
   project: string,
   learnings: string[],
-  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string }
+  opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string; provenance?: FindingProvenance }
 ): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
@@ -501,7 +507,7 @@ export function addFindingsToFile(
         }
         const prepared = prepareFinding({
           finding: learning, project, fullHistory: content, extraAnnotations,
-          citationInput: resolvedCitationInput, scope, nowIso, inferredRepo, headCommit, phrenPath,
+          citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
         });
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
