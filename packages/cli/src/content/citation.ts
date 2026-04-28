@@ -111,6 +111,12 @@ function readSourceToken(match: RegExpMatchArray | null | undefined): string | u
   return raw;
 }
 
+/** Format actor/machine attribution for human-readable display. */
+export function formatActorAttribution(actor: string | undefined, machine: string | undefined): string {
+  if (!actor && !machine) return "";
+  return `[from:${actor ?? "?"}${machine ? `@${machine}` : ""}]`;
+}
+
 export function buildSourceComment(source: FindingProvenance): string {
   const parts: string[] = [];
   if (source.source) parts.push(source.source);
