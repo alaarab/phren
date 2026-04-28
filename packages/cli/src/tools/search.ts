@@ -35,7 +35,7 @@ import { runCustomHooks } from "../hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "../shared/governance.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
-import { parseScopeComment, parseSourceComment } from "../content/citation.js";
+import { formatActorAttribution, parseScopeComment, parseSourceComment } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
 
@@ -726,7 +726,8 @@ async function handleGetFindings(
     if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
     if (entry.tier === "archived") metadata.push("tier=archived");
     const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
-    return `- [${idLabel}] ${entry.date}: ${entry.text}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
+    const attribution = formatActorAttribution(entry.actor, entry.machine);
+    return `- [${idLabel}] ${entry.date}: ${entry.text}${attribution ? ` ${attribution}` : ""}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
   });
   const hiddenHistoryCount = includeHistory ? 0 : historyCount;
   const historyNote = hiddenHistoryCount > 0 ? ` (${hiddenHistoryCount} historical hidden)` : "";

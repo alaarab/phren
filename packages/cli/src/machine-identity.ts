@@ -17,17 +17,25 @@ export function defaultMachineName(): string {
   return os.hostname();
 }
 
+let cachedMachineName: string | null = null;
+
 export function getMachineName(): string {
+  if (cachedMachineName !== null) return cachedMachineName;
   const filePath = machineFilePath();
   if (fs.existsSync(filePath)) {
     const persisted = fs.readFileSync(filePath, "utf8").trim();
-    if (persisted) return persisted;
+    if (persisted) return (cachedMachineName = persisted);
   }
-  return defaultMachineName();
+  return (cachedMachineName = defaultMachineName());
 }
 
 export function persistMachineName(machine: string): void {
   const normalized = machine.trim();
   if (!normalized) return;
   atomicWriteText(machineFilePath(), `${normalized}\n`);
+  cachedMachineName = normalized;
+}
+
+export function getCurrentActor(): string {
+  return process.env.PHREN_ACTOR || process.env.USER || "unknown";
 }

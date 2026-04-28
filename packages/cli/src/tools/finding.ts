@@ -15,6 +15,8 @@ import {
   FINDING_TYPES,
   normalizeMemoryScope,
 } from "../shared.js";
+import { getCurrentActor, getMachineName } from "../machine-identity.js";
+import { type FindingProvenance } from "../content/citation.js";
 import {
   addFindingToFile,
   addFindingsToFile,
@@ -149,6 +151,13 @@ async function handleAddFinding(
   const addFindingDenied = permissionDeniedError(phrenPath, "add_finding", project);
   if (addFindingDenied) return mcpResponse({ ok: false, error: addFindingDenied });
 
+  const provenance: FindingProvenance = {
+    source: "human",
+    machine: getMachineName(),
+    actor: getCurrentActor(),
+    session_id: sessionId,
+  };
+
   // Team stores: use append-only journal (no FINDINGS.md mutation, no merge conflicts)
   {
     const storeResolved = resolveStoreForProject(ctx, params.project);
@@ -158,7 +167,7 @@ async function handleAddFinding(
       const added: string[] = [];
       for (const f of findings) {
         const taggedFinding = findingType ? `[${findingType}] ${f}` : f;
-        const result = appendTeamJournal(phrenPath, project, taggedFinding);
+        const result = appendTeamJournal(phrenPath, project, taggedFinding, provenance.actor, provenance.machine);
         if (result.ok) added.push(taggedFinding);
       }
       return mcpResponse({
@@ -195,6 +204,7 @@ async function handleAddFinding(
         extraAnnotationsByFinding,
         sessionId,
         scope: normalizedScope,
+        provenance,
       });
       if (!result.ok) return mcpResponse({ ok: false, error: result.error });
       const { added, skipped, rejected } = result.data;
@@ -232,6 +242,7 @@ async function handleAddFinding(
         sessionId,
         scope: normalizedScope,
         extraAnnotations: semanticConflicts.checked ? semanticConflicts.annotations : undefined,
+        provenance,
       });
       if (!result.ok) {
         return mcpResponse({ ok: false, error: result.error });

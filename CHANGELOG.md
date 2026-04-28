@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-04-27
+
+### Added
+- **Team finding provenance.** Findings now carry inline `<!-- source:human machine:X actor:Y -->` metadata so teammates can tell who recorded a finding and on which machine. `add_finding` captures this automatically (machine via `getMachineName()`, actor via `PHREN_ACTOR`/`USER`). Both single-store and team-store (journal) write paths are wired. Reading paths surface the attribution: `get_findings` MCP output appends `[from:actor@machine]`, and the FTS5 indexer transforms the source comment to the same format so `search_knowledge` snippets and the per-prompt phren-context injection carry attribution as well. Findings without attribution are implicitly team-verified.
+- `formatActorAttribution(actor, machine)` and `getCurrentActor()` helpers in `content/citation.ts` and `machine-identity.ts` for reuse across write/read paths.
+
+### Fixed
+- `materializeTeamFindings()` previously emitted `<!-- author:${actor} -->` (a non-standard format that nothing parsed). Now relies on the embedded source comment from journal entries; for older entries that lack one, injects a fallback source comment built from the journal filename actor so attribution is preserved through materialization.
+
+### Performance
+- `getMachineName()` now caches its result at module level. Previously hit `fs.existsSync` + `fs.readFileSync` on every call; the file content does not change during a process lifetime. `persistMachineName()` invalidates the cache.
+
 ## [0.1.23] - 2026-04-25
 
 ### Fixed
