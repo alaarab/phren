@@ -12,11 +12,13 @@ phren is a memory layer for ai agents. one command:
 
 `npx @phren/cli init`
 
-point it at a repo and boom, claude remembers. so does copilot, cursor, codex. same memory, all four.
+point it at a repo and boom, claude remembers. so does copilot, cursor, codex. one mcp server, same memory across all four.
 
 your data lives as plain markdown in your own git repo. imagine that, actually owning your data in 2026. lol.
 
-the vscode extension is where it really clicks. you get a fragment graph that shows how your knowledge connects across projects, a sidebar to manage memories, supersede the wrong ones, retract the obsolete ones, and watch trust scores decay over time so old advice doesn't haunt you forever.
+there's a full cli too. `phren search` across every project, `phren add-finding` to teach it something new, an interactive memory shell, plus task management and a `phren doctor` for when things drift.
+
+the vscode extension is where it really clicks visually. you get a fragment graph that shows how your knowledge connects across projects, a sidebar to manage memories, supersede the wrong ones, retract the obsolete ones, and watch trust scores decay over time so old advice doesn't haunt you forever.
 
 spin up a team store and your whole crew shares the same memory. one repo for the company, separate repos per team, profiles per machine. everyone's agents get smarter together.
 
