@@ -245,27 +245,81 @@ describe("extractToolFindings", () => {
     expect(todo!.confidence).toBe(0.45);
   });
 
-  it("extracts try/catch pattern from Write tool input", () => {
+  it("does not emit a pitfall for try/catch additions (heuristic deleted)", () => {
+    // Adding error handling is normal code, not a pitfall. The old heuristic produced
+    // ~21 false positives for every real one in observed stores; it's removed in 0.1.25.
     const candidates = extractToolFindings(
       "Write",
       { file_path: "/src/handler.ts", content: "try {\n  await fetchData();\n} catch (err) {\n  log(err);\n}" },
       "ok"
     );
-    const tryCatch = candidates.find((c) => c.text.includes("error handling added"));
-    expect(tryCatch).toBeDefined();
-    expect(tryCatch!.confidence).toBe(0.45);
+    const errorHandling = candidates.find((c) => c.text.includes("error handling added"));
+    expect(errorHandling).toBeUndefined();
   });
 
-  it("extracts Bash error candidates", () => {
+  it("emits [bug] for Bash with explicit is_error signal on a non-noisy command", () => {
     const candidates = extractToolFindings(
       "Bash",
       { command: "npm run build" },
-      "Error: Cannot find module '@/utils'\n  at Module._resolveFilename"
+      "Error: Cannot find module '@/utils'\n  at Module._resolveFilename",
+      { is_error: true, stdout: "", stderr: "Error: Cannot find module" }
     );
     const bug = candidates.find((c) => c.text.includes("[bug]"));
     expect(bug).toBeDefined();
     expect(bug!.confidence).toBe(0.55);
     expect(bug!.text).toContain("npm run build");
+  });
+
+  it("does NOT emit [bug] for Bash without an explicit error signal (no exit_code, no is_error)", () => {
+    // Pre-0.1.25 this matched the word "error" in stdout and produced a [bug].
+    // grep/find/curl etc. routinely contain "error" in their output without failing.
+    const candidates = extractToolFindings(
+      "Bash",
+      { command: "ls /src" },
+      "error.js\nhandler.js"
+    );
+    expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
+  });
+
+  it("does NOT emit [bug] for grep with exit_code=1 (no-match is not a bug)", () => {
+    const candidates = extractToolFindings(
+      "Bash",
+      { command: "grep -rn 'never-matches' src/" },
+      "",
+      { is_error: true, exit_code: 1, stdout: "", stderr: "" }
+    );
+    expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
+  });
+
+  it("does NOT emit [bug] for find with non-zero exit (noisy command allowlist)", () => {
+    const candidates = extractToolFindings(
+      "Bash",
+      { command: "find . -name '*.tmp'" },
+      "find: '/restricted': Permission denied",
+      { is_error: true, exit_code: 1 }
+    );
+    expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
+  });
+
+  it("does NOT emit [bug] for `cmd || true` (user already silencing failure)", () => {
+    const candidates = extractToolFindings(
+      "Bash",
+      { command: "rm -f /nonexistent || true" },
+      "rm: cannot remove '/nonexistent': No such file or directory",
+      { is_error: true, exit_code: 1 }
+    );
+    expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
+  });
+
+  it("emits [bug] for non-noisy command with non-zero exit_code even without is_error", () => {
+    const candidates = extractToolFindings(
+      "Bash",
+      { command: "cargo test" },
+      "test result: FAILED. 0 passed; 3 failed",
+      { exit_code: 101 }
+    );
+    const bug = candidates.find((c) => c.text.startsWith("[bug] command"));
+    expect(bug).toBeDefined();
   });
 
   it("returns empty for normal successful tool output", () => {
