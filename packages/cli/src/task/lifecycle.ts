@@ -117,6 +117,24 @@ function getTaskMode(phrenPath: string): TaskMode {
   return getWorkflowPolicy(phrenPath).taskMode;
 }
 
+// Hard substance floor — applies before any intent-specific logic so that conversational
+// fragments slipping past the noise regex (e.g. "Here's the thing", "I just clicked on to
+// this page", "<") never become tasks even at proactivityTasks=high. A prompt clears the
+// floor only if it has enough words AND has at least one signal: an actionable verb, a
+// path-like fragment (./, /), a reference (#123 or a 4+ digit ticket number), a file
+// extension, or a URL.
+const MIN_TASK_PROMPT_WORDS = 4;
+const MIN_TASK_PROMPT_CHARS = 12;
+const TASK_SIGNAL_RE = /\b(?:fix|add|update|remove|delete|check|run|build|test|ship|implement|investigate|review|audit|create|change|refactor|rename|deploy|merge|migrate|wire|integrate|debug|explore|evaluate|compare|analy[sz]e|assess|consider|design|document|plan|prototype|prepare|configure|enable|disable|publish|release|rollback|verify|validate|profile|optimi[sz]e|harden|automate|backport|cleanup|cleanse|polish|tune|land)\b|[/\\][\w.\-]+|#\d+|\b\d{4,}\b|\.[a-z]{1,4}\b|https?:\/\//i;
+
+function hasMinimumTaskSubstance(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (trimmed.length < MIN_TASK_PROMPT_CHARS) return false;
+  const words = trimmed.split(/\s+/).filter((w) => /\w/.test(w));
+  if (words.length < MIN_TASK_PROMPT_WORDS) return false;
+  return TASK_SIGNAL_RE.test(trimmed);
+}
+
 function isActionablePrompt(prompt: string, intent: string): boolean {
   const normalized = prompt.trim();
   if (!normalized) return false;
@@ -124,6 +142,9 @@ function isActionablePrompt(prompt: string, intent: string): boolean {
   // Always reject conversational noise and raw system/SQL fragments regardless of intent.
   if (CONVERSATIONAL_NOISE_RE.test(normalized)) return false;
   if (RAW_MESSAGE_SIGNALS_RE.test(normalized)) return false;
+  // Substance floor — independent of intent / proactivity. Short utterances without
+  // any actionable signal are conversational fragments, not tasks.
+  if (!hasMinimumTaskSubstance(normalized)) return false;
   if (intent === "general") return ACTIONABLE_RE.test(normalized);
   return true;
 }
