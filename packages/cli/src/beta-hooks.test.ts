@@ -338,6 +338,39 @@ describe("extractToolFindings", () => {
     expect(bug!.confidence).toBe(0.85);
   });
 
+  it("does NOT capture markdown TOC anchors as [architecture] (#architecture) entries", () => {
+    // Regression: a README with `- [Architecture](#architecture)` used to match
+    // EXPLICIT_TAG_PATTERN and emit "[architecture] (#architecture)" candidates.
+    const candidates = extractToolFindings(
+      "Read",
+      { file_path: "/repo/README.md" },
+      "## Table of Contents\n- [Architecture](#architecture)\n- [Releases](#releases)\n"
+    );
+    const arch = candidates.find((c) => c.text.includes("(#architecture)"));
+    expect(arch).toBeUndefined();
+  });
+
+  it("does NOT capture markdown reference links as tagged findings", () => {
+    const candidates = extractToolFindings(
+      "Read",
+      { file_path: "/repo/notes.md" },
+      "See [bug][1] for context.\n\n[1]: https://example.com/issue/42\n"
+    );
+    const bug = candidates.find((c) => c.text === "[bug] [1]");
+    expect(bug).toBeUndefined();
+  });
+
+  it("still extracts genuine inline tags when followed by space then content (positive guard)", () => {
+    const candidates = extractToolFindings(
+      "Read",
+      { file_path: "/repo/notes.md" },
+      "Notes: [pattern] Wrap retry budgets per request, never per call site."
+    );
+    const pattern = candidates.find((c) => c.text.startsWith("[pattern]"));
+    expect(pattern).toBeDefined();
+    expect(pattern!.text).toContain("Wrap retry budgets");
+  });
+
   it("prefers changed content over escaped tool-response blobs for Edit explicit tags", () => {
     const candidates = extractToolFindings(
       "Edit",
