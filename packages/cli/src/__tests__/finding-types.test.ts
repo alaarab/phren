@@ -178,3 +178,35 @@ describe("typed findings (decision|pitfall|pattern)", () => {
     expect(content).toContain("[pattern]");
   });
 });
+
+// ── findingType prefix application ──────────────────────────────────────────
+// Regression guard for the "doubled tag" bug where add_finding(finding="[pattern] X",
+// findingType="pattern") used to store "[pattern] [pattern] X". Same shape produced
+// "[bug] [critical bug]" and "[pitfall] [pitfall]" rows in the wild.
+
+describe("applyFindingTypePrefix", () => {
+  it("prepends findingType when text has no tag", async () => {
+    const { applyFindingTypePrefix } = await import("../core/finding.js");
+    expect(applyFindingTypePrefix("plain text", "pattern")).toBe("[pattern] plain text");
+  });
+
+  it("does not double-prepend when text already starts with the same tag", async () => {
+    const { applyFindingTypePrefix } = await import("../core/finding.js");
+    expect(applyFindingTypePrefix("[pattern] foo", "pattern")).toBe("[pattern] foo");
+  });
+
+  it("preserves a user-supplied refinement tag instead of replacing it", async () => {
+    const { applyFindingTypePrefix } = await import("../core/finding.js");
+    expect(applyFindingTypePrefix("[critical bug] X", "bug")).toBe("[critical bug] X");
+  });
+
+  it("returns text unchanged when findingType is undefined", async () => {
+    const { applyFindingTypePrefix } = await import("../core/finding.js");
+    expect(applyFindingTypePrefix("plain text", undefined)).toBe("plain text");
+  });
+
+  it("handles leading whitespace before existing tag", async () => {
+    const { applyFindingTypePrefix } = await import("../core/finding.js");
+    expect(applyFindingTypePrefix("  [pattern] foo", "pattern")).toBe("  [pattern] foo");
+  });
+});
