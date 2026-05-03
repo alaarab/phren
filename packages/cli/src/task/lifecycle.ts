@@ -390,6 +390,16 @@ export function finalizeTaskSession(args: {
   }
 
   if (args.status === "error") {
+    // Don't poison the task with transient git infrastructure failures. Common
+    // observed pattern: git add -A failing because of file locks / permissions
+    // on Windows mounts / sparse-checkout edge cases. The user's task is unrelated;
+    // promoting it to Active and marking it "Blocked: Command failed: git add -A"
+    // creates a permanent zombie that re-blocks every subsequent session.
+    if (isTransientGitFailure(args.detail)) {
+      debugLog(`task lifecycle ignored transient git failure for ${state.project}: ${args.detail}`);
+      // Keep session state intact — next clean session can complete normally.
+      return;
+    }
     const blocked = updateTask(args.phrenPath, state.project, match, {
       section: "active",
       context: `Blocked: ${args.detail}`,
@@ -406,6 +416,13 @@ export function finalizeTaskSession(args: {
     });
     return;
   }
+}
+
+const TRANSIENT_GIT_FAILURE_RE = /^Command failed:\s*git\s+(?:add|commit|push|stage|pull|fetch|stash)\b/i;
+
+export function isTransientGitFailure(detail: string): boolean {
+  if (!detail) return false;
+  return TRANSIENT_GIT_FAILURE_RE.test(detail.trim());
 }
 
 /**
