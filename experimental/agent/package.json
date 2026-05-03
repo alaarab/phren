@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@phren/cli": "workspace:*",
-    "ink": "^6.8.0",
+    "ink": "^7.0.1",
     "react": "^19.2.5"
   },
   "engines": {

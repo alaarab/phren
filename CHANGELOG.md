@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.26] - 2026-05-03
+
+### Security
+
+- Bumped transitive `uuid` to `^14.0.0` via pnpm overrides to clear two open Dependabot advisories (GHSA-w5hq-g745-h8pq, missing buffer bounds check in `uuid` v3/v5/v6 < 14). The vulnerable copy was reaching us through `@vscode/vsce → @azure/identity → @azure/msal-node`, devDependency-only, but worth shutting off the alerts.
+
+### Dependencies
+
+Routine bumps to the latest of every dependency phren ships. Tests/lint/build all green on the new versions.
+
+- Runtime (`@phren/cli`): `inquirer` 13.4.1 → 13.4.2, `sigma` 3.0.2 → 3.0.3, `zod` 4.3.6 → 4.4.2.
+- Tooling (root): `@biomejs/biome` 2.4.12 → 2.4.14, `@vitest/coverage-v8` 4.1.4 → 4.1.5, `vitest` 4.1.4 → 4.1.5, `turbo` 2.9.6 → 2.9.8, `esbuild` 0.27.7 → 0.28.0.
+- VS Code extension: `@types/vscode` 1.116.0 → 1.118.0.
+- Experimental agent: `ink` 6.8.0 → 7.0.1 (major; experimental package, not shipped on npm).
+
+### Includes 0.1.25 (not separately published)
+
+The 0.1.25 noise-fix sweep merged but was rolled forward into this release rather than published independently. See the 0.1.25 entry below for the seven auto-extract bug fixes and the `phren doctor` zombie-blocked-task migration.
+
 ## [0.1.25] - 2026-05-03
 
 ### Fixed
