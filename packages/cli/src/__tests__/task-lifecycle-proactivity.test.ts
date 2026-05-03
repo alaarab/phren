@@ -220,4 +220,76 @@ describe("task lifecycle task proactivity gating", () => {
     expect(task.data.items.Active).toHaveLength(0);
     expect(task.data.items.Queue).toHaveLength(0);
   });
+
+  // ── Substance gate (regression for the conversational-fragment task spam) ────
+  // At proactivityTasks=high the task lifecycle used to capture every prompt that
+  // wasn't an exact match against CONVERSATIONAL_NOISE_RE. That left fragments like
+  // "I just clicked on to this page", "Here's the thing", "Need this fixed", "<"
+  // in tasks.md. The substance gate (min words + min chars + signal verb / path /
+  // ticket / file extension / URL) rejects them all without losing real tasks.
+
+  const observedJunkPrompts = [
+    "Bro",
+    "Here's the thing",
+    "I just clicked on to this page",
+    "Need this fixed",
+    "OK",
+    "<",
+    "IDK man",
+    "Yeah do that",
+    "Wait why are those hiding by preference",
+  ];
+
+  for (const junk of observedJunkPrompts) {
+    it(`substance gate at high rejects: "${junk}"`, () => {
+      process.env.PHREN_PROACTIVITY_TASKS = "high";
+      const result = handleTaskPromptLifecycle({
+        phrenPath: tmp.path,
+        prompt: junk,
+        project,
+        sessionId: `session-junk-${junk.slice(0, 4)}`,
+        intent: "general",
+        taskLevel: "high",
+      });
+      expect(result.noticeLines).toEqual([]);
+      const tasks = readTasks(tmp.path, project);
+      expect(tasks.ok).toBe(true);
+      if (!tasks.ok) return;
+      expect(tasks.data.items.Active).toHaveLength(0);
+    });
+  }
+
+  it("substance gate accepts a real ticket-referenced prompt", () => {
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Investigate ticket 43062 — Power Portal reports tile not loading",
+      project,
+      sessionId: "session-real-ticket",
+      intent: "general",
+      taskLevel: "high",
+    });
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    expect(tasks.data.items.Active).toHaveLength(1);
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+  });
+
+  it("substance gate accepts a file-path-referenced prompt", () => {
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Update the regex in src/utils.ts to handle empty input",
+      project,
+      sessionId: "session-real-path",
+      intent: "general",
+      taskLevel: "high",
+    });
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    expect(tasks.data.items.Active).toHaveLength(1);
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+  });
 });

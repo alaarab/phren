@@ -689,6 +689,109 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     }
   }
 
+  // Zombie blocked-task scan: pre-0.1.25 task lifecycle promoted tasks to Active
+  // and stamped them "Blocked: Command failed: git add -A" on transient git
+  // failures. Those tasks never resolve themselves. With --fix, archive them
+  // to Done with a phren-managed comment so they stop appearing in Active.
+  try {
+    const zombieResult = scanAndOptionallyFixZombieTasks(phrenPath, fix);
+    if (zombieResult.scanned > 0) {
+      const cleared = zombieResult.zombies === 0 || fix;
+      checks.push({
+        name: "zombie-blocked-tasks",
+        ok: cleared,
+        detail: zombieResult.zombies === 0
+          ? `0 zombie blocked tasks across ${zombieResult.scanned} project(s)`
+          : fix
+            ? `archived ${zombieResult.zombies} zombie task(s) across ${zombieResult.fixedProjects} project(s)`
+            : `${zombieResult.zombies} zombie blocked task(s) found across ${zombieResult.affectedProjects} project(s). Run \`phren doctor --fix\` to archive them.`,
+      });
+    }
+  } catch (err: unknown) {
+    debugLog(`doctor: zombie task scan failed: ${errorMessage(err)}`);
+  }
+
   const ok = checks.every((c) => c.ok);
   return { ok, machine, profile: profile || undefined, checks };
+}
+
+interface ZombieScanResult {
+  scanned: number;
+  affectedProjects: number;
+  fixedProjects: number;
+  zombies: number;
+}
+
+const ZOMBIE_BLOCKED_CONTEXT_RE = /^\s*Context:\s*Blocked:\s*Command failed:\s*git\s+(?:add|commit|push|stage|pull|fetch|stash)\b/i;
+
+function scanAndOptionallyFixZombieTasks(phrenPath: string, fix: boolean): ZombieScanResult {
+  const result: ZombieScanResult = { scanned: 0, affectedProjects: 0, fixedProjects: 0, zombies: 0 };
+  const projectDirs = getProjectDirs(phrenPath);
+  for (const project of projectDirs) {
+    const filePath = resolveTaskFilePath(phrenPath, project);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    result.scanned += 1;
+    const original = fs.readFileSync(filePath, "utf8");
+    const lines = original.split("\n");
+    // Walk in Active section; find task lines whose next line is a zombie Context.
+    let section: string | null = null;
+    const zombieIndices: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const heading = line.match(/^##\s+(\w+)/);
+      if (heading) {
+        section = heading[1];
+        continue;
+      }
+      if (section !== "Active") continue;
+      if (!/^- \[ \]/.test(line)) continue;
+      const next = lines[i + 1];
+      if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
+        zombieIndices.push(i);
+      }
+    }
+    if (zombieIndices.length === 0) continue;
+    result.affectedProjects += 1;
+    result.zombies += zombieIndices.length;
+    if (!fix) continue;
+
+    // Build edited file: move zombie tasks (and their Context line) to ## Done.
+    // Mark them [x] and prepend "(phren: archived zombie git-failure block)".
+    const archived: string[] = [];
+    const keepLines: string[] = [];
+    section = null;
+    let insertDoneAfter: number | null = null;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const heading = line.match(/^##\s+(\w+)/);
+      if (heading) {
+        section = heading[1];
+        if (section === "Done") insertDoneAfter = keepLines.length;
+        keepLines.push(line);
+        continue;
+      }
+      if (section === "Active" && zombieIndices.includes(i)) {
+        const taskLine = line.replace(/^- \[ \]/, "- [x]");
+        archived.push(`${taskLine}  <!-- phren: archived zombie git-failure block -->`);
+        // Carry Context line if present.
+        const next = lines[i + 1];
+        if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
+          archived.push(next);
+          i += 1;
+        }
+        continue;
+      }
+      keepLines.push(line);
+    }
+    if (archived.length > 0 && insertDoneAfter !== null) {
+      // Insert the archived block right after `## Done` heading (and the blank line).
+      const before = keepLines.slice(0, insertDoneAfter + 1);
+      const after = keepLines.slice(insertDoneAfter + 1);
+      const archivedBlock = ["", ...archived];
+      const next = [...before, ...archivedBlock, ...after].join("\n");
+      fs.writeFileSync(filePath, next, "utf8");
+      result.fixedProjects += 1;
+    }
+  }
+  return result;
 }

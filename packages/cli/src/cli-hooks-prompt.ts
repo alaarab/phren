@@ -256,7 +256,7 @@ export async function handleHookTool() {
     if (activeProject && findingsLevelForTool !== "low") {
       try {
         const candidates = filterToolFindingsForProactivity(
-          extractToolFindings(toolName, input, responseStr),
+          extractToolFindings(toolName, input, responseStr, data.tool_response),
           findingsLevelForTool
         );
         for (const { text, confidence } of candidates) {
@@ -306,7 +306,11 @@ interface LearningCandidate {
   explicit?: boolean;
 }
 
-const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]\s*(.+)/i;
+// Negative lookahead `(?!\(|\[)` rejects markdown link/reference patterns:
+//   [Architecture](#architecture)  ← TOC anchor, content was being captured as "(#architecture)"
+//   [bug][1]                       ← markdown reference link, content was being captured as "[1]"
+// produced garbage review-queue entries like "[architecture] (#architecture)".
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\](?!\(|\[)\s*(.+)/i;
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
@@ -317,10 +321,50 @@ export function filterToolFindingsForProactivity(
   return candidates.filter((candidate) => candidate.explicit === true);
 }
 
+// Bash commands whose non-zero exit codes are routine signal, not bugs.
+// grep/rg/ag/find returning exit 1 (no match) is the common case; conditional
+// shell tests evaluating false is another. Don't surface these as findings.
+const NOISY_BASH_COMMAND_PATTERNS: RegExp[] = [
+  /^\s*(?:grep|rg|ag|ack)\b/,
+  /^\s*find\b/,
+  /^\s*which\b/,
+  /^\s*command\s+-v\b/,
+  /^\s*test\b/,
+  /^\s*\[\s/,
+  /^\s*\[\[\s/,
+  /^\s*pgrep\b/,
+  /^\s*pkill\b/,
+  /^\s*git\s+diff\s+--quiet/,
+];
+
+function isNoisyBashCommand(cmd: string): boolean {
+  if (/\|\|\s*true\b/.test(cmd)) return true;
+  if (/2>\s*\/dev\/null/.test(cmd)) return true;
+  return NOISY_BASH_COMMAND_PATTERNS.some((re) => re.test(cmd));
+}
+
+interface ToolErrorSignal {
+  isError: boolean;
+  exitCode?: number;
+  hasExitCode: boolean;
+}
+
+function extractToolErrorSignal(toolResponse: unknown): ToolErrorSignal {
+  if (!toolResponse || typeof toolResponse !== "object") {
+    return { isError: false, hasExitCode: false };
+  }
+  const tr = toolResponse as Record<string, unknown>;
+  const isError = Boolean(tr.is_error ?? tr.isError);
+  const rawExit = tr.exit_code ?? tr.exitCode;
+  const exitCode = typeof rawExit === "number" ? rawExit : undefined;
+  return { isError, exitCode, hasExitCode: exitCode !== undefined };
+}
+
 export function extractToolFindings(
   toolName: string,
   input: Record<string, unknown>,
-  responseStr: string
+  responseStr: string,
+  toolResponse?: unknown
 ): LearningCandidate[] {
   const candidates: LearningCandidate[] = [];
   const changedContent = (toolName === "Edit" || toolName === "Write")
@@ -350,30 +394,28 @@ export function extractToolFindings(
         });
       }
     }
-    if (/\btry\s*\{[\s\S]*?\bcatch\b/.test(changedContent)) {
-      const meaningfulLine = changedContent.split("\n").find(
-        (l) => l.trim().length > 10 && !/^\s*(try|catch|\{|\})/.test(l)
-      );
-      if (meaningfulLine) {
-        candidates.push({
-          text: `[pitfall] ${filename}: error handling added near "${meaningfulLine.trim().slice(0, 100)}"`,
-          confidence: 0.45,
-          explicit: false,
-        });
-      }
-    }
+    // (Removed: try/catch additions used to emit "[pitfall] ... error handling added near ..."
+    //  candidates. Adding error handling is normal code, not a pitfall — the heuristic produced
+    //  ~21 false positives for every real one in observed stores. If we ever need this back,
+    //  gate on a *removed* try/catch, not an added one.)
   }
 
   if (toolName === "Bash") {
-    const cmd = String(input.command ?? "").slice(0, 30);
-    const hasError = /(error|exception|failed|ENOENT|command not found|permission denied)/i.test(responseStr);
-    if (hasError && cmd) {
+    const fullCmd = String(input.command ?? "");
+    const cmdShort = fullCmd.slice(0, 30);
+    const errorSignal = extractToolErrorSignal(toolResponse);
+    // Only emit a [bug] candidate when (a) we have a definite error signal from the tool
+    // result (is_error or non-zero exit_code) and (b) the command isn't a known-noisy one
+    // like grep/find/test where exit 1 just means "didn't match" rather than a failure.
+    const hasDefiniteError = errorSignal.isError || (errorSignal.hasExitCode && (errorSignal.exitCode ?? 0) !== 0);
+    if (hasDefiniteError && cmdShort && !isNoisyBashCommand(fullCmd)) {
       const firstErrorLine = responseStr.split("\n").find(
         (l) => /(error|exception|failed|ENOENT|command not found|permission denied)/i.test(l)
       );
-      if (firstErrorLine) {
+      const detail = (firstErrorLine ?? responseStr.split("\n")[0] ?? "").trim().slice(0, 150);
+      if (detail) {
         candidates.push({
-          text: `[bug] command '${cmd}' failed: ${firstErrorLine.trim().slice(0, 150)}`,
+          text: `[bug] command '${cmdShort}' failed: ${detail}`,
           confidence: 0.55,
           explicit: false,
         });

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-05-03
+
+### Fixed
+
+Auto-extract noise sweep — seven targeted bugs that filled review queues and task lists with garbage at `proactivity*=high`. Each fix has a regression test.
+
+- **`extractToolFindings` reads tool exit codes instead of grepping stdout for "error".** Pre-fix any Bash response containing the word `error`/`failed`/`ENOENT` produced a `[bug] command 'X' failed:` candidate — `ls` listing a file named `error.js`, `grep` returning exit 1 because nothing matched, `curl` printing `failed` in a JSON body, all became phantom bugs. Now reads `tool_response.is_error` / `exit_code` and only emits when there's a definite error signal. Adds a noisy-command allowlist (`grep`/`rg`/`find`/`test`/`[`/`pgrep`/`git diff --quiet`/anything piped through `|| true` or `2>/dev/null`) so non-zero exits from those commands no longer count.
+- **Removed the `error handling added near "..."` pitfall heuristic.** Adding a `try`/`catch` block in an `Edit` or `Write` is normal code, not a pitfall — the heuristic produced ~21 false positives for every real one in observed stores. Deleted outright.
+- **`EXPLICIT_TAG_PATTERN` ignores markdown link/anchor patterns.** A README TOC like `- [Architecture](#architecture)` used to match the regex and emit `[architecture] (#architecture)` review-queue rows. Added negative lookahead `(?!\(|\[)` after the closing `]` so markdown links and reference links no longer pollute the queue.
+- **`add_finding` no longer double-prepends a tag** when the finding text already starts with one. `add_finding({finding: "[pattern] foo", findingType: "pattern"})` now stores `[pattern] foo`, not `[pattern] [pattern] foo`. Same path produced `[bug] [critical bug]` and `[pitfall] [pitfall]` rows in the wild. New `applyFindingTypePrefix` helper centralizes the guard across all three call sites (single, bulk, team-store).
+- **`update_task` priority tag is now idempotent.** `stripPriorityTag` looped only once and required `[pinned]` (if present) to be the absolute last token, so a pinned task accumulated one extra `[high]` per priority update. Observed: 48× `[high]` on a single deltek-ops task. Strip now repeats until no further trailing priority tag can be removed; `normalizeTaskItemLine` strips `[pinned]` first so the priority strip can clear ALL trailing priority tags in one pass.
+- **Zombie blocked-task prevention.** `finalizeTaskSession` used to promote the user's tracked task to Active and stamp it `Blocked: Command failed: git add -A` on transient git auto-stage failures, leaving a permanent task that re-blocked every subsequent session. Now detects `Command failed: git (add|commit|push|stage|pull|fetch|stash)` patterns and skips the update entirely; the task captured for the user's prompt stays as it was.
+- **Substance gate in `isActionablePrompt`.** At `proactivityTasks=high` the lifecycle captured nearly any prompt that wasn't an exact match against `CONVERSATIONAL_NOISE_RE`. Observed in the wild: `Bro`, `<`, `OK`, `IDK man`, `Yeah do that`, `Here's the thing`, `Need this fixed`, `I just clicked on to this page` — all became permanent tasks. New floor (4+ words, 12+ chars, plus at least one signal: actionable verb / path-like fragment / `#N` / 4+ digit ticket / file extension / URL) runs before the intent branch; independent of the proactivity dial.
+
+### Migrated
+
+- `phren doctor` gained a `zombie-blocked-tasks` check that scans every project's `tasks.md` for Active items whose `Context:` line matches the legacy `Blocked: Command failed: git ...` shape. Reports the count by default; with `--fix`, archives them to `## Done` with a `<!-- phren: archived zombie git-failure block -->` comment so they stop bubbling up.
+
 ## [0.1.24] - 2026-04-27
 
 ### Added
