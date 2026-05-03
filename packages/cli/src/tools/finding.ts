@@ -8,6 +8,7 @@ import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
 import {
   removeFinding as removeFindingCore,
   removeFindings as removeFindingsCore,
+  applyFindingTypePrefix,
 } from "../core/finding.js";
 import {
   debugLog,
@@ -166,7 +167,7 @@ async function handleAddFinding(
       const findings = Array.isArray(finding) ? finding : [finding];
       const added: string[] = [];
       for (const f of findings) {
-        const taggedFinding = findingType ? `[${findingType}] ${f}` : f;
+        const taggedFinding = applyFindingTypePrefix(f, findingType);
         const result = appendTeamJournal(phrenPath, project, taggedFinding, provenance.actor, provenance.machine);
         if (result.ok) added.push(taggedFinding);
       }
@@ -233,7 +234,7 @@ async function handleAddFinding(
   if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
   return withWriteQueue(async () => {
     try {
-      const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
+      const taggedFinding = applyFindingTypePrefix(finding, findingType);
       // Jaccard "maybe zone" scan — free, no LLM call. Return candidates so the agent decides.
       const potentialDuplicates = findJaccardCandidates(phrenPath, project, taggedFinding);
       const semanticConflicts = await checkSemanticConflicts(phrenPath, project, taggedFinding);
