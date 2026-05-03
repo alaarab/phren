@@ -608,6 +608,37 @@ describe("updateTask", () => {
     expect(item?.priority).toBe("high");
   });
 
+  it("idempotent: priority tag does not accumulate across repeated updates", () => {
+    // Regression for the 48× [high] bug: stripPriorityTag failed to remove the trailing
+    // tag when it was followed by [pinned], so each update appended another [high].
+    writeTaskFile(SAMPLE_TASKS);
+    for (let i = 0; i < 50; i++) {
+      const r = updateTask(tmpDir, PROJECT, "Add rate limiting", { priority: "high" });
+      expect(r.ok).toBe(true);
+    }
+    const raw = fs.readFileSync(path.join(tmpDir, PROJECT, "tasks.md"), "utf-8");
+    const matchingLine = raw.split("\n").find((l) => l.includes("rate limiting"));
+    expect(matchingLine).toBeDefined();
+    const occurrences = matchingLine!.match(/\[high\]/g)?.length ?? 0;
+    expect(occurrences).toBe(1);
+    expect(matchingLine).not.toContain("[high] [high]");
+  });
+
+  it("idempotent: priority tag does not accumulate when [pinned] is also present", () => {
+    // Pin then repeatedly bump priority — the [pinned] used to block the trailing-tag
+    // strip, so accumulated [high]s sat between the text and [pinned].
+    writeTaskFile(SAMPLE_TASKS);
+    pinTask(tmpDir, PROJECT, "Add rate limiting");
+    for (let i = 0; i < 30; i++) {
+      updateTask(tmpDir, PROJECT, "Add rate limiting", { priority: "high" });
+    }
+    const raw = fs.readFileSync(path.join(tmpDir, PROJECT, "tasks.md"), "utf-8");
+    const matchingLine = raw.split("\n").find((l) => l.includes("rate limiting"));
+    expect(matchingLine).toBeDefined();
+    expect(matchingLine!.match(/\[high\]/g)?.length ?? 0).toBe(1);
+    expect(matchingLine!.match(/\[pinned\]/g)?.length ?? 0).toBe(1);
+  });
+
   it("moves task to different section", () => {
     writeTaskFile(SAMPLE_TASKS);
     const result = updateTask(tmpDir, PROJECT, "Add rate limiting", { section: "Active" });
