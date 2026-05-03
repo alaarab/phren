@@ -241,7 +241,11 @@ interface LearningCandidate {
   explicit?: boolean;
 }
 
-const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]\s*(.+)/i;
+// Negative lookahead `(?!\(|\[)` rejects markdown link/reference patterns:
+//   [Architecture](#architecture)  ← TOC anchor, content was being captured as "(#architecture)"
+//   [bug][1]                       ← markdown reference link, content was being captured as "[1]"
+// produced garbage review-queue entries like "[architecture] (#architecture)".
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\](?!\(|\[)\s*(.+)/i;
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
