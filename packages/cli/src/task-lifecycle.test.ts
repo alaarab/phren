@@ -175,6 +175,77 @@ describe("task lifecycle", () => {
     expect(result.noticeLines.join("\n")).toContain("Active task");
   });
 
+  it("auto mode does not poison the tracked task on transient git failure", () => {
+    // Regression for the zombie-blocked-task bug. The lifecycle used to promote
+    // the user's active task to Active and stamp it "Blocked: Command failed:
+    // git add -A" when the session-end git auto-stage failed — leaving a
+    // permanent task that re-blocked every subsequent session.
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Fix narrow terminal task rendering",
+      project,
+      sessionId: "session-git-fail",
+      intent: "debug",
+    });
+
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-git-fail",
+      status: "error",
+      detail: "Command failed: git add -A",
+    });
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    // Task remains as it was — not stamped with the git failure.
+    const allLines = [...task.data.items.Active, ...task.data.items.Queue].map((i) => i.line);
+    expect(allLines.some((l) => l.includes("narrow terminal task rendering"))).toBe(true);
+    const allContexts = [...task.data.items.Active, ...task.data.items.Queue]
+      .map((i) => i.context)
+      .filter(Boolean);
+    expect(allContexts.some((c) => /Blocked: Command failed: git/.test(c!))).toBe(false);
+  });
+
+  it("auto mode still blocks the task on a non-git error", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Investigate the build pipeline failure",
+      project,
+      sessionId: "session-real-error",
+      intent: "debug",
+    });
+
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-real-error",
+      status: "error",
+      detail: "Disk full while writing logs",
+    });
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    const blocked = task.data.items.Active.find((i) => /Disk full/.test(i.context ?? ""));
+    expect(blocked).toBeDefined();
+  });
+
   it("auto mode completes the tracked task after a successful stop", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,

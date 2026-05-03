@@ -13,6 +13,20 @@ interface FindingResult {
   data?: unknown;
 }
 
+const FINDING_TAG_PREFIX_RE = /^\s*\[[^\]]+\]\s*/;
+
+/**
+ * Prepend `[findingType]` to a finding only when the text doesn't already
+ * start with a bracketed tag. Prevents accumulation like `[pattern] [pattern] X`
+ * when callers pass both `findingType` and a finding that's already tagged
+ * (a common shape — many MCP callers prefix manually for human readability).
+ */
+export function applyFindingTypePrefix(finding: string, findingType?: string): string {
+  if (!findingType) return finding;
+  if (FINDING_TAG_PREFIX_RE.test(finding)) return finding;
+  return `[${findingType}] ${finding}`;
+}
+
 /**
  * Validate and add a single finding. Shared validation logic used by
  * both CLI `phren add-finding` and MCP `add_finding` tool.
@@ -31,7 +45,7 @@ export function addFinding(
     return { ok: false, message: `Finding text exceeds ${MAX_FINDING_LENGTH} character limit.` };
   }
 
-  const taggedFinding = findingType ? `[${findingType}] ${finding}` : finding;
+  const taggedFinding = applyFindingTypePrefix(finding, findingType);
   const result = addFindingToFile(phrenPath, project, taggedFinding, citation);
   if (!result.ok) {
     return { ok: false, message: result.error };

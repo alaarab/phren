@@ -63,10 +63,16 @@ function normalizePriority(text: string): "high" | "medium" | "low" | undefined 
 }
 
 function stripPriorityTag(text: string): string {
-  return text
-    .replace(/\s*\[(high|medium|low)\](?=\s*(?:\[pinned\])?\s*$)/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  // Strip ALL trailing priority tags (with optional [pinned] interleaved or at the end).
+  // Previous regex only stripped the last one and required [pinned] (if present) to be the
+  // final token — meaning accumulated `[high] [high] ... [pinned]` only lost one tag per
+  // call, so each updateTask grew the line by one tag (observed: 48× [high] on one task).
+  let prev: string;
+  do {
+    prev = text;
+    text = text.replace(/\s*\[(high|medium|low)\](?=\s*(?:\[pinned\])?\s*$)/gi, "");
+  } while (text !== prev);
+  return text.replace(/\s{2,}/g, " ").trim();
 }
 
 function detectPinned(text: string): boolean {
@@ -232,7 +238,10 @@ export function resolveTaskFilePath(phrenPath: string, project: string): string 
 }
 
 function normalizeTaskItemLine(item: TaskItem): string {
-  let text = stripPinnedTag(item.line.replace(/\s*\[(high|medium|low)\]\s*$/gi, "")).trim();
+  // Strip pinned first so the priority strip can clear ALL trailing priority tags
+  // (otherwise [pinned] sat between accumulated [high]s and the end-anchor, leaking
+  // one tag per render — see stripPriorityTag for the pre-fix shape).
+  let text = stripPinnedTag(item.line).replace(/(\s*\[(high|medium|low)\])+\s*$/gi, "").trim();
   if (item.priority) text = `${text} [${item.priority}]`;
   if (item.pinned) text = `${text} [pinned]`;
   const prefix = item.checked || item.section === "Done" ? "- [x] " : "- [ ] ";

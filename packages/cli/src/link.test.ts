@@ -833,6 +833,89 @@ describe("link", () => {
       expect(fs.existsSync(path.join(phrenPath, ".runtime"))).toBe(true);
       expect(fs.existsSync(path.join(phrenPath, ".config"))).toBe(true);
     });
+
+    it("detects zombie blocked tasks and reports without --fix", async () => {
+      const profilesDir = path.join(phrenPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "T", projects: ["zproj"] })
+      );
+      fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${getMachineName()}: test\n`);
+      const projDir = path.join(phrenPath, "zproj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(path.join(projDir, "phren.project.yaml"), "ownership: detached\n");
+      fs.writeFileSync(path.join(projDir, "tasks.md"), [
+        "# zproj tasks",
+        "",
+        "## Active",
+        "",
+        "- [ ] Real task that should stay <!-- bid:aaaaaaaa rank:1 -->",
+        "  Context: Some real context",
+        "- [ ] Zombie one <!-- bid:bbbbbbbb rank:2 -->",
+        "  Context: Blocked: Command failed: git add -A",
+        "- [ ] Zombie two <!-- bid:cccccccc rank:3 -->",
+        "  Context: Blocked: Command failed: git commit",
+        "",
+        "## Queue",
+        "",
+        "## Done",
+        "",
+      ].join("\n"));
+
+      const result = await runDoctor(phrenPath, false);
+      const zombieCheck = result.checks.find((c) => c.name === "zombie-blocked-tasks");
+      expect(zombieCheck).toBeDefined();
+      expect(zombieCheck!.ok).toBe(false);
+      expect(zombieCheck!.detail).toContain("2 zombie");
+      // File untouched without --fix.
+      const after = fs.readFileSync(path.join(projDir, "tasks.md"), "utf8");
+      expect(after).toContain("Zombie one");
+      expect(after).toContain("Zombie two");
+    });
+
+    it("--fix archives zombie blocked tasks to Done", async () => {
+      const profilesDir = path.join(phrenPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(profilesDir, "test.yaml"),
+        yaml.dump({ name: "test", description: "T", projects: ["zproj"] })
+      );
+      fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${getMachineName()}: test\n`);
+      const projDir = path.join(phrenPath, "zproj");
+      fs.mkdirSync(projDir, { recursive: true });
+      fs.writeFileSync(path.join(projDir, "phren.project.yaml"), "ownership: detached\n");
+      fs.writeFileSync(path.join(projDir, "tasks.md"), [
+        "# zproj tasks",
+        "",
+        "## Active",
+        "",
+        "- [ ] Real task <!-- bid:aaaaaaaa rank:1 -->",
+        "  Context: Some real context",
+        "- [ ] Zombie <!-- bid:bbbbbbbb rank:2 -->",
+        "  Context: Blocked: Command failed: git add -A",
+        "",
+        "## Queue",
+        "",
+        "## Done",
+        "",
+      ].join("\n"));
+
+      const result = await runDoctor(phrenPath, true);
+      const zombieCheck = result.checks.find((c) => c.name === "zombie-blocked-tasks");
+      expect(zombieCheck).toBeDefined();
+      expect(zombieCheck!.ok).toBe(true);
+      expect(zombieCheck!.detail).toContain("archived 1");
+
+      const after = fs.readFileSync(path.join(projDir, "tasks.md"), "utf8");
+      // Active still has the real task.
+      expect(after).toMatch(/## Active[\s\S]*Real task/);
+      // Done has the archived zombie marked [x] with the phren-managed comment.
+      expect(after).toMatch(/## Done[\s\S]*- \[x\] Zombie[\s\S]*phren: archived zombie git-failure block/);
+      // Active no longer contains the zombie.
+      const activeSection = after.split("## Queue")[0];
+      expect(activeSection).not.toContain("Zombie");
+    });
   });
 
   describe("skill frontmatter validation (#294, #298)", () => {
