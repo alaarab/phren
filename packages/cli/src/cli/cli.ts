@@ -37,23 +37,14 @@ import {
   handleGovernMemories,
   handlePruneMemories,
   handleConsolidateMemories,
-  handleMaintain,
   handleBackgroundMaintenance,
 } from "./govern.js";
 import {
-  handleConfig,
   handleIndexPolicy,
   handleRetentionPolicy,
   handleWorkflowPolicy,
 } from "./config.js";
-import {
-  handleHooksNamespace,
-  handleProjectsNamespace,
-  handleSkillsNamespace,
-  handleSkillList,
-  handleStoreNamespace,
-} from "./namespaces.js";
-import { handleTeamNamespace } from "./team.js";
+import { handleSkillList } from "./namespaces.js";
 import {
   handleDebugInjection,
   handleInspectIndex,
@@ -91,28 +82,14 @@ export async function runCliCommand(command: string, args: string[]) {
       return handleRetentionPolicy(args);
     case "workflow":
       return handleWorkflowPolicy(args);
-    case "config":
-      return handleConfig(args);
-    case "maintain":
-      return handleMaintain(args);
     case "skill-list":
       return handleSkillList(getProfile());
-    case "skills":
-      return handleSkillsNamespace(args, getProfile());
-    case "hooks":
-      return handleHooksNamespace(args);
-    case "projects":
-      return handleProjectsNamespace(args, getProfile());
     case "background-maintenance":
       return handleBackgroundMaintenance(args[0]);
     case "debug-injection":
       return handleDebugInjection(args, getProfile());
     case "inspect-index":
       return handleInspectIndex(args, getProfile());
-    case "store":
-      return handleStoreNamespace(args);
-    case "team":
-      return handleTeamNamespace(args);
     default:
       console.error(`Unknown command: ${command}\nRun 'phren --help' for available commands.`);
       process.exit(1);
