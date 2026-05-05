@@ -38,6 +38,7 @@ import {
 import { getBuiltinTopicConfig, normalizeBuiltinTopicDomain, type BuiltinTopic } from "../project-topics.js";
 import { writeSkillMd } from "../link/skills.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
+import { detectInstalledTools } from "../hooks.js";
 import { logger } from "../logger.js";
 
 export interface PostInitCheck {
@@ -234,8 +235,8 @@ function ensureGlobalStarterAssets(phrenPath: string): string[] {
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
   const targetSkillsDir = path.join(targetGlobalDir, "skills");
+  fs.mkdirSync(targetSkillsDir, { recursive: true });
   if (fs.existsSync(starterSkillsDir)) {
-    fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const entry of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
       const source = path.join(starterSkillsDir, entry.name);
       const target = path.join(targetSkillsDir, entry.name);
@@ -318,6 +319,17 @@ function ensureGeneratedSkillArtifacts(phrenPath: string, preferredHome: string)
     if (!hadCommands && fs.existsSync(commandsPath)) created.push("~/.claude/skill-commands.json");
   } catch (err: unknown) {
     debugLog(`ensureGeneratedSkillArtifacts: global skill mirror sync failed: ${errorMessage(err)}`);
+  }
+
+  const copilotSkillsDir = path.join(preferredHome, ".copilot", "skills");
+  const hadCopilotSkillsDir = fs.existsSync(copilotSkillsDir);
+  if (detectInstalledTools().has("copilot")) {
+    try {
+      syncScopeSkillsToDir(phrenPath, "global", copilotSkillsDir);
+      if (!hadCopilotSkillsDir && fs.existsSync(copilotSkillsDir)) created.push("~/.copilot/skills/");
+    } catch (err: unknown) {
+      debugLog(`ensureGeneratedSkillArtifacts: copilot skill mirror sync failed: ${errorMessage(err)}`);
+    }
   }
 
   const skillMdPath = path.join(phrenPath, "phren.SKILL.md");
