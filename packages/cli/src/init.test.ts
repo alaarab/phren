@@ -98,21 +98,21 @@ describe.sequential("mcp mode configuration", () => {
     delete process.env.PHREN_PATH;
   });
 
-  it("stages starter updates for modified global skills instead of overwriting them", () => {
-    const targetSkill = path.join(phrenPath, "global", "skills", "audit.md");
-    fs.mkdirSync(path.dirname(targetSkill), { recursive: true });
-    fs.writeFileSync(targetSkill, "# custom audit\n");
+  it("stages starter updates for modified global CLAUDE.md instead of overwriting it", () => {
+    const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
+    fs.mkdirSync(path.dirname(targetClaude), { recursive: true });
+    fs.writeFileSync(targetClaude, "# custom user CLAUDE\n");
 
     const updates = applyStarterTemplateUpdates(phrenPath);
-    const stagedSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "audit.md.new");
-    const currentSkill = path.join(phrenPath, ".runtime", "starter-updates", "global", "skills", "audit.md.current");
+    const stagedClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.new");
+    const currentClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.current");
 
-    expect(fs.readFileSync(targetSkill, "utf8")).toBe("# custom audit\n");
-    expect(fs.existsSync(`${targetSkill}.bak`)).toBe(false);
-    expect(fs.existsSync(`${targetSkill}.new`)).toBe(false);
-    expect(fs.existsSync(stagedSkill)).toBe(true);
-    expect(fs.existsSync(currentSkill)).toBe(true);
-    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "skills", "audit.md.new"));
+    expect(fs.readFileSync(targetClaude, "utf8")).toBe("# custom user CLAUDE\n");
+    expect(fs.existsSync(`${targetClaude}.bak`)).toBe(false);
+    expect(fs.existsSync(`${targetClaude}.new`)).toBe(false);
+    expect(fs.existsSync(stagedClaude)).toBe(true);
+    expect(fs.existsSync(currentClaude)).toBe(true);
+    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "CLAUDE.md.new"));
   });
 
   it("ships starter gitignore entries for local governance runtime state", () => {
@@ -621,7 +621,7 @@ describe("runInit walkthrough integration", () => {
     expect(fs.existsSync(path.join(phrenPath, ".sessions"))).toBe(true);
     // canonical-locks.json removed (canonical locks feature was stripped)
     expect(fs.existsSync(path.join(phrenPath, "global", "CLAUDE.md"))).toBe(true);
-    expect(fs.existsSync(path.join(phrenPath, "global", "skills", "audit.md"))).toBe(true);
+    expect(fs.existsSync(path.join(phrenPath, "global", "skills"))).toBe(true);
     expect(fs.existsSync(path.join(phrenPath, "phren.SKILL.md"))).toBe(true);
     expect(fs.readFileSync(path.join(phrenPath, ".env"), "utf8")).toContain("PHREN_FEATURE_AUTO_CAPTURE=1");
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(true);

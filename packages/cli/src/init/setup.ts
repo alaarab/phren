@@ -237,16 +237,31 @@ function ensureGlobalStarterAssets(phrenPath: string): string[] {
   if (fs.existsSync(starterSkillsDir)) {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const entry of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
       const source = path.join(starterSkillsDir, entry.name);
       const target = path.join(targetSkillsDir, entry.name);
-      if (fs.existsSync(target)) continue;
-      fs.copyFileSync(source, target);
-      created.push(path.join("global", "skills", entry.name));
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        if (fs.existsSync(target)) continue;
+        fs.copyFileSync(source, target);
+        created.push(path.join("global", "skills", entry.name));
+      } else if (entry.isDirectory() && fs.existsSync(path.join(source, "SKILL.md"))) {
+        if (fs.existsSync(target)) continue;
+        copyDirRecursive(source, target);
+        created.push(path.join("global", "skills", entry.name) + path.sep);
+      }
     }
   }
 
   return created;
+}
+
+function copyDirRecursive(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDirRecursive(s, d);
+    else if (entry.isFile()) fs.copyFileSync(s, d);
+  }
 }
 
 function ensureRuntimeAssets(phrenPath: string): string[] {
@@ -525,13 +540,32 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   if (fs.existsSync(starterSkillsDir)) {
     fs.mkdirSync(targetSkillsDir, { recursive: true });
     for (const f of fs.readdirSync(starterSkillsDir, { withFileTypes: true })) {
-      if (!f.isFile()) continue;
-      const written = copyStarterFile(phrenPath, path.join(starterSkillsDir, f.name), path.join(targetSkillsDir, f.name));
-      if (written) updates.push(path.relative(phrenPath, written));
+      const src = path.join(starterSkillsDir, f.name);
+      const dest = path.join(targetSkillsDir, f.name);
+      if (f.isFile() && f.name.endsWith(".md")) {
+        const written = copyStarterFile(phrenPath, src, dest);
+        if (written) updates.push(path.relative(phrenPath, written));
+      } else if (f.isDirectory() && fs.existsSync(path.join(src, "SKILL.md"))) {
+        for (const inner of walkSkillFolder(src)) {
+          const written = copyStarterFile(phrenPath, path.join(src, inner), path.join(dest, inner));
+          if (written) updates.push(path.relative(phrenPath, written));
+        }
+      }
     }
   }
 
   return updates;
+}
+
+function walkSkillFolder(root: string, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const rel = path.join(prefix, entry.name);
+    const abs = path.join(root, entry.name);
+    if (entry.isDirectory()) out.push(...walkSkillFolder(abs, rel));
+    else if (entry.isFile()) out.push(rel);
+  }
+  return out;
 }
 
 export function ensureGovernanceFiles(phrenPath: string): string[] {
