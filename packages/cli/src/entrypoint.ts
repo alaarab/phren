@@ -97,6 +97,13 @@ async function finish(exitCode?: number): Promise<true> {
   return true;
 }
 
+function buildCliContext(): CliContext {
+  return {
+    phrenPath: () => getPhrenPath(),
+    profile: () => resolveRuntimeProfile(getPhrenPath()),
+  };
+}
+
 async function runHelp(args: string[]): Promise<true> {
   const target = args[0]?.toLowerCase();
 
@@ -159,13 +166,7 @@ export async function runTopLevelCommand(
         return finish();
       }
       const shellCmd = lookupCommand("shell");
-      if (shellCmd) {
-        const ctx: CliContext = {
-          phrenPath: () => getPhrenPath(),
-          profile: () => resolveRuntimeProfile(getPhrenPath()),
-        };
-        await shellCmd.run([], ctx);
-      }
+      if (shellCmd) await shellCmd.run([], buildCliContext());
       return finish();
     }
     return false;
@@ -195,13 +196,8 @@ export async function runTopLevelCommand(
     }
   }
 
-  const ctx: CliContext = {
-    phrenPath: () => getPhrenPath(),
-    profile: () => resolveRuntimeProfile(getPhrenPath()),
-  };
-
   try {
-    const code = await cmd.run(argv.slice(1), ctx);
+    const code = await cmd.run(argv.slice(1), buildCliContext());
     return finish(typeof code === "number" ? code : 0);
   } catch (err: unknown) {
     console.error(errorMessage(err));

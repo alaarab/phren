@@ -139,11 +139,6 @@ export function parseSearchArgs(phrenPath: string, args: string[]): SearchOption
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
-    if (arg === "--help" || arg === "-h") {
-      printSearchUsage();
-      return null;
-    }
-
     if (arg === "--history") {
       showHistory = true;
       continue;
@@ -403,10 +398,6 @@ export function parseFragmentSearchArgs(args: string[]): { query: string; projec
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--help" || arg === "-h") {
-      console.error("Usage: phren search-fragments <query> [--project <name>] [--limit <n>]");
-      return null;
-    }
     if (arg === "--project" && args[i + 1]) {
       project = args[++i];
       continue;
@@ -470,10 +461,6 @@ export function parseRelatedDocsArgs(args: string[]): { entity: string; project?
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--help" || arg === "-h") {
-      console.error("Usage: phren related-docs <fragment-name> [--project <name>] [--limit <n>]");
-      return null;
-    }
     if (arg === "--project" && args[i + 1]) {
       project = args[++i];
       continue;

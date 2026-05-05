@@ -313,22 +313,11 @@ export async function handleMemoryUi(args: string[]) {
   });
 }
 
-export async function handleShell(args: string[], profile: string) {
-  if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: phren shell");
-    console.log("Interactive shell with views for Projects, Task, Findings, Review Queue, Skills, Hooks, Machines/Profiles, and Health.");
-    return;
-  }
+export async function handleShell(_args: string[], profile: string) {
   await startShell(getPhrenPath(), profile);
 }
 
 export async function handleUpdate(args: string[]) {
-  if (args.includes("--help") || args.includes("-h")) {
-    console.log("Usage: phren update [--refresh-starter]");
-    console.log("Updates phren to the latest version (local git clone when available, otherwise npm global package).");
-    console.log("Pass --refresh-starter to refresh global starter assets in the same flow.");
-    return;
-  }
   const result = await runPhrenUpdate({ refreshStarter: args.includes("--refresh-starter") });
   console.log(result.message);
   if (!result.ok) {
