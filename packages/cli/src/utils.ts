@@ -1,8 +1,6 @@
-// Barrel re-export — all public API preserved for existing importers.
-// Actual implementations live in:
-//   utils-helpers.ts  — errorMessage, runGit*, isFeatureEnabled, clampInt, exec helpers
-//   utils-paths.ts    — isValidProjectName, safeProjectPath, queueFilePath
-//   utils-fts.ts      — FTS5 sanitization, synonym expansion, keyword extraction, query building
+// Barrel re-export. Implementations split across utils-helpers.ts (general
+// helpers, argv parsing, exec helpers), utils-paths.ts (path validation),
+// utils-fts.ts (FTS5 query building, synonym/keyword extraction).
 
 export {
   runGitOrThrow,
@@ -12,6 +10,8 @@ export {
   errorMessage,
   isFeatureEnabled,
   clampInt,
+  getOptionValue,
+  getPositionalArgs,
 } from "./utils-helpers.js";
 
 export {

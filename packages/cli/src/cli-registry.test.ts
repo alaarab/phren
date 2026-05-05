@@ -7,6 +7,7 @@ import {
   TOPIC_ORDER,
   DOC_TOPICS,
   helpTopicNames,
+  isShimRun,
   lookupCommand,
 } from "./cli-registry.js";
 
@@ -101,17 +102,10 @@ describe("cli-registry: switch-case coverage in cli/cli.ts", () => {
     [...cliSrc.matchAll(/case\s+"([\w-]+)":/g)].map((m) => m[1]),
   );
 
-  // Identify natives by introspecting the run function's source. `native()`
-  // wraps `await import("./cli-handlers.js")`, so any `cmd.run` that
-  // references that path is a native handler. Avoids a hardcoded allowlist
-  // that would silently drift when natives are added or removed.
-  const isNativeRun = (run: typeof REGISTRY[number]["run"]): boolean =>
-    /cli-handlers/.test(run.toString());
-
   it("every shim'd registry name has a matching case in cli/cli.ts", () => {
     const missing: string[] = [];
     for (const cmd of REGISTRY) {
-      if (isNativeRun(cmd.run)) continue;
+      if (!isShimRun(cmd.run)) continue;
       if (!switchCases.has(cmd.name)) missing.push(cmd.name);
     }
     expect(missing, `registry shim entries with no switch case: ${missing.join(", ")}`).toEqual([]);

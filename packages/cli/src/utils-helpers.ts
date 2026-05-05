@@ -92,3 +92,28 @@ export function clampInt(raw: string | undefined, fallback: number, min: number,
   if (Number.isNaN(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
 }
+
+// ── Argv parsing helpers ────────────────────────────────────────────────────
+
+export function getOptionValue(args: string[], name: string): string | undefined {
+  const exactIdx = args.indexOf(name);
+  if (exactIdx !== -1) return args[exactIdx + 1];
+  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : undefined;
+}
+
+export function getPositionalArgs(args: string[], optionNamesWithValues: string[]): string[] {
+  const positions: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (optionNamesWithValues.includes(arg)) {
+      i += 1;
+      continue;
+    }
+    if (optionNamesWithValues.some((name) => arg.startsWith(`${name}=`))) {
+      continue;
+    }
+    if (!arg.startsWith("--")) positions.push(arg);
+  }
+  return positions;
+}

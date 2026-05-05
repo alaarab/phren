@@ -56,13 +56,27 @@ export interface Command {
 
 // ── Shim helper for runCliCommand-routed commands ────────────────────────────
 
+/**
+ * Marker attached to `shim()`-produced run functions. Lets tests
+ * distinguish shim'd entries from inline-dispatch entries reliably,
+ * regardless of which module the inline lambda imports.
+ */
+const SHIM_MARKER = Symbol.for("phren.cli-registry.shim");
+
+export function isShimRun(run: RunFn): boolean {
+  return (run as unknown as { [SHIM_MARKER]?: boolean })[SHIM_MARKER] === true;
+}
+
 function shim(name: string): RunFn {
-  return async (args) => {
-    // Returning void (not 0) so Phase 2 handlers can surface non-zero codes
-    // once they stop calling process.exit directly. Dispatcher coerces void to 0.
+  // Returning void (not 0) lets the dispatcher coerce undefined to 0 while
+  // leaving room for handlers to eventually surface non-zero codes when they
+  // stop calling process.exit directly.
+  const fn: RunFn = async (args) => {
     const { runCliCommand } = await import("./cli/cli.js");
     await runCliCommand(name, args);
   };
+  Object.defineProperty(fn, SHIM_MARKER, { value: true, enumerable: false });
+  return fn;
 }
 
 type NativeHandlerName =
