@@ -30,7 +30,12 @@ export function commandExists(cmd: string): boolean {
 
 export function detectInstalledTools(): Set<string> {
   const tools = new Set<string>();
-  if (commandExists("github-copilot-cli") || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))) {
+  if (
+    commandExists("copilot")
+    || commandExists("github-copilot-cli")
+    || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))
+    || fs.existsSync(homePath(".copilot", "config.json"))
+  ) {
     tools.add("copilot");
   }
   if (commandExists("cursor")) {

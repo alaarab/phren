@@ -44,13 +44,12 @@ describe("hooks", () => {
     });
 
     it("does not false-positive copilot from bare ~/.github dir", () => {
-      if (!commandExists("github-copilot-cli")) {
-        const extensionDir = path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot");
-        if (!fs.existsSync(extensionDir)) {
-          const tools = detectInstalledTools();
-          expect(tools.has("copilot")).toBe(false);
-        }
-      }
+      if (commandExists("copilot") || commandExists("github-copilot-cli")) return;
+      const extensionDir = path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot");
+      const copilotConfig = path.join(os.homedir(), ".copilot", "config.json");
+      if (fs.existsSync(extensionDir) || fs.existsSync(copilotConfig)) return;
+      const tools = detectInstalledTools();
+      expect(tools.has("copilot")).toBe(false);
     });
   });
 

@@ -319,6 +319,16 @@ function linkGlobal(phrenPath: string, tools: Set<string>) {
   const skillsDir = homePath(".claude", "skills");
   syncScopeSkillsToDir(phrenPath, "global", skillsDir);
 
+  if (tools.has("copilot")) {
+    const copilotSkillsDir = homePath(".copilot", "skills");
+    log("  global skills -> ~/.copilot/skills/");
+    try {
+      syncScopeSkillsToDir(phrenPath, "global", copilotSkillsDir);
+    } catch (err: unknown) {
+      logger.debug("link", `linkGlobal copilotSkills: ${errorMessage(err)}`);
+    }
+  }
+
   const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
   if (fs.existsSync(globalClaude)) {
     symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), phrenPath);
