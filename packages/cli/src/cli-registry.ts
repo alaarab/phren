@@ -222,7 +222,10 @@ export const REGISTRY: Command[] = [
     usage: "phren quickstart",
     summary: "Quick setup: init + project scaffold",
     featured: true,
-    run: shim("quickstart"),
+    run: async () => {
+      const { handleQuickstart } = await import("./cli/ops.js");
+      await handleQuickstart();
+    },
   },
 
   // Projects (featured: add)
@@ -272,7 +275,10 @@ export const REGISTRY: Command[] = [
     usage: "phren doctor [--fix]",
     summary: "Diagnose and repair",
     featured: true,
-    run: shim("doctor"),
+    run: async (args) => {
+      const { handleDoctor } = await import("./cli/actions.js");
+      await handleDoctor(args);
+    },
   },
   {
     name: "web-ui",
@@ -280,7 +286,10 @@ export const REGISTRY: Command[] = [
     usage: "phren web-ui [--port <n>]",
     summary: "Open the knowledge graph",
     featured: true,
-    run: shim("web-ui"),
+    run: async (args) => {
+      const { handleMemoryUi } = await import("./cli/actions.js");
+      await handleMemoryUi(args);
+    },
   },
   {
     name: "tasks",
@@ -288,7 +297,10 @@ export const REGISTRY: Command[] = [
     usage: "phren tasks",
     summary: "Cross-project task view",
     featured: true,
-    run: shim("tasks"),
+    run: async (_args, ctx) => {
+      const { handleTaskView } = await import("./cli/ops.js");
+      await handleTaskView(ctx.profile());
+    },
   },
   {
     name: "graph",
@@ -296,7 +308,10 @@ export const REGISTRY: Command[] = [
     usage: "phren graph",
     summary: "Fragment knowledge graph",
     featured: true,
-    run: shim("graph"),
+    run: async (args) => {
+      const { handleGraphNamespace } = await import("./cli/graph.js");
+      await handleGraphNamespace(args);
+    },
   },
   {
     name: "shell",
@@ -304,7 +319,10 @@ export const REGISTRY: Command[] = [
     usage: "phren shell",
     summary: "Interactive memory shell",
     featured: true,
-    run: shim("shell"),
+    run: async (args, ctx) => {
+      const { handleShell } = await import("./cli/actions.js");
+      await handleShell(args, ctx.profile());
+    },
   },
 
   // Other core commands
@@ -313,77 +331,110 @@ export const REGISTRY: Command[] = [
     topic: "core",
     usage: 'phren add-finding <project> "<insight>"',
     summary: "Tell phren what you learned",
-    run: shim("add-finding"),
+    run: async (args) => {
+      const { handleAddFinding } = await import("./cli/actions.js");
+      await handleAddFinding(args[0], args.slice(1).join(" "));
+    },
   },
   {
     name: "pin",
     topic: "core",
     usage: 'phren pin <project> "<truth>"',
     summary: "Save a truth (always-inject, never decays)",
-    run: shim("pin"),
+    run: async (args) => {
+      const { handlePinCanonical } = await import("./cli/actions.js");
+      await handlePinCanonical(args[0], args.slice(1).join(" "));
+    },
   },
   {
     name: "review",
     topic: "core",
     usage: "phren review [project]",
     summary: "Show review queue",
-    run: shim("review"),
+    run: async (args) => {
+      const { handleReviewNamespace } = await import("./cli/namespaces.js");
+      await handleReviewNamespace(args);
+    },
   },
   {
     name: "session-context",
     topic: "core",
     usage: "phren session-context",
     summary: "Current session state",
-    run: shim("session-context"),
+    run: async () => {
+      const { handleSessionContext } = await import("./cli/actions.js");
+      await handleSessionContext();
+    },
   },
   {
     name: "sessions",
     topic: "core",
     usage: "phren sessions",
     summary: "List recent sessions",
-    run: shim("sessions"),
+    run: async (args) => {
+      const { handleSessionsView } = await import("./cli/ops.js");
+      await handleSessionsView(args);
+    },
   },
   {
     name: "task",
     topic: "core",
     usage: "phren task <subcommand>",
     summary: "Manage tasks",
-    run: shim("task"),
+    run: async (args) => {
+      const { handleTaskNamespace } = await import("./cli/namespaces.js");
+      await handleTaskNamespace(args);
+    },
   },
   {
     name: "finding",
     topic: "core",
     usage: "phren finding <subcommand>",
     summary: "Manage findings",
-    run: shim("finding"),
+    run: async (args) => {
+      const { handleFindingNamespace } = await import("./cli/namespaces.js");
+      await handleFindingNamespace(args);
+    },
   },
   {
     name: "search-fragments",
     topic: "core",
     usage: "phren search-fragments <query>",
     summary: "Search the named-fragment graph",
-    run: shim("search-fragments"),
+    run: async (args, ctx) => {
+      const { handleFragmentSearch } = await import("./cli/actions.js");
+      await handleFragmentSearch(args, ctx.profile());
+    },
   },
   {
     name: "related-docs",
     topic: "core",
     usage: "phren related-docs <entity>",
     summary: "Find docs that share fragments with an entity",
-    run: shim("related-docs"),
+    run: async (args, ctx) => {
+      const { handleRelatedDocs } = await import("./cli/actions.js");
+      await handleRelatedDocs(args, ctx.profile());
+    },
   },
   {
     name: "truths",
     topic: "core",
     usage: "phren truths [project]",
     summary: "Show pinned truths for a project",
-    run: shim("truths"),
+    run: async (args) => {
+      const { handleTruths } = await import("./cli/actions.js");
+      await handleTruths(args[0]);
+    },
   },
   {
     name: "promote",
     topic: "core",
     usage: "phren promote <finding> --to <store>",
     summary: "Move a finding from personal to a team store",
-    run: shim("promote"),
+    run: async (args) => {
+      const { handlePromoteNamespace } = await import("./cli/namespaces.js");
+      await handlePromoteNamespace(args);
+    },
   },
 
   // Skills
@@ -400,7 +451,10 @@ export const REGISTRY: Command[] = [
     topic: "skills",
     usage: "phren detect-skills [--import]",
     summary: "Find untracked skills in ~/.claude/skills/",
-    run: shim("detect-skills"),
+    run: async (args, ctx) => {
+      const { handleDetectSkills } = await import("./cli/namespaces.js");
+      await handleDetectSkills(args, ctx.profile());
+    },
   },
 
   // Hooks (namespace shares name with topic - distinct concept)
@@ -437,14 +491,20 @@ export const REGISTRY: Command[] = [
     topic: "maintain",
     usage: "phren consolidation-status",
     summary: "Report findings consolidation health",
-    run: shim("consolidation-status"),
+    run: async (args) => {
+      const { handleConsolidationStatus } = await import("./cli/actions.js");
+      await handleConsolidationStatus(args);
+    },
   },
   {
     name: "quality-feedback",
     topic: "maintain",
     usage: "phren quality-feedback",
     summary: "Inspect injected-memory feedback",
-    run: shim("quality-feedback"),
+    run: async (args) => {
+      const { handleQualityFeedback } = await import("./cli/actions.js");
+      await handleQualityFeedback(args);
+    },
   },
 
   // Setup (the rest)
@@ -481,14 +541,20 @@ export const REGISTRY: Command[] = [
     topic: "setup",
     usage: "phren update [--refresh-starter]",
     summary: "Update to latest version",
-    run: shim("update"),
+    run: async (args) => {
+      const { handleUpdate } = await import("./cli/actions.js");
+      await handleUpdate(args);
+    },
   },
   {
     name: "profile",
     topic: "setup",
     usage: "phren profile <subcommand>",
     summary: "Manage machine-to-profile mappings",
-    run: shim("profile"),
+    run: async (args) => {
+      const { handleProfileNamespace } = await import("./cli/namespaces.js");
+      await handleProfileNamespace(args);
+    },
   },
 
   // Stores
