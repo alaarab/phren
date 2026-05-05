@@ -1,17 +1,11 @@
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
 import {
   REGISTRY,
   TOPIC_ORDER,
   DOC_TOPICS,
   helpTopicNames,
-  isShimRun,
   lookupCommand,
 } from "./cli-registry.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("cli-registry: shape invariants", () => {
   it("every entry has a unique name", () => {
@@ -92,30 +86,3 @@ describe("cli-registry: helpTopicNames", () => {
   });
 });
 
-describe("cli-registry: switch-case coverage in cli/cli.ts", () => {
-  // Phase 1 routes most commands through cli/cli.ts's switch via shim().
-  // Adding a registry entry without a matching `case` would crash at the
-  // switch's default branch (process.exit(1)). This guard catches the
-  // regression at test time. Phase 2 deletes the switch entirely.
-  const cliSrc = fs.readFileSync(path.join(__dirname, "cli", "cli.ts"), "utf8");
-  const switchCases = new Set<string>(
-    [...cliSrc.matchAll(/case\s+"([\w-]+)":/g)].map((m) => m[1]),
-  );
-
-  it("every shim'd registry name has a matching case in cli/cli.ts", () => {
-    const missing: string[] = [];
-    for (const cmd of REGISTRY) {
-      if (!isShimRun(cmd.run)) continue;
-      if (!switchCases.has(cmd.name)) missing.push(cmd.name);
-    }
-    expect(missing, `registry shim entries with no switch case: ${missing.join(", ")}`).toEqual([]);
-  });
-
-  it("every switch case has a matching registry entry", () => {
-    const orphans: string[] = [];
-    for (const caseName of switchCases) {
-      if (!lookupCommand(caseName)) orphans.push(caseName);
-    }
-    expect(orphans, `switch cases with no registry entry (dead code): ${orphans.join(", ")}`).toEqual([]);
-  });
-});

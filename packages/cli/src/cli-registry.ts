@@ -64,30 +64,7 @@ export interface Command {
   run: RunFn;
 }
 
-// ── Shim helper for runCliCommand-routed commands ────────────────────────────
-
-/**
- * Marker attached to `shim()`-produced run functions. Lets tests
- * distinguish shim'd entries from inline-dispatch entries reliably,
- * regardless of which module the inline lambda imports.
- */
-const SHIM_MARKER = Symbol.for("phren.cli-registry.shim");
-
-export function isShimRun(run: RunFn): boolean {
-  return (run as unknown as { [SHIM_MARKER]?: boolean })[SHIM_MARKER] === true;
-}
-
-function shim(name: string): RunFn {
-  // Returning void (not 0) lets the dispatcher coerce undefined to 0 while
-  // leaving room for handlers to eventually surface non-zero codes when they
-  // stop calling process.exit directly.
-  const fn: RunFn = async (args) => {
-    const { runCliCommand } = await import("./cli/cli.js");
-    await runCliCommand(name, args);
-  };
-  Object.defineProperty(fn, SHIM_MARKER, { value: true, enumerable: false });
-  return fn;
-}
+// ── Native handler dispatch helper ──────────────────────────────────────────
 
 type NativeHandlerName =
   | "runAddCommand"
@@ -599,26 +576,196 @@ export const REGISTRY: Command[] = [
   },
 
   // Hidden - internal hooks (called by Claude/Cursor/etc., not by humans)
-  { name: "hook-prompt",          topic: "core", usage: "phren hook-prompt",          summary: "Internal: UserPromptSubmit hook",          hidden: true, run: shim("hook-prompt") },
-  { name: "hook-session-start",   topic: "core", usage: "phren hook-session-start",   summary: "Internal: SessionStart hook",              hidden: true, run: shim("hook-session-start") },
-  { name: "hook-stop",            topic: "core", usage: "phren hook-stop",            summary: "Internal: Stop hook",                      hidden: true, run: shim("hook-stop") },
-  { name: "hook-context",         topic: "core", usage: "phren hook-context",         summary: "Internal: context-injection hook",         hidden: true, run: shim("hook-context") },
-  { name: "hook-tool",            topic: "core", usage: "phren hook-tool",            summary: "Internal: PostToolUse hook",               hidden: true, run: shim("hook-tool") },
-  { name: "background-sync",      topic: "core", usage: "phren background-sync",      summary: "Internal: background git sync",            hidden: true, run: shim("background-sync") },
-  { name: "background-maintenance", topic: "core", usage: "phren background-maintenance", summary: "Internal: scheduled maintenance",       hidden: true, run: shim("background-maintenance") },
-  { name: "debug-injection",      topic: "core", usage: "phren debug-injection",      summary: "Internal: dump injection rationale",       hidden: true, run: shim("debug-injection") },
-  { name: "inspect-index",        topic: "core", usage: "phren inspect-index",        summary: "Internal: dump index contents",            hidden: true, run: shim("inspect-index") },
+  {
+    name: "hook-prompt",
+    topic: "core",
+    usage: "phren hook-prompt",
+    summary: "Internal: UserPromptSubmit hook",
+    hidden: true,
+    run: async () => {
+      const { handleHookPrompt } = await import("./cli/hooks.js");
+      await handleHookPrompt();
+    },
+  },
+  {
+    name: "hook-session-start",
+    topic: "core",
+    usage: "phren hook-session-start",
+    summary: "Internal: SessionStart hook",
+    hidden: true,
+    run: async () => {
+      const { handleHookSessionStart } = await import("./cli/hooks.js");
+      await handleHookSessionStart();
+    },
+  },
+  {
+    name: "hook-stop",
+    topic: "core",
+    usage: "phren hook-stop",
+    summary: "Internal: Stop hook",
+    hidden: true,
+    run: async () => {
+      const { handleHookStop } = await import("./cli/hooks.js");
+      await handleHookStop();
+    },
+  },
+  {
+    name: "hook-context",
+    topic: "core",
+    usage: "phren hook-context",
+    summary: "Internal: context-injection hook",
+    hidden: true,
+    run: async () => {
+      const { handleHookContext } = await import("./cli/hooks.js");
+      await handleHookContext();
+    },
+  },
+  {
+    name: "hook-tool",
+    topic: "core",
+    usage: "phren hook-tool",
+    summary: "Internal: PostToolUse hook",
+    hidden: true,
+    run: async () => {
+      const { handleHookTool } = await import("./cli/hooks.js");
+      await handleHookTool();
+    },
+  },
+  {
+    name: "background-sync",
+    topic: "core",
+    usage: "phren background-sync",
+    summary: "Internal: background git sync",
+    hidden: true,
+    run: async () => {
+      const { handleBackgroundSync } = await import("./cli/hooks.js");
+      await handleBackgroundSync();
+    },
+  },
+  {
+    name: "background-maintenance",
+    topic: "core",
+    usage: "phren background-maintenance",
+    summary: "Internal: scheduled maintenance",
+    hidden: true,
+    run: async (args) => {
+      const { handleBackgroundMaintenance } = await import("./cli/govern.js");
+      await handleBackgroundMaintenance(args[0]);
+    },
+  },
+  {
+    name: "debug-injection",
+    topic: "core",
+    usage: "phren debug-injection",
+    summary: "Internal: dump injection rationale",
+    hidden: true,
+    run: async (args, ctx) => {
+      const { handleDebugInjection } = await import("./cli/ops.js");
+      await handleDebugInjection(args, ctx.profile());
+    },
+  },
+  {
+    name: "inspect-index",
+    topic: "core",
+    usage: "phren inspect-index",
+    summary: "Internal: dump index contents",
+    hidden: true,
+    run: async (args, ctx) => {
+      const { handleInspectIndex } = await import("./cli/ops.js");
+      await handleInspectIndex(args, ctx.profile());
+    },
+  },
 
   // Hidden - undocumented aliases of namespaced commands (kept for back-compat;
   // user-facing form lives under config / maintain / skills).
-  { name: "skill-list",           topic: "skills",   usage: "phren skill-list",           summary: "Alias of `phren skills list`",          hidden: true, run: shim("skill-list") },
-  { name: "policy",               topic: "config",   usage: "phren policy [get|set ...]", summary: "Alias of `phren config policy`",        hidden: true, run: shim("policy") },
-  { name: "workflow",             topic: "config",   usage: "phren workflow [get|set ...]", summary: "Alias of `phren config workflow`",    hidden: true, run: shim("workflow") },
-  { name: "index-policy",         topic: "config",   usage: "phren index-policy [...]",   summary: "Alias of `phren config index`",         hidden: true, run: shim("index-policy") },
-  { name: "extract-memories",     topic: "maintain", usage: "phren extract-memories [project]",   summary: "Alias of `phren maintain extract`",     hidden: true, run: shim("extract-memories") },
-  { name: "govern-memories",      topic: "maintain", usage: "phren govern-memories [project]",    summary: "Alias of `phren maintain govern`",      hidden: true, run: shim("govern-memories") },
-  { name: "prune-memories",       topic: "maintain", usage: "phren prune-memories [project]",     summary: "Alias of `phren maintain prune`",       hidden: true, run: shim("prune-memories") },
-  { name: "consolidate-memories", topic: "maintain", usage: "phren consolidate-memories [project]", summary: "Alias of `phren maintain consolidate`", hidden: true, run: shim("consolidate-memories") },
+  {
+    name: "skill-list",
+    topic: "skills",
+    usage: "phren skill-list",
+    summary: "Alias of `phren skills list`",
+    hidden: true,
+    run: async (_args, ctx) => {
+      const { handleSkillList } = await import("./cli/namespaces.js");
+      await handleSkillList(ctx.profile());
+    },
+  },
+  {
+    name: "policy",
+    topic: "config",
+    usage: "phren policy [get|set ...]",
+    summary: "Alias of `phren config policy`",
+    hidden: true,
+    run: async (args) => {
+      const { handleRetentionPolicy } = await import("./cli/config.js");
+      await handleRetentionPolicy(args);
+    },
+  },
+  {
+    name: "workflow",
+    topic: "config",
+    usage: "phren workflow [get|set ...]",
+    summary: "Alias of `phren config workflow`",
+    hidden: true,
+    run: async (args) => {
+      const { handleWorkflowPolicy } = await import("./cli/config.js");
+      await handleWorkflowPolicy(args);
+    },
+  },
+  {
+    name: "index-policy",
+    topic: "config",
+    usage: "phren index-policy [...]",
+    summary: "Alias of `phren config index`",
+    hidden: true,
+    run: async (args) => {
+      const { handleIndexPolicy } = await import("./cli/config.js");
+      await handleIndexPolicy(args);
+    },
+  },
+  {
+    name: "extract-memories",
+    topic: "maintain",
+    usage: "phren extract-memories [project]",
+    summary: "Alias of `phren maintain extract`",
+    hidden: true,
+    run: async (args) => {
+      const { handleExtractMemories } = await import("./cli/extract.js");
+      await handleExtractMemories(args[0]);
+    },
+  },
+  {
+    name: "govern-memories",
+    topic: "maintain",
+    usage: "phren govern-memories [project]",
+    summary: "Alias of `phren maintain govern`",
+    hidden: true,
+    run: async (args) => {
+      const { handleGovernMemories } = await import("./cli/govern.js");
+      await handleGovernMemories(args[0]);
+    },
+  },
+  {
+    name: "prune-memories",
+    topic: "maintain",
+    usage: "phren prune-memories [project]",
+    summary: "Alias of `phren maintain prune`",
+    hidden: true,
+    run: async (args) => {
+      const { handlePruneMemories } = await import("./cli/govern.js");
+      await handlePruneMemories(args);
+    },
+  },
+  {
+    name: "consolidate-memories",
+    topic: "maintain",
+    usage: "phren consolidate-memories [project]",
+    summary: "Alias of `phren maintain consolidate`",
+    hidden: true,
+    run: async (args) => {
+      const { handleConsolidateMemories } = await import("./cli/govern.js");
+      await handleConsolidateMemories(args);
+    },
+  },
 
   // Hidden - `phren link` was removed; this prints a removal notice.
   {
