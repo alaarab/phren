@@ -1,12 +1,6 @@
 /**
  * Command registry - single source of truth for help generation and dispatch.
  *
- * Replaces four parallel sources that used to drift:
- *   - HELP_TEXT (cheat sheet)
- *   - HELP_TOPICS (topic-grouped help)
- *   - CLI_COMMANDS (allowlist)
- *   - the if/else dispatch chain in entrypoint.ts and the switch in cli/cli.ts
- *
  * Order in REGISTRY is load-bearing: it drives cheat-sheet ordering and
  * within-topic ordering. Don't sort.
  */

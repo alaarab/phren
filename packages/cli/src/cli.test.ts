@@ -1723,7 +1723,8 @@ describe("CLI integration: detect-skills", () => {
 
 // --- Unit tests for exported cli functions ---
 
-import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli/cli.js";
+import { scoreFindingCandidate } from "./cli/extract.js";
+import { detectTaskIntent, selectSnippets } from "./cli/hooks.js";
 import { DocRow } from "./shared/index.js";
 
 describe("scoreFindingCandidate", () => {

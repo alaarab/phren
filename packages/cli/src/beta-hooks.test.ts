@@ -17,7 +17,7 @@ import {
   clearCitationValidCache,
   extractToolFindings,
   filterToolFindingsForProactivity,
-} from "./cli/cli.js";
+} from "./cli/hooks.js";
 
 // ── Task #5: rankResults no longer hard-filters ─────────────────────────────
 
