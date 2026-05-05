@@ -158,8 +158,14 @@ export async function runTopLevelCommand(
         console.log(formatCheatSheet());
         return finish();
       }
-      const { runCliCommand } = await import("./cli/cli.js");
-      await runCliCommand("shell", []);
+      const shellCmd = lookupCommand("shell");
+      if (shellCmd) {
+        const ctx: CliContext = {
+          phrenPath: () => getPhrenPath(),
+          profile: () => resolveRuntimeProfile(getPhrenPath()),
+        };
+        await shellCmd.run([], ctx);
+      }
       return finish();
     }
     return false;
