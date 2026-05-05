@@ -5,13 +5,16 @@ import { logger } from "./logger.js";
 import {
   defaultPhrenPath,
   expandHomePath,
+  getPhrenPath,
   readRootManifest,
 } from "./shared.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { VERSION } from "./package-metadata.js";
 import {
   TOPIC_ORDER,
   helpTopicNames,
   lookupCommand,
+  type CliContext,
   type Topic,
 } from "./cli-registry.js";
 import {
@@ -186,8 +189,13 @@ export async function runTopLevelCommand(
     }
   }
 
+  const ctx: CliContext = {
+    phrenPath: () => getPhrenPath(),
+    profile: () => resolveRuntimeProfile(getPhrenPath()),
+  };
+
   try {
-    const code = await cmd.run(argv.slice(1));
+    const code = await cmd.run(argv.slice(1), ctx);
     return finish(typeof code === "number" ? code : 0);
   } catch (err: unknown) {
     console.error(errorMessage(err));
