@@ -37,7 +37,17 @@ export interface Subcommand {
   summary?: string;
 }
 
-export type RunFn = (argv: string[]) => Promise<number | void>;
+/**
+ * Lazy accessors passed to every `run`. Both throw or resolve only when
+ * called, so commands that dispatch without a configured phren root
+ * (`verify`, `init`, `add`, the help router) avoid touching them.
+ */
+export interface CliContext {
+  phrenPath: () => string;
+  profile: () => string;
+}
+
+export type RunFn = (argv: string[], ctx: CliContext) => Promise<number | void>;
 
 export interface Command {
   name: string;
@@ -240,7 +250,13 @@ export const REGISTRY: Command[] = [
     usage: "phren search <query>",
     summary: "Search what phren knows",
     featured: true,
-    run: shim("search"),
+    run: async (args, ctx) => {
+      const { parseSearchArgs } = await import("./cli/search.js");
+      const { handleSearch } = await import("./cli/actions.js");
+      const opts = parseSearchArgs(ctx.phrenPath(), args);
+      if (!opts) return;
+      await handleSearch(opts, ctx.profile());
+    },
   },
   {
     name: "status",

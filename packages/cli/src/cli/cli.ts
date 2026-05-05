@@ -92,12 +92,6 @@ import { resolveRuntimeProfile } from "../runtime-profile.js";
 export async function runCliCommand(command: string, args: string[]) {
   const getProfile = () => resolveRuntimeProfile(getPhrenPath());
   switch (command) {
-    case "search":
-      {
-        const opts = parseSearchArgs(getPhrenPath(), args);
-        if (!opts) return;
-        return handleSearch(opts, getProfile());
-      }
     case "hook-prompt":
       return handleHookPrompt();
     case "hook-session-start":
