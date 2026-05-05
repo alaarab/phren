@@ -26,12 +26,16 @@ Experimental (not published, not wired into the `phren` CLI):
 
 | File | Purpose |
 |------|---------|
-| `packages/cli/src/index.ts` | Entry point: CLI routing + MCP server with 54 tools |
+| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server with 54 tools |
+| `packages/cli/src/entrypoint.ts` | Top-level dispatcher: resolves `--help`/`--version`/`--health`/MCP/manage invocations and routes via the command registry |
+| `packages/cli/src/cli-registry.ts` | Command catalog. Single source of truth for help generation and dispatch (Command type, REGISTRY, lookupCommand, DOC_TOPICS). |
+| `packages/cli/src/cli-help.ts` | Help formatters over the registry: formatCheatSheet, formatTopic, formatCommand, formatFullHelp |
+| `packages/cli/src/cli-handlers.ts` | Native handlers for `add`, `init`, `uninstall`, `status`, `verify`, `mcp-mode`, `hooks-mode`, plus argv parsing helpers |
 | `packages/cli/src/shared.ts` | Shared infrastructure: findPhrenPath, getProjectDirs, runtimeFile, sessionMarker |
 | `packages/cli/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
 | `packages/cli/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
 | `packages/cli/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
-| `packages/cli/src/cli/cli.ts` | CLI subcommands: search, shell, hooks, doctor, memory-ui, governance commands |
+| `packages/cli/src/cli/cli.ts` | CLI subcommand router for the ~40 commands not yet absorbed into the registry. Reached via `shim()` entries in `cli-registry.ts`. |
 | `packages/cli/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `packages/cli/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
 | `packages/cli/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |

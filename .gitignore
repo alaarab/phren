@@ -21,6 +21,7 @@ packages/vscode/test-results/
 
 # AI design tooling output
 .design-bundles/
+temp/
 
 # Runtime / ephemeral
 .runtime/

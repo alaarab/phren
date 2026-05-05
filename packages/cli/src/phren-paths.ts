@@ -63,7 +63,7 @@ export function atomicWriteText(filePath: string, content: string): void {
   }
 }
 
-function isInstallMode(value: unknown): value is InstallMode {
+export function isInstallMode(value: unknown): value is InstallMode {
   return value === "shared" || value === "project-local";
 }
 
