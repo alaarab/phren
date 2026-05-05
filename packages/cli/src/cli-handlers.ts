@@ -16,7 +16,6 @@ import {
   isInstallMode,
   parseProactivityLevel,
   type InstallMode,
-  type ProactivityLevel,
 } from "./shared.js";
 import { errorMessage, getOptionValue, getPositionalArgs } from "./utils.js";
 import { addProjectFromPath } from "./core/project.js";
