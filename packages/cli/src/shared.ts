@@ -39,6 +39,7 @@ export {
   type SyncMode,
   type PhrenRootManifest,
   type InstallContext,
+  isInstallMode,
   homeDir,
   homePath,
   expandHomePath,
@@ -81,6 +82,7 @@ export {
 export {
   PROACTIVITY_LEVELS,
   type ProactivityLevel,
+  parseProactivityLevel,
   getProactivityLevel,
   getProactivityLevelForFindings,
   getProactivityLevelForTask,

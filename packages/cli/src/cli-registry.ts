@@ -1,0 +1,535 @@
+/**
+ * Command registry - single source of truth for help generation and dispatch.
+ *
+ * Replaces four parallel sources that used to drift:
+ *   - HELP_TEXT (cheat sheet)
+ *   - HELP_TOPICS (topic-grouped help)
+ *   - CLI_COMMANDS (allowlist)
+ *   - the if/else dispatch chain in entrypoint.ts and the switch in cli/cli.ts
+ *
+ * Order in REGISTRY is load-bearing: it drives cheat-sheet ordering and
+ * within-topic ordering. Don't sort.
+ */
+
+// Native handlers load lazily via `native()` below - statically importing
+// cli-handlers.js would pull init/init.js (and its transitive deps) into
+// every phren invocation, defeating cold-start.
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export const TOPIC_ORDER = [
+  "core",
+  "projects",
+  "skills",
+  "hooks",
+  "config",
+  "maintain",
+  "setup",
+  "stores",
+  "team",
+] as const;
+
+export type Topic = typeof TOPIC_ORDER[number];
+
+export interface Subcommand {
+  name: string;
+  usage: string;
+  summary?: string;
+}
+
+export type RunFn = (argv: string[]) => Promise<number | void>;
+
+export interface Command {
+  name: string;
+  aliases?: string[];
+  topic: Topic;
+  /** Full usage line shown in topic help and per-command help. */
+  usage: string;
+  /** Optional shorter form for the cheat sheet. Falls back to `usage`. */
+  cheatUsage?: string;
+  summary: string;
+  subcommands?: Subcommand[];
+  featured?: boolean;
+  hidden?: boolean;
+  run: RunFn;
+}
+
+// ── Shim helper for runCliCommand-routed commands ────────────────────────────
+
+function shim(name: string): RunFn {
+  return async (args) => {
+    // Returning void (not 0) so Phase 2 handlers can surface non-zero codes
+    // once they stop calling process.exit directly. Dispatcher coerces void to 0.
+    const { runCliCommand } = await import("./cli/cli.js");
+    await runCliCommand(name, args);
+  };
+}
+
+type NativeHandlerName =
+  | "runAddCommand"
+  | "runInitCommand"
+  | "runUninstallCommand"
+  | "runStatusCommand"
+  | "runVerifyCommand"
+  | "runMcpModeCommand"
+  | "runHooksModeCommand"
+  | "runLinkRemovedNotice";
+
+function native(fn: NativeHandlerName): RunFn {
+  return async (args) => {
+    const mod = await import("./cli-handlers.js");
+    return mod[fn](args);
+  };
+}
+
+// ── Doc topics (not commands) ────────────────────────────────────────────────
+
+export const ENV_HELP = `Environment variables:
+  PHREN_PATH                  Override phren directory (default: ~/.phren)
+  PHREN_PROFILE               Active profile name
+  PHREN_DEBUG                 Enable debug logging (set to 1)
+
+  Embeddings:
+  PHREN_OLLAMA_URL            Ollama base URL (default: http://localhost:11434, 'off' to disable)
+  PHREN_EMBEDDING_API_URL     OpenAI-compatible /embeddings endpoint
+  PHREN_EMBEDDING_API_KEY     API key for embedding endpoint
+  PHREN_EMBEDDING_MODEL       Embedding model (default: nomic-embed-text)
+
+  Context injection:
+  PHREN_CONTEXT_TOKEN_BUDGET  Max tokens injected per prompt (default: 550)
+  PHREN_MAX_INJECT_TOKENS     Hard cap on total injected tokens (default: 2000)
+  PHREN_HOOK_TIMEOUT_MS       Hook subprocess timeout in ms (default: 14000)
+
+  Feature flags:
+  PHREN_FEATURE_AUTO_EXTRACT=0       Disable auto memory extraction
+  PHREN_FEATURE_AUTO_CAPTURE=1       Extract insights from conversations
+  PHREN_FEATURE_SEMANTIC_DEDUP=1     LLM-based dedup on add_finding
+  PHREN_FEATURE_HYBRID_SEARCH=0      Disable TF-IDF cosine fallback
+
+  Run 'phren help all' to see everything.
+`;
+
+export const DOC_TOPICS: Record<string, string> = {
+  env: ENV_HELP,
+};
+
+// ── Subcommand catalogues ────────────────────────────────────────────────────
+// Lifted from the old HELP_TOPICS string blocks. Verbatim where preserved.
+
+const PROJECTS_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren projects list", summary: "List all tracked projects" },
+  { name: "configure", usage: "phren projects configure <name> [--ownership <mode>] [--hooks on|off]", summary: "Update per-project settings" },
+  { name: "remove", usage: "phren projects remove <name>", summary: "Remove a project" },
+];
+
+const SKILLS_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren skills list", summary: "List installed skills" },
+  { name: "add", usage: "phren skills add <project> <path>", summary: "Link a skill into a project" },
+  { name: "show", usage: "phren skills show <name>", summary: "Show skill content" },
+  { name: "resolve", usage: "phren skills resolve <project|global>", summary: "Print resolved skill manifest" },
+  { name: "doctor", usage: "phren skills doctor <project|global>", summary: "Diagnose skill visibility" },
+  { name: "sync", usage: "phren skills sync <project|global>", summary: "Regenerate skill mirror" },
+  { name: "enable", usage: "phren skills enable <project|global> <name>", summary: "Enable a disabled skill" },
+  { name: "disable", usage: "phren skills disable <project|global> <name>", summary: "Disable a skill without deleting" },
+  { name: "remove", usage: "phren skills remove <project> <name>", summary: "Remove a skill" },
+];
+
+const HOOKS_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren hooks list [--project <name>]", summary: "Show hook status per tool" },
+  { name: "enable", usage: "phren hooks enable <tool>", summary: "Enable hooks for a tool" },
+  { name: "disable", usage: "phren hooks disable <tool>", summary: "Disable hooks for a tool" },
+  { name: "add-custom", usage: "phren hooks add-custom <event> <cmd>", summary: "Add a custom hook" },
+  { name: "remove-custom", usage: "phren hooks remove-custom <event>", summary: "Remove custom hooks" },
+  { name: "errors", usage: "phren hooks errors [--limit <n>]", summary: "Show recent hook errors" },
+];
+
+const CONFIG_SUBCOMMANDS: Subcommand[] = [
+  { name: "show", usage: "phren config show [--project <name>]", summary: "Show current config" },
+  { name: "policy", usage: "phren config policy [get|set ...]", summary: "Retention, TTL, confidence, decay" },
+  { name: "workflow", usage: "phren config workflow [get|set ...]", summary: "Risky-memory thresholds" },
+  { name: "proactivity", usage: "phren config proactivity [level]", summary: "Set proactivity level" },
+  { name: "task-mode", usage: "phren config task-mode [mode]", summary: "Set task automation mode" },
+  { name: "finding-sensitivity", usage: "phren config finding-sensitivity [lvl]", summary: "Set finding capture sensitivity" },
+  { name: "index", usage: "phren config index [get|set ...]", summary: "Indexer include/exclude globs" },
+  { name: "synonyms", usage: "phren config synonyms [list|add|remove]", summary: "Manage learned synonyms" },
+  { name: "project-ownership", usage: "phren config project-ownership [mode]", summary: "Default ownership for new projects" },
+  { name: "machines", usage: "phren config machines", summary: "Registered machines" },
+  { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
+  { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
+];
+
+const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
+  { name: "govern", usage: "phren maintain govern [project]", summary: "Queue stale memories for review" },
+  { name: "prune", usage: "phren maintain prune [project]", summary: "Delete expired entries" },
+  { name: "consolidate", usage: "phren maintain consolidate [project]", summary: "Deduplicate findings" },
+  { name: "extract", usage: "phren maintain extract [project]", summary: "Mine git/GitHub signals" },
+];
+
+const STORE_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren store list", summary: "List registered stores" },
+  { name: "add", usage: "phren store add <name> --remote <url>", summary: "Add a team store" },
+  { name: "remove", usage: "phren store remove <name>", summary: "Remove a store (local only)" },
+  { name: "sync", usage: "phren store sync", summary: "Pull all stores" },
+];
+
+const TEAM_SUBCOMMANDS: Subcommand[] = [
+  { name: "init", usage: "phren team init <name> [--remote <url>]", summary: "Create a new team store" },
+  { name: "join", usage: "phren team join <git-url> [--name <name>]", summary: "Join an existing team store" },
+  { name: "add-project", usage: "phren team add-project <store> <project>", summary: "Add a project to a team store" },
+  { name: "list", usage: "phren team list", summary: "List team stores" },
+];
+
+// ── Registry ─────────────────────────────────────────────────────────────────
+
+export const REGISTRY: Command[] = [
+  // Setup (featured: init, quickstart)
+  {
+    name: "init",
+    topic: "setup",
+    usage: "phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
+    cheatUsage: "phren init",
+    summary: "Set up phren",
+    featured: true,
+    run: native("runInitCommand"),
+  },
+  {
+    name: "quickstart",
+    topic: "setup",
+    usage: "phren quickstart",
+    summary: "Quick setup: init + project scaffold",
+    featured: true,
+    run: shim("quickstart"),
+  },
+
+  // Projects (featured: add)
+  {
+    name: "add",
+    topic: "projects",
+    usage: "phren add [path] [--ownership <mode>]",
+    summary: "Register a project",
+    featured: true,
+    run: native("runAddCommand"),
+  },
+  {
+    name: "projects",
+    topic: "projects",
+    usage: "phren projects <subcommand>",
+    summary: "Manage tracked projects",
+    subcommands: PROJECTS_SUBCOMMANDS,
+    run: shim("projects"),
+  },
+
+  // Core (featured: search, status, doctor, web-ui, tasks, graph, shell)
+  {
+    name: "search",
+    topic: "core",
+    usage: "phren search <query>",
+    summary: "Search what phren knows",
+    featured: true,
+    run: shim("search"),
+  },
+  {
+    name: "status",
+    topic: "core",
+    usage: "phren status",
+    summary: "Health check",
+    featured: true,
+    run: native("runStatusCommand"),
+  },
+  {
+    name: "doctor",
+    topic: "core",
+    usage: "phren doctor [--fix]",
+    summary: "Diagnose and repair",
+    featured: true,
+    run: shim("doctor"),
+  },
+  {
+    name: "web-ui",
+    topic: "core",
+    usage: "phren web-ui [--port <n>]",
+    summary: "Open the knowledge graph",
+    featured: true,
+    run: shim("web-ui"),
+  },
+  {
+    name: "tasks",
+    topic: "core",
+    usage: "phren tasks",
+    summary: "Cross-project task view",
+    featured: true,
+    run: shim("tasks"),
+  },
+  {
+    name: "graph",
+    topic: "core",
+    usage: "phren graph",
+    summary: "Fragment knowledge graph",
+    featured: true,
+    run: shim("graph"),
+  },
+  {
+    name: "shell",
+    topic: "core",
+    usage: "phren shell",
+    summary: "Interactive memory shell",
+    featured: true,
+    run: shim("shell"),
+  },
+
+  // Other core commands
+  {
+    name: "add-finding",
+    topic: "core",
+    usage: 'phren add-finding <project> "<insight>"',
+    summary: "Tell phren what you learned",
+    run: shim("add-finding"),
+  },
+  {
+    name: "pin",
+    topic: "core",
+    usage: 'phren pin <project> "<truth>"',
+    summary: "Save a truth (always-inject, never decays)",
+    run: shim("pin"),
+  },
+  {
+    name: "review",
+    topic: "core",
+    usage: "phren review [project]",
+    summary: "Show review queue",
+    run: shim("review"),
+  },
+  {
+    name: "session-context",
+    topic: "core",
+    usage: "phren session-context",
+    summary: "Current session state",
+    run: shim("session-context"),
+  },
+  {
+    name: "sessions",
+    topic: "core",
+    usage: "phren sessions",
+    summary: "List recent sessions",
+    run: shim("sessions"),
+  },
+  {
+    name: "task",
+    topic: "core",
+    usage: "phren task <subcommand>",
+    summary: "Manage tasks",
+    run: shim("task"),
+  },
+  {
+    name: "finding",
+    topic: "core",
+    usage: "phren finding <subcommand>",
+    summary: "Manage findings",
+    run: shim("finding"),
+  },
+  {
+    name: "search-fragments",
+    topic: "core",
+    usage: "phren search-fragments <query>",
+    summary: "Search the named-fragment graph",
+    run: shim("search-fragments"),
+  },
+  {
+    name: "related-docs",
+    topic: "core",
+    usage: "phren related-docs <entity>",
+    summary: "Find docs that share fragments with an entity",
+    run: shim("related-docs"),
+  },
+  {
+    name: "truths",
+    topic: "core",
+    usage: "phren truths [project]",
+    summary: "Show pinned truths for a project",
+    run: shim("truths"),
+  },
+  {
+    name: "promote",
+    topic: "core",
+    usage: "phren promote <finding> --to <store>",
+    summary: "Move a finding from personal to a team store",
+    run: shim("promote"),
+  },
+
+  // Skills
+  {
+    name: "skills",
+    topic: "skills",
+    usage: "phren skills <subcommand>",
+    summary: "Manage skills",
+    subcommands: SKILLS_SUBCOMMANDS,
+    run: shim("skills"),
+  },
+  {
+    name: "detect-skills",
+    topic: "skills",
+    usage: "phren detect-skills [--import]",
+    summary: "Find untracked skills in ~/.claude/skills/",
+    run: shim("detect-skills"),
+  },
+
+  // Hooks (namespace shares name with topic - distinct concept)
+  {
+    name: "hooks",
+    topic: "hooks",
+    usage: "phren hooks <subcommand>",
+    summary: "Manage lifecycle hooks",
+    subcommands: HOOKS_SUBCOMMANDS,
+    run: shim("hooks"),
+  },
+
+  // Config
+  {
+    name: "config",
+    topic: "config",
+    usage: "phren config <subcommand>",
+    summary: "View and update configuration",
+    subcommands: CONFIG_SUBCOMMANDS,
+    run: shim("config"),
+  },
+
+  // Maintain
+  {
+    name: "maintain",
+    topic: "maintain",
+    usage: "phren maintain <subcommand>",
+    summary: "Memory maintenance operations",
+    subcommands: MAINTAIN_SUBCOMMANDS,
+    run: shim("maintain"),
+  },
+  {
+    name: "consolidation-status",
+    topic: "maintain",
+    usage: "phren consolidation-status",
+    summary: "Report findings consolidation health",
+    run: shim("consolidation-status"),
+  },
+  {
+    name: "quality-feedback",
+    topic: "maintain",
+    usage: "phren quality-feedback",
+    summary: "Inspect injected-memory feedback",
+    run: shim("quality-feedback"),
+  },
+
+  // Setup (the rest)
+  {
+    name: "mcp-mode",
+    topic: "setup",
+    usage: "phren mcp-mode [on|off|status]",
+    summary: "Toggle MCP integration",
+    run: native("runMcpModeCommand"),
+  },
+  {
+    name: "hooks-mode",
+    topic: "setup",
+    usage: "phren hooks-mode [on|off|status]",
+    summary: "Toggle hook execution",
+    run: native("runHooksModeCommand"),
+  },
+  {
+    name: "verify",
+    topic: "setup",
+    usage: "phren verify",
+    summary: "Check init completed OK",
+    run: native("runVerifyCommand"),
+  },
+  {
+    name: "uninstall",
+    topic: "setup",
+    usage: "phren uninstall",
+    summary: "Remove phren config and hooks",
+    run: native("runUninstallCommand"),
+  },
+  {
+    name: "update",
+    topic: "setup",
+    usage: "phren update [--refresh-starter]",
+    summary: "Update to latest version",
+    run: shim("update"),
+  },
+  {
+    name: "profile",
+    topic: "setup",
+    usage: "phren profile <subcommand>",
+    summary: "Manage machine-to-profile mappings",
+    run: shim("profile"),
+  },
+
+  // Stores
+  {
+    name: "store",
+    topic: "stores",
+    usage: "phren store <subcommand>",
+    summary: "Manage knowledge stores",
+    subcommands: STORE_SUBCOMMANDS,
+    run: shim("store"),
+  },
+
+  // Team
+  {
+    name: "team",
+    topic: "team",
+    usage: "phren team <subcommand>",
+    summary: "Manage team stores",
+    subcommands: TEAM_SUBCOMMANDS,
+    run: shim("team"),
+  },
+
+  // Hidden - internal hooks (called by Claude/Cursor/etc., not by humans)
+  { name: "hook-prompt",          topic: "core", usage: "phren hook-prompt",          summary: "Internal: UserPromptSubmit hook",          hidden: true, run: shim("hook-prompt") },
+  { name: "hook-session-start",   topic: "core", usage: "phren hook-session-start",   summary: "Internal: SessionStart hook",              hidden: true, run: shim("hook-session-start") },
+  { name: "hook-stop",            topic: "core", usage: "phren hook-stop",            summary: "Internal: Stop hook",                      hidden: true, run: shim("hook-stop") },
+  { name: "hook-context",         topic: "core", usage: "phren hook-context",         summary: "Internal: context-injection hook",         hidden: true, run: shim("hook-context") },
+  { name: "hook-tool",            topic: "core", usage: "phren hook-tool",            summary: "Internal: PostToolUse hook",               hidden: true, run: shim("hook-tool") },
+  { name: "background-sync",      topic: "core", usage: "phren background-sync",      summary: "Internal: background git sync",            hidden: true, run: shim("background-sync") },
+  { name: "background-maintenance", topic: "core", usage: "phren background-maintenance", summary: "Internal: scheduled maintenance",       hidden: true, run: shim("background-maintenance") },
+  { name: "debug-injection",      topic: "core", usage: "phren debug-injection",      summary: "Internal: dump injection rationale",       hidden: true, run: shim("debug-injection") },
+  { name: "inspect-index",        topic: "core", usage: "phren inspect-index",        summary: "Internal: dump index contents",            hidden: true, run: shim("inspect-index") },
+
+  // Hidden - undocumented aliases of namespaced commands (kept for back-compat;
+  // user-facing form lives under config / maintain / skills).
+  { name: "skill-list",           topic: "skills",   usage: "phren skill-list",           summary: "Alias of `phren skills list`",          hidden: true, run: shim("skill-list") },
+  { name: "policy",               topic: "config",   usage: "phren policy [get|set ...]", summary: "Alias of `phren config policy`",        hidden: true, run: shim("policy") },
+  { name: "workflow",             topic: "config",   usage: "phren workflow [get|set ...]", summary: "Alias of `phren config workflow`",    hidden: true, run: shim("workflow") },
+  { name: "index-policy",         topic: "config",   usage: "phren index-policy [...]",   summary: "Alias of `phren config index`",         hidden: true, run: shim("index-policy") },
+  { name: "extract-memories",     topic: "maintain", usage: "phren extract-memories [project]",   summary: "Alias of `phren maintain extract`",     hidden: true, run: shim("extract-memories") },
+  { name: "govern-memories",      topic: "maintain", usage: "phren govern-memories [project]",    summary: "Alias of `phren maintain govern`",      hidden: true, run: shim("govern-memories") },
+  { name: "prune-memories",       topic: "maintain", usage: "phren prune-memories [project]",     summary: "Alias of `phren maintain prune`",       hidden: true, run: shim("prune-memories") },
+  { name: "consolidate-memories", topic: "maintain", usage: "phren consolidate-memories [project]", summary: "Alias of `phren maintain consolidate`", hidden: true, run: shim("consolidate-memories") },
+
+  // Hidden - `phren link` was removed; this prints a removal notice.
+  {
+    name: "link",
+    topic: "setup",
+    usage: "phren link",
+    summary: "Removed - use `phren init`",
+    hidden: true,
+    run: native("runLinkRemovedNotice"),
+  },
+];
+
+// ── Lookup ───────────────────────────────────────────────────────────────────
+
+export function lookupCommand(name: string): Command | undefined {
+  for (const cmd of REGISTRY) {
+    if (cmd.name === name) return cmd;
+    if (cmd.aliases?.includes(name)) return cmd;
+  }
+  return undefined;
+}
+
+/** Topic IDs available to `phren help <topic>`, including doc topics and `all`. */
+export function helpTopicNames(): string[] {
+  return [...TOPIC_ORDER, ...Object.keys(DOC_TOPICS), "all"];
+}
+
+/** Topic IDs that are command groups (excludes doc topics and `all`). */
+export function commandTopics(): readonly Topic[] {
+  return TOPIC_ORDER;
+}
