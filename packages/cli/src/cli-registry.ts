@@ -243,7 +243,10 @@ export const REGISTRY: Command[] = [
     usage: "phren projects <subcommand>",
     summary: "Manage tracked projects",
     subcommands: PROJECTS_SUBCOMMANDS,
-    run: shim("projects"),
+    run: async (args, ctx) => {
+      const { handleProjectsNamespace } = await import("./cli/namespaces.js");
+      await handleProjectsNamespace(args, ctx.profile());
+    },
   },
 
   // Core (featured: search, status, doctor, web-ui, tasks, graph, shell)
@@ -444,7 +447,10 @@ export const REGISTRY: Command[] = [
     usage: "phren skills <subcommand>",
     summary: "Manage skills",
     subcommands: SKILLS_SUBCOMMANDS,
-    run: shim("skills"),
+    run: async (args, ctx) => {
+      const { handleSkillsNamespace } = await import("./cli/namespaces.js");
+      await handleSkillsNamespace(args, ctx.profile());
+    },
   },
   {
     name: "detect-skills",
@@ -464,7 +470,10 @@ export const REGISTRY: Command[] = [
     usage: "phren hooks <subcommand>",
     summary: "Manage lifecycle hooks",
     subcommands: HOOKS_SUBCOMMANDS,
-    run: shim("hooks"),
+    run: async (args) => {
+      const { handleHooksNamespace } = await import("./cli/namespaces.js");
+      await handleHooksNamespace(args);
+    },
   },
 
   // Config
@@ -474,7 +483,10 @@ export const REGISTRY: Command[] = [
     usage: "phren config <subcommand>",
     summary: "View and update configuration",
     subcommands: CONFIG_SUBCOMMANDS,
-    run: shim("config"),
+    run: async (args) => {
+      const { handleConfig } = await import("./cli/config.js");
+      await handleConfig(args);
+    },
   },
 
   // Maintain
@@ -484,7 +496,10 @@ export const REGISTRY: Command[] = [
     usage: "phren maintain <subcommand>",
     summary: "Memory maintenance operations",
     subcommands: MAINTAIN_SUBCOMMANDS,
-    run: shim("maintain"),
+    run: async (args) => {
+      const { handleMaintain } = await import("./cli/govern.js");
+      await handleMaintain(args);
+    },
   },
   {
     name: "consolidation-status",
@@ -564,7 +579,10 @@ export const REGISTRY: Command[] = [
     usage: "phren store <subcommand>",
     summary: "Manage knowledge stores",
     subcommands: STORE_SUBCOMMANDS,
-    run: shim("store"),
+    run: async (args) => {
+      const { handleStoreNamespace } = await import("./cli/namespaces.js");
+      await handleStoreNamespace(args);
+    },
   },
 
   // Team
@@ -574,7 +592,10 @@ export const REGISTRY: Command[] = [
     usage: "phren team <subcommand>",
     summary: "Manage team stores",
     subcommands: TEAM_SUBCOMMANDS,
-    run: shim("team"),
+    run: async (args) => {
+      const { handleTeamNamespace } = await import("./cli/team.js");
+      await handleTeamNamespace(args);
+    },
   },
 
   // Hidden - internal hooks (called by Claude/Cursor/etc., not by humans)
