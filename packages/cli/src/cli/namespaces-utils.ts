@@ -15,13 +15,6 @@ export function resolveProjectStorePath(phrenPath: string, project: string): str
   return phrenPath;
 }
 
-export function getOptionValue(args: string[], name: string): string | undefined {
-  const exactIdx = args.indexOf(name);
-  if (exactIdx !== -1) return args[exactIdx + 1];
-  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
-  return prefixed ? prefixed.slice(name.length + 1) : undefined;
-}
-
 export function parseMcpToggle(raw: string | undefined): boolean | undefined {
   if (!raw) return undefined;
   const normalized = raw.trim().toLowerCase();

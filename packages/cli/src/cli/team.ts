@@ -8,7 +8,7 @@ import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
-import { isValidProjectName } from "../utils.js";
+import { isValidProjectName, getOptionValue, getPositionalArgs } from "../utils.js";
 import { addProjectToProfile, resolveActiveProfile } from "../profile-store.js";
 import {
   addStoreToRegistry,
@@ -21,24 +21,6 @@ import {
 } from "../store-registry.js";
 
 const EXEC_TIMEOUT_MS = 30_000;
-
-function getOptionValue(args: string[], name: string): string | undefined {
-  const exactIdx = args.indexOf(name);
-  if (exactIdx !== -1) return args[exactIdx + 1];
-  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
-  return prefixed ? prefixed.slice(name.length + 1) : undefined;
-}
-
-function getPositionalArgs(args: string[], optionNames: string[]): string[] {
-  const positions: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (optionNames.includes(arg)) { i++; continue; }
-    if (optionNames.some((name) => arg.startsWith(`${name}=`))) continue;
-    if (!arg.startsWith("--")) positions.push(arg);
-  }
-  return positions;
-}
 
 function atomicWriteText(filePath: string, content: string): void {
   const dir = path.dirname(filePath);

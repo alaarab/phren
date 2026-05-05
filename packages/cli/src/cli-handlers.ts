@@ -18,7 +18,7 @@ import {
   type InstallMode,
   type ProactivityLevel,
 } from "./shared.js";
-import { errorMessage } from "./utils.js";
+import { errorMessage, getOptionValue, getPositionalArgs } from "./utils.js";
 import { addProjectFromPath } from "./core/project.js";
 import {
   PROJECT_OWNERSHIP_MODES,
@@ -27,31 +27,6 @@ import {
   type ProjectOwnershipMode,
 } from "./project-config.js";
 import { VALID_TASK_MODES, type TaskMode } from "./governance/policy.js";
-
-// ── argv parsing helpers ────────────────────────────────────────────────────
-
-export function getOptionValue(args: string[], name: string): string | undefined {
-  const exactIdx = args.indexOf(name);
-  if (exactIdx !== -1) return args[exactIdx + 1];
-  const prefixed = args.find((arg) => arg.startsWith(`${name}=`));
-  return prefixed ? prefixed.slice(name.length + 1) : undefined;
-}
-
-export function getPositionalArgs(args: string[], optionNamesWithValues: string[]): string[] {
-  const positions: string[] = [];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (optionNamesWithValues.includes(arg)) {
-      i += 1;
-      continue;
-    }
-    if (optionNamesWithValues.some((name) => arg.startsWith(`${name}=`))) {
-      continue;
-    }
-    if (!arg.startsWith("--")) positions.push(arg);
-  }
-  return positions;
-}
 
 function parseTaskModeFlag(raw: string | undefined): TaskMode | undefined {
   if (!raw) return undefined;
