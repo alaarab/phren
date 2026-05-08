@@ -198,7 +198,7 @@ export async function runTopLevelCommand(
 
   try {
     const code = await cmd.run(argv.slice(1), buildCliContext());
-    return finish(typeof code === "number" ? code : 0);
+    return finish(typeof code === "number" ? code : undefined);
   } catch (err: unknown) {
     console.error(errorMessage(err));
     return finish(1);
