@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { grantAdmin, makeTempDir, setupIsolatedCliEnv, runCliSpawn, type IsolatedCliEnv } from "./test-helpers.js";
 import { getMachineName } from "./link/link.js";
+import { REGISTRY } from "./cli-registry.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -1562,6 +1563,58 @@ describe("CLI integration: help and health", () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain("has been removed");
   });
+
+  // Parametric: every namespace command (those with subcommands) must surface
+  // its subcommand list under `--help`. Catches the regression where the
+  // dispatcher's short-circuit was bypassed for namespace commands.
+  describe("namespace --help shows subcommand list", () => {
+    const namespaces = REGISTRY.filter((c) => c.subcommands?.length && !c.hidden);
+    for (const cmd of namespaces) {
+      const firstSub = cmd.subcommands![0];
+      it(`${cmd.name} --help renders ${cmd.subcommands!.length} subcommand line(s)`, () => {
+        const { stdout, exitCode } = runCli([cmd.name, "--help"]);
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain(`phren ${cmd.name}`);
+        expect(stdout).toContain(firstSub.usage);
+      });
+    }
+  });
+
+  it("add --help short-circuits before runAddCommand", () => {
+    // If the dispatcher's --help intercept broke, runAddCommand would run,
+    // print "phren is not set up yet" (no PHREN_PATH set in test env), and
+    // exit 1. The exitCode 0 + stdout shape assertions below catch that.
+    const { stdout, exitCode } = runCli(["add", "--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("phren add");
+    expect(stdout).toContain("Register a project");
+    expect(stdout).not.toContain("not set up");
+    expect(stdout).not.toContain("Added project");
+  });
+
+  it("init --help short-circuits before runInit", () => {
+    const { stdout, exitCode } = runCli(["init", "--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("phren init");
+    expect(stdout).toContain("Set up phren");
+  });
+
+  it("mem add --help works through the alias unwrap", () => {
+    const { stdout, exitCode } = runCli(["mem", "add", "--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("phren add");
+    expect(stdout).toContain("Register a project");
+  });
+
+  it("search-fragments is reachable as a top-level command (legacy CLI_COMMANDS allowlist bug)", () => {
+    // Pre-refactor, search-fragments was handled in cli/cli.ts switch but
+    // missing from CLI_COMMANDS, so `phren search-fragments` printed "Unknown
+    // command:". The registry routes by lookup, not by allowlist.
+    const { stdout, stderr, exitCode } = runCli(["search-fragments", "--help"]);
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("phren search-fragments");
+    expect(stderr).not.toContain("Unknown command");
+  });
 });
 
 describe("CLI integration: temp HOME subprocess stability", () => {
@@ -1670,7 +1723,8 @@ describe("CLI integration: detect-skills", () => {
 
 // --- Unit tests for exported cli functions ---
 
-import { scoreFindingCandidate, detectTaskIntent, selectSnippets } from "./cli/cli.js";
+import { scoreFindingCandidate } from "./cli/extract.js";
+import { detectTaskIntent, selectSnippets } from "./cli/hooks.js";
 import { DocRow } from "./shared/index.js";
 
 describe("scoreFindingCandidate", () => {

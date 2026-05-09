@@ -13,7 +13,7 @@ const EXPLICIT_FINDING_SIGNAL_PATTERN = /\b(add finding|worth remembering)\b/i;
 const EXPLICIT_FINDING_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]/i;
 const EXPLICIT_TASK_SIGNAL_PATTERN = /\b(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:task|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:task|todo(?:\s+list)?|task(?:\s+list)?))\b/i;
 
-function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel | undefined {
+export function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel | undefined {
   if (!raw) return undefined;
   const normalized = raw.trim().toLowerCase();
   return PROACTIVITY_LEVELS.includes(normalized as ProactivityLevel)

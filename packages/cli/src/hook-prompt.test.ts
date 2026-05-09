@@ -17,7 +17,7 @@ import {
   filterTaskByPriority,
   type HookPromptInput,
   type SelectedSnippet,
-} from "./cli/cli.js";
+} from "./cli/hooks.js";
 
 describe("parseHookInput", () => {
   it("parses valid JSON with prompt, cwd, session_id", () => {

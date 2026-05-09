@@ -7,7 +7,7 @@ import {
   homePath,
   hookConfigPath,
 } from "../shared.js";
-import { isValidProjectName, errorMessage } from "../utils.js";
+import { isValidProjectName, errorMessage, getOptionValue } from "../utils.js";
 import { logger } from "../logger.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/registry.js";
@@ -21,7 +21,7 @@ import {
   PROJECT_HOOK_EVENTS,
   isProjectHookEnabled,
 } from "../project-config.js";
-import { resolveProjectStorePath, getOptionValue, openInEditor } from "./namespaces-utils.js";
+import { resolveProjectStorePath, openInEditor } from "./namespaces-utils.js";
 
 const HOOK_TOOLS = ["claude", "copilot", "cursor", "codex"] as const;
 type HookToolName = typeof HOOK_TOOLS[number];
