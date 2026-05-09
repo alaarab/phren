@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.28] - 2026-05-08
+
+### Changed
+
+- CLI dispatch refactor: unified help and dispatch behind a single command registry (`packages/cli/src/cli-registry.ts`) with a typed `Command` catalog, native handlers extracted to `cli-handlers.ts`, and help formatters in `cli-help.ts`. The old `cli/cli.ts` switch barrel is gone; namespace and non-namespace commands now inline-dispatch through the registry. No user-visible CLI surface changes.
+
+### Fixed
+
+- `phren profile` and other profile namespace subcommands now load via ESM dynamic import, fixing a regression where the namespace failed to resolve under the new dispatch path.
+- Void-returning command handlers preserve `process.exitCode` instead of clobbering it to 0, so failed commands surface the right exit status to shells and CI.
+
+## [0.1.27] - 2026-05-03
+
+### Added
+
+- Mirror global skills to `~/.copilot/skills/` during `phren init` so Copilot CLI picks them up alongside Claude Code and Codex.
+- Bundled skills converted to the `<name>/SKILL.md` folder format for consistency with the agentskills convention.
+
+### Dependencies
+
+Routine dep refresh across the monorepo.
+
 ## [0.1.26] - 2026-05-03
 
 ### Security
