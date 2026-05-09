@@ -6,7 +6,7 @@ function printProfileUsage() {
   console.log("  phren profile switch <name>         Switch to an active profile");
 }
 
-export function handleProfileNamespace(args: string[]) {
+export async function handleProfileNamespace(args: string[]) {
   const subcommand = args[0];
 
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
@@ -17,7 +17,7 @@ export function handleProfileNamespace(args: string[]) {
   const phrenPath = getPhrenPath();
 
   if (subcommand === "list") {
-    const { listProfiles } = require("../profile-store.js");
+    const { listProfiles, listMachines } = await import("../profile-store.js");
     const result = listProfiles(phrenPath);
     if (!result.ok) {
       console.error(`Failed to list profiles: ${result.error}`);
@@ -30,10 +30,9 @@ export function handleProfileNamespace(args: string[]) {
       return;
     }
 
-    const { listMachines } = require("../profile-store.js");
     const machinesResult = listMachines(phrenPath);
     const machines = machinesResult.ok ? machinesResult.data : {};
-    const { getMachineName } = require("../machine-identity.js");
+    const { getMachineName } = await import("../machine-identity.js");
     const currentMachine = getMachineName();
     const activeProfile = machines[currentMachine];
 
@@ -55,9 +54,8 @@ export function handleProfileNamespace(args: string[]) {
       process.exit(1);
     }
 
-    const { setMachineProfile, getDefaultMachineAlias, listProfiles } = require("../profile-store.js");
+    const { setMachineProfile, getDefaultMachineAlias, listProfiles } = await import("../profile-store.js");
 
-    // Validate that profile exists
     const listResult = listProfiles(phrenPath);
     if (!listResult.ok) {
       console.error(`Failed to list profiles: ${listResult.error}`);

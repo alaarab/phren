@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
-import { isValidProjectName, errorMessage } from "../utils.js";
+import { isValidProjectName, errorMessage, getOptionValue } from "../utils.js";
 import {
   resolveAllStores,
   addStoreToRegistry,
@@ -11,7 +11,6 @@ import {
   readTeamBootstrap,
   type StoreEntry,
 } from "../store-registry.js";
-import { getOptionValue } from "./namespaces-utils.js";
 
 function printStoreUsage() {
   console.log("Usage:");
