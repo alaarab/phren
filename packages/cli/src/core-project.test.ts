@@ -62,4 +62,29 @@ describe("addProjectFromPath", () => {
       tmp.cleanup();
     }
   });
+
+  it("writes to a target store while updating the primary profile", () => {
+    const tmp = makeTempDir("core-project-write-store-");
+    try {
+      const phrenPath = path.join(tmp.path, ".phren");
+      const teamStorePath = path.join(tmp.path, "team-store");
+      const repoPath = path.join(tmp.path, "repo");
+      fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+      fs.writeFileSync(path.join(phrenPath, "profiles", "work.yaml"), "name: work\nprojects:\n  - global\n");
+      fs.mkdirSync(teamStorePath, { recursive: true });
+      fs.mkdirSync(path.join(repoPath, ".git"), { recursive: true });
+
+      const result = addProjectFromPath(phrenPath, repoPath, "work", "phren-managed", { writeToPath: teamStorePath });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.data.files.summary).toBe(path.join(teamStorePath, "repo", "summary.md"));
+      expect(fs.existsSync(path.join(teamStorePath, "repo", "summary.md"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "repo", "summary.md"))).toBe(false);
+      expect(fs.readFileSync(path.join(phrenPath, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+      expect(fs.existsSync(path.join(teamStorePath, "profiles"))).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
+  });
 });

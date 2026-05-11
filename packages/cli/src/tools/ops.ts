@@ -64,10 +64,11 @@ async function handleAddProject(
       }
 
       const added = addProjectFromPath(
-        targetPhrenPath,
+        phrenPath,
         targetPath,
         requestedProfile || profile || undefined,
-        parseProjectOwnershipMode(ownership) ?? undefined
+        parseProjectOwnershipMode(ownership) ?? undefined,
+        { writeToPath: targetPhrenPath }
       );
       if (!added.ok) {
         return mcpResponse({
