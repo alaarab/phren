@@ -19,11 +19,16 @@ interface AddedProjectData {
   };
 }
 
+interface AddProjectFromPathOptions {
+  writeToPath?: string;
+}
+
 export function addProjectFromPath(
   phrenPath: string,
   targetPath: string | undefined,
   requestedProfile?: string,
   ownership?: ProjectOwnershipMode,
+  options: AddProjectFromPathOptions = {},
 ): PhrenResult<AddedProjectData> {
   if (!targetPath) {
     return phrenErr("Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.");
@@ -32,6 +37,7 @@ export function addProjectFromPath(
   const activeProfile = resolveActiveProfile(phrenPath, requestedProfile);
   if (!activeProfile.ok) return activeProfile;
 
+  const writePhrenPath = options.writeToPath ?? phrenPath;
   const manifest = readRootManifest(phrenPath);
   const resolvedPath = path.resolve(targetPath);
   if (manifest?.installMode === "project-local") {
@@ -42,7 +48,11 @@ export function addProjectFromPath(
     }
   }
   const selectedProfile = activeProfile.data;
-  const added = bootstrapFromExisting(phrenPath, resolvedPath, { profile: selectedProfile, ownership });
+  const added = bootstrapFromExisting(writePhrenPath, resolvedPath, {
+    profile: selectedProfile,
+    profilePhrenPath: phrenPath,
+    ownership,
+  });
 
   return phrenOk({
     project: added.project,
@@ -51,9 +61,9 @@ export function addProjectFromPath(
     ownership: added.ownership,
     files: {
       claude: added.claudePath,
-      summary: path.join(phrenPath, added.project, "summary.md"),
-      findings: path.join(phrenPath, added.project, FINDINGS_FILENAME),
-      task: path.join(phrenPath, added.project, TASKS_FILENAME),
+      summary: path.join(writePhrenPath, added.project, "summary.md"),
+      findings: path.join(writePhrenPath, added.project, FINDINGS_FILENAME),
+      task: path.join(writePhrenPath, added.project, TASKS_FILENAME),
     },
   });
 }
