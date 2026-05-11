@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.29] - 2026-05-10
+
+### Security
+
+- **CRITICAL**: Fixed GitHub Actions workflow security vulnerabilities:
+  - Added `persist-credentials: false` to all checkout actions to prevent accidental credential exposure
+  - Secured git push operations in release workflow with explicit token passing via GITHUB_TOKEN
+  - Added explicit pnpm version pinning to prevent unexpected behavior changes
+  - Improved CI/CD credentials isolation and principle of least privilege
+
+### Dependencies
+
+- Dependencies remain unchanged pending upstream patch for MCP SDK transitive vulnerabilities (fast-uri, hono, ip-address). These are awaiting fixes from @modelcontextprotocol/sdk upstream.
+
 ## [0.1.28] - 2026-05-08
 
 ### Changed
