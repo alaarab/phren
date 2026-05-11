@@ -50,6 +50,7 @@ export interface PostInitCheck {
 
 interface BootstrapProjectOptions {
   profile?: string;
+  profilePhrenPath?: string;
   ownership?: ProjectOwnershipMode;
 }
 
@@ -1189,6 +1190,7 @@ export function bootstrapFromExisting(
   opts: string | BootstrapProjectOptions = {}
 ): BootstrapProjectResult {
   const profile = typeof opts === "string" ? opts : opts.profile;
+  const profilePhrenPath = typeof opts === "string" ? phrenPath : (opts.profilePhrenPath ?? phrenPath);
   const resolvedPath = path.resolve(projectPath);
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Path does not exist: ${resolvedPath}`);
@@ -1302,9 +1304,9 @@ export function bootstrapFromExisting(
     );
   }
 
-  const activeProfile = resolveActiveProfile(phrenPath, profile);
+  const activeProfile = resolveActiveProfile(profilePhrenPath, profile);
   if (activeProfile.ok && activeProfile.data) {
-    const addResult = addProjectToProfile(phrenPath, activeProfile.data, projectName);
+    const addResult = addProjectToProfile(profilePhrenPath, activeProfile.data, projectName);
     if (!addResult.ok) {
       throw new Error(addResult.error);
     }
