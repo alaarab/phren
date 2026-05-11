@@ -383,6 +383,37 @@ describe("mcp-ops: add_project", () => {
     expect(fs.readFileSync(path.join(tmp.path, "repo-managed", "phren.project.yaml"), "utf8")).toContain("ownership: repo-managed");
   });
 
+  it("adds a repo to an explicit team store while updating the primary profile", async () => {
+    const teamStore = path.join(tmp.path, "team-store");
+    fs.mkdirSync(teamStore, { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp.path, "stores.yaml"),
+      [
+        "version: 1",
+        "stores:",
+        "  - id: primary01",
+        "    name: primary",
+        `    path: ${tmp.path}`,
+        "    role: primary",
+        "    sync: managed-git",
+        "  - id: team0001",
+        "    name: team",
+        `    path: ${teamStore}`,
+        "    role: team",
+        "    sync: managed-git",
+        "",
+      ].join("\n")
+    );
+
+    const res = parseResult(await server.call("add_project", { path: repoDir, store: "team", ownership: "repo-managed" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.files.summary).toBe(path.join(teamStore, "repo", "summary.md"));
+    expect(fs.existsSync(path.join(teamStore, "repo", "summary.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "repo", "summary.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(tmp.path, "profiles", "work.yaml"), "utf8")).toContain("- repo");
+    expect(fs.existsSync(path.join(teamStore, "profiles"))).toBe(false);
+  });
+
   it("requires an explicit path", async () => {
     const res = parseResult(await server.call("add_project", {}));
     expect(res.ok).toBe(false);
