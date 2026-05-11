@@ -30,15 +30,19 @@
   },
   "packageManager": "pnpm@10.30.1",
   "overrides": {
+    "fast-uri": "^3.1.2",
     "flatted": "^3.4.2",
+    "hono": "^4.12.18",
+    "ip-address": "^10.1.1",
     "undici": "^7.10.0",
-    "hono": "^4.12.14",
     "uuid": "^14.0.0"
   },
   "pnpm": {
     "overrides": {
+      "fast-uri": "^3.1.2",
       "vite": "^8.0.8",
-      "hono": "^4.12.14",
+      "hono": "^4.12.18",
+      "ip-address": "^10.1.1",
       "uuid": "^14.0.0"
     }
   }
