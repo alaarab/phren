@@ -176,8 +176,30 @@ async function main() {
   type RegisterToolName = RegisterToolArgs[0];
   type RegisterToolConfig = RegisterToolArgs[1];
   type RegisterToolHandler = (...args: unknown[]) => unknown;
+
+  // Tools Claude reaches for during normal work. Marked with anthropic/alwaysLoad
+  // so Claude Code keeps their schemas resident instead of deferring them behind
+  // ToolSearch — otherwise the first call in a fresh session fails with
+  // InputValidationError until the schema is fetched.
+  const ALWAYS_LOAD_TOOLS = new Set([
+    "add_finding",
+    "add_task",
+    "complete_task",
+    "search_knowledge",
+    "session_start",
+    "session_end",
+    "get_findings",
+    "get_tasks",
+  ]);
+
   server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
     const registeredName = name;
+    let finalConfig = config;
+    if (ALWAYS_LOAD_TOOLS.has(registeredName as string)) {
+      const cfgObj = config as Record<string, unknown>;
+      const existingMeta = (cfgObj?._meta as Record<string, unknown> | undefined) ?? {};
+      finalConfig = { ...cfgObj, _meta: { ...existingMeta, "anthropic/alwaysLoad": true } } as RegisterToolConfig;
+    }
     const wrapped = async (...args: unknown[]) => {
       if (!indexReady || !db) {
         return {
@@ -195,7 +217,7 @@ async function main() {
       }
       return handler(...args);
     };
-    return origRegisterTool(registeredName, config, wrapped as RegisterToolArgs[2]);
+    return origRegisterTool(registeredName, finalConfig, wrapped as RegisterToolArgs[2]);
   } as typeof server.registerTool;
 
   // Register all tool handlers from domain modules
