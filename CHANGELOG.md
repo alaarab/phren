@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.30] - 2026-05-13
+
+### Fixed
+
+- MCP core tools (`add_finding`, `add_task`, `complete_task`, `search_knowledge`, `get_findings`, `get_tasks`, `session_start`, `session_end`) are now marked `anthropic/alwaysLoad` via the `_meta` field so Claude Code keeps their schemas resident instead of deferring them behind `ToolSearch`. Without this flag, the first call to a deferred tool in a fresh session fails with `InputValidationError` because parameters are stripped before the schema is loaded — which surfaced as repeated silent `add_finding` failures with "project/finding both undefined." Other phren tools remain deferred since the deferral exists to keep MCP tool definitions under ~10% of the context window.
+
 ## [0.1.29] - 2026-05-10
 
 ### Security
