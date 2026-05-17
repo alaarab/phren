@@ -34,6 +34,8 @@ import {
   writeProjectTopics,
   type ProjectTopic,
 } from "../project-topics.js";
+import { buildConfigView } from "../config/resolve.js";
+import { getConfigField, CONFIG_DOMAINS } from "../config/schema.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +98,28 @@ function getTopicConfigData(phrenPath: string, project: string) {
       pinnedTopics: raw?.pinnedTopics ?? [],
     },
   };
+}
+
+/**
+ * Resolved per-field provenance for the requested domain(s), keyed by dotted
+ * field key. Every field carries the uniform `{ value, source, inheritedValue,
+ * sourcePath }` shape so all surfaces render the same 3-level source chip.
+ */
+function resolvedFields(phrenPath: string, domain: string, project?: string) {
+  const view = buildConfigView(phrenPath, project);
+  if (domain === "all") return view.fields;
+  return Object.fromEntries(
+    Object.entries(view.fields).filter(([key]) => getConfigField(key)?.domain === domain),
+  );
+}
+
+/**
+ * The shared schema descriptors for the requested domain(s). Surfaces that can't
+ * import `@phren/cli` directly (e.g. the VS Code extension) render entirely from
+ * this, so they never re-hardcode labels, options, or defaults.
+ */
+function configSchema(domain: string) {
+  return domain === "all" ? CONFIG_DOMAINS : CONFIG_DOMAINS.filter((d) => d.id === domain);
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -201,6 +225,9 @@ async function handleGetConfig(
       result.index = getIndexPolicy(phrenPath);
     }
 
+    result.fields = resolvedFields(phrenPath, d, project);
+    result.schema = configSchema(d);
+
     return mcpResponse({
       ok: true,
       message: `Config for ${d === "all" ? "all domains" : d} (project: ${project}).`,
@@ -232,6 +259,9 @@ async function handleGetConfig(
   if (d === "all" || d === "index") {
     result.index = getIndexPolicy(phrenPath);
   }
+
+  result.fields = resolvedFields(phrenPath, d);
+  result.schema = configSchema(d);
 
   return mcpResponse({
     ok: true,

@@ -334,6 +334,12 @@ ${PHREN_DEEP_VOID_STYLES}
           <div id="settings-workflow" style="color:var(--muted)">Loading...</div>
         </div>
       </section>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--cyan) 45%, var(--border))">
+        <div class="settings-section-header">Index Policy</div>
+        <div class="settings-section-body">
+          <div id="settings-index" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
       <section class="settings-section settings-section-integrations">
         <div class="settings-section-header">Integrations</div>
         <div class="settings-section-body">

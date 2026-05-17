@@ -5,6 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-05-17
+
+### Added
+
+- **Config is now first-class and surfaced across every interface.** A single shared
+  config schema (`packages/cli/src/config/schema.ts`) describes all eight config
+  domains — proactivity, taskMode, findingSensitivity, retention, workflow, index,
+  topic, access — with labels, plain-English help, options, defaults, and ranges.
+  The CLI, Web UI, and VS Code extension all render from it, so config copy can no
+  longer drift between surfaces.
+- **Uniform config provenance.** A new resolver (`config/resolve.ts`,
+  `buildConfigView`) resolves every field through the 3-level precedence chain and
+  reports `{ value, source, inheritedValue, sourcePath }`. A global file that merely
+  mirrors the defaults is correctly reported as `default`, not a customisation.
+  `get_config` now returns a `fields` map (resolved provenance) and `schema`
+  alongside its existing keys.
+- **`phren config show`** is rewritten: grouped by domain with a source column
+  (`default` / `global` / `project`) and the file each value came from. New
+  `--diff` flag shows only customised values; `--json` emits the machine-readable view.
+- **`phren config access`** — view and set role-based access lists
+  (`admins` / `contributors` / `readers`) at global or per-project scope.
+- **Web UI** — the settings tab gains an Index Policy section (include/exclude
+  globs, hidden-file toggle); `/api/config`, `/api/settings`, and a new
+  `/api/config/view` endpoint expose the resolved view + schema.
+- **VS Code** — a new Settings Dashboard webview (`phren.openSettings`, gear icon
+  in the Phren view) covers every domain with source chips and inline help,
+  replacing the four-setting QuickPick as the primary config surface.
+
 ## [0.1.30] - 2026-05-13
 
 ### Fixed

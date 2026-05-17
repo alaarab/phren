@@ -7,6 +7,7 @@ import { showGraphWebview } from "../graphWebview";
 import { showProjectFile } from "../projectFileViewer";
 import { showSkillEditor } from "../skillEditor";
 import { showProjectConfigPanel } from "../configPanel";
+import { showSettingsWebview } from "../settingsWebview";
 import { showSetupWizard } from "../setupWizard";
 
 export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposable[] {
@@ -418,7 +419,17 @@ export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposabl
     }
   });
 
+  const openSettings = vscode.commands.registerCommand("phren.openSettings", async (projectName?: unknown) => {
+    try {
+      const initial = typeof projectName === "string" ? projectName : statusBar.getActiveProjectName() ?? undefined;
+      await showSettingsWebview(phrenClient, ctx.context, initial);
+    } catch (error) {
+      await vscode.window.showErrorMessage(`Failed to open Phren settings: ${toErrorMessage(error)}`);
+    }
+  });
+
   return [
+    openSettings,
     setActiveProject,
     search,
     showGraph,

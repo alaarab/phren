@@ -322,3 +322,127 @@ describe("CLI config: synonyms", () => {
     expect(removeAll.exitCode).toBe(0);
   });
 });
+
+describe("CLI config: show", () => {
+  let phrenDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    fs.mkdirSync(path.join(phrenDir, "demo"), { recursive: true });
+  });
+  afterEach(() => cleanup());
+
+  it("renders config grouped by domain with a source column", () => {
+    const { stdout, exitCode } = runCli(
+      ["config", "show"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("phren config — global");
+    expect(stdout).toContain("Retention");
+    expect(stdout).toContain("TTL (days)");
+    expect(stdout).toContain("default");
+  });
+
+  it("emits a machine-readable view with --json", () => {
+    const { stdout, exitCode } = runCli(
+      ["config", "show", "--json"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(exitCode).toBe(0);
+    const view = JSON.parse(stdout);
+    expect(view.scope).toBe("global");
+    expect(view.fields["retention.ttlDays"].value).toBe(120);
+    expect(view.fields["retention.ttlDays"].source).toBe("default");
+  });
+
+  it("shows the source as global after a value is set, and surfaces it in --diff", () => {
+    runCli(
+      ["config", "task-mode", "set", "suggest"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    const json = runCli(
+      ["config", "show", "--json"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    const view = JSON.parse(json.stdout);
+    expect(view.fields.taskMode.value).toBe("suggest");
+    expect(view.fields.taskMode.source).toBe("global");
+
+    const diff = runCli(
+      ["config", "show", "--diff"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(diff.stdout).toContain("suggest");
+    expect(diff.stdout).toContain("global");
+  });
+
+  it("reports everything as default in --diff before any change", () => {
+    const { stdout } = runCli(
+      ["config", "show", "--diff"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(stdout).toContain("Everything is at its default value");
+  });
+
+  it("renders a project-scoped view", () => {
+    const { stdout, exitCode } = runCli(
+      ["config", "show", "--project", "demo"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("project: demo");
+  });
+});
+
+describe("CLI config: access", () => {
+  let phrenDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ phrenDir, cleanup } = setupPhrenDir());
+    fs.mkdirSync(path.join(phrenDir, "demo"), { recursive: true });
+  });
+  afterEach(() => cleanup());
+
+  it("reports empty role lists by default", () => {
+    const { stdout, exitCode } = runCli(
+      ["config", "access", "get"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.admins).toEqual([]);
+    expect(payload.contributors).toEqual([]);
+    expect(payload.readers).toEqual([]);
+  });
+
+  it("sets a global admin and reads it back", () => {
+    const set = runCli(
+      ["config", "access", "set", "--admins=alice,bob"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    expect(set.exitCode).toBe(0);
+    const payload = JSON.parse(set.stdout);
+    expect(payload.admins).toEqual(["alice", "bob"]);
+  });
+
+  it("unions global and per-project role lists", () => {
+    runCli(
+      ["config", "access", "set", "--admins=alice"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    runCli(
+      ["config", "access", "--project", "demo", "set", "--contributors=carol"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    const { stdout } = runCli(
+      ["config", "access", "--project", "demo", "get"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    const payload = JSON.parse(stdout);
+    expect(payload.admins).toEqual(["alice"]);
+    expect(payload.contributors).toEqual(["carol"]);
+  });
+});

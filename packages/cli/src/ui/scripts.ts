@@ -1201,6 +1201,30 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           workflowEl.innerHTML = wfHtml;
         }
 
+        var indexEl = document.getElementById('settings-index');
+        if (indexEl && !isProject) {
+          var idx = data.indexPolicy || {};
+          var idxHtml = '';
+          function idxGlobRow(label, field, note) {
+            var val = Array.isArray(idx[field]) ? idx[field].join(', ') : '';
+            idxHtml += '<div class="settings-control">';
+            idxHtml += '<div class="settings-control-header"><span class="settings-control-label">' + esc(label) + '</span></div>';
+            idxHtml += '<div class="settings-control-note">' + esc(note) + '</div>';
+            idxHtml += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+              '<input type="text" id="idx-input-' + esc(field) + '" value="' + esc(val) + '" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+              '<button data-ts-action="setGlobalIndex" data-field="' + esc(field) + '" class="settings-chip active" style="font-size:11px">Set</button>' +
+              '</div></div>';
+          }
+          idxGlobRow('Include globs', 'includeGlobs', 'Comma-separated glob patterns the indexer reads.');
+          idxGlobRow('Exclude globs', 'excludeGlobs', 'Comma-separated glob patterns the indexer skips. Excludes win over includes.');
+          idxHtml += '<div class="settings-control"><div class="settings-control-header"><span class="settings-control-label">Index hidden files</span>';
+          idxHtml += '<button data-ts-action="toggleIndexHidden" data-enabled="' + (idx.includeHidden ? 'true' : 'false') + '" class="settings-chip' + (idx.includeHidden ? ' active' : '') + '" style="margin-left:auto">' + (idx.includeHidden ? 'On' : 'Off') + '</button></div>';
+          idxHtml += '<div class="settings-control-note">When on, dotfiles and dot-directories are eligible for indexing.</div></div>';
+          indexEl.innerHTML = idxHtml;
+        } else if (indexEl && isProject) {
+          indexEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">Index policy is global — switch to Global scope to edit it.</div>';
+        }
+
         var integrationsEl = document.getElementById('settings-integrations');
         if (integrationsEl && !isProject) {
           var tools = Array.isArray(data.hookTools) ? data.hookTools : [];
@@ -1388,6 +1412,17 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var inputEl = document.getElementById('wf-input-' + field);
         var val = inputEl ? inputEl.value : '';
         postProjectOverride(proj, field, val, false);
+      }
+      else if (action === 'setGlobalIndex') {
+        var field = actionEl.getAttribute('data-field') || '';
+        var inputEl = document.getElementById('idx-input-' + field);
+        var payload = {};
+        payload[field] = inputEl ? inputEl.value : '';
+        postSettings('/api/settings/index-policy', payload, 'Index policy updated.');
+      }
+      else if (action === 'toggleIndexHidden') {
+        var nextHidden = actionEl.getAttribute('data-enabled') !== 'true';
+        postSettings('/api/settings/index-policy', { includeHidden: String(nextHidden) }, 'Index policy updated.');
       }
     });
 
