@@ -47,8 +47,10 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "../project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, VALID_TASK_MODES } from "../governance/policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
+import { buildConfigView } from "../config/resolve.js";
+import { CONFIG_DOMAINS } from "../config/schema.js";
 import { findSkill } from "../skill/registry.js";
 import { setSkillEnabledAndSync } from "../skill/files.js";
 import { repairPreexistingInstall } from "../init/setup.js";
@@ -611,13 +613,18 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
         hasClaudeMd: fs.existsSync(path.join(projectDir, "CLAUDE.md")), findingCount, taskCount,
       };
     }
+    const indexPolicy = getIndexPolicy(ctx.phrenPath);
+    const view = buildConfigView(
+      ctx.phrenPath,
+      settingsProject && isValidProjectName(settingsProject) ? settingsProject : undefined,
+    );
     jsonOk(res, {
       ok: true, proactivity: prefs.proactivity || "high", proactivityFindings,
       proactivityTask: prefs.proactivityTask || prefs.proactivity || "high", taskMode: workflowPolicy.taskMode,
       findingSensitivity: workflowPolicy.findingSensitivity || "balanced", autoCaptureEnabled: proactivityFindings !== "low",
       consolidationEntryThreshold: CONSOLIDATION_ENTRY_THRESHOLD, hooksEnabled: hooksData.globalEnabled,
       mcpEnabled: prefs.mcpEnabled !== false, hookTools: hooksData.tools,
-      retentionPolicy, workflowPolicy, merged, overrides, projectInfo,
+      retentionPolicy, workflowPolicy, indexPolicy, merged, overrides, projectInfo, view,
     });
   } catch (err: unknown) {
     jsonErr(res, errorMessage(err));
@@ -630,7 +637,23 @@ function handleGetConfig(res: Res, url: string, ctx: RouteCtx): void {
   try {
     const config = mergeConfig(ctx.phrenPath, project || undefined);
     const projects = getProjectDirs(ctx.phrenPath, ctx.profile).map((d) => path.basename(d)).filter((p) => p !== "global");
-    jsonOk(res, { ok: true, config, projects });
+    const view = buildConfigView(ctx.phrenPath, project || undefined);
+    jsonOk(res, { ok: true, config, projects, view });
+  } catch (err: unknown) {
+    jsonErr(res, errorMessage(err));
+  }
+}
+
+/**
+ * Resolved config view plus the shared schema — everything the settings UI
+ * needs to render every domain with a consistent source chip, in one call.
+ */
+function handleGetConfigView(res: Res, url: string, ctx: RouteCtx): void {
+  const project = String(parseQs(url).project || "");
+  if (project && !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  try {
+    const view = buildConfigView(ctx.phrenPath, project || undefined);
+    jsonOk(res, { ok: true, view, schema: CONFIG_DOMAINS });
   } catch (err: unknown) {
     jsonErr(res, errorMessage(err));
   }
@@ -892,6 +915,23 @@ function handlePostSettingsAutoCapture(req: Req, res: Res, url: string, ctx: Rou
   });
 }
 
+function handlePostSettingsIndexPolicy(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const patch: { includeGlobs?: string[]; excludeGlobs?: string[]; includeHidden?: boolean } = {};
+    const toGlobList = (v: unknown): string[] =>
+      (Array.isArray(v) ? v : String(v ?? "").split(","))
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+    if (Object.prototype.hasOwnProperty.call(parsed, "includeGlobs")) patch.includeGlobs = toGlobList(parsed.includeGlobs);
+    if (Object.prototype.hasOwnProperty.call(parsed, "excludeGlobs")) patch.excludeGlobs = toGlobList(parsed.excludeGlobs);
+    if (Object.prototype.hasOwnProperty.call(parsed, "includeHidden")) {
+      patch.includeHidden = String(parsed.includeHidden).toLowerCase() === "true";
+    }
+    const result = updateIndexPolicy(ctx.phrenPath, patch);
+    jsonOk(res, result.ok ? { ok: true, indexPolicy: result.data } : { ok: false, error: result.error });
+  });
+}
+
 function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: RouteCtx): void {
   withPostBody(req, res, url, ctx, (parsed) => {
     const enabled = String(parsed.enabled || "").toLowerCase() === "true";
@@ -1124,6 +1164,7 @@ export function createWebUiHttpServer(
         case "/api/tasks": return handleGetTasks(res, ctx);
         case "/api/settings": return handleGetSettings(res, url, ctx);
         case "/api/config": return handleGetConfig(res, url, ctx);
+        case "/api/config/view": return handleGetConfigView(res, url, ctx);
         case "/api/csrf-token": return handleGetCsrfToken(res, ctx);
         case "/api/profiles": return handleGetProfiles(res, ctx);
         case "/api/search": return await handleGetSearch(res, url, ctx);
@@ -1161,6 +1202,7 @@ export function createWebUiHttpServer(
         case "/api/settings/proactivity": return handlePostSettingsProactivity(req, res, url, ctx);
         case "/api/settings/auto-capture": return handlePostSettingsAutoCapture(req, res, url, ctx);
         case "/api/settings/mcp-enabled": return handlePostSettingsMcpEnabled(req, res, url, ctx);
+        case "/api/settings/index-policy": return handlePostSettingsIndexPolicy(req, res, url, ctx);
         case "/api/settings/project-overrides": return handlePostSettingsProjectOverrides(req, res, url, ctx);
       }
       // Prefix-matched write routes

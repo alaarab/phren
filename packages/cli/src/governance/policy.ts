@@ -106,7 +106,8 @@ export type RetentionPolicyPatch = Partial<Omit<RetentionPolicy, "decay">> & {
 
 export const GOVERNANCE_SCHEMA_VERSION = 1;
 
-const DEFAULT_POLICY: RetentionPolicy = {
+/** Default retention policy. Exported so {@link config/schema} can render one source of truth. */
+export const DEFAULT_POLICY: RetentionPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   ttlDays: 120,
   retentionDays: 365,
@@ -120,7 +121,8 @@ const DEFAULT_POLICY: RetentionPolicy = {
   },
 };
 
-const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
+/** Default workflow policy. Exported so {@link config/schema} can render one source of truth. */
+export const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
@@ -128,7 +130,8 @@ const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   findingSensitivity: "balanced",
 };
 
-const DEFAULT_INDEX_POLICY: IndexPolicy = {
+/** Default index policy. Exported so {@link config/schema} can render one source of truth. */
+export const DEFAULT_INDEX_POLICY: IndexPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md"],
   excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],

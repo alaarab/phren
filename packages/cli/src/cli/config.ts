@@ -33,7 +33,14 @@ import {
   getProjectOwnershipDefault,
   parseProjectOwnershipMode,
   updateProjectConfigOverrides,
+  readProjectConfig,
+  writeProjectConfig,
+  type ProjectAccessControl,
 } from "../project-config.js";
+import * as fs from "fs";
+import * as path from "path";
+import { buildConfigView, type ConfigView } from "../config/resolve.js";
+import { CONFIG_DOMAINS } from "../config/schema.js";
 import {
   isValidProjectName,
   learnedSynonymsPath,
@@ -87,94 +94,84 @@ export function buildProactivitySnapshot(phrenPath: string) {
 
 // ── Config show ───────────────────────────────────────────────────────────────
 
-function formatConfigAsTable(label: string, rows: [string, string][]): void {
-  const maxKey = Math.max(...rows.map(([k]) => k.length));
-  console.log(`\n${label}`);
-  for (const [k, v] of rows) {
-    console.log(`  ${k.padEnd(maxKey)}  ${v}`);
+function formatConfigValue(value: unknown): string {
+  if (value === undefined || value === null) return "(unset)";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "(none)";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+/**
+ * Render a resolved {@link ConfigView} grouped by domain, with a source column
+ * that names where each value came from (default / global / project) and the
+ * file that set it.
+ */
+function renderConfigView(view: ConfigView, opts: { diff: boolean }): void {
+  const heading = view.scope === "project"
+    ? `phren config — project: ${view.project}`
+    : "phren config — global (applies to all projects unless overridden)";
+  console.log(`\n${heading}`);
+  if (opts.diff) console.log("(showing only values customised away from defaults)");
+
+  let shownAny = false;
+  for (const domain of CONFIG_DOMAINS) {
+    const rows: Array<{ label: string; value: string; source: string }> = [];
+    for (const field of domain.fields) {
+      const resolved = view.fields[field.key];
+      if (!resolved) continue; // topic fields are resolved separately
+      if (opts.diff && resolved.source === "default") continue;
+      const file = resolved.sourcePath ? path.basename(resolved.sourcePath) : "";
+      rows.push({
+        label: field.label,
+        value: formatConfigValue(resolved.value),
+        source: resolved.source === "default"
+          ? "default"
+          : `${resolved.source}${file ? ` (${file})` : ""}`,
+      });
+    }
+    if (!rows.length) continue;
+    shownAny = true;
+    console.log(`\n${domain.label}  —  ${domain.summary}`);
+    const labelW = Math.max(...rows.map((r) => r.label.length));
+    const valueW = Math.max(...rows.map((r) => r.value.length), 6);
+    for (const r of rows) {
+      console.log(`  ${r.label.padEnd(labelW)}  ${r.value.padEnd(valueW)}  ${r.source}`);
+    }
   }
+  if (!shownAny) {
+    console.log(opts.diff ? "\nEverything is at its default value." : "\n(no config)");
+  }
+  console.log("");
 }
 
 function handleConfigShow(args: string[]): void {
   const phrenPath = getPhrenPath();
-  const { project: projectArg } = parseProjectArg(args);
+  const { project: projectArg, rest } = parseProjectArg(args);
+  const asJson = rest.includes("--json");
+  const diff = rest.includes("--diff");
 
-  if (projectArg) {
-    if (!isValidProjectName(projectArg)) {
-      console.error(`Invalid project name: "${projectArg}"`);
-      process.exit(1);
-    }
-    const resolved = mergeConfig(phrenPath, projectArg);
-    const inProfile = checkProjectInProfile(phrenPath, projectArg);
+  if (projectArg && !isValidProjectName(projectArg)) {
+    console.error(`Invalid project name: "${projectArg}"`);
+    process.exit(1);
+  }
 
-    console.log(`\nConfig for project: ${projectArg}${inProfile ? "" : "  (not in active profile)"}`);
+  const view = buildConfigView(phrenPath, projectArg);
 
-    formatConfigAsTable("Finding capture", [
-      ["sensitivity", resolved.findingSensitivity],
-      ["proactivity", resolved.proactivity.base ?? "(global)"],
-      ["proactivity.findings", resolved.proactivity.findings ?? "(global)"],
-      ["proactivity.tasks", resolved.proactivity.tasks ?? "(global)"],
-    ]);
-
-    formatConfigAsTable("Task automation", [
-      ["taskMode", resolved.taskMode],
-    ]);
-
-    formatConfigAsTable("Retention policy", [
-      ["ttlDays", String(resolved.retentionPolicy.ttlDays)],
-      ["retentionDays", String(resolved.retentionPolicy.retentionDays)],
-      ["autoAcceptThreshold", String(resolved.retentionPolicy.autoAcceptThreshold)],
-      ["minInjectConfidence", String(resolved.retentionPolicy.minInjectConfidence)],
-      ["decay.d30", String(resolved.retentionPolicy.decay.d30)],
-      ["decay.d60", String(resolved.retentionPolicy.decay.d60)],
-      ["decay.d90", String(resolved.retentionPolicy.decay.d90)],
-      ["decay.d120", String(resolved.retentionPolicy.decay.d120)],
-    ]);
-
-    formatConfigAsTable("Workflow policy", [
-      ["lowConfidenceThreshold", String(resolved.workflowPolicy.lowConfidenceThreshold)],
-      ["riskySections", resolved.workflowPolicy.riskySections.join(", ")],
-    ]);
-
-    if (!inProfile) {
-      console.error(`\nRun 'phren add /path/to/${projectArg}' to register this project.`);
-    }
-    console.log("");
+  if (asJson) {
+    console.log(JSON.stringify(view, null, 2));
     return;
   }
 
-  // Global config — no project
-  const retention = getRetentionPolicy(phrenPath);
-  const workflow = getWorkflowPolicy(phrenPath);
+  renderConfigView(view, { diff });
 
-  console.log("\nGlobal config (applies to all projects unless overridden)");
-
-  formatConfigAsTable("Finding capture", [
-    ["findingSensitivity", workflow.findingSensitivity],
-  ]);
-
-  formatConfigAsTable("Task automation", [
-    ["taskMode", workflow.taskMode],
-  ]);
-
-  formatConfigAsTable("Retention policy", [
-    ["ttlDays", String(retention.ttlDays)],
-    ["retentionDays", String(retention.retentionDays)],
-    ["autoAcceptThreshold", String(retention.autoAcceptThreshold)],
-    ["minInjectConfidence", String(retention.minInjectConfidence)],
-    ["decay.d30", String(retention.decay.d30)],
-    ["decay.d60", String(retention.decay.d60)],
-    ["decay.d90", String(retention.decay.d90)],
-    ["decay.d120", String(retention.decay.d120)],
-  ]);
-
-  formatConfigAsTable("Workflow policy", [
-    ["lowConfidenceThreshold", String(workflow.lowConfidenceThreshold)],
-    ["riskySections", workflow.riskySections.join(", ")],
-  ]);
-
-  console.log(`\nUse '--project <name>' to see merged config for a specific project.`);
-  console.log("");
+  if (projectArg) {
+    const notRegistered = checkProjectInProfile(phrenPath, projectArg);
+    if (notRegistered) {
+      console.error(`Run 'phren add /path/to/${projectArg}' to register this project.\n`);
+    }
+  } else {
+    console.log("Tips: '--project <name>' for a project's merged config, '--diff' for only customised values, '--json' for machine-readable output.\n");
+  }
 }
 
 // ── Config router ────────────────────────────────────────────────────────────
@@ -207,6 +204,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigTaskMode(rest);
     case "finding-sensitivity":
       return handleConfigFindingSensitivity(rest);
+    case "access":
+      return handleConfigAccess(rest);
     case "llm":
       return handleConfigLlm(rest);
     case "synonyms":
@@ -215,7 +214,9 @@ export async function handleConfig(args: string[]) {
       console.log(`phren config - manage settings and policies
 
 Subcommands:
-  phren config show [--project <name>]  Full merged config summary (what's actually active)
+  phren config show [--project <name>] [--diff] [--json]
+                                        Full merged config grouped by domain, with the
+                                        source (default/global/project) of every value
   phren config policy [get|set ...]     Memory retention, TTL, confidence, decay
   phren config workflow [get|set ...]   Risky-memory thresholds, task automation mode
   phren config index [get|set ...]      Indexer include/exclude globs
@@ -228,6 +229,8 @@ Subcommands:
                                         Task automation mode (off|manual|suggest|auto)
   phren config finding-sensitivity [get|set <level>]
                                         Finding capture level (minimal|conservative|balanced|aggressive)
+  phren config access [--project <name>] [get|set --admins=...]
+                                        Role-based access lists (admins|contributors|readers)
   phren config project-ownership [mode]
                                         Default ownership for future project enrollments
   phren config llm [get|set model|endpoint|key]
@@ -830,6 +833,91 @@ export async function handleWorkflowPolicy(args: string[]) {
     return;
   }
   console.error("Usage: phren config workflow [--project <name>] [get|set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts --taskMode=manual]");
+  process.exit(1);
+}
+
+// ── Access control ───────────────────────────────────────────────────────────
+
+const ACCESS_ROLES = ["admins", "contributors", "readers"] as const;
+
+function globalAccessFile(phrenPath: string): string {
+  return path.join(phrenPath, ".config", "access-control.json");
+}
+
+function readGlobalAccess(phrenPath: string): ProjectAccessControl {
+  const file = globalAccessFile(phrenPath);
+  if (!fs.existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseRoleList(raw: string): string[] {
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function printAccessSnapshot(phrenPath: string, projectArg: string | undefined): void {
+  const view = buildConfigView(phrenPath, projectArg);
+  console.log(JSON.stringify({
+    _project: projectArg ?? null,
+    _note: "Effective lists are the union of global and per-project roles. All lists empty everywhere = open mode.",
+    admins: view.fields["access.admins"].value,
+    contributors: view.fields["access.contributors"].value,
+    readers: view.fields["access.readers"].value,
+  }, null, 2));
+}
+
+export function handleConfigAccess(args: string[]) {
+  const phrenPath = getPhrenPath();
+  const { project: projectArg, rest } = parseProjectArg(args);
+  const action = rest[0];
+
+  if (projectArg && !isValidProjectName(projectArg)) {
+    console.error(`Invalid project name: "${projectArg}"`);
+    process.exit(1);
+  }
+
+  if (!action || action === "get") {
+    printAccessSnapshot(phrenPath, projectArg);
+    return;
+  }
+
+  if (action === "set") {
+    const patch: ProjectAccessControl = {};
+    let touched = false;
+    for (const arg of rest.slice(1)) {
+      if (!arg.startsWith("--")) continue;
+      const [k, v] = arg.slice(2).split("=");
+      if (!k || v === undefined) continue;
+      if ((ACCESS_ROLES as readonly string[]).includes(k)) {
+        patch[k as keyof ProjectAccessControl] = parseRoleList(v);
+        touched = true;
+      }
+    }
+    if (!touched) {
+      console.error("Usage: phren config access [--project <name>] set --admins=a,b --contributors=c --readers=d");
+      process.exit(1);
+    }
+    if (projectArg) {
+      warnIfUnregistered(phrenPath, projectArg);
+      const current = readProjectConfig(phrenPath, projectArg);
+      writeProjectConfig(phrenPath, projectArg, {
+        access: { ...(current.access ?? {}), ...patch },
+      });
+    } else {
+      const next = { ...readGlobalAccess(phrenPath), ...patch };
+      const file = globalAccessFile(phrenPath);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
+    }
+    printAccessSnapshot(phrenPath, projectArg);
+    return;
+  }
+
+  console.error("Usage: phren config access [--project <name>] [get|set --admins=a,b --contributors=c --readers=d]");
   process.exit(1);
 }
 

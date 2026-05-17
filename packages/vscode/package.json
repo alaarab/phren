@@ -182,8 +182,13 @@
       },
       {
         "command": "phren.projectConfig",
-        "title": "Phren: Project Config",
+        "title": "Phren: Project Config (Quick Edit)",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "phren.openSettings",
+        "title": "Phren: Open Settings Dashboard",
+        "icon": "$(gear)"
       },
       {
         "command": "phren.toggleProject",
@@ -421,6 +426,11 @@
       "view/title": [
         {
           "command": "phren.addProject",
+          "when": "view == phren.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "phren.openSettings",
           "when": "view == phren.explorer",
           "group": "navigation"
         },

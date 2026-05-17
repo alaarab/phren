@@ -160,6 +160,51 @@ describe.sequential("web-ui server", () => {
     expect(res.body).toBe("Not found");
   });
 
+  it("serves a resolved config view with schema via /api/config/view", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/config/view`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    const parsed = JSON.parse(body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.view.scope).toBe("global");
+    expect(parsed.view.fields["retention.ttlDays"].value).toBe(120);
+    expect(parsed.view.fields["retention.ttlDays"].source).toBe("default");
+    expect(Array.isArray(parsed.schema)).toBe(true);
+    expect(parsed.schema.length).toBe(8);
+  });
+
+  it("includes the resolved view and index policy in /api/settings", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/settings`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    const parsed = JSON.parse(body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.view).toBeTruthy();
+    expect(parsed.view.fields.taskMode).toBeTruthy();
+    expect(parsed.indexPolicy).toBeTruthy();
+    expect(Array.isArray(parsed.indexPolicy.includeGlobs)).toBe(true);
+  });
+
+  it("updates the index policy via POST /api/settings/index-policy", async () => {
+    const res = await postForm(port, "/api/settings/index-policy", {
+      includeGlobs: "**/*.md, docs/**/*.md",
+      includeHidden: "true",
+    });
+    expect(res.status).toBe(200);
+    const parsed = JSON.parse(res.body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.indexPolicy.includeGlobs).toContain("docs/**/*.md");
+    expect(parsed.indexPolicy.includeHidden).toBe(true);
+  });
+
   it("change token updates when project content changes", async () => {
     const readToken = async (): Promise<string> => {
       return await new Promise((resolve, reject) => {
