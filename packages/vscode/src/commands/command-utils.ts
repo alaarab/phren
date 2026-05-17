@@ -84,6 +84,10 @@ export function uninstallGlobalPhrenPackage(): CommandResult {
     const result = spawnSync(getNpmCommand(), ["uninstall", "-g", PHREN_PACKAGE_NAME], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      // npm is npm.cmd on Windows; spawning a .cmd without a shell throws
+      // `spawn EINVAL` since the Node fix for CVE-2024-27980. Never shell
+      // elsewhere — POSIX shells re-interpret args.
+      shell: process.platform === "win32",
     });
     return {
       ok: result.status === 0,
@@ -116,7 +120,10 @@ export async function runCommandWithProgress(
 export async function runCommand(command: string, args: string[], options: CommandOptions = {}): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
-      shell: false,
+      // npm/npx are .cmd batch files on Windows; spawning a .cmd without a
+      // shell throws `spawn EINVAL` since the Node fix for CVE-2024-27980.
+      // Shell only on Windows — POSIX shells would re-interpret the args.
+      shell: process.platform === "win32",
       env: options.env ? { ...process.env, ...options.env } : process.env,
     });
     let stdout = "";
