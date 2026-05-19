@@ -36,14 +36,14 @@ async function openGraphTab(page: Page): Promise<void> {
   await expect(page.locator(".project-card")).toHaveCount(2);
   await page.locator("button.nav-item").filter({ hasText: "Graph" }).click();
   await expect(page.locator("#graph-canvas")).toBeVisible();
-  // Wait for sigma to render and the graph to settle
+  // Wait for the 3D renderer to mount and the graph to settle
   await page.waitForFunction(() => {
     const pg = (window as any).phrenGraph;
-    return pg && pg.__renderer === "sigma" && pg.getData().nodes.length > 0;
+    return pg && pg.__renderer === "three" && pg.getData().nodes.length > 0;
   }, { timeout: 10_000 });
 }
 
-/** Get node IDs from the sigma graph API. */
+/** Get node IDs from the graph API. */
 async function getNodeIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const pg = (window as any).phrenGraph;
@@ -73,7 +73,7 @@ function parseNodeCount(text: string): { visible: number; total: number } {
   return { visible: Number(match[1]), total: Number(match[2]) };
 }
 
-/** Select a node via the sigma API. Returns the selected node ID or null. */
+/** Select a node via the graph API. Returns the selected node ID or null. */
 async function selectFirstNode(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const pg = (window as any).phrenGraph;
@@ -85,7 +85,7 @@ async function selectFirstNode(page: Page): Promise<string | null> {
   });
 }
 
-/** Select a node of a specific kind via the sigma API. Returns the ID or null. */
+/** Select a node of a specific kind via the graph API. Returns the ID or null. */
 async function selectNodeOfKind(page: Page, kind: string): Promise<string | null> {
   return page.evaluate((k) => {
     const pg = (window as any).phrenGraph;
@@ -144,9 +144,9 @@ test.describe.serial("graph visualization e2e", () => {
     // Container div should be visible
     await expect(page.locator("#graph-canvas")).toBeVisible();
 
-    // Sigma renderer should be active
+    // The 3D renderer should be active
     const renderer = await page.evaluate(() => (window as any).phrenGraph?.__renderer);
-    expect(renderer).toBe("sigma");
+    expect(renderer).toBe("three");
 
     // Should have loaded nodes
     const nodeIds = await getNodeIds(page);
@@ -215,28 +215,15 @@ test.describe.serial("graph visualization e2e", () => {
   test("zoom controls change the camera ratio", async ({ page }) => {
     await openGraphTab(page);
 
-    // Get initial camera ratio
-    const getRatio = () =>
-      page.evaluate(() => {
-        const pg = (window as any).phrenGraph;
-        if (!pg || !pg.__renderer) return 1;
-        // Access sigma camera ratio via the internal renderer reference
-        const renderer = (window as any).__sigmaRenderer || null;
-        // Use graphZoom/graphReset and track ratio indirectly
-        return document.querySelector("#graph-canvas canvas")
-          ? 1 // placeholder — real test is that zoom changes something
-          : 0;
-      });
-
     // Click zoom in and verify camera state changed
     await page.locator(".graph-controls button").filter({ hasText: "+" }).click();
     await page.waitForTimeout(300);
 
-    // Verify by checking that the sigma camera ratio changed
+    // Verify the renderer is still drawing after the zoom interaction
     const afterZoomIn = await page.evaluate(() => {
-      // The sigma renderer stores camera state — verify it's not at default
+      // The renderer stores camera state — verify it's not at default
       const canvases = document.querySelectorAll("#graph-canvas canvas");
-      return canvases.length > 0; // At minimum, sigma created WebGL canvases
+      return canvases.length > 0; // At minimum, the renderer created a WebGL canvas
     });
     expect(afterZoomIn).toBe(true);
 
@@ -248,8 +235,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator(".graph-controls button").filter({ hasText: "R" }).click();
     await page.waitForTimeout(300);
 
-    // Verify sigma is still running after zoom operations
-    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // Verify the renderer is still running after zoom operations
+    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(stillAlive).toBe(true);
   });
 
@@ -328,7 +315,7 @@ test.describe.serial("graph visualization e2e", () => {
     // Graph div should fill most of the container width
     expect(graphBox!.width).toBeGreaterThan(containerBox!.width * 0.9);
 
-    // Sigma should have created WebGL canvases inside the div
+    // The renderer should have created a WebGL canvas inside the div
     const canvasCount = await page.locator("#graph-canvas canvas").count();
     expect(canvasCount).toBeGreaterThanOrEqual(1);
   });
@@ -404,8 +391,8 @@ test.describe.serial("graph visualization e2e", () => {
     const after = await getThemeClass();
     expect(after).not.toBe(before);
 
-    // Sigma should still be running after theme change
-    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running after theme change
+    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(stillAlive).toBe(true);
 
     // Toggle back
@@ -455,8 +442,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.evaluate(() => (window as any).graphZoom(1.5));
     await page.waitForTimeout(300);
 
-    // Sigma should still be running
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -480,8 +467,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     await page.waitForTimeout(300);
 
-    // Sigma should still be functional after pan
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be functional after pan
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -510,8 +497,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     await page.waitForTimeout(300);
 
-    // Sigma should still be functional
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be functional
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -626,15 +613,15 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.wheel(0, -300);
     await page.waitForTimeout(400);
 
-    // Sigma should still be running
-    let alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running
+    let alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Scroll to zoom out
     await page.mouse.wheel(0, 600);
     await page.waitForTimeout(400);
 
-    alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -687,7 +674,7 @@ test.describe.serial("graph visualization e2e", () => {
 
     const initial = await page.evaluate(() => (window as any).phrenGraph.getData().nodes.length);
 
-    // Capture the sigma canvas element identity to prove there's no full remount
+    // Capture the canvas element identity to prove there's no full remount
     const canvasIdBefore = await page.evaluate(() => {
       const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
       if (!canvas) return null;
@@ -707,7 +694,7 @@ test.describe.serial("graph visualization e2e", () => {
     const midAnim = await page.evaluate((id: string) => {
       const pg = (window as any).phrenGraph;
       const data = pg.getData();
-      // Internal: check sigma-level attrs if still attached
+      // Internal: check node-level attrs if still attached
       return {
         stillInData: data.nodes.some((n: any) => n.id === id),
         count: data.nodes.length,
@@ -732,8 +719,8 @@ test.describe.serial("graph visualization e2e", () => {
     // Selection should be cleared (popover hidden)
     await expect(popover).toHaveCSS("display", "none");
 
-    // Sigma still alive
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // Renderer still alive
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // removeNode on an unknown id returns false

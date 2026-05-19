@@ -19,7 +19,7 @@ function isValidProjectName(name: string): boolean {
 
 /**
  * Load the web-ui graph script from the MCP dist.
- * This gives us the Sigma.js v3 renderer with ForceAtlas2 layout, drag, glow, etc.
+ * This gives us the Three.js / 3d-force-graph renderer with 3D force layout, bloom, drag, etc.
  *
  * Resolution order:
  * 1. Same directory as compiled extension JS (works in .vsix packaging)
