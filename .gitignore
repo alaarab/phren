@@ -18,6 +18,7 @@ coverage/
 .benchmarks/
 docs/benchmark-*.json
 packages/vscode/test-results/
+packages/cli/test-results/
 
 # AI design tooling output
 .design-bundles/

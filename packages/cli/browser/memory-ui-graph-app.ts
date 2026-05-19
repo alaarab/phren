@@ -233,8 +233,10 @@ function currentTheme(): "dark" | "light" {
   return theme === "light" ? "light" : "dark";
 }
 
-function spaceBackground(theme: "dark" | "light"): string {
-  return theme === "light" ? "#eceef3" : "#04050b";
+// The 3D scene is always a dark cosmos — additive glow can't survive a light
+// backdrop. Only the DOM chrome (filter bar, popover, tooltip) follows the UI theme.
+function spaceBackground(): string {
+  return "#04050b";
 }
 
 function hashString(value: string): number {
@@ -571,8 +573,8 @@ function makeShellMaterial(color: string): THREE.ShaderMaterial {
       varying vec3 vView;
       void main() {
         float fres = pow(1.0 - max(dot(vNormal, vView), 0.0), uRimPower);
-        vec3 col = uColor * (0.35 + fres * 1.7);
-        gl_FragColor = vec4(col, uOpacity * (0.22 + fres * 0.9));
+        vec3 col = uColor * (0.25 + fres * 1.15);
+        gl_FragColor = vec4(col, uOpacity * (0.12 + fres * 0.62));
       }
     `,
     transparent: true,
@@ -610,7 +612,7 @@ function makeLabelSprite(text: string): THREE.Sprite {
 }
 
 function nodeRadius(node: RuntimeNode): number {
-  return clamp(node.size * 0.42, 2.6, 16);
+  return clamp(node.size * 0.5, 4, 18);
 }
 
 function buildNodeObject(fgNode: FGNode): THREE.Group {
@@ -650,11 +652,11 @@ function buildNodeObject(fgNode: FGNode): THREE.Group {
     map: glowTexture(),
     color,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.22,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   }));
-  halo.scale.setScalar(radius * (node.kind === "project" ? 7 : 5.2));
+  halo.scale.setScalar(radius * (node.kind === "project" ? 3.4 : 3));
   group.add(halo);
 
   if (node.forceLabel) {
@@ -694,7 +696,7 @@ function applyHighlight(): void {
     const haloMat = fgNode.__halo!.material as THREE.SpriteMaterial;
     coreMat.opacity = lit ? 1 : 0.08;
     shellMat.uniforms.uOpacity.value = lit ? 1 : 0.05;
-    haloMat.opacity = lit ? (isSelected || isHovered ? 0.95 : 0.5) : 0.03;
+    haloMat.opacity = lit ? (isSelected || isHovered ? 0.5 : 0.22) : 0.02;
     if (fgNode.__wire) {
       (fgNode.__wire.material as THREE.MeshBasicMaterial).opacity = lit ? 0.34 : 0.04;
     }
@@ -702,7 +704,7 @@ function applyHighlight(): void {
       (fgNode.__label.material as THREE.SpriteMaterial).opacity = lit ? 0.92 : 0.06;
     }
     // Breathing applies this each frame; here we only set the target.
-    fgNode.__focusScale = isSelected ? 1.4 : isHovered ? 1.22 : 1;
+    fgNode.__focusScale = isSelected ? 1.18 : isHovered ? 1.12 : 1;
   });
 
   if (state.fg) {
@@ -747,13 +749,13 @@ function linkColor(link: FGLink): string {
     const r = Math.round(c.r * 255);
     const g = Math.round(c.g * 255);
     const b = Math.round(c.b * 255);
-    return `rgba(${r},${g},${b},${state.theme === "dark" ? 0.34 : 0.3})`;
+    return `rgba(${r},${g},${b},0.52)`;
   }
-  return state.theme === "dark" ? "rgba(120,150,200,0.22)" : "rgba(70,90,130,0.22)";
+  return "rgba(140,165,210,0.4)";
 }
 
 function linkWidth(link: FGLink): number {
-  return linkIsFocused(link) ? 1.6 : 0.4;
+  return linkIsFocused(link) ? 2 : 0.7;
 }
 
 function linkParticles(link: FGLink): number {
@@ -778,10 +780,10 @@ function buildStarfield(): THREE.Points {
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const material = new THREE.PointsMaterial({
     color: 0xaab6ff,
-    size: 5,
+    size: 13,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.55,
     depthWrite: false,
     fog: false,
   });
@@ -792,16 +794,16 @@ function buildStarfield(): THREE.Points {
 function buildNebula(): THREE.Group {
   const group = new THREE.Group();
   const blooms: Array<{ color: number; pos: [number, number, number]; scale: number }> = [
-    { color: 0x7c3aed, pos: [-1000, 320, -1500], scale: 1700 },
-    { color: 0x28d3f2, pos: [1150, -240, -1400], scale: 2000 },
-    { color: 0x9c8ff8, pos: [240, 640, -1800], scale: 2300 },
+    { color: 0x6d3bd4, pos: [-1500, 600, -2800], scale: 900 },
+    { color: 0x1f9fd0, pos: [1600, -500, -3000], scale: 1000 },
+    { color: 0x8b7ff0, pos: [500, 1100, -3200], scale: 1050 },
   ];
   for (const bloom of blooms) {
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: glowTexture(),
       color: bloom.color,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.06,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       fog: false,
@@ -847,24 +849,10 @@ function buildCinematicOverlay(): HTMLElement {
   return overlay;
 }
 
+// The 3D scene is fixed to its dark cosmos; only state.theme is tracked for the
+// DOM-side bits (the host renders the filter bar / popover with theme variables).
 function applyTheme(): void {
   state.theme = currentTheme();
-  if (!state.fg) return;
-  const dark = state.theme === "dark";
-  state.fg.backgroundColor(spaceBackground(state.theme));
-  if (state.bloomPass) state.bloomPass.strength = dark ? 1.15 : 0.4;
-  if (state.starfield) {
-    (state.starfield.material as THREE.PointsMaterial).opacity = dark ? 0.85 : 0.25;
-  }
-  const fog = state.fg.scene().fog as THREE.FogExp2 | null;
-  if (fog) fog.color.set(spaceBackground(state.theme));
-  if (state.nebula) state.nebula.visible = dark;
-  if (state.vignetteEl) {
-    state.vignetteEl.style.background = dark
-      ? "radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.6) 100%)"
-      : "radial-gradient(ellipse at 50% 50%, transparent 58%, rgba(20,22,30,0.26) 100%)";
-  }
-  state.fg.linkColor(state.fg.linkColor());
 }
 
 function fgNodeFor(node: RuntimeNode): FGNode {
@@ -899,7 +887,7 @@ function setupForceGraph(): void {
   state.container.style.position = "relative";
 
   const fg = new ForceGraph3D(state.container, { controlType: "orbit" })
-    .backgroundColor(spaceBackground(state.theme))
+    .backgroundColor(spaceBackground())
     .showNavInfo(false)
     .nodeId("id")
     .nodeThreeObject((node: FGNode) => buildNodeObject(node))
@@ -944,25 +932,26 @@ function setupForceGraph(): void {
 
   // Force tuning for an airy 3D spread.
   const charge = fg.d3Force("charge");
-  if (charge) charge.strength(-170);
+  if (charge) charge.strength(-95);
   const linkForce = fg.d3Force("link");
   if (linkForce) {
     linkForce.distance((link: FGLink) => {
       const s = state.nodeById.get(linkEndpointId(link.source))?.kind;
       const t = state.nodeById.get(linkEndpointId(link.target))?.kind;
-      if (s === "project" || t === "project") return 70;
-      if (s === "entity" || t === "entity") return 48;
-      return 34;
+      if (s === "project" || t === "project") return 52;
+      if (s === "entity" || t === "entity") return 38;
+      return 26;
     });
   }
 
   // Bloom post-processing for the glow.
   const size = containerSize();
-  state.bloomPass = new UnrealBloomPass(new THREE.Vector2(size.w, size.h), 1.15, 0.7, 0);
+  // strength / radius / threshold — thresholded so only bright cores bloom.
+  state.bloomPass = new UnrealBloomPass(new THREE.Vector2(size.w, size.h), 0.48, 0.4, 0.32);
   fg.postProcessingComposer().addPass(state.bloomPass);
 
   // Gentle exponential fog so depth reads — far nodes melt into the background.
-  fg.scene().fog = new THREE.FogExp2(spaceBackground(state.theme), 0.001);
+  fg.scene().fog = new THREE.FogExp2(spaceBackground(), 0.001);
 
   // Starfield + nebula backdrop.
   state.starfield = buildStarfield();
@@ -1029,7 +1018,7 @@ function setupForceGraph(): void {
   fg.onEngineStop(() => {
     if (state.firstSettle) {
       state.firstSettle = false;
-      fg.zoomToFit(700, 90);
+      fg.zoomToFit(700, 40);
     }
   });
 
@@ -1151,7 +1140,7 @@ function onHover(fgNode: FGNode | null): void {
 
 function flyToNode(fgNode: FGNode, duration: number): void {
   if (!state.fg || fgNode.x == null) return;
-  const distance = 90 + nodeRadius(fgNode.raw) * 7;
+  const distance = 155 + nodeRadius(fgNode.raw) * 9;
   const len = Math.hypot(fgNode.x, fgNode.y || 0, fgNode.z || 0) || 1;
   const ratio = 1 + distance / len;
   state.fg.cameraPosition(
@@ -1701,7 +1690,7 @@ function startMascot(): void {
     depthWrite: false,
     depthTest: false,
   }));
-  sprite.scale.setScalar(26);
+  sprite.scale.setScalar(21);
   sprite.renderOrder = 999;
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTexture(),
@@ -1711,7 +1700,7 @@ function startMascot(): void {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   }));
-  glow.scale.setScalar(72);
+  glow.scale.setScalar(46);
   state.fg.scene().add(glow);
   state.fg.scene().add(sprite);
   mascot.sprite = sprite;
@@ -1823,7 +1812,7 @@ ROOT.graphZoom = function graphZoom(factor: number): void {
 };
 
 ROOT.graphReset = function graphReset(): void {
-  state.fg?.zoomToFit(500, 90);
+  state.fg?.zoomToFit(500, 40);
 };
 
 ROOT.graphResetLayout = function graphResetLayout(): void {
