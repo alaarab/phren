@@ -84,8 +84,12 @@ type FGNode = {
   fz?: number;
   __group?: THREE.Group;
   __core?: THREE.Mesh;
+  __shell?: THREE.Mesh;
+  __wire?: THREE.Mesh;
   __halo?: THREE.Sprite;
   __label?: THREE.Sprite;
+  __focusScale?: number;
+  __phase?: number;
 };
 
 /** A link object handed to 3d-force-graph. Force layout swaps source/target to node refs. */
@@ -210,6 +214,10 @@ const state = {
   firstSettle: true,
   bloomPass: null as UnrealBloomPass | null,
   starfield: null as THREE.Points | null,
+  nebula: null as THREE.Group | null,
+  ringSprite: null as THREE.Sprite | null,
+  ringPhase: 0,
+  vignetteEl: null as HTMLElement | null,
   ambientRafId: 0,
   themeObserver: null as MutationObserver | null,
   resizeObserver: null as ResizeObserver | null,
@@ -522,6 +530,57 @@ function glowTexture(): THREE.Texture {
   return _glowTexture;
 }
 
+let _ringTexture: THREE.Texture | null = null;
+function ringTexture(): THREE.Texture {
+  if (_ringTexture) return _ringTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(64, 64, 54, 0, Math.PI * 2);
+  ctx.stroke();
+  _ringTexture = new THREE.CanvasTexture(canvas);
+  return _ringTexture;
+}
+
+/** Fresnel rim-glow shell — node silhouettes glow brighter than their centers. */
+function makeShellMaterial(color: string): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uOpacity: { value: 1 },
+      uRimPower: { value: 2.4 },
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform float uRimPower;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        float fres = pow(1.0 - max(dot(vNormal, vView), 0.0), uRimPower);
+        vec3 col = uColor * (0.35 + fres * 1.7);
+        gl_FragColor = vec4(col, uOpacity * (0.22 + fres * 0.9));
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+}
+
 function makeLabelSprite(text: string): THREE.Sprite {
   const canvas = document.createElement("canvas");
   const fontSize = 64;
@@ -561,17 +620,37 @@ function buildNodeObject(fgNode: FGNode): THREE.Group {
   group.userData.phrenNodeId = node.id;
   const radius = nodeRadius(node);
   const color = new THREE.Color(node.baseColor);
+  const shellGeom = node.kind === "project" ? PROJECT_GEOM : NODE_GEOM;
 
-  const geometry = node.kind === "project" ? PROJECT_GEOM : NODE_GEOM;
-  const core = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 }));
-  core.scale.setScalar(radius);
+  // Bright inner core — blooms hot.
+  const core = new THREE.Mesh(NODE_GEOM, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 }));
+  core.scale.setScalar(radius * 0.55);
   group.add(core);
+
+  // Fresnel shell — rim-lit translucent orb of light.
+  const shell = new THREE.Mesh(shellGeom, makeShellMaterial(node.baseColor));
+  shell.scale.setScalar(radius);
+  group.add(shell);
+
+  // Project hubs get a slowly rotating wireframe cage.
+  if (node.kind === "project") {
+    const wire = new THREE.Mesh(PROJECT_GEOM, new THREE.MeshBasicMaterial({
+      color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+    }));
+    wire.scale.setScalar(radius * 1.5);
+    group.add(wire);
+    fgNode.__wire = wire;
+  }
 
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTexture(),
     color,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.5,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   }));
@@ -588,7 +667,9 @@ function buildNodeObject(fgNode: FGNode): THREE.Group {
 
   fgNode.__group = group;
   fgNode.__core = core;
+  fgNode.__shell = shell;
   fgNode.__halo = halo;
+  fgNode.__focusScale = 1;
   return group;
 }
 
@@ -599,22 +680,29 @@ function applyHighlight(): void {
   const neighbors = focus ? state.visibleAdjacency.get(focus) : null;
 
   state.fgNodeById.forEach((fgNode, id) => {
-    if (!fgNode.__core) return;
+    if (!fgNode.__core || !fgNode.__shell) return;
     let lit = true;
     if (focusProject) {
       lit = isInProjectNetwork(id, focusProject);
     } else if (focus) {
       lit = id === focus || Boolean(neighbors?.has(id));
     }
-    const isFocus = id === focus || id === focusProject;
+    const isSelected = id === state.selectedNodeId || id === focusProject;
+    const isHovered = id === state.hoveredNodeId;
     const coreMat = fgNode.__core.material as THREE.MeshBasicMaterial;
+    const shellMat = fgNode.__shell.material as THREE.ShaderMaterial;
     const haloMat = fgNode.__halo!.material as THREE.SpriteMaterial;
     coreMat.opacity = lit ? 1 : 0.08;
-    haloMat.opacity = lit ? (isFocus ? 0.95 : 0.5) : 0.03;
-    fgNode.__group!.scale.setScalar(isFocus ? 1.35 : 1);
+    shellMat.uniforms.uOpacity.value = lit ? 1 : 0.05;
+    haloMat.opacity = lit ? (isSelected || isHovered ? 0.95 : 0.5) : 0.03;
+    if (fgNode.__wire) {
+      (fgNode.__wire.material as THREE.MeshBasicMaterial).opacity = lit ? 0.34 : 0.04;
+    }
     if (fgNode.__label) {
       (fgNode.__label.material as THREE.SpriteMaterial).opacity = lit ? 0.92 : 0.06;
     }
+    // Breathing applies this each frame; here we only set the target.
+    fgNode.__focusScale = isSelected ? 1.4 : isHovered ? 1.22 : 1;
   });
 
   if (state.fg) {
@@ -648,10 +736,20 @@ function linkTouchesProject(link: FGLink): boolean {
 }
 
 function linkColor(link: FGLink): string {
+  if (linkIsFocused(link)) return "rgba(255,217,102,0.9)";
   const focus = state.hoveredNodeId || state.selectedNodeId || state.focusedProjectId;
-  if (linkIsFocused(link)) return "rgba(255,217,102,0.85)";
-  if (focus) return state.theme === "dark" ? "rgba(120,140,170,0.05)" : "rgba(90,105,130,0.05)";
-  return state.theme === "dark" ? "rgba(120,150,200,0.16)" : "rgba(70,90,130,0.16)";
+  if (focus) return state.theme === "dark" ? "rgba(120,140,170,0.04)" : "rgba(90,105,130,0.04)";
+  // Tint each edge by a blend of its two endpoint colours so links read as relationships.
+  const s = state.nodeById.get(linkEndpointId(link.source));
+  const t = state.nodeById.get(linkEndpointId(link.target));
+  if (s && t) {
+    const c = new THREE.Color(s.baseColor).lerp(new THREE.Color(t.baseColor), 0.5);
+    const r = Math.round(c.r * 255);
+    const g = Math.round(c.g * 255);
+    const b = Math.round(c.b * 255);
+    return `rgba(${r},${g},${b},${state.theme === "dark" ? 0.34 : 0.3})`;
+  }
+  return state.theme === "dark" ? "rgba(120,150,200,0.22)" : "rgba(70,90,130,0.22)";
 }
 
 function linkWidth(link: FGLink): number {
@@ -685,17 +783,86 @@ function buildStarfield(): THREE.Points {
     transparent: true,
     opacity: 0.85,
     depthWrite: false,
+    fog: false,
   });
   return new THREE.Points(geometry, material);
+}
+
+/** Soft coloured nebula blooms parked far behind the graph. */
+function buildNebula(): THREE.Group {
+  const group = new THREE.Group();
+  const blooms: Array<{ color: number; pos: [number, number, number]; scale: number }> = [
+    { color: 0x7c3aed, pos: [-1000, 320, -1500], scale: 1700 },
+    { color: 0x28d3f2, pos: [1150, -240, -1400], scale: 2000 },
+    { color: 0x9c8ff8, pos: [240, 640, -1800], scale: 2300 },
+  ];
+  for (const bloom of blooms) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture(),
+      color: bloom.color,
+      transparent: true,
+      opacity: 0.2,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    }));
+    sprite.scale.setScalar(bloom.scale);
+    sprite.position.set(...bloom.pos);
+    group.add(sprite);
+  }
+  return group;
+}
+
+const GRAIN_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E";
+
+/** A pointer-transparent DOM layer over the canvas: vignette + animated film grain. */
+function buildCinematicOverlay(): HTMLElement {
+  if (!document.getElementById("graph-grain-keyframes")) {
+    const style = document.createElement("style");
+    style.id = "graph-grain-keyframes";
+    style.textContent =
+      "@keyframes graphGrain {0%{transform:translate(0,0)}25%{transform:translate(-6%,4%)}" +
+      "50%{transform:translate(5%,-5%)}75%{transform:translate(-4%,6%)}100%{transform:translate(0,0)}}";
+    document.head.appendChild(style);
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "graph-cinematic";
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden;";
+
+  const vignette = document.createElement("div");
+  vignette.className = "graph-vignette";
+  vignette.style.cssText =
+    "position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.6) 100%);";
+
+  const grain = document.createElement("div");
+  grain.style.cssText =
+    `position:absolute;inset:-20%;opacity:0.05;mix-blend-mode:overlay;` +
+    `background-image:url("${GRAIN_SVG}");background-size:180px 180px;` +
+    `animation:graphGrain 0.6s steps(2) infinite;will-change:transform;`;
+
+  overlay.appendChild(vignette);
+  overlay.appendChild(grain);
+  state.vignetteEl = vignette;
+  return overlay;
 }
 
 function applyTheme(): void {
   state.theme = currentTheme();
   if (!state.fg) return;
+  const dark = state.theme === "dark";
   state.fg.backgroundColor(spaceBackground(state.theme));
-  if (state.bloomPass) state.bloomPass.strength = state.theme === "dark" ? 1.15 : 0.4;
+  if (state.bloomPass) state.bloomPass.strength = dark ? 1.15 : 0.4;
   if (state.starfield) {
-    (state.starfield.material as THREE.PointsMaterial).opacity = state.theme === "dark" ? 0.85 : 0.25;
+    (state.starfield.material as THREE.PointsMaterial).opacity = dark ? 0.85 : 0.25;
+  }
+  const fog = state.fg.scene().fog as THREE.FogExp2 | null;
+  if (fog) fog.color.set(spaceBackground(state.theme));
+  if (state.nebula) state.nebula.visible = dark;
+  if (state.vignetteEl) {
+    state.vignetteEl.style.background = dark
+      ? "radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.6) 100%)"
+      : "radial-gradient(ellipse at 50% 50%, transparent 58%, rgba(20,22,30,0.26) 100%)";
   }
   state.fg.linkColor(state.fg.linkColor());
 }
@@ -739,6 +906,7 @@ function setupForceGraph(): void {
     .nodeThreeObjectExtend(false)
     .linkColor((link: FGLink) => linkColor(link))
     .linkWidth((link: FGLink) => linkWidth(link))
+    .linkCurvature(0.28)
     .linkOpacity(1)
     .linkDirectionalParticles((link: FGLink) => linkParticles(link))
     .linkDirectionalParticleSpeed(0.012)
@@ -792,11 +960,37 @@ function setupForceGraph(): void {
   const size = containerSize();
   state.bloomPass = new UnrealBloomPass(new THREE.Vector2(size.w, size.h), 1.15, 0.7, 0);
   fg.postProcessingComposer().addPass(state.bloomPass);
-  applyTheme();
 
-  // Starfield backdrop.
+  // Gentle exponential fog so depth reads — far nodes melt into the background.
+  fg.scene().fog = new THREE.FogExp2(spaceBackground(state.theme), 0.001);
+
+  // Starfield + nebula backdrop.
   state.starfield = buildStarfield();
   fg.scene().add(state.starfield);
+  state.nebula = buildNebula();
+  fg.scene().add(state.nebula);
+
+  // Expanding pulse ring shown around the selected node.
+  state.ringSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: ringTexture(),
+    color: 0xffd966,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  }));
+  state.ringSprite.visible = false;
+  state.ringSprite.renderOrder = 998;
+  fg.scene().add(state.ringSprite);
+
+  // Cinematic vignette + film-grain overlay.
+  const overlay = buildCinematicOverlay();
+  state.container.appendChild(overlay);
+  state.cleanupFns.push(() => overlay.remove());
+
+  applyTheme();
 
   // Mouse tracking for tooltip placement.
   const onMouseMove = (event: MouseEvent) => {
@@ -852,9 +1046,39 @@ function setupForceGraph(): void {
   const ambientTick = (timestamp: number) => {
     const dt = lastTime > 0 ? Math.min(0.05, (timestamp - lastTime) / 1000) : 0.016;
     lastTime = timestamp;
+    const now = timestamp * 0.001;
     if (state.starfield) {
       state.starfield.rotation.y += dt * 0.012;
       state.starfield.rotation.x += dt * 0.004;
+    }
+    if (state.nebula) {
+      state.nebula.rotation.z += dt * 0.006;
+    }
+    // Per-node breathing + project wireframe spin.
+    state.fgNodeById.forEach((fgNode) => {
+      if (!fgNode.__group) return;
+      if (fgNode.__phase === undefined) fgNode.__phase = seeded(fgNode.id, "breathe") * 6.283;
+      const breathe = 1 + 0.04 * Math.sin(now * 1.5 + fgNode.__phase);
+      fgNode.__group.scale.setScalar((fgNode.__focusScale ?? 1) * breathe);
+      if (fgNode.__wire) {
+        fgNode.__wire.rotation.y += dt * 0.4;
+        fgNode.__wire.rotation.x += dt * 0.15;
+      }
+    });
+    // Expanding pulse ring around the active node.
+    if (state.ringSprite) {
+      const activeId = state.selectedNodeId || state.focusedProjectId;
+      const pos = activeId ? nodeWorldPos(activeId) : null;
+      if (pos) {
+        state.ringSprite.visible = true;
+        state.ringSprite.position.copy(pos);
+        state.ringPhase = (state.ringPhase + dt * 0.85) % 1;
+        const baseR = nodeRadius(state.nodeById.get(activeId!)!) || 8;
+        state.ringSprite.scale.setScalar(baseR * (2 + state.ringPhase * 5.5));
+        (state.ringSprite.material as THREE.SpriteMaterial).opacity = (1 - state.ringPhase) * 0.7;
+      } else {
+        state.ringSprite.visible = false;
+      }
     }
     mascotUpdate(dt);
     state.ambientRafId = requestAnimationFrame(ambientTick);
@@ -1285,6 +1509,8 @@ function mount(payload: GraphPayload): void {
 
 function disposeNodeObject(fgNode: FGNode): void {
   if (fgNode.__core) (fgNode.__core.material as THREE.Material).dispose();
+  if (fgNode.__shell) (fgNode.__shell.material as THREE.Material).dispose();
+  if (fgNode.__wire) (fgNode.__wire.material as THREE.Material).dispose();
   if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).dispose();
   if (fgNode.__label) {
     const mat = fgNode.__label.material as THREE.SpriteMaterial;
@@ -1293,6 +1519,8 @@ function disposeNodeObject(fgNode: FGNode): void {
   }
   fgNode.__group = undefined;
   fgNode.__core = undefined;
+  fgNode.__shell = undefined;
+  fgNode.__wire = undefined;
   fgNode.__halo = undefined;
   fgNode.__label = undefined;
 }
@@ -1344,6 +1572,12 @@ function updateNode(
   if (fgNode?.__core) {
     (fgNode.__core.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
     (fgNode.__halo!.material as THREE.SpriteMaterial).color.set(node.baseColor);
+    if (fgNode.__shell) {
+      (fgNode.__shell.material as THREE.ShaderMaterial).uniforms.uColor.value.set(node.baseColor);
+    }
+    if (fgNode.__wire) {
+      (fgNode.__wire.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
+    }
   }
   return true;
 }
@@ -1383,13 +1617,13 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
 
   if (wasSelected) clearSelection();
   hideTooltip();
-  const group = fgNode.__group;
   const duration = 280;
   const start = performance.now();
   const step = (now: number) => {
     const t = Math.min(1, (now - start) / duration);
-    const scale = 1 - (1 - (1 - t) * (1 - t) * (1 - t));
-    group.scale.setScalar(Math.max(0.01, scale));
+    const scale = (1 - t) * (1 - t) * (1 - t);
+    // Breathing renders __focusScale each frame, so shrink via that.
+    fgNode.__focusScale = Math.max(0.01, scale);
     if (t < 1) requestAnimationFrame(step);
     else finalize();
   };
@@ -1410,10 +1644,23 @@ function destroy(): void {
   state.cleanupFns = [];
   state.fgNodeById.forEach(disposeNodeObject);
   state.fgNodeById.clear();
+  if (state.starfield) {
+    state.starfield.geometry.dispose();
+    (state.starfield.material as THREE.Material).dispose();
+  }
+  state.nebula?.children.forEach((child) => {
+    ((child as THREE.Sprite).material as THREE.SpriteMaterial).dispose();
+  });
+  if (state.ringSprite) (state.ringSprite.material as THREE.SpriteMaterial).dispose();
   if (state.fg) {
     try { state.fg._destructor?.(); } catch { /* ignore */ }
   }
   state.fg = null;
+  state.starfield = null;
+  state.nebula = null;
+  state.ringSprite = null;
+  state.vignetteEl = null;
+  state.bloomPass = null;
   state.container = null;
   state.tooltip = null;
 }
