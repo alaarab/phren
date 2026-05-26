@@ -243,10 +243,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren)."),
-        item: z.union([
-          z.string().describe("A single task to add."),
-          z.array(z.string()).describe("Multiple tasks to add in one call."),
-        ]).describe("The task(s) to add. Pass a string for one task, or an array for bulk."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to add. Always pass as an array of strings — use a single-element array for one task."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },
@@ -294,10 +294,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Move one or more tasks to the Done section by matching text. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.union([
-          z.string().describe("Exact or partial text of the item to complete."),
-          z.array(z.string()).describe("List of partial item texts to complete."),
-        ]).describe("The task(s) to complete. Pass a string for one, or an array for bulk."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to complete. Always pass as an array of strings — use a single-element array for one."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
       }),
     },
@@ -366,10 +366,10 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "Remove one or more tasks from a project's tasks.md file by matching text or ID. Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        item: z.union([
-          z.string().describe("Exact or partial text of the task, or a task ID like A1/Q3/D2."),
-          z.array(z.string()).describe("List of partial item texts or IDs to remove."),
-        ]).describe("The task(s) to remove. Pass a string for one, or an array for bulk."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to remove. Always pass as an array of strings (or task IDs like A1/Q3/D2) — use a single-element array for one."),
       }),
     },
     async ({ project: projectInput, item }) => {
