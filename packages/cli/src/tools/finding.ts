@@ -179,6 +179,9 @@ async function handleAddFinding(
     }
   }
 
+  const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+  if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
+
   if (Array.isArray(finding)) {
     const findings = finding;
     if (findings.length > 100) return mcpResponse({ ok: false, error: "Bulk add limited to 100 findings per call." });
@@ -230,8 +233,6 @@ async function handleAddFinding(
   }
 
   if (finding.length > 5000) return mcpResponse({ ok: false, error: "Finding text exceeds 5000 character limit." });
-  const normalizedScope = normalizeMemoryScope(scope ?? "shared");
-  if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
   return withWriteQueue(async () => {
     try {
       const taggedFinding = applyFindingTypePrefix(finding, findingType);
@@ -720,10 +721,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         " Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug.",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren store)."),
-        finding: z.union([
-          z.string().describe("A single insight, written as a bullet point."),
-          z.array(z.string()).describe("Multiple insights to record in one call."),
-        ]).describe("The insight(s) to save. Pass a string for one finding, or an array for bulk."),
+        finding: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The insight(s) to save. Always pass as an array of strings — use a single-element array for one finding."),
         citation: z.object({
           file: z.string().optional().describe("Source file path that supports this finding."),
           line: z.number().int().positive().optional().describe("1-based line number in file."),
@@ -839,10 +840,10 @@ export function register(server: McpServer, ctx: McpContext): void {
         " Pass a single string or an array of strings.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        finding: z.union([
-          z.string().describe("Partial text to match against existing findings."),
-          z.array(z.string()).describe("List of partial texts to match and remove."),
-        ]).describe("Text(s) to match and remove. Pass a string for one, or an array for bulk."),
+        finding: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("Text(s) to match and remove. Always pass as an array of strings — use a single-element array for one."),
       }),
     },
     (params) => handleRemoveFinding(ctx, params),
