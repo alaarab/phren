@@ -4,6 +4,7 @@ import * as os from "os";
 import * as vscode from "vscode";
 import { PhrenClient } from "./phrenClient";
 import { PhrenTreeProvider } from "./providers/PhrenTreeProvider";
+import { PhrenActivityProvider } from "./providers/PhrenActivityProvider";
 import { PhrenStatusBar } from "./statusBar";
 import { resolveRuntimeConfig } from "./runtimeConfig";
 import { type ExtensionContext as PhrenExtCtx, toErrorMessage, asRecord, asArraySafe } from "./extensionContext";
@@ -60,7 +61,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   statusBar.setOnHealthChanged((ok) => treeDataProvider.setHealthStatus(ok));
 
-  context.subscriptions.push(treeDataProvider, treeView, statusBar);
+  // Live memory-lookup activity: watches the store's lookup-events log and
+  // surfaces each search hit in real time (tree view + status-bar flash).
+  const activityProvider = new PhrenActivityProvider(runtimeConfig.storePath);
+  const activityView = vscode.window.createTreeView("phren.activity", {
+    treeDataProvider: activityProvider,
+  });
+  activityProvider.setOnNewLookup((ev) => {
+    const label = ev.filename ?? `${ev.project ?? ""}`;
+    if (label) statusBar.flashLookup(label);
+  });
+
+  context.subscriptions.push(treeDataProvider, treeView, statusBar, activityProvider, activityView);
 
   const extCtx: PhrenExtCtx = {
     phrenClient,

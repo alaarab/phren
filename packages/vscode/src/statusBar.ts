@@ -16,6 +16,7 @@ export class PhrenStatusBar implements vscode.Disposable {
   private syncBrokenWarned = false;
   private healthTimer?: ReturnType<typeof setInterval>;
   private onHealthChanged?: (ok: boolean) => void;
+  private flashTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly client: PhrenClient) {
     this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -82,7 +83,26 @@ export class PhrenStatusBar implements vscode.Disposable {
     return selected;
   }
 
+  /**
+   * Briefly show "looking up <label>" in the status bar to make memory lookups
+   * visible the instant they happen, then revert to the normal render.
+   */
+  flashLookup(label: string): void {
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+    const trimmed = label.length > 40 ? label.slice(0, 39) + "…" : label;
+    this.statusItem.text = `$(search) phren: ${trimmed}`;
+    this.statusItem.color = undefined;
+    this.flashTimer = setTimeout(() => {
+      this.flashTimer = undefined;
+      this.render();
+    }, 2500);
+  }
+
   dispose(): void {
+    if (this.flashTimer) {
+      clearTimeout(this.flashTimer);
+      this.flashTimer = undefined;
+    }
     if (this.healthTimer) {
       clearInterval(this.healthTimer);
       this.healthTimer = undefined;
@@ -163,6 +183,8 @@ export class PhrenStatusBar implements vscode.Disposable {
   }
 
   private render(): void {
+    // Don't overwrite an in-flight lookup flash; it reverts via its own timer.
+    if (this.flashTimer) return;
     const projectName = this.activeProjectName ?? "No project";
     const healthIcon = this.healthOk === true ? "$(pass-filled)" : this.healthOk === false ? "$(error)" : "$(loading~spin)";
     const syncIcon = this.syncStatus === "synced" ? " $(cloud)"

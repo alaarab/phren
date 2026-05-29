@@ -34,8 +34,10 @@ import {
   isAllowedSkillPath,
   readSyncSnapshot,
   recentAccepted,
+  recentLookups,
   recentUsage,
 } from "./data.js";
+import { lookupEventsLogFile } from "../shared.js";
 import { CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import {
   ensureTopicReferenceDoc,
@@ -458,6 +460,84 @@ function handleGetReviewQueue(res: Res, ctx: RouteCtx): void {
 
 function handleGetReviewActivity(res: Res, ctx: RouteCtx): void {
   jsonOk(res, { accepted: recentAccepted(ctx.phrenPath), usage: recentUsage(ctx.phrenPath) });
+}
+
+/** Initial snapshot of recent memory lookups (newest first) for the Activity feed. */
+function handleGetLookups(res: Res, ctx: RouteCtx): void {
+  jsonOk(res, { ok: true, lookups: recentLookups(ctx.phrenPath, 40) });
+}
+
+/**
+ * Server-Sent Events stream of memory lookups. The server tails
+ * .runtime/lookup-events.jsonl and pushes each newly appended event to the
+ * browser, so the Activity tab lights up in real time as phren lands on
+ * memories. A short poll loop reads only appended bytes (robust across
+ * platforms vs. fs.watch); delivery to the client is push-based via SSE.
+ */
+function handleLookupStream(req: Req, res: Res, ctx: RouteCtx): void {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.write("retry: 3000\n\n");
+
+  const logPath = lookupEventsLogFile(ctx.phrenPath);
+  // Start from the current end of the file so we only stream events that happen
+  // after the client connects (the initial snapshot comes from /api/lookups).
+  let offset = 0;
+  try {
+    offset = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
+  } catch { offset = 0; }
+
+  let carry = "";
+  const flushNew = (): void => {
+    let size: number;
+    try {
+      if (!fs.existsSync(logPath)) return;
+      size = fs.statSync(logPath).size;
+    } catch { return; }
+    if (size < offset) { offset = 0; carry = ""; } // file rotated/truncated
+    if (size <= offset) return;
+    let chunk = "";
+    try {
+      const fd = fs.openSync(logPath, "r");
+      try {
+        const buf = Buffer.alloc(size - offset);
+        fs.readSync(fd, buf, 0, buf.length, offset);
+        chunk = buf.toString("utf8");
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch { return; }
+    offset = size;
+    const lines = (carry + chunk).split("\n");
+    carry = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        JSON.parse(trimmed); // validate before forwarding
+        res.write(`data: ${trimmed}\n\n`);
+      } catch {
+        // skip malformed lines
+      }
+    }
+  };
+
+  const pollTimer = setInterval(flushNew, 1000);
+  const heartbeat = setInterval(() => {
+    try { res.write(": ping\n\n"); } catch { /* connection gone */ }
+  }, 25000);
+
+  const cleanup = (): void => {
+    clearInterval(pollTimer);
+    clearInterval(heartbeat);
+    try { res.end(); } catch { /* already closed */ }
+  };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
 }
 
 function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
@@ -1155,6 +1235,8 @@ export function createWebUiHttpServer(
         case "/api/runtime-health": return handleGetRuntimeHealth(res, ctx);
         case "/api/review-queue": return handleGetReviewQueue(res, ctx);
         case "/api/review-activity": return handleGetReviewActivity(res, ctx);
+        case "/api/lookups": return handleGetLookups(res, ctx);
+        case "/api/lookups/stream": return handleLookupStream(req, res, ctx);
         case "/api/project-topics": return handleGetProjectTopics(res, url, ctx);
         case "/api/project-reference-list": return handleGetProjectReferenceList(res, url, ctx);
         case "/api/project-reference-content": return handleGetProjectReferenceContent(res, url, ctx);

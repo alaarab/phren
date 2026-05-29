@@ -21,6 +21,7 @@ import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
 import { readProjectTopics, classifyTopicForText } from "../project-topics.js";
 import { entryScoreKey } from "../governance/scores.js";
+import { readRecentLookups, type LookupEvent } from "../governance/activity.js";
 import { logger } from "../logger.js";
 
 interface EntryScore {
@@ -634,6 +635,10 @@ export function recentUsage(phrenPath: string): string[] {
   if (!fs.existsSync(usage)) return [];
   const lines = fs.readFileSync(usage, "utf8").trim().split("\n").filter(Boolean);
   return lines.slice(-40).reverse();
+}
+
+export function recentLookups(phrenPath: string, limit = 40): LookupEvent[] {
+  return readRecentLookups(phrenPath, limit);
 }
 
 export function recentAccepted(phrenPath: string): string[] {

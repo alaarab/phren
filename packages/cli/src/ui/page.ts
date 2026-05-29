@@ -12,6 +12,7 @@ import {
   renderSearchScript,
   renderEventWiringScript,
   renderGraphHostScript,
+  renderActivityStreamScript,
 } from "./scripts.js";
 
 function h(s: string): string {
@@ -119,6 +120,7 @@ ${PHREN_DEEP_VOID_STYLES}
   <nav class="nav">
     <button class="nav-item active" data-tab="projects">Projects</button>
     <button class="nav-item" data-tab="review">Review</button>
+    <button class="nav-item" data-tab="activity">Activity</button>
     <button class="nav-item" data-tab="search">Search</button>
     <button class="nav-item" data-tab="graph">Graph</button>
     <button class="nav-item" data-tab="tasks">Tasks</button>
@@ -181,6 +183,35 @@ ${PHREN_DEEP_VOID_STYLES}
         <div class="card-header"><h2>Recently Used</h2></div>
         <div class="card-body"><ul id="usage-list"><li style="color:var(--muted)">Loading...</li></ul></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Activity Tab ──────────────────────────────────────── -->
+  <div id="tab-activity" class="tab-content">
+    <style>
+      .activity-led{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--muted);flex:0 0 auto}
+      .activity-led-ok{background:var(--success);box-shadow:0 0 0 0 var(--success-dim);animation:activity-pulse 2s infinite}
+      .activity-led-warn{background:var(--warning)}
+      .activity-led-err{background:var(--danger)}
+      @keyframes activity-pulse{0%{box-shadow:0 0 0 0 var(--success-glow,rgba(16,185,129,.35))}70%{box-shadow:0 0 0 7px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+      .activity-feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+      .activity-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--surface);transition:background .6s ease,border-color .6s ease}
+      .activity-item-new{background:var(--accent-dim);border-color:var(--accent)}
+      .activity-row{display:flex;align-items:center;gap:8px}
+      .activity-type{font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.04em;color:var(--accent);border:1px solid var(--border);border-radius:999px;padding:1px 8px;flex:0 0 auto}
+      .activity-loc{font-family:var(--mono);font-size:var(--text-sm);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .activity-time{margin-left:auto;font-size:var(--text-xs);color:var(--muted);flex:0 0 auto}
+      .activity-query{font-size:var(--text-sm);color:var(--ink-secondary);margin-top:4px}
+      .activity-snippet{font-size:var(--text-sm);color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+    </style>
+    <div style="max-width:860px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span id="activity-led" class="activity-led" title="Live status"></span>
+        <h2 style="font-size:var(--text-lg);font-weight:600;margin:0">Live Lookups</h2>
+        <span id="activity-status" class="text-muted" style="font-size:var(--text-sm);margin-left:auto">Connecting…</span>
+      </div>
+      <p class="text-muted" style="font-size:var(--text-sm);margin:0 0 16px 0">Memories phren lands on as it searches, streamed in real time.</p>
+      <ul id="activity-feed" class="activity-feed"><li style="color:var(--muted);list-style:none">Waiting for lookups…</li></ul>
     </div>
   </div>
 
@@ -391,6 +422,9 @@ ${renderTasksAndSettingsScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderReviewQueueKeyboardScript(authToken || "")}
+</script>
+<script${nonceAttr}>
+${renderActivityStreamScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderSearchScript(authToken || "")}

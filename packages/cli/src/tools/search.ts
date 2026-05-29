@@ -32,7 +32,7 @@ import {
   normalizeMemoryId,
 } from "../shared/index.js";
 import { runCustomHooks } from "../hooks.js";
-import { entryScoreKey, getQualityMultiplier, getRetentionPolicy } from "../shared/governance.js";
+import { entryScoreKey, getQualityMultiplier, getRetentionPolicy, recordLookupEvents } from "../shared/governance.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
 import { formatActorAttribution, parseScopeComment, parseSourceComment } from "../content/citation.js";
@@ -433,6 +433,27 @@ async function handleSearchKnowledge(
         ...(federationSource ? { federation_source: federationSource } : {}),
       };
     });
+
+    // Live activity: record each memory this search landed on so the web UI and
+    // VS Code extension can surface lookups in real time. Best-effort only.
+    try {
+      const at = new Date().toISOString();
+      recordLookupEvents(
+        phrenPath,
+        results.map((r) => ({
+          at,
+          query,
+          project: r.project,
+          filename: r.filename,
+          type: r.type,
+          path: r.path,
+          snippet: r.snippet,
+          source: "search",
+        })),
+      );
+    } catch (err: unknown) {
+      debugLog(`search_knowledge lookup-events: ${errorMessage(err)}`);
+    }
 
     let relatedFragments: string[] = [];
     try {
