@@ -13,6 +13,7 @@ import {
   renderEventWiringScript,
   renderGraphHostScript,
   renderActivityStreamScript,
+  renderGraphWalkScript,
 } from "./scripts.js";
 
 function h(s: string): string {
@@ -425,6 +426,9 @@ ${renderReviewQueueKeyboardScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderActivityStreamScript(authToken || "")}
+</script>
+<script${nonceAttr}>
+${renderGraphWalkScript()}
 </script>
 <script${nonceAttr}>
 ${renderSearchScript(authToken || "")}

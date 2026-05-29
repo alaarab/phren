@@ -36,6 +36,8 @@ export function renderGraphScript(): string {
     onSelectionClear: function() {},
     clearSelection: function() {},
     selectNode: function() { return false; },
+    focusNode: function() { return false; },
+    walkTo: function() { return false; },
     getNodeAt: function() { return null; },
     getNodeDetail: function() { return null; },
     destroy: function() {}

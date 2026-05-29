@@ -82,6 +82,7 @@ type PhrenGraphApi = {
   clearSelection: () => void;
   selectNode: (nodeId: string) => boolean;
   focusNode: (nodeId: string) => boolean;
+  walkTo: (nodeId: string) => boolean;
   getNodeAt: (x: number, y: number) => NodeDetail | null;
   getNodeDetail: (nodeId: string) => NodeDetail | null;
   getData: () => { nodes: NodeDetail[]; links: RawLink[]; topics: RawTopic[]; total: number };
@@ -1838,6 +1839,44 @@ function mascotMoveTo(targetId: string, userTriggered = false): void {
   mascot.targetNodeId = targetId;
 }
 
+let _lastWalkPanAt = 0;
+
+// Drive the mascot to a node in response to a live memory lookup, so phren
+// visibly "walks" the graph as searches stream in. Camera-follow is throttled
+// to avoid thrashing the viewport on bursts of events.
+function walkMascotTo(nodeId: string): boolean {
+  if (!state.graph?.hasNode(nodeId)) return false;
+  if (!mascot.initialized) {
+    // Mascot hasn't started yet (graph just mounted) — place it at the node.
+    const pos = mascotGraphPos(nodeId);
+    if (pos) {
+      mascot.gx = pos.x;
+      mascot.gy = pos.y;
+      mascot.currentNodeId = nodeId;
+    }
+    return true;
+  }
+  if (nodeId === mascot.currentNodeId && !mascot.moving) {
+    // Already here — give a little arrival bounce instead of a no-op.
+    mascot.arriving = true;
+    mascot.arriveTimer = 0;
+  } else {
+    mascotMoveTo(nodeId, true);
+  }
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  if (state.renderer && now - _lastWalkPanAt > 700) {
+    _lastWalkPanAt = now;
+    const display = state.renderer.getNodeDisplayData(nodeId);
+    if (display) {
+      state.renderer.getCamera().animate(
+        { x: display.x, y: display.y, ratio: state.renderer.getCamera().ratio },
+        { duration: 500 },
+      );
+    }
+  }
+  return true;
+}
+
 function mascotUpdate(dt: number): void {
   mascot.idlePhase += dt;
 
@@ -2112,6 +2151,7 @@ ROOT.phrenGraph = {
   clearSelection,
   selectNode,
   focusNode: selectNode,
+  walkTo: walkMascotTo,
   getNodeAt,
   getNodeDetail: nodeDetail,
   getData() {

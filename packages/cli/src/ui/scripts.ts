@@ -2405,7 +2405,9 @@ export function renderActivityStreamScript(_authToken: string): string {
     function loadInitial() {
       fetch(authUrl('/api/lookups')).then(function(r) { return r.json(); }).then(function(d) {
         var items = (d && d.lookups) || [];
-        if (!items.length) { setStatus('No lookups yet', ''); return; }
+        // Leave the feed placeholder and let the SSE connection drive the status
+        // (avoids clobbering 'Live' when the snapshot is empty).
+        if (!items.length) return;
         // API returns newest-first; render oldest-first so newest ends up on top.
         for (var i = items.length - 1; i >= 0; i--) renderItem(items[i], false);
       }).catch(function() { /* stream may still deliver */ });
@@ -2419,7 +2421,13 @@ export function renderActivityStreamScript(_authToken: string): string {
       var src = new EventSource(authUrl('/api/lookups/stream'));
       src.onopen = function() { setStatus('Live', 'ok'); };
       src.onmessage = function(e) {
-        try { renderItem(JSON.parse(e.data), true); } catch (err) {}
+        try {
+          var ev = JSON.parse(e.data);
+          renderItem(ev, true);
+          // Broadcast so other surfaces (e.g. the graph walk) can react without
+          // opening a second SSE connection.
+          try { window.dispatchEvent(new CustomEvent('phren:lookup', { detail: ev })); } catch (err2) {}
+        } catch (err) {}
         setStatus('Live', 'ok');
       };
       src.onerror = function() {
@@ -2440,5 +2448,51 @@ export function renderActivityStreamScript(_authToken: string): string {
     } else {
       init();
     }
+  })();`;
+}
+
+/**
+ * Drives the graph mascot from the live lookup feed: each 'phren:lookup' event
+ * (dispatched by the activity stream) maps to a graph node and sends phren
+ * walking to it, so you can watch phren traverse the knowledge graph in real
+ * time. No-ops gracefully until the graph is mounted (Graph tab opened).
+ */
+export function renderGraphWalkScript(): string {
+  return `(function() {
+    function api() { return window.phrenGraph; }
+
+    function nodeIdForLookup(ev) {
+      var g = api();
+      if (!g || typeof g.getNodeDetail !== 'function' || typeof g.getData !== 'function') return null;
+      if (!ev || !ev.project) return null;
+
+      // Reference lookups: prefer the specific reference node when present.
+      if (ev.type === 'reference' && ev.filename) {
+        var base = String(ev.filename).split('/').pop() || ev.filename;
+        var candidates = [ev.project + ':ref:' + ev.filename, ev.project + ':ref:' + base];
+        for (var i = 0; i < candidates.length; i++) {
+          if (g.getNodeDetail(candidates[i])) return candidates[i];
+        }
+        var stem = base.replace(/\\.md$/, '');
+        var refMatch = (g.getData().nodes || []).find(function(n) {
+          return n.project === ev.project && n.group === 'reference' && String(n.label || '').indexOf(stem) !== -1;
+        });
+        if (refMatch) return refMatch.id;
+      }
+
+      // Project node id is the project name — the reliable, always-present hop.
+      if (g.getNodeDetail(ev.project)) return ev.project;
+
+      // Last resort: any visible node belonging to the project.
+      var any = (g.getData().nodes || []).find(function(n) { return n.project === ev.project; });
+      return any ? any.id : null;
+    }
+
+    window.addEventListener('phren:lookup', function(e) {
+      var g = api();
+      if (!g || typeof g.walkTo !== 'function') return;
+      var id = nodeIdForLookup(e.detail);
+      if (id) { try { g.walkTo(id); } catch (err) {} }
+    });
   })();`;
 }
