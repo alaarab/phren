@@ -33,6 +33,7 @@ import {
 } from "../shared/index.js";
 import { runCustomHooks } from "../hooks.js";
 import { entryScoreKey, getQualityMultiplier, getRetentionPolicy, recordLookupEvents } from "../shared/governance.js";
+import { bestFindingNodeId } from "../finding-graph-id.js";
 import { callLlm } from "../content/dedup.js";
 import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStores, type FederatedDocRow } from "../shared/retrieval.js";
 import { formatActorAttribution, parseScopeComment, parseSourceComment } from "../content/citation.js";
@@ -440,16 +441,24 @@ async function handleSearchKnowledge(
       const at = new Date().toISOString();
       recordLookupEvents(
         phrenPath,
-        results.map((r) => ({
-          at,
-          query,
-          project: r.project,
-          filename: r.filename,
-          type: r.type,
-          path: r.path,
-          snippet: r.snippet,
-          source: "search",
-        })),
+        results.map((r, i) => {
+          // For findings, resolve the specific finding node so phren can walk
+          // to it on the graph; otherwise the project node is used downstream.
+          const nodeId = r.type === "findings"
+            ? bestFindingNodeId(r.project, rows[i]?.content ?? "", query)
+            : null;
+          return {
+            at,
+            query,
+            project: r.project,
+            filename: r.filename,
+            type: r.type,
+            path: r.path,
+            snippet: r.snippet,
+            source: "search",
+            ...(nodeId ? { nodeId } : {}),
+          };
+        }),
       );
     } catch (err: unknown) {
       debugLog(`search_knowledge lookup-events: ${errorMessage(err)}`);
