@@ -666,3 +666,43 @@ export const REVIEW_UI_STYLES = `
   }
 `;
 
+/*
+ * Viewport refinements — appended LAST in the page <style> so these win the
+ * cascade over the base WEB_UI_STYLES. Keeps the layout fitting the viewport
+ * across desktop, laptop, and narrow widths without horizontal page scroll.
+ */
+export const LAYOUT_VIEWPORT_STYLES = `
+  /* Graph: fill the available viewport height instead of forcing 800px
+     (which overflowed laptop-height screens), and frame it as a panel. */
+  #graph-canvas {
+    height: calc(100vh - 110px);
+    min-height: 420px;
+  }
+  .graph-container {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  /* Header nav: shrink and scroll internally on narrow widths so the header
+     never pushes the page wider than the viewport. */
+  .nav {
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-item { flex: 0 0 auto; white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    #graph-canvas { height: calc(100vh - 92px); min-height: 360px; }
+    .header { gap: 12px; }
+    .nav-item { padding: 0 12px; }
+  }
+`;
+
+
