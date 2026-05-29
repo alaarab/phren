@@ -21,6 +21,7 @@ import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
 import { readProjectTopics, classifyTopicForText } from "../project-topics.js";
 import { entryScoreKey } from "../governance/scores.js";
+import { findingStableId } from "../finding-graph-id.js";
 import { readRecentLookups, type LookupEvent } from "../governance/activity.js";
 import { logger } from "../logger.js";
 
@@ -346,7 +347,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           if (taggedCount >= MAX_TAGGED) continue;
           const topic = classifyTopicForText(`[${currentHeadingTag}] ${text}`, projectTopics);
           const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${currentHeadingTag}] ${text}`);
-          const nodeId = stableId("finding", scoreKey);
+          const nodeId = findingStableId(scoreKey);
           taggedCount++;
           nodes.push({
             id: nodeId,
@@ -381,7 +382,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         // Classify the finding using the project's topic system
         const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
         const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${tag}] ${text}`);
-        const nodeId = stableId("finding", scoreKey);
+        const nodeId = findingStableId(scoreKey);
         taggedCount++;
         nodes.push({
           id: nodeId,
@@ -414,7 +415,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       // Classify using dynamic topics
       const topic = classifyTopicForText(text, projectTopics);
       const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, text);
-      const nodeId = stableId("finding", scoreKey);
+      const nodeId = findingStableId(scoreKey);
       untaggedAdded++;
       nodes.push({
         id: nodeId,

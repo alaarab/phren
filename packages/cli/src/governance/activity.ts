@@ -26,6 +26,8 @@ export interface LookupEvent {
   type: string;
   /** Source key / path of the memory, when available. */
   path?: string;
+  /** Precomputed graph node id for this hit (e.g. a specific finding), when resolvable. */
+  nodeId?: string;
   /** Short snippet of the matched content. */
   snippet?: string;
   /** What triggered the lookup: "search" (MCP search) | "inject" (hook). */
@@ -62,6 +64,7 @@ export function recordLookupEvents(
         filename: e.filename,
         type: e.type,
         ...(e.path ? { path: e.path } : {}),
+        ...(e.nodeId ? { nodeId: e.nodeId } : {}),
         ...(e.snippet ? { snippet: clampSnippet(e.snippet) } : {}),
         source: e.source,
         ...(e.session ? { session: e.session } : {}),

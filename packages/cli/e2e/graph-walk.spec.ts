@@ -67,4 +67,35 @@ test.describe.serial("web-ui graph walk (phren follows the live feed)", () => {
     // The project node id equals the project name — the reliable hop target.
     expect(walked).toContain("repo-a");
   });
+
+  test("walks to a specific finding node when the event carries a nodeId", async ({ page }) => {
+    await openGraph(page);
+
+    await page.evaluate(() => {
+      const g = (window as unknown as { phrenGraph: { walkTo: (id: string) => boolean; __walk?: string[] } }).phrenGraph;
+      const orig = g.walkTo.bind(g);
+      (g as { __walk?: string[] }).__walk = [];
+      g.walkTo = (id: string) => { (g as { __walk?: string[] }).__walk!.push(id); return orig(id); };
+    });
+    await expect(page.locator("#activity-status")).toHaveText("Live", { timeout: 8_000 });
+
+    // Grab a real finding node id from the live graph and feed it through.
+    const findingId = await page.evaluate(() => {
+      const nodes = (window as unknown as { phrenGraph: { getData: () => { nodes: Array<{ id: string }> } } }).phrenGraph.getData().nodes;
+      const f = nodes.find((n) => String(n.id).indexOf("finding:") === 0);
+      return f ? f.id : null;
+    });
+    expect(findingId).toBeTruthy();
+
+    appendLookup({ query: "anything", project: "repo-a", filename: "FINDINGS.md", type: "findings", nodeId: findingId as string });
+
+    await page.waitForFunction(
+      (id) => {
+        const w = (window as unknown as { phrenGraph?: { __walk?: string[] } }).phrenGraph?.__walk;
+        return !!w && w.indexOf(id as string) !== -1;
+      },
+      findingId,
+      { timeout: 8_000 },
+    );
+  });
 });

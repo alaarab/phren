@@ -131,6 +131,8 @@ describe("mcp-search: lookup-event recording", () => {
       expect(ev.query).toBe("Redis");
       expect(ev.project).toBe("app");
     }
+    // The findings hit resolves to a specific finding graph node id.
+    expect(events.some((ev) => typeof ev.nodeId === "string" && ev.nodeId.startsWith("finding:"))).toBe(true);
   });
 
   it("does not record events when a search has zero results", async () => {

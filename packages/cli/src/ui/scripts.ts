@@ -2466,6 +2466,9 @@ export function renderGraphWalkScript(): string {
       if (!g || typeof g.getNodeDetail !== 'function' || typeof g.getData !== 'function') return null;
       if (!ev || !ev.project) return null;
 
+      // Precomputed node id (e.g. a specific finding) wins when it resolves.
+      if (ev.nodeId && g.getNodeDetail(ev.nodeId)) return ev.nodeId;
+
       // Reference lookups: prefer the specific reference node when present.
       if (ev.type === 'reference' && ev.filename) {
         var base = String(ev.filename).split('/').pop() || ev.filename;
