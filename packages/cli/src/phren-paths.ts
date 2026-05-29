@@ -300,6 +300,15 @@ export function memoryUsageLogFile(phrenPath: string): string {
   return path.join(runtimeDir(phrenPath), "memory-usage.log");
 }
 
+/**
+ * Live "lookup events" log: one JSONL entry per memory a search lands on.
+ * Distinct from memory-usage.log (injection scoring) — this feed powers the
+ * real-time activity surfaces in the web UI and the VS Code extension.
+ */
+export function lookupEventsLogFile(phrenPath: string): string {
+  return path.join(runtimeDir(phrenPath), "lookup-events.jsonl");
+}
+
 export function sessionMarker(phrenPath: string, name: string): string {
   const dir = sessionsDir(phrenPath);
   fs.mkdirSync(dir, { recursive: true });

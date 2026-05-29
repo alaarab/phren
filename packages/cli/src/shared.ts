@@ -60,6 +60,7 @@ export {
   sessionMetricsFile,
   memoryScoresFile,
   memoryUsageLogFile,
+  lookupEventsLogFile,
   sessionMarker,
   debugLog,
   appendIndexEvent,

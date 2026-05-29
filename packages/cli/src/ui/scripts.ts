@@ -2339,3 +2339,106 @@ export function renderReviewQueueKeyboardScript(_authToken: string): string {
     });
   })();`;
 }
+
+/**
+ * Live "Activity" tab: streams memory lookups from /api/lookups/stream (SSE)
+ * and prepends them to #activity-feed in real time, so you can watch phren land
+ * on memories as it searches. Falls back gracefully if EventSource is missing.
+ */
+export function renderActivityStreamScript(_authToken: string): string {
+  return `(function() {
+    var esc = window._phrenEsc;
+    var authUrl = window._phrenAuthUrl;
+    var MAX_ITEMS = 80;
+    var feed = null, statusEl = null, ledEl = null;
+    var emptyShown = true;
+
+    function el() {
+      feed = document.getElementById('activity-feed');
+      statusEl = document.getElementById('activity-status');
+      ledEl = document.getElementById('activity-led');
+      return !!feed;
+    }
+
+    function relTime(iso) {
+      var t = Date.parse(iso);
+      if (isNaN(t)) return '';
+      var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (s < 5) return 'just now';
+      if (s < 60) return s + 's ago';
+      var m = Math.round(s / 60);
+      if (m < 60) return m + 'm ago';
+      var h = Math.round(m / 60);
+      if (h < 24) return h + 'h ago';
+      return Math.round(h / 24) + 'd ago';
+    }
+
+    function setStatus(text, state) {
+      if (statusEl) statusEl.textContent = text;
+      if (ledEl) ledEl.className = 'activity-led' + (state ? ' activity-led-' + state : '');
+    }
+
+    function renderItem(ev, isNew) {
+      if (!feed) return;
+      if (emptyShown) { feed.innerHTML = ''; emptyShown = false; }
+      var li = document.createElement('li');
+      li.className = 'activity-item' + (isNew ? ' activity-item-new' : '');
+      var loc = esc((ev.project || '?') + '/' + (ev.filename || '?'));
+      var type = esc(ev.type || '');
+      var q = ev.query ? esc(ev.query) : '';
+      var snip = ev.snippet ? esc(ev.snippet) : '';
+      li.innerHTML =
+        '<div class="activity-row">' +
+          '<span class="activity-type activity-type-' + type + '">' + type + '</span>' +
+          '<span class="activity-loc">' + loc + '</span>' +
+          '<span class="activity-time">' + esc(relTime(ev.at)) + '</span>' +
+        '</div>' +
+        (q ? '<div class="activity-query">found via &ldquo;' + q + '&rdquo;</div>' : '') +
+        (snip ? '<div class="activity-snippet">' + snip + '</div>' : '');
+      feed.insertBefore(li, feed.firstChild);
+      while (feed.children.length > MAX_ITEMS) feed.removeChild(feed.lastChild);
+      if (isNew) {
+        setTimeout(function() { li.classList.remove('activity-item-new'); }, 1500);
+      }
+    }
+
+    function loadInitial() {
+      fetch(authUrl('/api/lookups')).then(function(r) { return r.json(); }).then(function(d) {
+        var items = (d && d.lookups) || [];
+        if (!items.length) { setStatus('No lookups yet', ''); return; }
+        // API returns newest-first; render oldest-first so newest ends up on top.
+        for (var i = items.length - 1; i >= 0; i--) renderItem(items[i], false);
+      }).catch(function() { /* stream may still deliver */ });
+    }
+
+    function connect() {
+      if (typeof EventSource === 'undefined') {
+        setStatus('Live updates unsupported — reload to refresh', 'err');
+        return;
+      }
+      var src = new EventSource(authUrl('/api/lookups/stream'));
+      src.onopen = function() { setStatus('Live', 'ok'); };
+      src.onmessage = function(e) {
+        try { renderItem(JSON.parse(e.data), true); } catch (err) {}
+        setStatus('Live', 'ok');
+      };
+      src.onerror = function() {
+        setStatus('Reconnecting…', 'warn');
+        // EventSource auto-reconnects using the server's retry hint.
+      };
+    }
+
+    function init() {
+      if (!el()) return;
+      setStatus('Connecting…', 'warn');
+      loadInitial();
+      connect();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+  })();`;
+}
