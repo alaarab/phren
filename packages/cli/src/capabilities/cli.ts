@@ -46,8 +46,8 @@ export const cliManifest: CapabilityManifest = {
     "health.check": { implemented: true, handler: "cli-actions.ts:handleDoctor" },
     "health.doctor_fix": { implemented: true, handler: "cli-actions.ts:handleDoctor --fix" },
     "health.sync": { implemented: true, handler: "hook-stop auto-commit" },
-    "session.start": { implemented: true, handler: "cli-hooks-session.ts (hook)" },
-    "session.end": { implemented: true, handler: "cli-hooks-stop.ts (hook)" },
+    "session.start": { implemented: true, handler: "cli/session-start.ts (hook)" },
+    "session.end": { implemented: true, handler: "cli/session-stop.ts (hook)" },
 
     // Skill management
     "skill.list": { implemented: true, handler: "cli-actions.ts:handleSkillList" },
