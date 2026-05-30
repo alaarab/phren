@@ -58,13 +58,19 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-0.1.18
+`@phren/cli` 0.1.31 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 
-See `reference/topics/` for detailed documentation:
-- `mcp-tools.md` -- all 54 MCP tools
-- `cli-commands.md` -- full CLI command reference
-- `hooks.md` -- lifecycle hooks, consolidation system, key patterns
-- `environment.md` -- environment variables, directory structure, finding quality rules
+Developer docs live in `docs/` (also published to the GitHub Pages site):
+- `api-reference.md` -- all 54 MCP tools, parameters, and usage
 - `architecture.md` -- system architecture and design patterns
+- `architecture-team-stores.md` -- multi-store / team-store design
+- `environment.md` -- environment variables, directory structure, finding quality rules
+- `governance.md` -- policies, access control, retention, audit
+- `feature-flags.md` -- optional features and their env flags
+- `performance.md` -- indexing and search performance notes
+- `shell.md` -- the interactive `phren` shell
+
+Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<project>/`
+(archived per-topic docs), not a directory in this repo.
