@@ -100,12 +100,13 @@ function toSetConfig(key: string, value: unknown): { domain: string; settings: R
   if (key === "workflow.lowConfidenceThreshold") return { domain: "workflow", settings: { lowConfidenceThreshold: value } };
   if (key === "workflow.riskySections") return { domain: "workflow", settings: { riskySections: value } };
   if (key.startsWith("index.")) return { domain: "index", settings: { [key.slice("index.".length)]: value } };
-  return null; // access / topic — not writable through set_config
+  if (key.startsWith("access.")) return { domain: "access", settings: { [key.slice("access.".length)]: value } };
+  return null; // topic — not writable through set_config (managed via the Reference/topics UI)
 }
 
 /** Whether a field can be edited at the current scope. */
 function isEditable(field: SchemaField, isProject: boolean): boolean {
-  if (field.domain === "access" || field.domain === "topic") return false;
+  if (field.domain === "topic") return false;
   if (field.scope === "global-only") return !isProject;
   if (field.scope === "project-only") return isProject;
   return true;
@@ -192,13 +193,13 @@ function renderControl(field: SchemaField, resolved: ResolvedField | undefined, 
 function renderField(field: SchemaField, resolved: ResolvedField | undefined, isProject: boolean): string {
   const editable = isEditable(field, isProject);
   const cautionBadge = field.risk === "caution" ? `<span class="caution" title="Changing this has notable side effects.">caution</span>` : "";
-  const scopeNote = !editable && field.domain !== "access" && field.domain !== "topic"
+  const scopeNote = !editable && field.domain !== "topic"
     ? `<div class="note">${field.scope === "global-only"
       ? "Global-only — switch to Global scope to edit."
       : "Project-only — select a project to edit."}</div>`
     : "";
   const accessNote = field.domain === "access"
-    ? `<div class="note">Edit access roles with <code>phren config access</code>.</div>`
+    ? `<div class="note">Effective roles are the union of global and per-project lists. Empty everywhere = open mode.</div>`
     : "";
   return `<div class="field">
     <div class="field-head">

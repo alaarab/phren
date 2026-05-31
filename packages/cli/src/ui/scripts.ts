@@ -962,6 +962,30 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
     }
 
+    function postAccess(role, value) {
+      var proj = getSettingsProject();
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
+        var payload = {};
+        payload[role] = value || '';
+        if (proj) payload.project = proj;
+        var body = new URLSearchParams(payload);
+        if (csrfData.token) body.set('_csrf', csrfData.token);
+        var url = _tsAuthToken ? tsAuthUrl('/api/settings/access') : '/api/settings/access';
+        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) {
+          setSettingsStatus(data.error || 'Failed to update access roles', 'err');
+          return;
+        }
+        _settingsLoaded = false;
+        loadSettings();
+        setSettingsStatus('Access roles updated', 'ok');
+      }).catch(function(err) {
+        setSettingsStatus('Failed: ' + String(err), 'err');
+      });
+    }
+
     function postGlobalWorkflow(field, value, clearField) {
       var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
       fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
@@ -1173,6 +1197,11 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           retRow('Retention days', 'retentionDays', ret.retentionDays, 'Hard cutoff — memories past this age are removed.');
           retRow('Auto-accept threshold', 'autoAcceptThreshold', ret.autoAcceptThreshold, 'Confidence score (0–1) above which memories are auto-accepted.');
           retRow('Min inject confidence', 'minInjectConfidence', ret.minInjectConfidence, 'Minimum confidence score to inject a memory into context.');
+          var decay = ret.decay || {};
+          retRow('Decay @30d', 'decay.d30', decay.d30, 'Confidence multiplier (0–1) applied to memories ~30 days old.');
+          retRow('Decay @60d', 'decay.d60', decay.d60, 'Confidence multiplier (0–1) applied to memories ~60 days old.');
+          retRow('Decay @90d', 'decay.d90', decay.d90, 'Confidence multiplier (0–1) applied to memories ~90 days old.');
+          retRow('Decay @120d', 'decay.d120', decay.d120, 'Confidence multiplier (0–1) applied to memories ~120 days old.');
           retentionEl.innerHTML = retHtml;
         }
 
@@ -1196,8 +1225,14 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           wfHtml += '<div class="settings-control-note">Memories below this confidence score are flagged for review.</div></div>';
           wfHtml += '<div class="settings-control">';
           wfHtml += '<div class="settings-control-header"><span class="settings-control-label">Risky sections</span>' + sourceBadge(riskySectionsOverride);
-          wfHtml += '<span class="settings-control-value" style="margin-left:auto">' + esc(Array.isArray(wf.riskySections) ? wf.riskySections.join(', ') : '—') + '</span></div>';
-          wfHtml += '<div class="settings-control-note">Sections that trigger approval gates when memories are written.</div></div>';
+          if (isProject && riskySectionsOverride) {
+            wfHtml += '<button data-ts-action="clearProjectOverride" data-field="riskySections" class="settings-chip" style="font-size:11px;margin-left:auto">Clear</button>';
+          }
+          wfHtml += '</div><div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+            '<input type="text" id="wf-input-riskySections" value="' + esc(Array.isArray(wf.riskySections) ? wf.riskySections.join(', ') : '') + '" placeholder="Review, Stale, Conflicts" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+            '<button data-ts-action="' + (isProject ? 'setProjectWorkflow' : 'setGlobalWorkflow') + '" data-field="riskySections" class="settings-chip active" style="font-size:11px">Set</button>' +
+            '</div>';
+          wfHtml += '<div class="settings-control-note">Comma-separated sections that trigger approval gates when memories are written (Review, Stale, Conflicts).</div></div>';
           workflowEl.innerHTML = wfHtml;
         }
 
@@ -1223,6 +1258,35 @@ export function renderTasksAndSettingsScript(authToken: string): string {
           indexEl.innerHTML = idxHtml;
         } else if (indexEl && isProject) {
           indexEl.innerHTML = '<div style="color:var(--muted);font-size:var(--text-sm)">Index policy is global — switch to Global scope to edit it.</div>';
+        }
+
+        var accessEl = document.getElementById('settings-access');
+        if (accessEl) {
+          var accFields = (data.view && data.view.fields) ? data.view.fields : {};
+          function accVal(role) {
+            if (isProject) {
+              return (rawOverrides && rawOverrides.access && Array.isArray(rawOverrides.access[role])) ? rawOverrides.access[role].join(', ') : '';
+            }
+            var f = accFields['access.' + role];
+            return (f && Array.isArray(f.value)) ? f.value.join(', ') : '';
+          }
+          var accHtml = '';
+          function accRow(label, role, note) {
+            accHtml += '<div class="settings-control">';
+            accHtml += '<div class="settings-control-header"><span class="settings-control-label">' + esc(label) + '</span></div>';
+            accHtml += '<div class="settings-control-note">' + esc(note) + '</div>';
+            accHtml += '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+              '<input type="text" id="access-input-' + esc(role) + '" value="' + esc(accVal(role)) + '" placeholder="comma,separated actors" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
+              '<button data-ts-action="setAccessRole" data-role="' + esc(role) + '" class="settings-chip active" style="font-size:11px">Set</button>' +
+              '</div></div>';
+          }
+          accRow('Admins', 'admins', 'Full access — all actions, including config changes.');
+          accRow('Contributors', 'contributors', 'Can add, edit, and remove findings and tasks.');
+          accRow('Readers', 'readers', 'Read-only access (search and get).');
+          accHtml += '<div class="settings-control-note">' + (isProject
+            ? 'Editing the per-project access list for this project. Effective roles are the union of global and project lists.'
+            : 'Editing the global access list. Effective roles are the union of global and per-project lists.') + ' All lists empty everywhere = open mode (everyone allowed).</div>';
+          accessEl.innerHTML = accHtml;
         }
 
         var integrationsEl = document.getElementById('settings-integrations');
@@ -1423,6 +1487,11 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       else if (action === 'toggleIndexHidden') {
         var nextHidden = actionEl.getAttribute('data-enabled') !== 'true';
         postSettings('/api/settings/index-policy', { includeHidden: String(nextHidden) }, 'Index policy updated.');
+      }
+      else if (action === 'setAccessRole') {
+        var role = actionEl.getAttribute('data-role') || '';
+        var inputEl = document.getElementById('access-input-' + role);
+        postAccess(role, inputEl ? inputEl.value : '');
       }
     });
 

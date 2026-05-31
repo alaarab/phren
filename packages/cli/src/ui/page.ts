@@ -367,6 +367,12 @@ ${LAYOUT_VIEWPORT_STYLES}
           <div id="settings-workflow" style="color:var(--muted)">Loading...</div>
         </div>
       </section>
+      <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--danger, var(--warning)) 45%, var(--border))">
+        <div class="settings-section-header">Access Control</div>
+        <div class="settings-section-body">
+          <div id="settings-access" style="color:var(--muted)">Loading...</div>
+        </div>
+      </section>
       <section class="settings-section" style="border-top:3px solid color-mix(in srgb, var(--cyan) 45%, var(--border))">
         <div class="settings-section-header">Index Policy</div>
         <div class="settings-section-body">

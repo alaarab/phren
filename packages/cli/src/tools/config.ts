@@ -29,6 +29,7 @@ import {
   updateProjectConfigOverrides,
 } from "../project-config.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { ACCESS_ROLE_KEYS, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import {
   readProjectTopics,
   writeProjectTopics,
@@ -273,7 +274,7 @@ async function handleGetConfig(
 async function handleSetConfig(
   ctx: McpContext,
   { domain, settings, project }: {
-    domain: "proactivity" | "taskMode" | "findingSensitivity" | "retention" | "workflow" | "index" | "topic";
+    domain: "proactivity" | "taskMode" | "findingSensitivity" | "retention" | "workflow" | "access" | "index" | "topic";
     settings: Record<string, unknown>;
     project?: string;
   },
@@ -522,6 +523,42 @@ async function handleSetConfig(
       });
     }
 
+    // ── access ────────────────────────────────────────────────────
+    case "access": {
+      const patch: AccessRolePatch = {};
+      let touched = false;
+      for (const key of ACCESS_ROLE_KEYS) {
+        const value = settings[key];
+        if (value === undefined) continue;
+        if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+          return mcpResponse({ ok: false, error: `Invalid access roles: "${key}" must be an array of strings.` });
+        }
+        patch[key] = value as string[];
+        touched = true;
+      }
+      if (!touched) {
+        return mcpResponse({ ok: false, error: "Provide at least one of: admins, contributors, readers (each an array of actor names)." });
+      }
+
+      let warning: string | undefined;
+      if (project) {
+        const err = validateProject(project);
+        if (err) return mcpResponse({ ok: false, error: err });
+        warning = checkProjectRegistered(phrenPath, project) ?? undefined;
+      }
+
+      const written = setAccessRoles(phrenPath, patch, project);
+      return mcpResponse({
+        ok: true,
+        message: project
+          ? (warning
+            ? `Access roles updated for project "${project}". WARNING: ${warning}`
+            : `Access roles updated for project "${project}".`)
+          : "Access roles updated.",
+        data: { ...(project ? { project } : {}), ...written, ...(warning ? { warning } : {}) },
+      });
+    }
+
     // ── index ─────────────────────────────────────────────────────
     case "index": {
       const { includeGlobs, excludeGlobs, includeHidden } =
@@ -658,12 +695,13 @@ export function register(server: McpServer, ctx: McpContext): void {
         "and set_topic_config. When project is provided, writes to that project's phren.project.yaml " +
         "instead of global .config/.",
       inputSchema: z.object({
-        domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "index", "topic"]),
+        domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic"]),
         settings: z.record(z.string(), z.unknown()).describe(
           "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
           "minInjectConfidence?, decay? } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
-          "findingSensitivity? } | index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
+          "findingSensitivity? } | access: { admins?, contributors?, readers? } (each an array of actor names) | " +
+          "index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
           "topic: { topics, domain? }"
         ),
         project: z.string().optional().describe(
