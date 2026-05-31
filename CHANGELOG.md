@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.33] - 2026-05-31
+
+### Changed
+
+- Maintenance release. Republished so the latest `main` ships as a clean build —
+  the previously published `0.1.32` tarball had been cut before the config /
+  access-control surfacing work merged, so it lagged the repo. No code changes
+  over `0.1.32`.
+
+## [0.1.32] - 2026-05-31
+
+### Fixed
+
+- **MCP tool schemas no longer use `anyOf`.** Some LLM serializers dropped
+  arguments when a tool's input schema contained `anyOf`; the affected
+  `finding` and `tasks` tool schemas were rewritten to avoid it.
+
 ## [0.1.31] - 2026-05-17
 
 ### Added
