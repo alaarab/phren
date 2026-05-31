@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
-import { permissionDeniedError } from "../governance/rbac.js";
+import { permissionDeniedError, setAccessRoles } from "../governance/rbac.js";
+import { readProjectConfig } from "../project-config.js";
 
 function writeAccessControl(phrenPath: string, data: Record<string, unknown>): void {
   const dir = path.join(phrenPath, ".config");
@@ -66,6 +67,51 @@ describe("readGlobalAccessControl edge cases", () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "access-control.json"), "[]");
     expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+  });
+});
+
+// ── setAccessRoles (shared writer for CLI + MCP set_config) ──────────────────
+
+describe("setAccessRoles", () => {
+  function readGlobal(): Record<string, unknown> {
+    const file = path.join(phrenPath, ".config", "access-control.json");
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  }
+
+  it("writes global role lists to .config/access-control.json", () => {
+    const written = setAccessRoles(phrenPath, { admins: ["alice"], contributors: ["bob"] });
+    expect(written.admins).toEqual(["alice"]);
+    expect(written.contributors).toEqual(["bob"]);
+    expect(readGlobal()).toMatchObject({ admins: ["alice"], contributors: ["bob"] });
+  });
+
+  it("merges with existing global roles, replacing only the provided keys", () => {
+    setAccessRoles(phrenPath, { admins: ["alice"], readers: ["carol"] });
+    setAccessRoles(phrenPath, { admins: ["dave"] });
+    const stored = readGlobal();
+    expect(stored.admins).toEqual(["dave"]);
+    expect(stored.readers).toEqual(["carol"]);
+  });
+
+  it("drops empty and non-string entries", () => {
+    const written = setAccessRoles(phrenPath, { admins: ["alice", "", "  "] as string[] });
+    expect(written.admins).toEqual(["alice"]);
+  });
+
+  it("writes per-project roles to phren.project.yaml without touching global", () => {
+    writeProjectYaml(phrenPath, "demo", "version: 1\n");
+    const written = setAccessRoles(phrenPath, { admins: ["proj-admin"] }, "demo");
+    expect(written.admins).toEqual(["proj-admin"]);
+    expect(readProjectConfig(phrenPath, "demo").access?.admins).toEqual(["proj-admin"]);
+    expect(fs.existsSync(path.join(phrenPath, ".config", "access-control.json"))).toBe(false);
+  });
+
+  it("the written global roles take effect for permission checks", () => {
+    setAccessRoles(phrenPath, { admins: ["alice"] });
+    process.env.PHREN_ACTOR = "alice";
+    expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
+    process.env.PHREN_ACTOR = "mallory";
+    expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
   });
 });
 

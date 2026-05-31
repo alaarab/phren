@@ -21,7 +21,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
-import { readProjectConfig, type ProjectAccessControl } from "../project-config.js";
+import { readProjectConfig, writeProjectConfig, type ProjectAccessControl } from "../project-config.js";
 
 type RbacAction =
   | "add_finding"
@@ -61,6 +61,50 @@ function readGlobalAccessControl(phrenPath: string): AccessControl | null {
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+export const ACCESS_ROLE_KEYS = ["admins", "contributors", "readers"] as const;
+export type AccessRole = (typeof ACCESS_ROLE_KEYS)[number];
+export type AccessRolePatch = Partial<Record<AccessRole, string[]>>;
+
+/**
+ * Single source of truth for writing access-control role lists. Writes to the
+ * global `.config/access-control.json` or, when `project` is given, to that
+ * project's `phren.project.yaml` under the `access` key (merged with any
+ * existing roles). Returns the role lists as written at the chosen scope.
+ *
+ * Shared by the CLI (`phren config access`) and the MCP `set_config` tool so
+ * the two paths can never diverge.
+ */
+export function setAccessRoles(
+  phrenPath: string,
+  patch: AccessRolePatch,
+  project?: string,
+): { admins: string[]; contributors: string[]; readers: string[] } {
+  const clean: AccessControl = {};
+  for (const key of ACCESS_ROLE_KEYS) {
+    if (patch[key] !== undefined) clean[key] = normalizeStringArray(patch[key]);
+  }
+
+  if (project) {
+    const current = readProjectConfig(phrenPath, project).access ?? {};
+    writeProjectConfig(phrenPath, project, { access: { ...current, ...clean } });
+  } else {
+    const current = readGlobalAccessControl(phrenPath) ?? {};
+    const next = { ...current, ...clean };
+    const dir = configDir(phrenPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "access-control.json"), JSON.stringify(next, null, 2) + "\n");
+  }
+
+  const written: AccessControl = project
+    ? (readProjectConfig(phrenPath, project).access ?? {})
+    : (readGlobalAccessControl(phrenPath) ?? {});
+  return {
+    admins: normalizeStringArray(written.admins),
+    contributors: normalizeStringArray(written.contributors),
+    readers: normalizeStringArray(written.readers),
+  };
 }
 
 function mergeAccessControl(global: AccessControl | null, projectAccess: ProjectAccessControl | undefined): AccessControl | null {

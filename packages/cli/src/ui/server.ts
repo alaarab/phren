@@ -50,6 +50,7 @@ import {
   writeProjectTopics,
 } from "../project-topics.js";
 import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
+import { setAccessRoles, ACCESS_ROLE_KEYS, type AccessRolePatch } from "../governance/rbac.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
 import { buildConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -1012,6 +1013,28 @@ function handlePostSettingsIndexPolicy(req: Req, res: Res, url: string, ctx: Rou
   });
 }
 
+function handlePostSettingsAccess(req: Req, res: Res, url: string, ctx: RouteCtx): void {
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const project = String(parsed.project || "").trim();
+    if (project && !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+    const toList = (v: unknown): string[] =>
+      (Array.isArray(v) ? v : String(v ?? "").split(","))
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+    const patch: AccessRolePatch = {};
+    for (const role of ACCESS_ROLE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(parsed, role)) patch[role] = toList(parsed[role]);
+    }
+    if (!Object.keys(patch).length) return jsonErr(res, "Provide at least one of: admins, contributors, readers");
+    try {
+      const written = setAccessRoles(ctx.phrenPath, patch, project || undefined);
+      jsonOk(res, { ok: true, access: written });
+    } catch (err: unknown) {
+      jsonErr(res, errorMessage(err));
+    }
+  });
+}
+
 function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: RouteCtx): void {
   withPostBody(req, res, url, ctx, (parsed) => {
     const enabled = String(parsed.enabled || "").toLowerCase() === "true";
@@ -1102,6 +1125,23 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           const result = updateRetentionPolicy(ctx.phrenPath, updateData);
           if (!result.ok) return jsonErr(res, result.error || "Failed to update retention policy", 500);
           return jsonOk(res, { ok: true, retentionPolicy: result.data });
+        } else if (field.startsWith("decay.")) {
+          const { updateRetentionPolicy } = require("../governance/policy.js");
+          const point = field.slice("decay.".length);
+          let updateData: Record<string, unknown> = {};
+          if (!clearField) {
+            const num = parseFloat(value);
+            if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error("Invalid value for " + field + " (must be 0-1)");
+            updateData = { decay: { [point]: num } };
+          }
+          const result = updateRetentionPolicy(ctx.phrenPath, updateData);
+          if (!result.ok) return jsonErr(res, result.error || "Failed to update retention policy", 500);
+          return jsonOk(res, { ok: true, retentionPolicy: result.data });
+        } else if (field === "riskySections") {
+          const sections = (clearField ? [] : value.split(",").map((s) => s.trim()).filter(Boolean)) as ("Review" | "Stale" | "Conflicts")[];
+          const result = updateWorkflowPolicy(ctx.phrenPath, { riskySections: sections });
+          if (!result.ok) return jsonErr(res, result.error || "Failed to update workflow policy", 500);
+          return jsonOk(res, { ok: true, workflowPolicy: result.data });
         } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
           const { updateWorkflowPolicy } = require("../governance/policy.js");
           let updateData: Record<string, unknown> = {};
@@ -1135,6 +1175,8 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
         if (clearField) {
           if (field in VALID_FIELDS) delete (next as Record<string, unknown>)[field];
           else if (NUMERIC_RETENTION_FIELDS.includes(field)) { if (next.retentionPolicy) delete (next.retentionPolicy as Record<string, unknown>)[field]; }
+          else if (field.startsWith("decay.")) { if (next.retentionPolicy?.decay) delete (next.retentionPolicy.decay as Record<string, unknown>)[field.slice("decay.".length)]; }
+          else if (field === "riskySections") { if (next.workflowPolicy) delete (next.workflowPolicy as Record<string, unknown>).riskySections; }
           else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) { if (next.workflowPolicy) delete (next.workflowPolicy as Record<string, unknown>)[field]; }
           return next;
         }
@@ -1145,6 +1187,13 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           const num = parseFloat(value);
           if (!Number.isFinite(num) || num < 0) throw new Error(`Invalid numeric value for ${field}`);
           next.retentionPolicy = { ...next.retentionPolicy, [field]: num };
+        } else if (field.startsWith("decay.")) {
+          const num = parseFloat(value);
+          if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error(`Invalid value for ${field} (must be 0-1)`);
+          next.retentionPolicy = { ...next.retentionPolicy, decay: { ...next.retentionPolicy?.decay, [field.slice("decay.".length)]: num } };
+        } else if (field === "riskySections") {
+          const sections = value.split(",").map((s) => s.trim()).filter(Boolean) as ("Review" | "Stale" | "Conflicts")[];
+          next.workflowPolicy = { ...next.workflowPolicy, riskySections: sections };
         } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
           const num = parseFloat(value);
           if (!Number.isFinite(num) || num < 0 || num > 1) throw new Error(`Invalid value for ${field} (must be 0-1)`);
@@ -1285,6 +1334,7 @@ export function createWebUiHttpServer(
         case "/api/settings/auto-capture": return handlePostSettingsAutoCapture(req, res, url, ctx);
         case "/api/settings/mcp-enabled": return handlePostSettingsMcpEnabled(req, res, url, ctx);
         case "/api/settings/index-policy": return handlePostSettingsIndexPolicy(req, res, url, ctx);
+        case "/api/settings/access": return handlePostSettingsAccess(req, res, url, ctx);
         case "/api/settings/project-overrides": return handlePostSettingsProjectOverrides(req, res, url, ctx);
       }
       // Prefix-matched write routes
