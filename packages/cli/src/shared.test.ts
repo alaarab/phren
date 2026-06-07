@@ -1794,6 +1794,11 @@ describe("consolidateProjectFindings additional", () => {
 
 describe("filterTrustedFindingsDetailed (extended)", () => {
   it("strips <details> blocks from input", () => {
+    // Use a recent date for the active finding so it stays within the TTL
+    // regardless of when the suite runs (avoids a date-bomb failure).
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 30);
+    const recentStr = recent.toISOString().slice(0, 10);
     const content = [
       "# proj FINDINGS",
       "",
@@ -1802,7 +1807,7 @@ describe("filterTrustedFindingsDetailed (extended)", () => {
       "- Archived finding",
       "</details>",
       "",
-      "## 2025-06-01",
+      `## ${recentStr}`,
       "",
       "- Active finding",
     ].join("\n");
