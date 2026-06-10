@@ -75,7 +75,10 @@ function flushTelemetryForPath(phrenPath: string): void {
   const file = telemetryPath(phrenPath);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+    // Usage stats are private to the user: owner-only perms, including files
+    // created by older versions (mode only applies on create).
+    fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+    fs.chmodSync(file, 0o600);
   } catch (err: unknown) {
     logger.debug("telemetry flush", errorMessage(err));
   }

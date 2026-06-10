@@ -41,18 +41,21 @@ async function handleTeamInit(args: string[]): Promise<void> {
 
   if (!name) {
     console.error("Usage: phren team init <name> [--remote <url>] [--description <text>]");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   if (!isValidProjectName(name)) {
     console.error(`Invalid store name: "${name}". Use lowercase letters, numbers, hyphens.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Check if store already exists
   const existing = findStoreByName(phrenPath, name);
   if (existing) {
     console.error(`Store "${name}" already exists at ${existing.path}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const storesDir = path.join(path.dirname(phrenPath), ".phren-stores");
@@ -60,7 +63,8 @@ async function handleTeamInit(args: string[]): Promise<void> {
 
   if (fs.existsSync(storePath)) {
     console.error(`Directory already exists: ${storePath}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Create the team store directory
@@ -173,7 +177,8 @@ async function handleTeamJoin(args: string[]): Promise<void> {
 
   if (!remote) {
     console.error("Usage: phren team join <git-url> [--name <name>]");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const storesDir = path.join(path.dirname(phrenPath), ".phren-stores");
@@ -182,19 +187,22 @@ async function handleTeamJoin(args: string[]): Promise<void> {
 
   if (!isValidProjectName(inferredName)) {
     console.error(`Invalid store name: "${inferredName}". Use --name to specify a valid name.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const existing = findStoreByName(phrenPath, inferredName);
   if (existing) {
     console.error(`Store "${inferredName}" already exists at ${existing.path}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const storePath = path.join(storesDir, inferredName);
   if (fs.existsSync(storePath)) {
     console.error(`Directory already exists: ${storePath}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Clone the remote
@@ -239,22 +247,26 @@ async function handleTeamAddProject(args: string[]): Promise<void> {
 
   if (!storeName || !projectName) {
     console.error("Usage: phren team add-project <store-name> <project-name>");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (!isValidProjectName(projectName)) {
     console.error(`Invalid project name: "${projectName}"`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const store = findStoreByName(phrenPath, storeName);
   if (!store) {
     console.error(`Store "${storeName}" not found. Run 'phren store list' to see available stores.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   if (store.role === "readonly") {
     console.error(`Store "${storeName}" is read-only. Cannot add projects.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Create project directory in the store
@@ -347,7 +359,8 @@ export async function handleTeamNamespace(args: string[]): Promise<void> {
 `);
       if (subcommand) {
         console.error(`Unknown subcommand: ${subcommand}`);
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
   }
 }

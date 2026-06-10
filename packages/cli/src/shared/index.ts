@@ -86,8 +86,10 @@ import { bootstrapSqlJs } from "./sqljs.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "../project-config.js";
 import {
   buildSourceDocKey,
-  queryDocBySourceKey,
+  decodeStringRow,
+  getDocSourceKey,
   queryDocRows,
+  queryRows,
   type SqlJsDatabase,
 } from "../index-query.js";
 import {
@@ -138,8 +140,19 @@ function scheduleEmbedding(phrenPath: string, docPath: string, content: string):
   _embQueue.set(docPath, { phrenPath, content });
   if (_embTimer) clearTimeout(_embTimer);
   _embTimer = setTimeout(() => { _embTimer = null; void _drainEmbQueue(); }, 500);
-  // Unref so the timer doesn't keep short-lived CLI processes alive
+  // Unref so the timer doesn't keep short-lived CLI processes alive. Pending
+  // embeddings are lost if such a process exits first (acceptable: they're
+  // regenerated on demand); the MCP server calls flushEmbeddingQueue on shutdown.
   _embTimer.unref();
+}
+
+/** Drain pending embeddings immediately (used by the MCP server's graceful shutdown). */
+export async function flushEmbeddingQueue(): Promise<void> {
+  if (_embTimer) {
+    clearTimeout(_embTimer);
+    _embTimer = null;
+  }
+  await _drainEmbQueue();
 }
 
 async function _drainEmbQueue(): Promise<void> {
@@ -420,13 +433,27 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
 
 const INDEX_HASHES_FILENAME = "index-hashes.json";
 const INDEX_SCHEMA_VERSION = 3; // bump when FTS schema changes to force full rebuild
+// Deletion share above which an incremental update falls back to a full rebuild.
+const MAX_INCREMENTAL_DELETE_RATIO = 0.5;
 
 function hashFileContent(filePath: string): string {
   const content = fs.readFileSync(filePath, "utf-8");
   return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-function loadHashMap(phrenPath: string): { version?: number; hashes: Record<string, string> } {
+/** Errors expected from idempotent schema migrations run against older cached DBs. */
+function isExpectedMigrationError(err: unknown): boolean {
+  const msg = errorMessage(err).toLowerCase();
+  return msg.includes("duplicate column name") || msg.includes("no such table");
+}
+
+/** Stat snapshot stored alongside each file hash so unchanged files can skip re-hashing. */
+interface FileStatMeta {
+  mtimeMs: number;
+  size: number;
+}
+
+function loadHashMap(phrenPath: string): { version?: number; hashes: Record<string, string>; meta?: Record<string, FileStatMeta> } {
   const runtimeDir = path.join(phrenPath, ".runtime");
   const hashFile = path.join(runtimeDir, INDEX_HASHES_FILENAME);
   try {
@@ -439,7 +466,7 @@ function loadHashMap(phrenPath: string): { version?: number; hashes: Record<stri
   return { hashes: {} };
 }
 
-function saveHashMap(phrenPath: string, hashes: Record<string, string>, knownPaths?: Set<string>): void {
+function saveHashMap(phrenPath: string, hashes: Record<string, string>, knownPaths?: Set<string>, meta?: Record<string, FileStatMeta>): void {
   const runtimeDir = path.join(phrenPath, ".runtime");
   try {
     fs.mkdirSync(runtimeDir, { recursive: true });
@@ -449,24 +476,32 @@ function saveHashMap(phrenPath: string, hashes: Record<string, string>, knownPat
       // Prune entries for files that no longer exist to prevent ghost paths from causing
       // repeated full rebuilds when deleted files are found in the hash map.
       let existing: Record<string, string> = {};
+      let existingMeta: Record<string, FileStatMeta> = {};
       try {
         const data = JSON.parse(fs.readFileSync(hashFile, "utf-8"));
         if (data.hashes && typeof data.hashes === "object") existing = data.hashes;
+        if (data.meta && typeof data.meta === "object") existingMeta = data.meta;
       } catch (err: unknown) {
         logger.debug("saveHashMap readExisting", errorMessage(err));
       }
       const merged = { ...existing, ...hashes };
+      const mergedMeta = { ...existingMeta, ...meta };
       // Remove entries for paths that no longer exist. When knownPaths is provided
       // (build passes supply the full file list), use set membership instead of
       // hitting the filesystem — avoids N sync stat calls inside the lock.
       for (const filePath of Object.keys(merged)) {
         if (knownPaths ? !knownPaths.has(filePath) : !fs.existsSync(filePath)) {
           delete merged[filePath];
+          delete mergedMeta[filePath];
         }
+      }
+      // Drop meta for paths without a hash entry (meta is only an optimization).
+      for (const filePath of Object.keys(mergedMeta)) {
+        if (!(filePath in merged)) delete mergedMeta[filePath];
       }
       fs.writeFileSync(
         hashFile,
-        JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes: merged }, null, 2)
+        JSON.stringify({ version: INDEX_SCHEMA_VERSION, hashes: merged, meta: mergedMeta }, null, 2)
       );
     });
   } catch (err: unknown) {
@@ -745,7 +780,8 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     try {
       const hashData = loadHashMap(phrenPath);
       hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
-      saveHashMap(phrenPath, hashData.hashes);
+      const stat = fs.statSync(resolvedPath);
+      saveHashMap(phrenPath, hashData.hashes, undefined, { [resolvedPath]: { mtimeMs: stat.mtimeMs, size: stat.size } });
     } catch (err: unknown) {
       logger.debug("updateFileInIndex hashMap", errorMessage(err));
     }
@@ -899,13 +935,35 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
   try {
     const manualLinks: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> =
       JSON.parse(fs.readFileSync(manualLinksPath, 'utf8'));
+
+    // Resolve all sourceDoc keys in one query instead of one lookup per link.
+    // Mirrors queryDocBySourceKey semantics: match project + basename(filename),
+    // then compare the full source-doc key.
+    const projects = [...new Set(
+      manualLinks.map((l) => l.sourceDoc.match(/^([^/]+)\//)?.[1]).filter((p): p is string => !!p)
+    )];
+    const filenames = [...new Set(
+      manualLinks
+        .map((l) => l.sourceDoc.match(/^[^/]+\/(.+)$/)?.[1])
+        .filter((rest): rest is string => !!rest)
+        .map((rest) => path.basename(rest))
+    )];
+    const validSourceKeys = new Set<string>();
+    if (projects.length && filenames.length) {
+      const sql = `SELECT project, filename, path FROM docs WHERE project IN (${projects.map(() => "?").join(",")}) AND filename IN (${filenames.map(() => "?").join(",")})`;
+      const rows = queryRows(db, sql, [...projects, ...filenames]) ?? [];
+      for (const row of rows) {
+        const [project, filename, docPath] = decodeStringRow(row, 3, "mergeManualLinks");
+        validSourceKeys.add(getDocSourceKey({ project, filename, path: docPath }, phrenPath));
+      }
+    }
+
     let pruned = false;
     const validLinks: typeof manualLinks = [];
     for (const link of manualLinks) {
       try {
         // Validate: skip manual links whose sourceDoc no longer exists in the index
-        const docCheck = queryDocBySourceKey(db, phrenPath, link.sourceDoc);
-        if (!docCheck) {
+        if (!validSourceKeys.has(link.sourceDoc)) {
           logger.debug("manualLinks", `pruning stale link to "${link.sourceDoc}"`);
           pruned = true;
           continue;
@@ -1015,7 +1073,10 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
         const docCountResult = db.exec("SELECT COUNT(*) FROM docs");
         const docCount = docCountResult?.[0]?.values?.[0]?.[0] as number ?? 0;
         if (docCount > 0) {
-          try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* column already exists */ }
+          try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch (err: unknown) {
+            // Usually "duplicate column name" — column already exists
+            if (!isExpectedMigrationError(err)) logger.warn("buildIndex migration", errorMessage(err));
+          }
           debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)}) in ${Date.now() - t0}ms [sentinel-hit]`);
           appendIndexEvent(phrenPath, {
             event: "build_index",
@@ -1053,18 +1114,32 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
         }
 
         // Schema migration: add first_seen_at column if missing
-        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* column already exists — expected */ }
+        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch (err: unknown) {
+          // Usually "duplicate column name" — column already exists
+          if (!isExpectedMigrationError(err)) logger.warn("buildIndex migration", errorMessage(err));
+        }
 
-        // Compute current file hashes and determine what changed
+        // Compute current file hashes and determine what changed.
+        // Files whose mtime+size match the stored snapshot reuse the stored hash,
+        // skipping a read+SHA256 per file; the content hash stays the source of
+        // truth whenever the stat changed.
         const allFiles = globResult.entries;
+        const savedMeta = savedHashData.meta ?? {};
         const currentHashes: Record<string, string> = {};
+        const currentMeta: Record<string, FileStatMeta> = {};
         const changedFiles: FileEntry[] = [];
         const newFiles: FileEntry[] = [];
 
         for (const entry of allFiles) {
           try {
-            const fileHash = hashFileContent(entry.fullPath);
+            const stat = fs.statSync(entry.fullPath);
+            const prevHash = savedHashes[entry.fullPath];
+            const prevMeta = savedMeta[entry.fullPath];
+            const statUnchanged = prevHash !== undefined && prevMeta !== undefined
+              && prevMeta.mtimeMs === stat.mtimeMs && prevMeta.size === stat.size;
+            const fileHash = statUnchanged ? prevHash : hashFileContent(entry.fullPath);
             currentHashes[entry.fullPath] = fileHash;
+            currentMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
             if (!(entry.fullPath in savedHashes)) {
               newFiles.push(entry);
             } else if (savedHashes[entry.fullPath] !== fileHash) {
@@ -1079,10 +1154,13 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
         const currentPaths = new Set(Object.keys(currentHashes));
         const missingFromIndex = Object.keys(savedHashes).filter(p => !currentPaths.has(p));
 
-        // Force full rebuild if >20% of saved files are missing
+        // Force a full rebuild when a large share of saved files vanished at once —
+        // guards against pathological glob results (e.g. a temporarily unmounted
+        // store dir) and bounds FTS bloat from mass tombstones. Smaller deletions
+        // are removed incrementally.
         const totalSaved = Object.keys(savedHashes).length;
-        if (totalSaved > 0 && missingFromIndex.length / totalSaved > 0.2) {
-          debugLog(`>20% files missing (${missingFromIndex.length}/${totalSaved}), forcing full rebuild`);
+        if (totalSaved > 0 && missingFromIndex.length / totalSaved > MAX_INCREMENTAL_DELETE_RATIO) {
+          debugLog(`>${MAX_INCREMENTAL_DELETE_RATIO * 100}% files missing (${missingFromIndex.length}/${totalSaved}), forcing full rebuild`);
           // Fall through to full rebuild below
         } else if (changedFiles.length === 0 && newFiles.length === 0 && missingFromIndex.length === 0) {
           // Nothing changed, pure cache hit
@@ -1125,7 +1203,10 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
                 const sourceDocKey = getEntrySourceDocKey(entry, phrenPath);
                 db.run("DELETE FROM entity_links WHERE source_doc = ?", [sourceDocKey]);
                 // Q19: keep global_entities in sync with entity_links on updates
-                try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch { /* table may not exist in older cached DBs */ }
+                try { db.run("DELETE FROM global_entities WHERE doc_key = ?", [sourceDocKey]); } catch (err: unknown) {
+                  // Usually "no such table" — table may not exist in older cached DBs
+                  if (!isExpectedMigrationError(err)) logger.warn("buildIndex migration", errorMessage(err));
+                }
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
@@ -1148,7 +1229,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             }
           }
 
-          saveHashMap(phrenPath, currentHashes, new Set(Object.keys(currentHashes)));
+          saveHashMap(phrenPath, currentHashes, new Set(Object.keys(currentHashes)), currentMeta);
           touchSentinel(phrenPath);
           invalidateDfCache();
 
@@ -1207,6 +1288,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
 
   const allFiles = globResult.entries;
   const newHashes: Record<string, string> = {};
+  const newMeta: Record<string, FileStatMeta> = {};
   let fileCount = 0;
 
   // Try loading cached fragment graph
@@ -1216,6 +1298,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   for (const entry of allFiles) {
     try {
       newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
+      const stat = fs.statSync(entry.fullPath);
+      newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
     } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -1249,7 +1333,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   mergeManualLinks(db, phrenPath);
 
   // ── Finalize: persist hashes, save cache, log ─────────────────────────────
-  saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)));
+  saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)), newMeta);
   touchSentinel(phrenPath);
   invalidateDfCache();
 
