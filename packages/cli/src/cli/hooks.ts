@@ -27,6 +27,7 @@ import {
   extractKeywordEntries,
   isFeatureEnabled,
   clampInt,
+  clampFloat,
   errorMessage,
 } from "../utils.js";
 import { getHooksEnabledPreference } from "../init/init.js";
@@ -63,6 +64,8 @@ export {
   searchDocuments,
   applyTrustFilter,
   rankResults,
+  applyRelevanceFloor,
+  DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   type SelectedSnippet,
 } from "../shared/retrieval.js";
@@ -92,6 +95,8 @@ import {
   searchDocumentsAsync,
   applyTrustFilter,
   rankResults,
+  applyRelevanceFloor,
+  DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   detectTaskIntent,
   type SelectedSnippet,
@@ -257,6 +262,17 @@ export async function handleHookPrompt() {
     const tRank0 = Date.now();
     rows = rankResults(rows, intent, gitCtx, detectedProject, getPhrenPath(), db, cwd, keywords);
     stage.rankMs = Date.now() - tRank0;
+    if (!rows.length) process.exit(0);
+
+    // Relevance floor: inject signal or nothing. Ranking scores on priors too,
+    // so a doc can rank well with no real tie to this prompt — drop those rather
+    // than pad to a quota with noise (env PHREN_MIN_QUERY_RELEVANCE=0 disables).
+    const relevanceFloor = clampFloat(process.env.PHREN_MIN_QUERY_RELEVANCE, DEFAULT_MIN_QUERY_RELEVANCE, 0, 1);
+    const preFloorCount = rows.length;
+    rows = applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, relevanceFloor);
+    if (rows.length !== preFloorCount) {
+      debugLog(`relevance-floor: ${preFloorCount} -> ${rows.length} rows (floor=${relevanceFloor})`);
+    }
     if (!rows.length) process.exit(0);
 
     let safeTokenBudget = clampInt(process.env.PHREN_CONTEXT_TOKEN_BUDGET, 550, 180, 10000);
