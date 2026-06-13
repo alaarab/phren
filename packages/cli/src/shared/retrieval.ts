@@ -52,6 +52,14 @@ const LOW_FOCUS_SNIPPET_SCORE = 0.3;
 const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
 const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
 const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
+/** Query-relevance floor (see applyRelevanceFloor). A doc with no structural
+ * signal must clear this query-overlap score to be worth injecting; on the
+ * overlapScore scale (matched / max(2, min(tokens, 10))) ~0.12 means "shares at
+ * least one query token" — enough to drop priors-only noise without hurting
+ * recall. Cross-project docs face a higher bar. Tunable via
+ * PHREN_MIN_QUERY_RELEVANCE (0 disables the floor). */
+const DEFAULT_MIN_QUERY_RELEVANCE = 0.12;
+const CROSS_PROJECT_MIN_QUERY_RELEVANCE = 0.25;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
 const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
 const TASK_RESCUE_SCORE_MARGIN = 0.6;
@@ -983,6 +991,46 @@ export function markStaleCitations(snippet: string): string {
     result.push(line);
   }
   return result.join("\n");
+}
+
+export { DEFAULT_MIN_QUERY_RELEVANCE };
+
+/**
+ * Relevance floor: drop ranked docs that aren't actually relevant to *this*
+ * prompt, so the hook injects signal or nothing — never noise to fill a quota.
+ *
+ * `rankResults` intentionally scores on priors too (intent, recency, project,
+ * feedback history), so a doc can rank well with zero query overlap. That's the
+ * right call for *ordering*, but the wrong thing to *inject*. This stage keeps a
+ * doc only when it has a real connection to the prompt:
+ *   - a structural signal: it's a changed file, or matches the branch name, or
+ *   - it's a canonical doc for the project you're actually in, or
+ *   - its text clears a query-overlap floor (higher for cross-project docs).
+ *
+ * When there's no usable query signal (no tokens) it is a no-op. Setting the
+ * floor to 0 (env PHREN_MIN_QUERY_RELEVANCE=0) disables it and restores the
+ * previous always-fill behavior.
+ */
+export function applyRelevanceFloor(
+  rows: DocRow[],
+  keywords: string,
+  gitCtx: { branch?: string; changedFiles?: Set<string> } | null,
+  detectedProject: string | null,
+  floor: number = DEFAULT_MIN_QUERY_RELEVANCE
+): DocRow[] {
+  if (!(floor > 0)) return rows;
+  const queryTokens = tokenizeForOverlap(keywords);
+  if (!queryTokens.length) return rows; // no query signal to judge against
+  const changedFiles = gitCtx?.changedFiles ?? new Set<string>();
+  const branch = gitCtx?.branch;
+  const crossFloor = Math.max(floor, CROSS_PROJECT_MIN_QUERY_RELEVANCE);
+  return rows.filter((doc) => {
+    if (fileRelevanceBoost(doc.path, changedFiles) > 0) return true;
+    if (branchMatchBoost(doc.content, branch) > 0) return true;
+    if (detectedProject && doc.project === detectedProject && doc.type === "canonical") return true;
+    const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
+    return docOverlapScore(queryTokens, doc) >= (isCrossProject ? crossFloor : floor);
+  });
 }
 
 export function selectSnippets(
