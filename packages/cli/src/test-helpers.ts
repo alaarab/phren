@@ -101,6 +101,15 @@ export function resultMsg(r: PhrenResult<unknown>): string {
 
 export const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 export const REPO_ROOT = path.resolve(__dirname, "../../..");
+
+/**
+ * Env forced onto every spawned CLI subprocess. `phren uninstall` shells out to
+ * a real `npm uninstall -g @phren/cli` (and `code --uninstall-extension`); the
+ * npm global prefix and the `code` CLI ignore a sandboxed HOME, so without this
+ * a sandboxed uninstall test would delete the developer's real global install.
+ * Applied after caller env so a test cannot accidentally turn it off.
+ */
+const SANDBOX_GUARD_ENV = { PHREN_SKIP_GLOBAL_UNINSTALL: "1" } as const;
 const CLI_BUILD_LOCK = path.join(REPO_ROOT, ".vitest-cli-build.lock");
 const CLI_BUILD_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
@@ -183,7 +192,7 @@ export function runCliExec(args: string[], env: Record<string, string> = {}): Cl
     ensureCliBuilt();
     const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, ...SANDBOX_GUARD_ENV },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
     });
@@ -205,7 +214,7 @@ export function runCliSpawn(args: string[], env: Record<string, string> = {}): C
   ensureCliBuilt();
   const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...env, ...SANDBOX_GUARD_ENV },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30000,
   });
