@@ -70,6 +70,35 @@ describe("index invalidation: file changes trigger rebuild", () => {
     expect(afterOld.length).toBe(0);
   });
 
+  it("stores mtime/size meta alongside file hashes after a build", async () => {
+    db = await buildIndex(tmp.path);
+
+    const hashFile = path.join(tmp.path, ".runtime", "index-hashes.json");
+    const data = JSON.parse(fs.readFileSync(hashFile, "utf8"));
+    const findingsPath = path.join(tmp.path, "myapp", "FINDINGS.md");
+
+    expect(data.hashes[findingsPath]).toBeTruthy();
+    expect(data.meta).toBeTruthy();
+    const stat = fs.statSync(findingsPath);
+    expect(data.meta[findingsPath]).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size });
+  });
+
+  it("rewriting a file with identical content (mtime bump) keeps the doc indexed", async () => {
+    db = await buildIndex(tmp.path);
+    db.close();
+
+    const findingsPath = path.join(tmp.path, "myapp", "FINDINGS.md");
+    const content = fs.readFileSync(findingsPath, "utf8");
+    // Bump mtime without changing content: stat check misses, hash check confirms no change
+    fs.utimesSync(findingsPath, new Date(), new Date(Date.now() + 5000));
+    fs.writeFileSync(findingsPath, content);
+
+    db = await buildIndex(tmp.path);
+
+    const results = db.exec("SELECT content FROM docs WHERE content LIKE '%Zymurgical%'");
+    expect(results.length).toBeGreaterThan(0);
+  });
+
   it("project file using @import gets global content indexed", async () => {
     // Write a project file that @imports the global conventions
     writeFile(

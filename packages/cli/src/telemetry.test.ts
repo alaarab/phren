@@ -48,6 +48,24 @@ describe("telemetry", () => {
     expect(fs.existsSync(oldPath)).toBe(false);
   });
 
+  it.skipIf(process.platform === "win32")("writes telemetry file with owner-only permissions", () => {
+    setTelemetryEnabled(tmpDir, true);
+    const file = path.join(tmpDir, ".runtime", "telemetry.json");
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32")("tightens permissions on pre-existing telemetry files", () => {
+    const runtimeDir = path.join(tmpDir, ".runtime");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    const file = path.join(runtimeDir, "telemetry.json");
+    fs.writeFileSync(file, JSON.stringify({ config: { enabled: true }, stats: {} }), { mode: 0o644 });
+
+    trackToolCall(tmpDir, "search_knowledge");
+    flushTelemetry();
+
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  });
+
   it("records enabledAt timestamp on first enable", () => {
     setTelemetryEnabled(tmpDir, true);
     const data = JSON.parse(

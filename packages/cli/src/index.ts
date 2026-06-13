@@ -12,6 +12,7 @@ import {
 import { log as structuredLog, logger } from "./logger.js";
 import {
   buildIndex,
+  flushEmbeddingQueue,
   updateFileInIndex as updateFileInIndexFn,
 } from "./shared/index.js";
 import { runCustomHooks } from "./hooks.js";
@@ -91,6 +92,7 @@ async function main() {
   cleanStaleLocks(phrenPath);
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
   let indexReady = false;
+  let shuttingDown = false;
   try {
     db = await buildIndex(phrenPath, profile);
     indexReady = true;
@@ -192,8 +194,16 @@ async function main() {
     "get_tasks",
   ]);
 
+  const registeredToolNames = new Set<string>();
+
   server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
     const registeredName = name;
+    // Registration runs before server.connect, so throwing here fails fast at
+    // startup instead of letting a later module silently shadow an earlier tool.
+    if (registeredToolNames.has(registeredName as string)) {
+      throw new Error(`Duplicate MCP tool registration: "${String(registeredName)}"`);
+    }
+    registeredToolNames.add(registeredName as string);
     let finalConfig = config;
     if (ALWAYS_LOAD_TOOLS.has(registeredName as string)) {
       const cfgObj = config as Record<string, unknown>;
@@ -201,6 +211,17 @@ async function main() {
       finalConfig = { ...cfgObj, _meta: { ...existingMeta, "anthropic/alwaysLoad": true } } as RegisterToolConfig;
     }
     const wrapped = async (...args: unknown[]) => {
+      if (shuttingDown) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: false,
+              error: "phren-mcp server is shutting down; retry in a new session",
+            }, null, 2),
+          }],
+        };
+      }
       if (!indexReady || !db) {
         return {
           content: [{
@@ -255,11 +276,22 @@ async function main() {
 
   // Graceful shutdown: drain write queue and close DB before exit
   async function shutdown(signal: string): Promise<void> {
+    shuttingDown = true;
     structuredLog("info", "shutdown", `Received ${signal}, draining write queue...`);
     try {
       await writeQueue;
     } catch {
       // Write queue errors already logged
+    }
+    // Persist any pending embeddings; bounded so a slow/unreachable Ollama
+    // can't stall shutdown.
+    try {
+      await Promise.race([
+        flushEmbeddingQueue(),
+        new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch (err: unknown) {
+      logger.warn("shutdown", `embFlush: ${errorMessage(err)}`);
     }
     try { db?.close(); } catch (err: unknown) {
       logger.warn("shutdown", `dbClose: ${errorMessage(err)}`);

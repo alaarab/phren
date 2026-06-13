@@ -136,15 +136,17 @@ describe("handleConfig proactivity", () => {
   it("rejects invalid proactivity values", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
+    const previousExitCode = process.exitCode;
 
-    await expect(handleConfig(["proactivity.findings", "urgent"])).rejects.toThrow("process.exit");
+    try {
+      await handleConfig(["proactivity.findings", "urgent"]);
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(output.errors).toContain("Usage: phren config proactivity.findings [high|medium|low]");
-    expect(fs.existsSync(governancePrefsPath())).toBe(false);
+      expect(process.exitCode).toBe(1);
+      expect(output.errors).toContain("Usage: phren config proactivity.findings [high|medium|low]");
+      expect(fs.existsSync(governancePrefsPath())).toBe(false);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 });
 

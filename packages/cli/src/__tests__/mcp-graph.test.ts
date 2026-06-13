@@ -56,6 +56,32 @@ describe("manual-links.json persistence", () => {
     ]);
   });
 
+  it("merges valid links across projects and prunes stale ones in one pass", async () => {
+    seedFindings(tmp.path, "alpha", "# alpha\n\n- Alpha finding about caching\n");
+    seedFindings(tmp.path, "beta", "# beta\n\n- Beta finding about routing\n");
+    const manualLinksPath = runtimeFile(tmp.path, "manual-links.json");
+    fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
+    fs.writeFileSync(manualLinksPath, JSON.stringify([
+      { entity: "cache-layer", entityType: "library", sourceDoc: "alpha/FINDINGS.md", relType: "mentions" },
+      { entity: "edge-router", entityType: "library", sourceDoc: "beta/FINDINGS.md", relType: "mentions" },
+      { entity: "ghost-lib", entityType: "library", sourceDoc: "deleted-proj/FINDINGS.md", relType: "mentions" },
+    ]));
+
+    const db = await buildIndex(tmp.path);
+
+    const entityNames = db.exec("SELECT name FROM entities WHERE name IN ('cache-layer', 'edge-router', 'ghost-lib')");
+    const found = (entityNames[0]?.values ?? []).map((row) => row[0]);
+    expect(found).toContain("cache-layer");
+    expect(found).toContain("edge-router");
+    expect(found).not.toContain("ghost-lib");
+
+    // Stale link pruned from disk; valid links survive
+    expect(JSON.parse(fs.readFileSync(manualLinksPath, "utf8"))).toEqual([
+      { entity: "cache-layer", entityType: "library", sourceDoc: "alpha/FINDINGS.md", relType: "mentions" },
+      { entity: "edge-router", entityType: "library", sourceDoc: "beta/FINDINGS.md", relType: "mentions" },
+    ]);
+  });
+
   it("handles missing manual-links.json gracefully", async () => {
     seedFindings(tmp.path, "proj", "# proj\n\n- A finding\n");
     await expect(buildIndex(tmp.path)).resolves.toBeDefined();
