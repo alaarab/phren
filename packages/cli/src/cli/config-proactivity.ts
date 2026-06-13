@@ -62,7 +62,8 @@ export function handleConfigProactivity(subcommand: "proactivity" | "proactivity
     if (projectArg) {
       if (!isValidProjectName(projectArg)) {
         console.error(`Invalid project name: "${projectArg}"`);
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
       const resolved = mergeConfig(phrenPath, projectArg);
       console.log(JSON.stringify({
@@ -79,19 +80,22 @@ export function handleConfigProactivity(subcommand: "proactivity" | "proactivity
 
   if (filteredArgs.length !== 1) {
     printProactivityUsage(subcommand);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const level = normalizeProactivityLevel(value);
   if (!level) {
     printProactivityUsage(subcommand);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (projectArg) {
     if (!isValidProjectName(projectArg)) {
       console.error(`Invalid project name: "${projectArg}"`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     warnIfUnregistered(phrenPath, projectArg);
     const key = subcommand === "proactivity" ? "proactivity"
@@ -147,13 +151,15 @@ export function handleConfigProjectOwnership(args: string[]) {
 
   if (args.length !== 1) {
     console.error(`Usage: phren config project-ownership [${PROJECT_OWNERSHIP_MODES.join("|")}]`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const ownership = parseProjectOwnershipMode(value);
   if (!ownership) {
     console.error(`Usage: phren config project-ownership [${PROJECT_OWNERSHIP_MODES.join("|")}]`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   writeInstallPreferences(phrenPath, { projectOwnershipDefault: ownership });

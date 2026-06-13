@@ -34,7 +34,8 @@ export function handleConfigSynonyms(args: string[]) {
 
   if (!project || !isValidProjectName(project)) {
     printSynonymsUsage();
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   if (action === "list") {
@@ -51,7 +52,8 @@ export function handleConfigSynonyms(args: string[]) {
     const synonyms = parseSynonymItems(args[3]);
     if (!term || synonyms.length === 0) {
       printSynonymsUsage();
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     const updated = learnSynonym(phrenPath, project, term, synonyms);
     console.log(JSON.stringify({ project, term, synonyms: updated[term.toLowerCase()] ?? [], updated }, null, 2));
@@ -62,7 +64,8 @@ export function handleConfigSynonyms(args: string[]) {
     const term = args[2];
     if (!term) {
       printSynonymsUsage();
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     const updated = removeLearnedSynonym(phrenPath, project, term, parseSynonymItems(args[3]));
     console.log(JSON.stringify({ project, term: term.toLowerCase(), updated }, null, 2));
@@ -70,5 +73,5 @@ export function handleConfigSynonyms(args: string[]) {
   }
 
   printSynonymsUsage();
-  process.exit(1);
+  process.exitCode = 1;
 }
