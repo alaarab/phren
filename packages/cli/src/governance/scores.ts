@@ -59,19 +59,11 @@ function entriesObject(data: Record<string, unknown>): Record<string, unknown> {
   return data;
 }
 
-function validateScoresJson(filePath: string): boolean {
-  try {
-    if (!fs.existsSync(filePath)) return true;
-    const raw = fs.readFileSync(filePath, "utf8");
-    const data = JSON.parse(raw);
-    if (!isRecord(data)) return false;
-    if (isVersionedEntries(data) && !hasValidSchemaVersion(data)) return false;
-    if (isVersionedEntries(data) && !isRecord(data.entries)) return false;
-    return Object.values(entriesObject(data)).every((entry) => isEntryScore(entry));
-  } catch (err: unknown) {
-    debugLog(`validateScoresJson failed for ${filePath}: ${errorMessage(err)}`);
-    return false;
-  }
+function validateScoresData(data: unknown): boolean {
+  if (!isRecord(data)) return false;
+  if (isVersionedEntries(data) && !hasValidSchemaVersion(data)) return false;
+  if (isVersionedEntries(data) && !isRecord(data.entries)) return false;
+  return Object.values(entriesObject(data)).every((entry) => isEntryScore(entry));
 }
 
 function normalizeVersionedEntries<T>(data: Record<string, unknown>, guard: (value: unknown) => value is T): VersionedEntriesFile<T> {
@@ -89,11 +81,11 @@ function readScoresFile(phrenPath: string): Record<string, EntryScore> {
   const file = memoryScoresFile(phrenPath);
   try {
     if (!fs.existsSync(file)) return { ...DEFAULT_MEMORY_SCORES_FILE.entries };
-    if (!validateScoresJson(file)) {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    if (!validateScoresData(parsed)) {
       debugLog(`readScoresFile: ${file} failed validation, using defaults`);
       return { ...DEFAULT_MEMORY_SCORES_FILE.entries };
     }
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
     return normalizeVersionedEntries(parsed, isEntryScore).entries;
   } catch (err: unknown) {
     debugLog(`readScoresFile failed for ${file}: ${errorMessage(err)}`);
@@ -126,24 +118,28 @@ function appendScoreJournal(phrenPath: string, key: string, delta: ScoreJournalE
   });
 }
 
+function parseScoreJournal(raw: string, context: string): ScoreJournalEntry[] {
+  return raw
+    .split("\n")
+    .filter(Boolean)
+    .map((line: string) => {
+      try {
+        return JSON.parse(line) as ScoreJournalEntry;
+      } catch (err: unknown) {
+        logger.debug("scores", `${context} parseLine: ${errorMessage(err)}`);
+        return null;
+      }
+    })
+    .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry =>
+      entry !== null && typeof entry.key === "string" && typeof entry.delta === "object" && entry.delta !== null
+    );
+}
+
 function readScoreJournal(phrenPath: string): ScoreJournalEntry[] {
   const file = scoresJournalFile(phrenPath);
   if (!fs.existsSync(file)) return [];
   try {
-    return fs.readFileSync(file, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line: string) => {
-        try {
-          return JSON.parse(line) as ScoreJournalEntry;
-        } catch (err: unknown) {
-          logger.debug("scores", `readScoreJournal parseLine: ${errorMessage(err)}`);
-          return null;
-        }
-      })
-      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry =>
-        entry !== null && typeof entry.key === "string" && typeof entry.delta === "object" && entry.delta !== null
-      );
+    return parseScoreJournal(fs.readFileSync(file, "utf8"), "readScoreJournal");
   } catch (err: unknown) {
     debugLog(`readScoreJournal failed: ${errorMessage(err)}`);
     return [];
@@ -161,20 +157,7 @@ function claimScoreJournal(phrenPath: string): ScoreJournalEntry[] {
   });
   if (!claimedFile) return [];
   try {
-    return fs.readFileSync(claimedFile, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line: string) => {
-        try {
-          return JSON.parse(line) as ScoreJournalEntry;
-        } catch (err: unknown) {
-          logger.debug("scores", `claimScoreJournal parseLine: ${errorMessage(err)}`);
-          return null;
-        }
-      })
-      .filter((entry: ScoreJournalEntry | null): entry is ScoreJournalEntry =>
-        entry !== null && typeof entry.key === "string" && typeof entry.delta === "object" && entry.delta !== null
-      );
+    return parseScoreJournal(fs.readFileSync(claimedFile, "utf8"), "claimScoreJournal");
   } catch (err: unknown) {
     debugLog(`claimScoreJournal failed: ${errorMessage(err)}`);
     return [];

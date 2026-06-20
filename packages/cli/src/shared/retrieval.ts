@@ -87,15 +87,34 @@ function intentBoost(intent: string, docType: string): number {
   return 0;
 }
 
+// fileRelevanceBoost runs once per candidate doc during ranking, all sharing the
+// same changedFiles Set. Cache the normalized view (keyed by the Set instance) so
+// path normalization happens once per ranking pass instead of once per doc.
+const _normalizedChangedFiles = new WeakMap<Set<string>, { basenames: Set<string>; paths: string[] }>();
+function normalizeChangedFiles(changedFiles: Set<string>): { basenames: Set<string>; paths: string[] } {
+  let cached = _normalizedChangedFiles.get(changedFiles);
+  if (cached) return cached;
+  const basenames = new Set<string>();
+  const paths: string[] = [];
+  for (const cf of changedFiles) {
+    const n = cf.replace(/\\/g, "/");
+    basenames.add(path.basename(n));
+    paths.push(n);
+  }
+  cached = { basenames, paths };
+  _normalizedChangedFiles.set(changedFiles, cached);
+  return cached;
+}
+
 export function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
   if (changedFiles.size === 0) return 0;
   const normalized = filePath.replace(/\\/g, "/");
   const docBasename = path.basename(normalized);
-  for (const cf of changedFiles) {
-    const n = cf.replace(/\\/g, "/");
-    // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
-    if (path.basename(n) === docBasename) return 3;
-    // Also match if the full changed-file path is a suffix of the doc path
+  const { basenames, paths } = normalizeChangedFiles(changedFiles);
+  // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
+  if (basenames.has(docBasename)) return 3;
+  // Also match if the full changed-file path is a suffix of the doc path
+  for (const n of paths) {
     if (normalized.endsWith(`/${n}`)) return 3;
   }
   return 0;
