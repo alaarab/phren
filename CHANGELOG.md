@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-06-27
+
+### Changed
+
+- **Contradiction detection surfaces candidates instead of auto-marking.** Potential
+  contradictions are now reported to the agent for review rather than being marked
+  automatically, and the detector's false-positive rate was reduced.
+- **Faster retrieval and indexing.** Scoring and retrieval hot paths were deduped and
+  optimized, with additional CLI reliability hardening and faster incremental indexing.
+
+### Security
+
+- Patched all known dependency vulnerabilities and refreshed dependencies. Removed an
+  orphaned `packages/vscode` lockfile that was triggering Dependabot alerts.
+
 ## [0.1.33] - 2026-05-31
 
 ### Changed
