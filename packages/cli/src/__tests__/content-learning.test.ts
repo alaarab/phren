@@ -114,8 +114,8 @@ describe("addFindings bulk", () => {
   });
 });
 
-describe("addFinding heuristic conflict handling", () => {
-  it("marks a heuristic conflict as a soft possible_conflict and keeps the finding active", () => {
+describe("addFinding does not auto-mark heuristic conflicts", () => {
+  it("keeps a conflicting finding active and writes no conflict marker (the agent decides instead)", () => {
     const r1 = addFindingToFile(tmp.path, PROJECT, "Always use Docker for build caching to speed up local development");
     expect(r1.ok).toBe(true);
 
@@ -124,23 +124,11 @@ describe("addFinding heuristic conflict handling", () => {
     if (r2.ok) expect(r2.data.status).toBe("added");
 
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    // A soft, reviewable marker is written...
-    expect(content).toContain("phren:possible_conflict");
-    // ...but the new finding is NOT demoted to contradicted, and no legacy hard-conflict
-    // annotation is written that would flip its status.
+    // The stored finding is never silently demoted or annotated by the lexical heuristic —
+    // contradiction handling is surfaced to the agent by the MCP tool, not written to disk here.
     expect(content).not.toContain('phren:status "contradicted"');
     expect(content).not.toContain("phren:contradicts");
-  });
-
-  it("does not flag unrelated findings that merely share a tool name", () => {
-    const r1 = addFindingToFile(tmp.path, PROJECT, "[decision] GitHub branch protection on the auth gateway must never be disabled");
-    expect(r1.ok).toBe(true);
-    const r2 = addFindingToFile(tmp.path, PROJECT, "[decision] For GitHub pushes always commit direct to main and prefer the merge workflow");
-    expect(r2.ok).toBe(true);
-
-    const content = fs.readFileSync(findingsPath(), "utf-8");
     expect(content).not.toContain("phren:possible_conflict");
-    expect(content).not.toContain('phren:status "contradicted"');
   });
 });
 
