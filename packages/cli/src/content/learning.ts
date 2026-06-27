@@ -198,14 +198,14 @@ function prepareFinding(
   const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
   if (conflicts.length > 0) {
     const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
-    lifecycle = {
-      status: "contradicted",
-      status_updated: today,
-      status_reason: "conflicts_with",
-      status_ref: snippet,
-    };
-    bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- phren:contradicts "${snippet}" -->`;
-    debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
+    // Heuristic conflict detection is lexical (shared entity + opposing polarity) and
+    // still produces false positives, so it must not suppress the new finding. Keep the
+    // finding active and attach a soft, reviewable marker instead of flipping status to
+    // "contradicted" (which demotes it in search and excludes it from dedup/entity scans).
+    // A hard "contradicted" status is reserved for the LLM-confirmed path
+    // (checkSemanticConflicts) and explicit user resolution via resolve_contradiction.
+    bullet += ` <!-- phren:possible_conflict "${snippet}" -->`;
+    debugLog(`add_finding: possible conflict detected for "${project}": ${snippet}`);
   }
   if (extraAnnotations && extraAnnotations.length > 0) {
     const lifecycleFromExtra = parseFindingLifecycle(`- lifecycle ${extraAnnotations.join(" ")}`);

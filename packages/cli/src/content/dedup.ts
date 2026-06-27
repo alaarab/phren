@@ -347,6 +347,27 @@ function learningPolarity(text: string): "positive" | "negative" | "neutral" {
   return "neutral";
 }
 
+// Minimum topical overlap (Jaccard over substantive tokens, with observation tags
+// and metadata stripped) required before two findings that share an entity and have
+// opposing polarity are treated as a contradiction. The bare "one shared entity +
+// opposite polarity" rule fires on unrelated findings that merely mention the same
+// tool or word (e.g. a git-workflow decision and a security decision that both say
+// "GitHub"); requiring genuine subject-matter overlap removes that false-positive
+// class while keeping real same-topic contradictions.
+const CONFLICT_MIN_TOPIC_OVERLAP = 0.12;
+
+/** Strip observation tags like [decision] so a shared tag is not counted as shared topic. */
+function stripObservationTags(text: string): string {
+  return text.replace(/\[[a-zA-Z_-]+\]/g, " ");
+}
+
+/** Jaccard overlap of the substantive tokens of two findings (tags + metadata removed). */
+function topicalOverlap(a: string, b: string): number {
+  const ta = jaccardTokenize(stripObservationTags(stripMetadata(a)));
+  const tb = jaccardTokenize(stripObservationTags(stripMetadata(b)));
+  return jaccardSimilarity(ta, tb);
+}
+
 /** Returns existing learning lines that appear to conflict with newFinding. */
 export function detectConflicts(newFinding: string, existingLines: string[], dynamicEntities?: Set<string>): string[] {
   const newEntities = extractProseEntities(newFinding, dynamicEntities);
@@ -361,9 +382,11 @@ export function detectConflicts(newFinding: string, existingLines: string[], dyn
     const shared = lineEntities.filter((e) => newEntities.includes(e));
     if (shared.length === 0) continue;
     const linePol = learningPolarity(line);
-    if (linePol !== "neutral" && linePol !== newPol) {
-      conflicts.push(line);
-    }
+    if (linePol === "neutral" || linePol === newPol) continue;
+    // Require genuine topical overlap, not just one incidental shared entity, before
+    // flagging. Unrelated findings that happen to share a tool name fall below this bar.
+    if (topicalOverlap(newFinding, line) < CONFLICT_MIN_TOPIC_OVERLAP) continue;
+    conflicts.push(line);
   }
   return conflicts;
 }
