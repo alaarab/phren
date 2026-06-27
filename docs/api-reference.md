@@ -179,6 +179,8 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
+The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
+
 ### `supersede_finding`
 
 Mark an existing finding as superseded by a newer finding.

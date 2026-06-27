@@ -15,7 +15,7 @@ import {
   getRepoRoot,
   inferCitationLocation,
 } from "./citation.js";
-import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./dedup.js";
+import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref } from "./dedup.js";
 import { validateFindingsFormat, validateFinding } from "./validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./archive.js";
 import {
@@ -160,7 +160,7 @@ interface PrepareFindingOpts {
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, phrenPath } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -193,20 +193,14 @@ function prepareFinding(
     return { status: "duplicate" };
   }
 
-  const existingBullets = fullHistory.split("\n").filter((l) => l.startsWith("- "));
-  const dynamicEntities = phrenPath ? extractDynamicEntities(phrenPath, project) : undefined;
-  const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
-  if (conflicts.length > 0) {
-    const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
-    // Heuristic conflict detection is lexical (shared entity + opposing polarity) and
-    // still produces false positives, so it must not suppress the new finding. Keep the
-    // finding active and attach a soft, reviewable marker instead of flipping status to
-    // "contradicted" (which demotes it in search and excludes it from dedup/entity scans).
-    // A hard "contradicted" status is reserved for the LLM-confirmed path
-    // (checkSemanticConflicts) and explicit user resolution via resolve_contradiction.
-    bullet += ` <!-- phren:possible_conflict "${snippet}" -->`;
-    debugLog(`add_finding: possible conflict detected for "${project}": ${snippet}`);
-  }
+  // NOTE: heuristic contradiction detection is intentionally NOT done here. The lexical
+  // heuristic (shared entity + opposing polarity) produces false positives, so it must
+  // never silently mutate the stored finding's status. Instead the MCP add_finding tool
+  // surfaces heuristic conflict *candidates* (via findConflictCandidates) in its response
+  // so the calling agent — an LLM already in the loop with full context — can judge them,
+  // exactly as it already does for potential duplicates. A hard "contradicted" status is
+  // reserved for the LLM-confirmed path (checkSemanticConflicts) and explicit user
+  // resolution via resolve_contradiction.
   if (extraAnnotations && extraAnnotations.length > 0) {
     const lifecycleFromExtra = parseFindingLifecycle(`- lifecycle ${extraAnnotations.join(" ")}`);
     if (
