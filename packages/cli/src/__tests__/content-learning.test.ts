@@ -114,6 +114,36 @@ describe("addFindings bulk", () => {
   });
 });
 
+describe("addFinding heuristic conflict handling", () => {
+  it("marks a heuristic conflict as a soft possible_conflict and keeps the finding active", () => {
+    const r1 = addFindingToFile(tmp.path, PROJECT, "Always use Docker for build caching to speed up local development");
+    expect(r1.ok).toBe(true);
+
+    const r2 = addFindingToFile(tmp.path, PROJECT, "Never use Docker for build caching — bare metal is faster for our pipeline");
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.data.status).toBe("added");
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    // A soft, reviewable marker is written...
+    expect(content).toContain("phren:possible_conflict");
+    // ...but the new finding is NOT demoted to contradicted, and no legacy hard-conflict
+    // annotation is written that would flip its status.
+    expect(content).not.toContain('phren:status "contradicted"');
+    expect(content).not.toContain("phren:contradicts");
+  });
+
+  it("does not flag unrelated findings that merely share a tool name", () => {
+    const r1 = addFindingToFile(tmp.path, PROJECT, "[decision] GitHub branch protection on the auth gateway must never be disabled");
+    expect(r1.ok).toBe(true);
+    const r2 = addFindingToFile(tmp.path, PROJECT, "[decision] For GitHub pushes always commit direct to main and prefer the merge workflow");
+    expect(r2.ok).toBe(true);
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    expect(content).not.toContain("phren:possible_conflict");
+    expect(content).not.toContain('phren:status "contradicted"');
+  });
+});
+
 describe("supersession", () => {
   it("marks old finding as superseded when new one specifies supersedes", () => {
     const oldFinding = "Use Redis for caching with default TTL settings";
