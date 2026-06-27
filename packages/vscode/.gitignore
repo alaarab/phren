@@ -1,1 +1,5 @@
 *.vsix
+
+# This is a pnpm workspace — npm lockfiles are not used and drift from pnpm-lock.yaml,
+# producing stale Dependabot alerts. Keep them out of the repo.
+package-lock.json
