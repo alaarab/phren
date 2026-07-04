@@ -1036,6 +1036,40 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
       writeHashSentinel(phrenPath, hash);
     }
+
+    // Fast path (stat-hash hit): cacheFile is `${computePhrenHash}.db`, and that
+    // hash is derived from every file's path:mtime:size. Its existence therefore
+    // PROVES no indexed file changed mtime/size since this DB was built — an
+    // in-place edit, add, or delete all change the hash and land on a different
+    // filename (cache miss → full rebuild below). So the per-file content re-hash
+    // that follows can only ever confirm "nothing changed"; skip it and return the
+    // cached DB directly. This mirrors the sentinel-hit return above but keys off
+    // the stronger per-file stat-hash rather than directory mtimes, so it is at
+    // least as safe. On any load failure we fall through to the incremental/rebuild
+    // path, which remains the safety net.
+    try {
+      const cached = fs.readFileSync(cacheFile);
+      const db = new SQL.Database(cached);
+      const docCountResult = db.exec("SELECT COUNT(*) FROM docs");
+      const docCount = docCountResult?.[0]?.values?.[0]?.[0] as number ?? 0;
+      if (docCount > 0) {
+        try { db.run("ALTER TABLE entities ADD COLUMN first_seen_at TEXT"); } catch { /* column already exists */ }
+        debugLog(`Loaded FTS index from cache (${hash.slice(0, 8)}) in ${Date.now() - t0}ms [stat-hash-hit]`);
+        appendIndexEvent(phrenPath, {
+          event: "build_index",
+          cache: "hit",
+          hash: hash.slice(0, 12),
+          elapsedMs: Date.now() - t0,
+          profile: profile || "",
+        });
+        return db;
+      }
+      // Empty DB (e.g. /tmp wiped and recreated) — fall through to full rebuild.
+      db.close();
+    } catch (err: unknown) {
+      debugLog(`stat-hash-hit DB load failed, falling back to incremental/rebuild: ${errorMessage(err)}`);
+    }
+
     try {
       const cached = fs.readFileSync(cacheFile);
       let db: SqlJsDatabase | undefined;
