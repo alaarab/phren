@@ -59,7 +59,7 @@ function writeClaudeSettings(homeDir: string, phrenPathInWiring: string): string
                 {
                   type: "command",
                   command: `PHREN_PATH='${phrenPathInWiring}' '${homeDir}/.local/bin/phren' hook-prompt`,
-                  timeout: 3,
+                  timeout: 10,
                 },
               ],
             },
