@@ -205,7 +205,6 @@ export async function handleHookPrompt() {
   const db = await loadIndexForHook(getPhrenPath(), profile);
   stage.indexMs = Date.now() - tIndex0;
 
-  const gitCtx = getGitContext(cwd);
   const intent = detectTaskIntent(prompt);
   const detectedProject = cwd ? detectProject(getPhrenPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
@@ -214,6 +213,10 @@ export async function handleHookPrompt() {
     appendAuditLog(getPhrenPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
     process.exit(0);
   }
+
+  // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
+  // wasted work when the project has hooks disabled.
+  const gitCtx = getGitContext(cwd);
 
   const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
 
