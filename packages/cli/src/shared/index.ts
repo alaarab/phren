@@ -422,9 +422,9 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
 const INDEX_HASHES_FILENAME = "index-hashes.json";
 const INDEX_SCHEMA_VERSION = 3; // bump when FTS schema changes to force full rebuild
 
-function hashFileContent(filePath: string): string {
-  const content = fs.readFileSync(filePath, "utf-8");
-  return crypto.createHash("sha256").update(content).digest("hex");
+function hashFileContent(filePath: string, content?: string): string {
+  const text = content ?? fs.readFileSync(filePath, "utf-8");
+  return crypto.createHash("sha256").update(text).digest("hex");
 }
 
 function loadHashMap(phrenPath: string): { version?: number; hashes: Record<string, string> } {
@@ -608,10 +608,10 @@ function insertFileIntoIndex(
   db: SqlJsDatabase,
   entry: FileEntry,
   phrenPath: string,
-  opts?: { scheduleEmbeddings?: boolean }
+  opts?: { scheduleEmbeddings?: boolean; content?: string }
 ): boolean {
   try {
-    const raw = fs.readFileSync(entry.fullPath, "utf-8");
+    const raw = opts?.content ?? fs.readFileSync(entry.fullPath, "utf-8");
     const content = normalizeIndexedContent(raw, entry.type, phrenPath);
     const indexedContent = applyReferenceTopicHints(entry, content, phrenPath);
     db.run(
@@ -1248,18 +1248,33 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
   const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
+  // Batch every doc + entity insert for this rebuild into one transaction. Without
+  // it, sql.js auto-commits each of the thousands of INSERTs individually, which
+  // dominates rebuild wall-clock. On error the whole in-memory db is discarded by
+  // the caller (loadIndexSnapshotOrEmpty builds a fresh one), so leaving the
+  // transaction open on a throw is harmless.
+  db.run("BEGIN");
   for (const entry of allFiles) {
+    // Read each file ONCE and reuse the buffer for hashing, FTS insert, and
+    // fragment extraction (previously 2-3 reads per file — the dominant cost of a
+    // rebuild on WSL2).
+    let content: string;
     try {
-      newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
+      content = fs.readFileSync(entry.fullPath, "utf-8");
+    } catch (err: unknown) {
+      logger.debug("buildIndex readFile skip", errorMessage(err));
+      continue;
+    }
+    try {
+      newHashes[entry.fullPath] = hashFileContent(entry.fullPath, content);
     } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
-    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
+    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content })) {
       fileCount++;
       // Extract fragments from finding files (if not loaded from cache)
       if (!entityGraphLoaded && entry.type === "findings") {
         try {
-          const content = fs.readFileSync(entry.fullPath, "utf-8");
           extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
       }
@@ -1282,6 +1297,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
 
   // Always merge manual links (survive rebuild)
   mergeManualLinks(db, phrenPath);
+  db.run("COMMIT");
 
   // ── Finalize: persist hashes, save cache, log ─────────────────────────────
   saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)));
