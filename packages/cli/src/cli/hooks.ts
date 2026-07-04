@@ -15,7 +15,7 @@ import {
   mergeConfig,
 } from "../shared/governance.js";
 import {
-  buildIndex,
+  loadIndexForHook,
   detectProject,
 } from "../shared/index.js";
 import { isProjectHookEnabled } from "../project-config.js";
@@ -200,7 +200,9 @@ export async function handleHookPrompt() {
   }
 
   const tIndex0 = Date.now();
-  const db = await buildIndex(getPhrenPath(), profile);
+  // Never block the prompt on a rebuild: serve the current/stale snapshot and
+  // refresh in a detached process (see loadIndexForHook).
+  const db = await loadIndexForHook(getPhrenPath(), profile);
   stage.indexMs = Date.now() - tIndex0;
 
   const gitCtx = getGitContext(cwd);
