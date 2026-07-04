@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import { impactLogFile } from "../shared.js";
+import { rotateJsonlIfLarge } from "../phren-paths.js";
 import { withFileLock } from "../shared/governance.js";
 import { normalizeFindingText } from "../content/metadata.js";
 
@@ -120,6 +121,9 @@ function appendImpact(phrenPath: string, entries: FindingImpactEntry[]): void {
   if (entries.length === 0) return;
   const file = impactLogFile(phrenPath);
   withFileLock(file, () => {
+    // getHighImpactFindings re-parses this whole file on the hook hot path, so cap
+    // it — otherwise it grows unbounded (seen at 2MB) and every prompt re-parses it.
+    rotateJsonlIfLarge(file);
     const lines = entries.map((entry) => JSON.stringify(entry));
     fs.appendFileSync(file, lines.join("\n") + "\n");
   });
