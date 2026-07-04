@@ -316,7 +316,7 @@ hooks:
     - hooks:
         - type: command
           command: "${promptCmd}"
-          timeout: 3
+          timeout: 10
   Stop:
     - hooks:
         - type: command
