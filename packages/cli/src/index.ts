@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as fs from "fs";
 import * as path from "path";
 import {
@@ -10,26 +8,7 @@ import {
   runtimeDir,
 } from "./shared.js";
 import { log as structuredLog, logger } from "./logger.js";
-import {
-  buildIndex,
-  flushEmbeddingQueue,
-  updateFileInIndex as updateFileInIndexFn,
-} from "./shared/index.js";
-import { runCustomHooks } from "./hooks.js";
-import { register as registerSearch } from "./tools/search.js";
-import { register as registerTask } from "./tools/tasks.js";
-import { register as registerFinding } from "./tools/finding.js";
-import { register as registerMemory } from "./tools/memory.js";
-import { register as registerData } from "./tools/data.js";
-import { register as registerGraph } from "./tools/graph.js";
-import { register as registerSession } from "./tools/session.js";
-import { register as registerOps } from "./tools/ops.js";
-import { register as registerSkills } from "./tools/skills.js";
-import { register as registerHooks } from "./tools/hooks.js";
-import { register as registerExtract } from "./tools/extract.js";
-import { register as registerConfig } from "./tools/config.js";
 import type { McpContext } from "./tools/types.js";
-import { mcpResponse } from "./tools/types.js";
 import { errorMessage } from "./utils.js";
 import {
   printIntegratedHelp,
@@ -37,9 +16,12 @@ import {
   resolveTopLevelInvocation,
   runTopLevelCommand,
 } from "./entrypoint.js";
-import { startEmbeddingWarmup } from "./startup-embedding.js";
-import { resolveRuntimeProfile } from "./runtime-profile.js";
-import { VERSION as PACKAGE_VERSION } from "./package-metadata.js";
+// NOTE: the MCP-server-only module graph (MCP SDK, FTS indexer, tool registries,
+// startup-embedding, custom-hook engine) is intentionally NOT imported here. It is
+// dynamically imported inside main() so that top-level commands — hook-prompt,
+// --version, --help — which never reach main() do not pay its ~1.8s cold-start cost.
+// This matters most for the PostToolUse `hook-tool`, which spawns per tool call.
+
 const invocation = resolveTopLevelInvocation(process.argv.slice(2));
 
 if (invocation.kind === "help") {
@@ -88,6 +70,29 @@ function cleanStaleLocks(phrenPath: string): void {
 }
 
 async function main() {
+  // Lazy-load the MCP-server-only module graph. Only the long-lived MCP server
+  // reaches main(), so paying the import cost here — not at module scope — keeps
+  // every hook subprocess fast (hook-prompt, hook-tool, --version never get here).
+  const [
+    { McpServer },
+    { StdioServerTransport },
+    { buildIndex, flushEmbeddingQueue, updateFileInIndex: updateFileInIndexFn },
+    { runCustomHooks },
+    { mcpResponse },
+    { startEmbeddingWarmup },
+    { resolveRuntimeProfile },
+    { VERSION: PACKAGE_VERSION },
+  ] = await Promise.all([
+    import("@modelcontextprotocol/sdk/server/mcp.js"),
+    import("@modelcontextprotocol/sdk/server/stdio.js"),
+    import("./shared/index.js"),
+    import("./hooks.js"),
+    import("./tools/types.js"),
+    import("./startup-embedding.js"),
+    import("./runtime-profile.js"),
+    import("./package-metadata.js"),
+  ]);
+
   const profile = resolveRuntimeProfile(phrenPath);
   cleanStaleLocks(phrenPath);
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
@@ -257,18 +262,23 @@ async function main() {
     },
   };
 
-  registerSearch(server, ctx);
-  registerTask(server, ctx);
-  registerFinding(server, ctx);
-  registerMemory(server, ctx);
-  registerData(server, ctx);
-  registerGraph(server, ctx);
-  registerSession(server, ctx);
-  registerOps(server, ctx);
-  registerSkills(server, ctx);
-  registerHooks(server, ctx);
-  registerExtract(server, ctx);
-  registerConfig(server, ctx);
+  // Lazy-imported tool registries — only the MCP server needs them. Registration
+  // order is irrelevant (each module registers a disjoint set of tools).
+  const toolModules = await Promise.all([
+    import("./tools/search.js"),
+    import("./tools/tasks.js"),
+    import("./tools/finding.js"),
+    import("./tools/memory.js"),
+    import("./tools/data.js"),
+    import("./tools/graph.js"),
+    import("./tools/session.js"),
+    import("./tools/ops.js"),
+    import("./tools/skills.js"),
+    import("./tools/hooks.js"),
+    import("./tools/extract.js"),
+    import("./tools/config.js"),
+  ]);
+  for (const mod of toolModules) mod.register(server, ctx);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -20,6 +20,7 @@ import {
   detectProject,
 } from "./hooks-context.js";
 import { logger } from "../logger.js";
+import { rotateJsonlIfLarge } from "../phren-paths.js";
 import {
   buildIndex,
   queryRows,
@@ -152,6 +153,7 @@ export async function handleHookTool() {
     try {
       const logFile = runtimeFile(ctx.phrenPath, "tool-log.jsonl");
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      rotateJsonlIfLarge(logFile);
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
     } catch (err: unknown) {
       logger.debug("hooks-session", `hookTool toolLog: ${errorMessage(err)}`);

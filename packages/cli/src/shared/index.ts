@@ -83,6 +83,7 @@ import {
   ensureGlobalEntitiesTable,
 } from "./fragment-graph.js";
 import { bootstrapSqlJs } from "./sqljs.js";
+import { spawnDetachedChild } from "./process.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "../project-config.js";
 import {
   buildSourceDocKey,
@@ -1492,6 +1493,79 @@ export async function buildIndex(phrenPath: string, profile?: string): Promise<S
   _lastBuildTimestamp = Date.now();
   _lastBuildKey = buildKey;
   return db;
+}
+
+/** Resolve the per-user FTS cache directory (os.tmpdir()/phren-fts-<uid>). */
+function ftsCacheDir(): string {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch (err: unknown) {
+    logger.debug("ftsCacheDir userInfo", errorMessage(err));
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
+  }
+  return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+
+/**
+ * Non-blocking index loader for the UserPromptSubmit / PostToolUse hooks.
+ * Unlike buildIndex(), this NEVER blocks a hook on a 2-12s rebuild:
+ *   - exact stat-hash cache hit → serve it immediately (fast path);
+ *   - miss but a usable (possibly stale) cache exists → serve the stale snapshot
+ *     now and kick a *detached* `background-reindex` (deduped by the rebuild
+ *     lock) so the next prompt gets fresh results. A single prompt's context may
+ *     lag one write — far better than freezing the prompt;
+ *   - cold start (no cache at all) → block once on a full build so the very first
+ *     prompt isn't empty.
+ * Freshness stays correct over time: an edit bumps mtime → new stat-hash → this
+ * misses → a rebuild is scheduled → the following prompt hits the new cache.
+ */
+export async function loadIndexForHook(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+  const cacheDir = ftsCacheDir();
+  const globResult = globAllFiles(phrenPath, profile);
+  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  const cacheFile = path.join(cacheDir, `${hash}.db`);
+  const SQL = await bootstrapSqlJs() as SqlJsStatic;
+
+  // Fast path: exact stat-hash hit (no file changed mtime/size since the build).
+  if (fs.existsSync(cacheFile)) {
+    try {
+      const db = new SQL.Database(fs.readFileSync(cacheFile));
+      const docCount = db.exec("SELECT COUNT(*) FROM docs")?.[0]?.values?.[0]?.[0] as number ?? 0;
+      if (docCount > 0) {
+        appendIndexEvent(phrenPath, { event: "build_index", cache: "hit", hash: hash.slice(0, 12), elapsedMs: 0, profile: profile || "" });
+        return db;
+      }
+      db.close();
+    } catch (err: unknown) {
+      debugLog(`loadIndexForHook fast-path load failed: ${errorMessage(err)}`);
+    }
+  }
+
+  // Miss. Serve stale immediately if any cache exists; else cold-build once.
+  let hasStale = false;
+  try {
+    hasStale = fs.existsSync(cacheDir) && fs.readdirSync(cacheDir).some(f => f.endsWith(".db"));
+  } catch (err: unknown) {
+    logger.debug("loadIndexForHook staleScan", errorMessage(err));
+  }
+  if (!hasStale) {
+    return buildIndex(phrenPath, profile);
+  }
+
+  // Schedule a detached rebuild for next time (rebuild lock dedups concurrent hooks).
+  if (!isRebuildLockHeld(phrenPath)) {
+    const entry = process.argv[1];
+    if (entry && /index\.(c?js|mjs|ts)$/.test(entry) && fs.existsSync(entry)) {
+      try {
+        spawnDetachedChild([entry, "background-reindex"], { phrenPath }).unref();
+        debugLog(`loadIndexForHook: scheduled detached background-reindex (stat-hash miss ${hash.slice(0, 8)})`);
+      } catch (err: unknown) {
+        debugLog(`loadIndexForHook: detached reindex spawn failed: ${errorMessage(err)}`);
+      }
+    }
+  }
+  return loadIndexSnapshotOrEmpty(phrenPath, profile);
 }
 
 async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {

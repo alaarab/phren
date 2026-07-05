@@ -360,12 +360,12 @@ export function configureClaude(phrenPath: string, opts: { mcpEnabled?: boolean;
       upsertPhrenHook("UserPromptSubmit", {
         type: "command",
         command: lifecycle.userPromptSubmit || `node "${entryScript}" hook-prompt`,
-        timeout: 3,
+        timeout: 10,
       });
 
       // Mirror pre-prompt custom hooks into Claude's settings.json as
       // peer UserPromptSubmit entries so they run in parallel with phren
-      // and don't share its 3-second timeout budget. See
+      // and don't share its timeout budget. See
       // upsertCustomPrePromptSiblings docstring for details.
       try {
         upsertCustomPrePromptSiblings(hooksMap, phrenPath);

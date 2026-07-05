@@ -341,9 +341,25 @@ export function errorLog(tool: string, msg: string): void {
   }
 }
 
+/**
+ * Truncate an append-only .jsonl to its last `keepLines` lines once it exceeds
+ * `maxBytes`. Best-effort: any IO error (including ENOENT) is ignored so callers
+ * never fail on rotation.
+ */
+export function rotateJsonlIfLarge(filePath: string, maxBytes = 2_000_000, keepLines = 2000): void {
+  try {
+    if (fs.statSync(filePath).size <= maxBytes) return;
+    const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+    fs.writeFileSync(filePath, lines.slice(-keepLines).join("\n"));
+  } catch {
+    // no file yet or IO error — nothing to rotate
+  }
+}
+
 export function appendIndexEvent(phrenPath: string, event: Record<string, unknown>): void {
   try {
     const file = runtimeFile(phrenPath, "index-events.jsonl");
+    rotateJsonlIfLarge(file);
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`appendIndexEvent: ${errorMessage(err)}`);
