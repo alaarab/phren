@@ -648,6 +648,17 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "background-reindex",
+    topic: "core",
+    usage: "phren background-reindex",
+    summary: "Internal: rebuild the FTS index off the hook path",
+    hidden: true,
+    run: async (_args, ctx) => {
+      const { buildIndex } = await import("./shared/index.js");
+      await buildIndex(ctx.phrenPath(), ctx.profile());
+    },
+  },
+  {
     name: "debug-injection",
     topic: "core",
     usage: "phren debug-injection",
