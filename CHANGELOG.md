@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-07-16
+
+### Fixed
+
+- **Hooks no longer break when the npx cache is pruned.** `phren init` wired Claude
+  Code's lifecycle hooks to the path of the running script, which under
+  `npx @phren/cli init` resolves into the ephemeral npx download cache
+  (`~/.npm/_npx/<hash>/…`). npx prunes that cache and the hash changes between
+  versions, so every hook would silently fail once it was gone — context stopped
+  injecting and phren appeared broken until init was re-run. Init now installs the
+  stable `~/.local/bin/phren` wrapper *before* writing hook commands, and
+  `buildLifecycleCommands` refuses to bake an npx-cache path into a fallback-less
+  `node <entry>` hook, dropping to the self-healing `npx -y` last resort instead.
+
+### Added
+
+- **`doctor` check `hook-path-stable`.** Flags hook commands still pointing into the
+  npx cache so the regression above is detected instead of failing silently.
+
 ## [0.1.34] - 2026-06-27
 
 ### Changed
