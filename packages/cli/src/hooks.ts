@@ -74,6 +74,18 @@ function resolveCliEntryScript(): string | null {
   return fs.existsSync(local) ? local : null;
 }
 
+/**
+ * True if a path lives inside an ephemeral npx download cache
+ * (`~/.npm/_npx/<hash>/…`). Baking such a path into a hook command that has no
+ * self-healing fallback is fragile: npx prunes that cache and the `<hash>`
+ * segment changes between versions, silently breaking every phren hook. Hook
+ * commands that resolve here must fall back to `npx -y <spec>` (which
+ * re-resolves on every run) or the ~/.local/bin/phren wrapper instead.
+ */
+export function isEphemeralNpxPath(p: string): boolean {
+  return /(^|[/\\])_npx[/\\]/.test(p);
+}
+
 function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
@@ -113,7 +125,12 @@ export function buildLifecycleCommands(
   phrenPath: string,
   options: BuildLifecycleOptions = {},
 ): LifecycleCommands {
-  const entry = resolveCliEntryScript();
+  const rawEntry = resolveCliEntryScript();
+  // A bare `node <entry>` hook has no fallback if <entry> disappears. When the
+  // package is running from the npx cache, that entry path is ephemeral, so we
+  // drop it here and let resolution fall through to the ~/.local/bin/phren
+  // wrapper (preferred) or the self-healing `npx -y <spec>` last resort.
+  const entry = rawEntry && !isEphemeralNpxPath(rawEntry) ? rawEntry : null;
   const nativeWindows = process.platform === "win32" && !options.forcePosix;
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const quotedPhren = shellEscape(phrenPath);
