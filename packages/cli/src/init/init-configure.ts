@@ -50,6 +50,17 @@ export function configureMcpTargets(
   opts: { mcpEnabled: boolean; hooksEnabled: boolean },
   verb: "Configured" | "Updated" = "Configured",
 ): string {
+  // Install the stable ~/.local/bin/phren wrapper BEFORE writing any hook
+  // commands. buildLifecycleCommands prefers that wrapper (it carries an npx
+  // fallback, so it survives nvm switches and npx cache clears); if it doesn't
+  // yet exist, hook commands fall through to the ephemeral npx-cache entry path
+  // and break the next time npx prunes its cache. configureHooksIfEnabled runs
+  // later and re-installs the wrapper idempotently, emitting the user-facing
+  // "CLI wrapper" line — this early install is intentionally silent.
+  try { installPhrenCliWrapper(phrenPath); } catch (err: unknown) {
+    debugLog(`configureMcpTargets: early wrapper install failed: ${errorMessage(err)}`);
+  }
+
   let claudeStatus = "no_settings";
   try {
     const status = configureClaude(phrenPath, { mcpEnabled: opts.mcpEnabled, hooksEnabled: opts.hooksEnabled });
