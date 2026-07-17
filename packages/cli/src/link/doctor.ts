@@ -18,7 +18,7 @@ import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
-import { detectInstalledTools } from "../hooks.js";
+import { detectInstalledTools, isEphemeralNpxPath } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
@@ -372,6 +372,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   });
   let hookOk = false;
   let lifecycleOk = false;
+  let hooksEphemeral = false;
   try {
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     const hooks = cfg?.hooks || {};
@@ -382,6 +383,11 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     const stopHookOk = stopHooks.includes("hook-stop");
     const startHookOk = startHooks.includes("hook-session-start");
     lifecycleOk = stopHookOk && startHookOk;
+    // A hook command that points into the npx cache (~/.npm/_npx/<hash>/…)
+    // works until npx prunes that cache, then breaks silently. Flag it so a
+    // re-init (which now resolves to the stable ~/.local/bin/phren wrapper)
+    // can repair it before the user notices context has stopped flowing.
+    hooksEphemeral = [promptHooks, stopHooks, startHooks].some(isEphemeralNpxPath);
   } catch (err: unknown) {
     debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
     hookOk = false;
@@ -398,6 +404,13 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: lifecycleOk
       ? "session-start + stop lifecycle hooks configured"
       : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
+  });
+  checks.push({
+    name: "hook-path-stable",
+    ok: !hooksEphemeral,
+    detail: hooksEphemeral
+      ? "hook commands point into the ephemeral npx cache (~/.npm/_npx/…); re-run `npx @phren/cli init` to repoint at the stable ~/.local/bin/phren wrapper"
+      : "hook commands use a stable entrypoint",
   });
 
   const runtimeHealthPath = runtimeHealthFile(phrenPath);
