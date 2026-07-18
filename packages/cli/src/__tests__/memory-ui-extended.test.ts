@@ -230,6 +230,17 @@ describe.sequential("web-ui graph API", () => {
     expect(typeof demoFinding?.fullLabel).toBe("string");
   });
 
+  it("graph nodes carry project totals and finding dates", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const demoProject = data.nodes.find((n: any) => n.id === "demo");
+    expect(typeof demoProject?.findingCount).toBe("number");
+    expect(demoProject?.findingCount).toBe(3);
+    expect(typeof demoProject?.taskCount).toBe("number");
+    const demoFinding = data.nodes.find((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(demoFinding?.date).toBe("2026-03-01");
+  });
+
   it("graph links connect project to its findings", async () => {
     const res = await httpGet(port, "/api/graph");
     const data = JSON.parse(res.body);

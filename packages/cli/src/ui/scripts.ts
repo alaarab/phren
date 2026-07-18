@@ -1898,22 +1898,17 @@ export function renderGraphHostScript(): string {
     if (typeof window.graphClearSelection === 'function') window.graphClearSelection();
   }
 
+  // The dossier docks to the right edge of the graph viewport — a stable
+  // reading pane instead of a cursor-chasing popover. Signature kept for
+  // callers; the x/y hint is no longer needed.
   function positionPopover(x, y) {
     var popover = document.getElementById('graph-node-popover');
-    var card = document.getElementById('graph-node-popover-card');
-    var container = document.querySelector('#tab-graph .graph-container');
-    if (!popover || !card || !container) return;
+    if (!popover) return;
+    popover.classList.add('phren-docked');
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.visibility = 'visible';
     popover.style.display = 'block';
-    popover.style.visibility = 'hidden';
-    requestAnimationFrame(function() {
-      var containerRect = container.getBoundingClientRect();
-      var cardRect = card.getBoundingClientRect();
-      var left = Math.min(Math.max(12, x + 18), Math.max(12, containerRect.width - cardRect.width - 12));
-      var top = Math.min(Math.max(12, y + 18), Math.max(12, containerRect.height - cardRect.height - 12));
-      popover.style.left = left + 'px';
-      popover.style.top = top + 'px';
-      popover.style.visibility = 'visible';
-    });
   }
 
   function currentPopoverPoint() {
@@ -1964,6 +1959,68 @@ export function renderGraphHostScript(): string {
     return node.kind || 'Node';
   }
 
+  function findingSiblings(node) {
+    var data = graphData();
+    return (data.nodes || []).filter(function(candidate) {
+      return candidate.kind === 'finding' && candidate.projectName === node.projectName;
+    }).sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  }
+
+  function findingNav(node) {
+    var list = findingSiblings(node);
+    var index = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === node.id) { index = i; break; }
+    }
+    return { list: list, index: index, total: list.length };
+  }
+
+  function relatedFindings(node) {
+    return findingSiblings(node).filter(function(candidate) {
+      return candidate.id !== node.id && candidate.topicSlug && candidate.topicSlug === node.topicSlug;
+    }).slice(0, 4);
+  }
+
+  // Neighbors of the node from the live graph links, scored so the panel can
+  // list "strongest relationships" like GraphRAG. Entities/findings first.
+  function strongestRelationships(node) {
+    var map = nodeMap();
+    var ids = neighborIds(node.id);
+    var out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var nb = map[ids[i]];
+      if (!nb || nb.kind === 'project') continue;
+      var w = 0.6;
+      if (nb.kind === 'entity') w = 0.7 + Math.min(0.28, (nb.refCount || 0) * 0.03);
+      else if (nb.kind === 'finding') w = typeof nb.qualityScore === 'number' ? 0.55 + nb.qualityScore * 0.4 : 0.6;
+      var name = nb.displayLabel || nb.label || nb.id;
+      var sub = nb.kind === 'entity' ? ((nb.refCount || 0) + ' references') : (nb.tooltipLabel || nb.fullLabel || '');
+      if (sub === name) sub = '';
+      out.push({ id: nb.id, name: name, sub: sub, w: w });
+    }
+    // same-topic siblings that aren't already linked, as softer relationships.
+    // Dedupe by display TEXT too — stores can hold near-duplicate findings and
+    // two identical rows read as a rendering bug.
+    var seen = {}; var seenName = {};
+    out.forEach(function(r) { seen[r.id] = true; seenName[r.name.toLowerCase()] = true; });
+    relatedFindings(node).forEach(function(rel) {
+      if (seen[rel.id]) return;
+      var relName = rel.displayLabel || rel.label || rel.id;
+      if (seenName[relName.toLowerCase()]) return;
+      seenName[relName.toLowerCase()] = true;
+      var relSub = 'same topic' + (rel.projectName && rel.projectName !== node.projectName ? ' · ' + rel.projectName : '');
+      out.push({ id: rel.id, name: relName, sub: relSub, w: 0.5 });
+    });
+    out.sort(function(a, b) { return b.w - a.w; });
+    return out.slice(0, 6);
+  }
+
+  function gotoChip(label, nodeId, accent) {
+    var border = accent ? 'var(--accent)' : 'var(--border)';
+    var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
+    return '<span data-graph-goto="' + esc(nodeId) + '" role="button" tabindex="0" style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid ' + border + ';background:' + bg + ';font-size:11px;color:var(--ink);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(label) + '</span>';
+  }
+
   function chip(text, accent) {
     var border = accent ? 'var(--accent)' : 'var(--border)';
     var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
@@ -1993,22 +2050,51 @@ export function renderGraphHostScript(): string {
     if (node.kind === 'task' && node.section) meta.push(node.section);
     if (node.kind === 'task' && node.priority) meta.push('Priority ' + node.priority);
     if (node.kind === 'finding' && node.topicLabel) meta.push(node.topicLabel);
+    if (node.kind === 'finding' && node.date) meta.push(node.date);
 
-    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
+    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div class="phren-dossier-kind" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
 
     var body = '';
     var actions = [];
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
+      // Server totals beat visible-adjacency counts (filters can hide nodes)
+      var findingTotal = typeof node.findingCount === 'number' && node.findingCount > counts.finding ? node.findingCount : counts.finding;
+      var taskTotal = typeof node.taskCount === 'number' && node.taskCount > counts.task ? node.taskCount : counts.task;
       body += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.finding + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.task + '</div></div>';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + findingTotal + '</div></div>';
+      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + taskTotal + '</div></div>';
       body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Fragments</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.entity + '</div></div>';
       body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
       body += '</div>';
     } else if (node.kind === 'finding') {
-      body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      // GraphRAG-style stats row: links / project / helpful
+      var conn = node.connections || {};
+      var helpful = node.score && typeof node.score.helpful === 'number' ? node.score.helpful : 0;
+      body += '<div class="phren-dossier-stats">'
+        + '<div><div class="k">Links</div><div class="v">' + (conn.total || 0) + '</div></div>'
+        + '<div><div class="k">Project</div><div class="v" style="font-size:11px;letter-spacing:.04em;text-transform:none">' + esc(node.projectName || '—') + '</div></div>'
+        + '<div><div class="k">Helpful</div><div class="v">' + helpful + '</div></div>'
+        + '</div>';
+      body += '<div class="phren-dossier-section">◈ Description</div>';
+      body += '<div id="graph-node-text" class="phren-dossier-text">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      // Strongest relationships — related same-topic findings + entity neighbors
+      var rels = strongestRelationships(node);
+      if (rels.length) {
+        body += '<div class="phren-dossier-section">⟿ Strongest relationships · ' + rels.length + '</div>';
+        body += '<div style="margin-top:8px">' + rels.map(function(r) {
+          return '<div class="phren-rel-row" data-graph-goto="' + esc(r.id) + '"><div class="n">' + esc(r.name) + (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + '</div><div class="w">' + r.w.toFixed(2) + '</div></div>';
+        }).join('') + '</div>';
+      }
+      if (node.projectName) {
+        body += '<div class="phren-dossier-section">Community</div>';
+        body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
+      }
+      var nav = findingNav(node);
+      if (nav.total > 1 && nav.index !== -1) {
+        actions.push('<span class="phren-dossier-nav"><button type="button" data-graph-action="prev-finding" title="Previous finding in project">‹</button><span>' + (nav.index + 1) + ' of ' + nav.total + '</span><button type="button" data-graph-action="next-finding" title="Next finding in project">›</button></span>');
+      }
       actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
       actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
     } else if (node.kind === 'task') {
@@ -2120,7 +2206,8 @@ export function renderGraphHostScript(): string {
     }
     graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'PUT', {
       old_text: currentNode.tooltipLabel || currentNode.fullLabel || '',
-      new_text: nextText
+      new_text: nextText,
+      score_key: currentNode.scoreKey || ''
     }).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
       graphToast('Finding updated', 'ok');
@@ -2170,7 +2257,8 @@ export function renderGraphHostScript(): string {
     if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
     if (currentNode.kind === 'finding') {
       graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'DELETE', {
-        text: currentNode.tooltipLabel || currentNode.fullLabel || ''
+        text: currentNode.tooltipLabel || currentNode.fullLabel || '',
+        score_key: currentNode.scoreKey || ''
       }).then(function(result) {
         if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
         graphToast('Finding deleted', 'ok');
@@ -2241,9 +2329,28 @@ export function renderGraphHostScript(): string {
       });
     });
 
+    // Related-node chips — fly to the referenced node
+    document.querySelectorAll('[data-graph-goto]').forEach(function(chipEl) {
+      chipEl.addEventListener('click', function() {
+        var target = chipEl.getAttribute('data-graph-goto') || '';
+        var api = graphApi();
+        if (target && api && api.focusNode) api.focusNode(target);
+      });
+    });
+
     document.querySelectorAll('[data-graph-action]').forEach(function(button) {
       button.addEventListener('click', function() {
         var action = button.getAttribute('data-graph-action');
+        if (action === 'prev-finding' || action === 'next-finding') {
+          if (!currentNode) return;
+          var nav = findingNav(currentNode);
+          if (nav.total < 2 || nav.index === -1) return;
+          var step = action === 'next-finding' ? 1 : -1;
+          var nextIndex = (nav.index + step + nav.total) % nav.total;
+          var api = graphApi();
+          if (api && api.focusNode) api.focusNode(nav.list[nextIndex].id);
+          return;
+        }
         if (action === 'edit') {
           editMode = currentNode && (currentNode.kind === 'finding' || currentNode.kind === 'task') ? currentNode.kind : null;
           var point = currentPopoverPoint();

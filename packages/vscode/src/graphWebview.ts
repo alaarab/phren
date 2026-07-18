@@ -19,7 +19,7 @@ function isValidProjectName(name: string): boolean {
 
 /**
  * Load the web-ui graph script from the MCP dist.
- * This gives us the Sigma.js v3 renderer with ForceAtlas2 layout, drag, glow, etc.
+ * This gives us the Three.js / 3d-force-graph renderer with 3D force layout, bloom, drag, etc.
  *
  * Resolution order:
  * 1. Same directory as compiled extension JS (works in .vsix packaging)
@@ -29,8 +29,8 @@ function isValidProjectName(name: string): boolean {
 function loadGraphScript(): string {
   const candidates = [
     path.resolve(__dirname, "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "generated", "memory-ui-graph.browser.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "memory-ui-graph.runtime.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "generated", "memory-ui-graph.browser.js"),
   ];
   for (const candidate of candidates) {
     try {
@@ -228,7 +228,9 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       suppressWatcherUntil = Date.now() + 1500;
       graphData = await loadGraphData(client);
       graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-      panel.webview.html = renderGraphHtml(panel.webview, graphData);
+      // In-place data swap — the webview remounts the renderer and keeps the
+      // user's camera pose (a full HTML rewrite reset the whole scene).
+      void panel.webview.postMessage({ type: "graphData", payload: graphData });
     }
 
     async function mutate<T>(fn: () => Promise<T>): Promise<T> {
@@ -454,7 +456,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           try {
             graphData = await loadGraphData(client);
             graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-            panel.webview.html = renderGraphHtml(panel.webview, graphData);
+            void panel.webview.postMessage({ type: "graphData", payload: graphData });
           } catch (err) {
             // Surface silently — user still sees the last-known graph.
             console.error("phren: failed to refresh graph on external change", err);
@@ -993,16 +995,26 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     }
     * { box-sizing: border-box; }
     body { margin: 0; height: 100vh; overflow: hidden; color: var(--ink); background: var(--vscode-editor-background); }
-    #graph-filter, #graph-project-filter, #graph-limit-row {
+    /* Full-bleed: the graph fills the whole panel and the renderer's filter bar
+       floats over the canvas (top-right), matching the immersive web-ui. The
+       old fixed 100vh-120px band left dead space below and a chrome strip on
+       top; the renderer now builds all its HUD inside #graph-filter. */
+    #graph-project-filter, #graph-limit-row { display: none; }
+    #graph-filter {
+      position: absolute;
+      top: 12px;
+      right: 58px;
+      left: auto;
+      width: min(560px, 60%);
+      z-index: 12;
       display: flex;
       gap: 8px;
-      padding: 8px 12px;
       align-items: center;
-      flex-wrap: wrap;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      background: transparent;
+      border: none;
+      padding: 0;
     }
-    .graph-shell { height: calc(100vh - 120px); position: relative; overflow: hidden; }
+    .graph-shell { height: 100vh; position: relative; overflow: hidden; }
     .graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
     #graph-canvas { width: 100%; height: 100%; display: block; }
     #ambient-canvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:2; }
@@ -1073,6 +1085,20 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       z-index: 20;
       max-width: min(300px, calc(100% - 24px));
       pointer-events: none;
+    }
+    /* The 3D canvas is immersive-dark in both editor themes; the popover,
+       context menu and toast adopt the web dossier's dark-glass palette so
+       they don't clash as light VS-theme cards floating on a dark scene. */
+    #node-popover, .node-ctx-menu, .graph-toast {
+      --border: rgba(103, 232, 249, 0.22);
+      --surface: rgba(8, 10, 22, 0.92);
+      --surface-raised: rgba(22, 27, 52, 0.9);
+      --surface-sunken: rgba(5, 6, 15, 0.92);
+      --ink: #dbe4ff;
+      --muted: #8b96c9;
+      --accent: #67e8f9;
+      --danger: #ff7b93;
+      color: var(--ink);
     }
     #node-popover-card {
       position: relative;
@@ -1277,7 +1303,11 @@ ${graphScript}
   var payload = ${payloadJson};
   var vscode = acquireVsCodeApi();
   var nodeLookup = {};
-  for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  function rebuildNodeLookup() {
+    nodeLookup = {};
+    for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  }
+  rebuildNodeLookup();
 
   function esc(value) {
     return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1320,6 +1350,11 @@ ${graphScript}
     return counts;
   }
 
+  // Maps the extension payload to the shared renderer's shape and (re)mounts.
+  // Re-runs on 'graphData' messages so external refreshes swap data in place —
+  // the renderer preserves the camera pose on remount, where the old
+  // full-HTML replacement reset the whole scene.
+  function mapAndMountGraph() {
   var graphNodes = [];
   var topicMap = {};
   for (var index = 0; index < payload.nodes.length; index++) {
@@ -1349,8 +1384,27 @@ ${graphScript}
       connectedProjects: n.connectedProjects || [],
       topicSlug: n.topicSlug || '',
       topicLabel: n.topicLabel || '',
-      tagged: n.kind === 'finding'
+      tagged: n.kind === 'finding',
+      store: n.store || ''
     });
+  }
+
+  // Project totals for tooltips/labels — counted from the payload itself
+  // (the extension's node shape has no findingCount/taskCount fields).
+  var projectTotals = {};
+  for (var totalsIdx = 0; totalsIdx < graphNodes.length; totalsIdx++) {
+    var totalsNode = graphNodes[totalsIdx];
+    if (totalsNode.group === 'project' || !totalsNode.project) continue;
+    var totals = projectTotals[totalsNode.project] || (projectTotals[totalsNode.project] = { findings: 0, tasks: 0 });
+    if (totalsNode.group.indexOf('topic:') === 0) totals.findings++;
+    else if (totalsNode.group.indexOf('task-') === 0) totals.tasks++;
+  }
+  for (var projIdx = 0; projIdx < graphNodes.length; projIdx++) {
+    var projNode = graphNodes[projIdx];
+    if (projNode.group !== 'project') continue;
+    var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0, tasks: 0 };
+    projNode.findingCount = projTotals.findings;
+    projNode.taskCount = projTotals.tasks;
   }
 
   var topics = [];
@@ -1400,6 +1454,8 @@ ${graphScript}
         + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div></div></div>';
     }
   }
+  }
+  mapAndMountGraph();
 
   var zoomInBtn = document.getElementById('btn-zoom-in');
   var zoomOutBtn = document.getElementById('btn-zoom-out');
@@ -1814,6 +1870,27 @@ ${graphScript}
   window.addEventListener('message', function(event) {
     var data = event && event.data;
     if (!data) return;
+    if (data.type === 'graphData' && data.payload && data.payload.nodes) {
+      // In-place data refresh: remount the shared renderer (camera pose is
+      // preserved on remount) instead of the extension rewriting the HTML.
+      payload = data.payload;
+      rebuildNodeLookup();
+      mapAndMountGraph();
+      if (currentNode) {
+        var refreshedNode = nodeLookup[currentNode.id];
+        if (refreshedNode) {
+          Object.assign(currentNode, refreshedNode);
+          if (!editMode) {
+            var refreshedPoint = currentPoint();
+            renderPopover(currentNode, refreshedPoint.x, refreshedPoint.y);
+          }
+        } else {
+          hidePopover(true);
+          currentNode = null;
+        }
+      }
+      return;
+    }
     if (data.type === 'nodeUpdated' && typeof data.id === 'string' && data.changes) {
       if (window.phrenGraph && typeof window.phrenGraph.updateNode === 'function') {
         window.phrenGraph.updateNode(data.id, data.changes);
