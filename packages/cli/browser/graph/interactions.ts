@@ -157,7 +157,10 @@ export function selectNode(nodeId: string): boolean {
     state.hoveredNodeId = null;
     applyHighlight();
     flyToNode(fgNode, 900);
-    setTimeout(() => notifySelection(nodeId), 950);
+    // Notify hosts right away — the docked dossier doesn't wait on the
+    // camera, and delaying was a flake source under load. The short defer
+    // just lets the fly-to start before the host re-renders.
+    setTimeout(() => notifySelection(nodeId), 120);
     mascotMoveTo(nodeId, true);
     return true;
   }
@@ -168,7 +171,7 @@ export function selectNode(nodeId: string): boolean {
   hideTooltip();
   applyHighlight();
   flyToNode(fgNode, 800);
-  setTimeout(() => notifySelection(nodeId), 850);
+  setTimeout(() => notifySelection(nodeId), 120);
   mascotMoveTo(nodeId, true);
   return true;
 }
