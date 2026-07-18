@@ -48,7 +48,8 @@ test.describe.serial("web-ui browser e2e", () => {
   test("navigates the major web-ui surfaces from an isolated temp store", async ({ page }) => {
     await openWebUi(page);
 
-    await expect(page.locator(".header-brand")).toContainText("Phren");
+    // The brand renders lowercase "phren" — match case-insensitively.
+    await expect(page.locator(".header-brand")).toContainText(/phren/i);
     await expect(page.locator(".project-card").filter({ hasText: "repo-a" })).toBeVisible();
     await expect(page.locator(".project-card").filter({ hasText: "repo-b" })).toBeVisible();
 
