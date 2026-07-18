@@ -38,6 +38,8 @@ import {
 import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
 import { mascotUpdate } from "./mascot.js";
 import { updateFilterBarCounter, updateHudStats } from "./hud.js";
+import { computeHierarchicalLayout } from "./layout.js";
+import { buildCages, disposeCages, refreshCageFocus, setCageResolution } from "./cages.js";
 
 let starfield: THREE.Points | null = null;
 let nebula: THREE.Group | null = null;
@@ -46,6 +48,7 @@ let ringPhase = 0;
 let bloomPass: UnrealBloomPass | null = null;
 let vignetteEl: HTMLElement | null = null;
 let labelRenderer: ReturnType<typeof createLabelRenderer> | null = null;
+let cageScene: THREE.Scene | null = null;
 
 function buildStarfield(): THREE.Points {
   const count = 1400;
@@ -148,7 +151,16 @@ export function pushGraphData(): void {
   const links: FGLink[] = state.visibleLinks
     .filter((link) => visibleIds.has(link.source) && visibleIds.has(link.target))
     .map((link) => ({ source: link.source, target: link.target }));
+  // Deterministic hierarchical layout (store ⊃ project ⊃ findings) — every
+  // node is pinned via fx/fy/fz so the force sim leaves the positions alone.
+  const cageSpecs = computeHierarchicalLayout(nodes);
   state.fg.graphData({ nodes, links });
+  if (state.fg.scene) {
+    cageScene = state.fg.scene();
+    buildCages(cageScene!, cageSpecs, containerSize());
+    const focusProj = state.focusedProjectId ? `project:${state.nodeById.get(state.focusedProjectId)?.store || "primary"}:${state.focusedProjectId}` : null;
+    refreshCageFocus(focusProj, null);
+  }
   applyHighlight();
 }
 
@@ -201,10 +213,10 @@ export function setupForceGraph(): void {
     .linkDirectionalParticleSpeed(0.006)
     .linkDirectionalParticleWidth(1.2)
     .linkDirectionalParticleColor(() => ACCENT_AMBER)
-    .enableNodeDrag(true)
-    .warmupTicks(60)
-    .cooldownTicks(100)
-    .d3AlphaDecay(0.03)
+    .enableNodeDrag(false)
+    .warmupTicks(0)
+    .cooldownTicks(0)
+    .d3AlphaDecay(1)
     .onNodeHover((node: FGNode | null) => onHover(node))
     .onNodeClick((node: FGNode) => onNodeClick(node))
     .onNodeRightClick((node: FGNode, event: MouseEvent) => onNodeRightClick(node, event))
@@ -238,35 +250,21 @@ export function setupForceGraph(): void {
     state.container?.removeEventListener("wheel", pauseRotate);
   });
 
-  // Force tuning: findings hug their project hub, projects repel each other
-  // into distinct constellations.
+  // Layout is deterministic (see computeHierarchicalLayout) and every node is
+  // pinned, so the force sim is neutralised: kill charge so nothing drifts.
   const charge = fg.d3Force("charge");
-  if (charge) charge.strength(-95);
-  const linkForce = fg.d3Force("link");
-  if (linkForce) {
-    linkForce.distance((link: FGLink) => {
-      const s = state.nodeById.get(linkEndpointId(link.source))?.kind;
-      const t = state.nodeById.get(linkEndpointId(link.target))?.kind;
-      if (s === "project" || t === "project") return 52;
-      if (s === "entity" || t === "entity") return 38;
-      return 26;
-    });
-  }
+  if (charge) charge.strength(0);
+  fg.d3Force("link", null);
+  fg.d3Force("center", null);
 
-  // Restrained bloom at half resolution: high threshold so only the hot
-  // white node cores glow. data-fx="off" skips the composer entirely.
+  // Restrained bloom at half resolution — the additive point-dots glow.
   if (!state.fxOff) {
     const size = containerSize();
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(Math.max(1, size.w / 2), Math.max(1, size.h / 2)), 0.32, 0.5, 0.72);
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(Math.max(1, size.w / 2), Math.max(1, size.h / 2)), 0.45, 0.6, 0.32);
     fg.postProcessingComposer().addPass(bloomPass);
   }
 
   fg.scene().fog = new THREE.FogExp2(BG_COLOR, 0.0009);
-
-  starfield = buildStarfield();
-  fg.scene().add(starfield);
-  nebula = buildNebula();
-  fg.scene().add(nebula);
   ensureFocusHalos(fg.scene());
 
   // Expanding pulse ring around the active node.
@@ -312,6 +310,7 @@ export function setupForceGraph(): void {
     const next = containerSize();
     state.fg?.width(next.w).height(next.h);
     labelRenderer?.setSize(next.w, next.h);
+    setCageResolution(next.w, next.h);
   };
   if (typeof ResizeObserver === "function") {
     state.resizeObserver = new ResizeObserver(onResize);
@@ -390,6 +389,7 @@ export function disposeScene(): void {
     ringSprite = null;
   }
   disposeFocusHalos();
+  if (cageScene) { disposeCages(cageScene); cageScene = null; }
   bloomPass = null;
   vignetteEl = null;
   labelRenderer = null;

@@ -28,6 +28,24 @@ export function glowTexture(): THREE.Texture {
   return _glowTexture;
 }
 
+let _dotTexture: THREE.Texture | null = null;
+/** Crisp glowing dot for point-nodes — tighter falloff than the soft glow. */
+export function dotTexture(): THREE.Texture {
+  if (_dotTexture) return _dotTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.45, "rgba(255,255,255,0.9)");
+  gradient.addColorStop(0.7, "rgba(255,255,255,0.35)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  _dotTexture = new THREE.CanvasTexture(canvas);
+  return _dotTexture;
+}
+
 let _ringTexture: THREE.Texture | null = null;
 export function ringTexture(): THREE.Texture {
   if (_ringTexture) return _ringTexture;
@@ -92,108 +110,45 @@ function makeHoloMaterial(color: string, bodyAlpha: number, rimPower: number): T
 
 // ── Node construction ───────────────────────────────────────────────────
 
+/** Point-node size (world units) by kind — GraphRAG-style small glowing dots. */
+function dotSize(node: FGNode["raw"]): number {
+  if (node.kind === "project") return 5.4;
+  if (node.kind === "finding") return node.tagged ? 4 : 3.4;
+  if (node.kind === "task") return 3.8;
+  if (node.kind === "reference") return 2.8;
+  return 2.6; // entity
+}
+
+/** Point-node tint by kind — findings brightest, entities dim satellites. */
+function dotColor(node: FGNode["raw"]): THREE.Color {
+  const c = new THREE.Color(node.baseColor);
+  if (node.kind === "project") return c.lerp(new THREE.Color(0xffffff), 0.35);
+  if (node.kind === "finding") return c.lerp(new THREE.Color(0xffffff), node.tagged ? 0.5 : 0.35);
+  if (node.kind === "entity") return c.lerp(new THREE.Color(0xffffff), 0.12).multiplyScalar(0.72);
+  if (node.kind === "reference") return c.lerp(new THREE.Color(0xffffff), 0.2).multiplyScalar(0.8);
+  return c.lerp(new THREE.Color(0xffffff), 0.3);
+}
+
 export function buildNodeObject(fgNode: FGNode): THREE.Group {
   if (fgNode.__group) return fgNode.__group;
   const node = fgNode.raw;
   const group = new THREE.Group();
   group.userData.phrenNodeId = node.id;
-  const radius = nodeRadius(node);
-  const color = new THREE.Color(node.baseColor);
 
-  if (node.kind === "project") {
-    // Glass orb: translucent fresnel sphere around a hot white-amber core,
-    // ringed by a thin accent band and a slow wireframe cage.
-    const core = new THREE.Mesh(
-      SPHERE_GEOM,
-      new THREE.MeshBasicMaterial({ color: color.clone().lerp(new THREE.Color("#ffffff"), 0.55), transparent: true, opacity: 1, toneMapped: false }),
-    );
-    core.scale.setScalar(radius * 0.3);
-    group.add(core);
-
-    const shell = new THREE.Mesh(SPHERE_GEOM, makeHoloMaterial(node.baseColor, 0.12, 3.0));
-    shell.scale.setScalar(radius);
-    group.add(shell);
-
-    const wire = new THREE.Mesh(CAGE_GEOM, new THREE.MeshBasicMaterial({
-      color,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-    }));
-    wire.scale.setScalar(radius * 1.35);
-    group.add(wire);
-    fgNode.__wire = wire;
-
-    const ring = new THREE.Mesh(RING_GEOM, new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.15,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }));
-    ring.scale.setScalar(radius);
-    ring.rotation.x = 1.1 + seeded(node.id, "tilt") * 0.6;
-    ring.rotation.y = seeded(node.id, "spin") * Math.PI;
-    group.add(ring);
-    fgNode.__ring = ring;
-
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTexture(),
-      color,
-      transparent: true,
-      opacity: 0.1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    }));
-    halo.scale.setScalar(radius * 2.2);
-    group.add(halo);
-    fgNode.__halo = halo;
-
-    fgNode.__core = core;
-    fgNode.__shell = shell;
-  } else if (node.kind === "finding" || node.kind === "task") {
-    // Crystal shard, tinted by topic. Static hash-seeded orientation — no
-    // per-frame spin, the stillness is part of the archive look.
-    const shard = new THREE.Mesh(SHARD_GEOM, makeHoloMaterial(node.baseColor, 0.55, 2.0));
-    if (node.kind === "task") shard.scale.set(radius * 0.8, radius * 1.4, radius * 0.8);
-    else shard.scale.setScalar(radius);
-    shard.rotation.set(
-      seeded(node.id, "rx") * Math.PI,
-      seeded(node.id, "ry") * Math.PI,
-      seeded(node.id, "rz") * Math.PI,
-    );
-    group.add(shard);
-
-    const core = new THREE.Mesh(
-      SPHERE_GEOM,
-      new THREE.MeshBasicMaterial({ color: color.clone().lerp(new THREE.Color("#ffffff"), 0.25), transparent: true, opacity: 1, toneMapped: false }),
-    );
-    core.scale.setScalar(radius * 0.22);
-    group.add(core);
-
-    fgNode.__core = core;
-    fgNode.__shell = shard;
-  } else {
-    // Entities and references: small quiet satellites.
-    const isRef = node.kind === "reference";
-    const shell = new THREE.Mesh(
-      isRef ? REF_GEOM : SPHERE_GEOM,
-      makeHoloMaterial(node.baseColor, isRef ? 0.4 : 0.35, 2.4),
-    );
-    shell.scale.setScalar(radius * 0.8);
-    group.add(shell);
-
-    const core = new THREE.Mesh(
-      SPHERE_GEOM,
-      new THREE.MeshBasicMaterial({ color: color.clone().lerp(new THREE.Color("#ffffff"), 0.2), transparent: true, opacity: 1, toneMapped: false }),
-    );
-    core.scale.setScalar(radius * 0.18);
-    group.add(core);
-
-    fgNode.__core = core;
-    fgNode.__shell = shell;
-  }
+  // Every node is a small glowing point (dot sprite). Communities/structure
+  // come from the cages, not from big per-node geometry.
+  const dot = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: dotTexture(),
+    color: dotColor(node),
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  }));
+  dot.scale.setScalar(dotSize(node));
+  group.add(dot);
+  fgNode.__dot = dot;
 
   fgNode.__group = group;
   fgNode.__focusScale = 1;
@@ -251,14 +206,7 @@ export function applyHighlight(): void {
 
 export function applyNodeIntensity(fgNode: FGNode): void {
   const i = fgNode.__int ?? 1;
-  if (fgNode.__core) (fgNode.__core.material as THREE.MeshBasicMaterial).opacity = i;
-  if (fgNode.__shell) {
-    const mat = fgNode.__shell.material as THREE.ShaderMaterial;
-    if (mat.uniforms?.uIntensity) mat.uniforms.uIntensity.value = i;
-  }
-  if (fgNode.__wire) (fgNode.__wire.material as THREE.MeshBasicMaterial).opacity = 0.18 * i;
-  if (fgNode.__ring) (fgNode.__ring.material as THREE.MeshBasicMaterial).opacity = 0.15 * i;
-  if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).opacity = 0.1 * i;
+  if (fgNode.__dot) (fgNode.__dot.material as THREE.SpriteMaterial).opacity = i;
 }
 
 // ── Intro stagger ───────────────────────────────────────────────────────
