@@ -2,6 +2,7 @@ import { WEB_UI_STYLES, renderWebUiScript } from "./assets.js";
 import { renderGraphScript } from "./graph.js";
 import { LAYOUT_VIEWPORT_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
 import { PHREN_DEEP_VOID_STYLES } from "./deep-void.js";
+import { GRAPH_HUD_STYLES } from "./graph-chrome.js";
 import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
@@ -35,6 +36,7 @@ export function renderWebUiPage(_phrenPath: string, authToken?: string, nonce?: 
   <link rel="preconnect" href="https://fonts.bunny.net" />
   <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700|space-grotesk:400,500,600,700|jetbrains-mono:400,500,700&display=swap" rel="stylesheet" />
   <title>phren</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%2312122a'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%237c6bf5'/%3E%3Ccircle cx='13' cy='13' r='3' fill='%23a99cfa'/%3E%3C/svg%3E" />
   <style>
 ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
@@ -43,6 +45,7 @@ ${TASK_UI_STYLES}
 ${REVIEW_UI_STYLES}
 ${PHREN_DEEP_VOID_STYLES}
 ${LAYOUT_VIEWPORT_STYLES}
+${GRAPH_HUD_STYLES}
   </style>
 </head>
 <body>

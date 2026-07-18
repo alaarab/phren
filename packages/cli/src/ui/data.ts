@@ -50,6 +50,11 @@ interface GraphNode {
   scoreKeys?: string[];
   topicSlug?: string;
   topicLabel?: string;
+  /** Findings only: the `## YYYY-MM-DD` heading the entry sits under. */
+  date?: string;
+  /** Project nodes only: real per-project totals for tooltips/labels. */
+  findingCount?: number;
+  taskCount?: number;
 }
 
 interface GraphDocRef {
@@ -265,6 +270,20 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   const topicMetaMap = new Map<string, GraphTopicMeta>();
   // Track which project nodes have already been pushed (same name may appear in multiple stores)
   const addedProjectNodeIds = new Set<string>();
+  // Project nodes by name so per-project finding/task totals can be stamped after the scans
+  const projectNodeByName = new Map<string, GraphNode>();
+
+  // Finding ids are content hashes, so duplicate-text bullets collide — every
+  // id-keyed map downstream (renderer, selection, removal) then conflates the
+  // twins. Salt repeat occurrences deterministically (file order); the FIRST
+  // occurrence keeps the canonical id so findingNodeIdForLine / lookup-event
+  // targeting stays in lockstep.
+  const usedFindingIds = new Map<string, number>();
+  const uniqueFindingId = (id: string): string => {
+    const seen = usedFindingIds.get(id) || 0;
+    usedFindingIds.set(id, seen + 1);
+    return seen === 0 ? id : `${id}-${seen + 1}`;
+  };
 
   for (const { storePath, project } of storeProjects) {
     // Load dynamic topics for this project
@@ -280,7 +299,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     if (!fs.existsSync(findingsPath)) {
       if (!addedProjectNodeIds.has(project)) {
         addedProjectNodeIds.add(project);
-        nodes.push({
+        const projectNode: GraphNode = {
           id: project,
           label: project,
           fullLabel: project,
@@ -289,14 +308,18 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           project,
           store: storeName,
           tagged: false,
-        });
+          findingCount: 0,
+          taskCount: 0,
+        };
+        nodes.push(projectNode);
+        projectNodeByName.set(project, projectNode);
       }
       continue;
     }
 
     if (!addedProjectNodeIds.has(project)) {
       addedProjectNodeIds.add(project);
-      nodes.push({
+      const projectNode: GraphNode = {
         id: project,
         label: project,
         fullLabel: project,
@@ -305,7 +328,11 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         project,
         store: storeName,
         tagged: false,
-      });
+        findingCount: 0,
+        taskCount: 0,
+      };
+      nodes.push(projectNode);
+      projectNodeByName.set(project, projectNode);
     }
 
     const content = fs.readFileSync(findingsPath, "utf8");
@@ -320,8 +347,16 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
     // Support heading-based findings: ## topic / ### title / paragraph
     let currentHeadingTag: string | undefined;
     let _currentHeadingTitle: string | undefined;
+    // FINDINGS.md groups entries under `## YYYY-MM-DD` date headings
+    let currentDate: string | undefined;
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       const line = lines[lineIdx];
+
+      const dateMatch = line.match(/^##\s+(\d{4}-\d{2}-\d{2})\s*$/);
+      if (dateMatch) {
+        currentDate = dateMatch[1];
+        continue;
+      }
 
       // Track heading context for heading-based findings
       const h2Match = line.match(/^##\s+([a-z_-]+)\s*$/i);
@@ -347,7 +382,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           if (taggedCount >= MAX_TAGGED) continue;
           const topic = classifyTopicForText(`[${currentHeadingTag}] ${text}`, projectTopics);
           const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${currentHeadingTag}] ${text}`);
-          const nodeId = findingStableId(scoreKey);
+          const nodeId = uniqueFindingId(findingStableId(scoreKey));
           taggedCount++;
           nodes.push({
             id: nodeId,
@@ -363,6 +398,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
             refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
             topicSlug: topic.slug,
             topicLabel: topic.label,
+            date: currentDate,
           });
           links.push({ source: project, target: nodeId });
           for (const other of exactProjectMentions(text, projectSet, project)) {
@@ -382,7 +418,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         // Classify the finding using the project's topic system
         const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
         const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${tag}] ${text}`);
-        const nodeId = findingStableId(scoreKey);
+        const nodeId = uniqueFindingId(findingStableId(scoreKey));
         taggedCount++;
         nodes.push({
           id: nodeId,
@@ -398,6 +434,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
           topicSlug: topic.slug,
           topicLabel: topic.label,
+          date: currentDate,
         });
         links.push({ source: project, target: nodeId });
         for (const other of exactProjectMentions(text, projectSet, project)) {
@@ -415,7 +452,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       // Classify using dynamic topics
       const topic = classifyTopicForText(text, projectTopics);
       const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, text);
-      const nodeId = findingStableId(scoreKey);
+      const nodeId = uniqueFindingId(findingStableId(scoreKey));
       untaggedAdded++;
       nodes.push({
         id: nodeId,
@@ -431,8 +468,14 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         refDocs: [{ doc: `${project}/FINDINGS.md`, project, scoreKey }],
         topicSlug: topic.slug,
         topicLabel: topic.label,
+        date: currentDate,
       });
       links.push({ source: project, target: nodeId });
+    }
+
+    const projectNode = projectNodeByName.get(project);
+    if (projectNode) {
+      projectNode.findingCount = (projectNode.findingCount || 0) + taggedCount + untaggedAdded;
     }
   }
 
@@ -470,6 +513,10 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           links.push({ source: project, target: nodeId });
           taskCount++;
         }
+      }
+      const projectNode = projectNodeByName.get(project);
+      if (projectNode) {
+        projectNode.taskCount = (projectNode.taskCount || 0) + taskCount;
       }
     }
   } catch {
