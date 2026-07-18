@@ -27,6 +27,7 @@ import {
   clearSelection,
   containerSize,
   noteInteraction,
+  fitCameraToGraph,
   notifyClear,
   notifySelection,
   onHover,
@@ -182,8 +183,15 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
     setTimeout(() => notifySelection(state.selectedNodeId!), 0);
   }
   if (options.resetCamera && state.fg) {
-    // onEngineStop refits the camera once the layout settles.
-    state.firstSettle = true;
+    // The force sim is disabled (cooldownTicks 0), so onEngineStop won't
+    // re-fire after a data swap — a filtered subset would otherwise be left
+    // off-screen (e.g. isolating one project parked the camera on empty space).
+    // Refit explicitly, but only after force-graph has committed the new node
+    // set — getGraphBbox lags the graphData() swap by a couple of frames, so an
+    // immediate fit would frame the stale (larger) bbox and leave the subset
+    // tiny. A short delay lets the new pinned layout settle first.
+    const fg = state.fg;
+    setTimeout(() => { if (state.fg === fg) fitCameraToGraph(600); }, 180);
   }
 }
 
