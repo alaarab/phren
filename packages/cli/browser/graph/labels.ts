@@ -95,11 +95,15 @@ export function attachEagerLabel(fgNode: FGNode): void {
   fadeIn(el);
 }
 
-/** Refresh an eager label after updateNode. */
+/** Refresh an eager label after updateNode / count changes. */
 export function updateEagerLabelText(fgNode: FGNode): void {
   if (!fgNode.__labelEl) return;
   const node = fgNode.raw;
-  if (node.kind !== "project") {
+  if (node.kind === "project") {
+    const count = typeof node.findingCount === "number" ? node.findingCount : "";
+    fgNode.__labelEl.style.setProperty("--pc", node.baseColor);
+    fgNode.__labelEl.innerHTML = `<span class="phren-label-dot"></span>${esc(node.label)}${count !== "" ? `<span class="phren-label-meta">${esc(String(count))}</span>` : ""}`;
+  } else {
     fgNode.__labelEl.textContent = node.label;
     fgNode.__labelEl.style.color = node.baseColor;
   }

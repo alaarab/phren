@@ -75,20 +75,27 @@ function mount(payload: GraphPayload): void {
   buildFilterBar();
   setupForceGraph();
   buildHudOverlays();
-  state.firstSettle = true;
-  applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
+
+  // Remounts (hosts re-mount after an edit/delete/external refresh) keep the
+  // user's camera pose: the layout is deterministic, so positions are
+  // identical and refitting would just yank the view back to the overview.
+  const isRemount = Boolean(state.fg) && state.introPlayed;
+  state.firstSettle = !isRemount;
+  applyFilters({ resetCamera: !isRemount, emitSelection: Boolean(state.selectedNodeId) });
   startMascot();
 
   // Software GL can take many seconds to finish the cooldown ticks that
   // fire onEngineStop — don't leave the camera parked wide. Warmup already
   // ran 60 ticks, so positions are respectable; whichever trigger fires
   // first wins via the firstSettle flag.
-  setTimeout(() => {
-    if (state.firstSettle) {
-      state.firstSettle = false;
-      runIntro();
-    }
-  }, 2600);
+  if (!isRemount) {
+    setTimeout(() => {
+      if (state.firstSettle) {
+        state.firstSettle = false;
+        runIntro();
+      }
+    }, 2600);
+  }
 }
 
 function disposeNodeObject(fgNode: FGNode): void {
@@ -175,6 +182,18 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
   const animate = opts?.animate !== false && !reducedMotion && Boolean(fgNode?.__group);
 
   const finalize = () => {
+    // Keep the project's eager-label count honest after a client-side delete
+    // (the count is payload-sourced and would otherwise go stale until reload).
+    const removed = state.nodeById.get(nodeId);
+    if (removed && (removed.kind === "finding" || removed.kind === "task") && removed.project) {
+      const projectNode = state.rawNodes.find((n) => n.kind === "project" && (n.project || n.id) === removed.project);
+      if (projectNode) {
+        if (removed.kind === "finding" && typeof projectNode.findingCount === "number" && projectNode.findingCount > 0) projectNode.findingCount--;
+        if (removed.kind === "task" && typeof projectNode.taskCount === "number" && projectNode.taskCount > 0) projectNode.taskCount--;
+        const projectFg = state.fgNodeById.get(projectNode.id);
+        if (projectFg) updateEagerLabelText(projectFg);
+      }
+    }
     state.rawNodes = state.rawNodes.filter((node) => node.id !== nodeId);
     state.rawLinks = state.rawLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
     state.nodeById.delete(nodeId);
@@ -266,6 +285,9 @@ function destroy(): void {
   state.fg = null;
   state.container = null;
   state.tooltip = null;
+  // A mount after destroy is a fresh scene — let the intro (and its camera
+  // fit) run again rather than being treated as a camera-preserving remount.
+  state.introPlayed = false;
 }
 
 // ── Window globals ──────────────────────────────────────────────────────

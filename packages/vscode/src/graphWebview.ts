@@ -228,7 +228,9 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       suppressWatcherUntil = Date.now() + 1500;
       graphData = await loadGraphData(client);
       graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-      panel.webview.html = renderGraphHtml(panel.webview, graphData);
+      // In-place data swap — the webview remounts the renderer and keeps the
+      // user's camera pose (a full HTML rewrite reset the whole scene).
+      void panel.webview.postMessage({ type: "graphData", payload: graphData });
     }
 
     async function mutate<T>(fn: () => Promise<T>): Promise<T> {
@@ -454,7 +456,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           try {
             graphData = await loadGraphData(client);
             graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-            panel.webview.html = renderGraphHtml(panel.webview, graphData);
+            void panel.webview.postMessage({ type: "graphData", payload: graphData });
           } catch (err) {
             // Surface silently — user still sees the last-known graph.
             console.error("phren: failed to refresh graph on external change", err);
@@ -1084,6 +1086,20 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       max-width: min(300px, calc(100% - 24px));
       pointer-events: none;
     }
+    /* The 3D canvas is immersive-dark in both editor themes; the popover,
+       context menu and toast adopt the web dossier's dark-glass palette so
+       they don't clash as light VS-theme cards floating on a dark scene. */
+    #node-popover, .node-ctx-menu, .graph-toast {
+      --border: rgba(103, 232, 249, 0.22);
+      --surface: rgba(8, 10, 22, 0.92);
+      --surface-raised: rgba(22, 27, 52, 0.9);
+      --surface-sunken: rgba(5, 6, 15, 0.92);
+      --ink: #dbe4ff;
+      --muted: #8b96c9;
+      --accent: #67e8f9;
+      --danger: #ff7b93;
+      color: var(--ink);
+    }
     #node-popover-card {
       position: relative;
       pointer-events: auto;
@@ -1287,7 +1303,11 @@ ${graphScript}
   var payload = ${payloadJson};
   var vscode = acquireVsCodeApi();
   var nodeLookup = {};
-  for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  function rebuildNodeLookup() {
+    nodeLookup = {};
+    for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  }
+  rebuildNodeLookup();
 
   function esc(value) {
     return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1330,6 +1350,11 @@ ${graphScript}
     return counts;
   }
 
+  // Maps the extension payload to the shared renderer's shape and (re)mounts.
+  // Re-runs on 'graphData' messages so external refreshes swap data in place —
+  // the renderer preserves the camera pose on remount, where the old
+  // full-HTML replacement reset the whole scene.
+  function mapAndMountGraph() {
   var graphNodes = [];
   var topicMap = {};
   for (var index = 0; index < payload.nodes.length; index++) {
@@ -1429,6 +1454,8 @@ ${graphScript}
         + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div></div></div>';
     }
   }
+  }
+  mapAndMountGraph();
 
   var zoomInBtn = document.getElementById('btn-zoom-in');
   var zoomOutBtn = document.getElementById('btn-zoom-out');
@@ -1843,6 +1870,27 @@ ${graphScript}
   window.addEventListener('message', function(event) {
     var data = event && event.data;
     if (!data) return;
+    if (data.type === 'graphData' && data.payload && data.payload.nodes) {
+      // In-place data refresh: remount the shared renderer (camera pose is
+      // preserved on remount) instead of the extension rewriting the HTML.
+      payload = data.payload;
+      rebuildNodeLookup();
+      mapAndMountGraph();
+      if (currentNode) {
+        var refreshedNode = nodeLookup[currentNode.id];
+        if (refreshedNode) {
+          Object.assign(currentNode, refreshedNode);
+          if (!editMode) {
+            var refreshedPoint = currentPoint();
+            renderPopover(currentNode, refreshedPoint.x, refreshedPoint.y);
+          }
+        } else {
+          hidePopover(true);
+          currentNode = null;
+        }
+      }
+      return;
+    }
     if (data.type === 'nodeUpdated' && typeof data.id === 'string' && data.changes) {
       if (window.phrenGraph && typeof window.phrenGraph.updateNode === 'function') {
         window.phrenGraph.updateNode(data.id, data.changes);
