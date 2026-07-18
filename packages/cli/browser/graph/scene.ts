@@ -40,7 +40,7 @@ import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
 import { mascotUpdate } from "./mascot.js";
 import { updateFilterBarCounter, updateHudStats } from "./hud.js";
 import { computeHierarchicalLayout } from "./layout.js";
-import { buildCages, disposeCages, refreshCageFocus, setCageResolution } from "./cages.js";
+import { buildCages, disposeCages, setCageResolution } from "./cages.js";
 
 let starfield: THREE.Points | null = null;
 let nebula: THREE.Group | null = null;
@@ -159,9 +159,9 @@ export function pushGraphData(): void {
   if (state.fg.scene) {
     cageScene = state.fg.scene();
     buildCages(cageScene!, cageSpecs, containerSize());
-    const focusProj = state.focusedProjectId ? `project:${state.nodeById.get(state.focusedProjectId)?.store || "primary"}:${state.focusedProjectId}` : null;
-    refreshCageFocus(focusProj, null);
   }
+  // applyHighlight also re-applies cage focus (refreshCageFocus) on the
+  // freshly built cages, keyed by project name + store.
   applyHighlight();
 }
 

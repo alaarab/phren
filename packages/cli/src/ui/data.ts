@@ -273,6 +273,18 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   // Project nodes by name so per-project finding/task totals can be stamped after the scans
   const projectNodeByName = new Map<string, GraphNode>();
 
+  // Finding ids are content hashes, so duplicate-text bullets collide — every
+  // id-keyed map downstream (renderer, selection, removal) then conflates the
+  // twins. Salt repeat occurrences deterministically (file order); the FIRST
+  // occurrence keeps the canonical id so findingNodeIdForLine / lookup-event
+  // targeting stays in lockstep.
+  const usedFindingIds = new Map<string, number>();
+  const uniqueFindingId = (id: string): string => {
+    const seen = usedFindingIds.get(id) || 0;
+    usedFindingIds.set(id, seen + 1);
+    return seen === 0 ? id : `${id}-${seen + 1}`;
+  };
+
   for (const { storePath, project } of storeProjects) {
     // Load dynamic topics for this project
     const { topics: projectTopics } = readProjectTopics(storePath, project);
@@ -370,7 +382,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           if (taggedCount >= MAX_TAGGED) continue;
           const topic = classifyTopicForText(`[${currentHeadingTag}] ${text}`, projectTopics);
           const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${currentHeadingTag}] ${text}`);
-          const nodeId = findingStableId(scoreKey);
+          const nodeId = uniqueFindingId(findingStableId(scoreKey));
           taggedCount++;
           nodes.push({
             id: nodeId,
@@ -406,7 +418,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         // Classify the finding using the project's topic system
         const topic = classifyTopicForText(`[${tag}] ${text}`, projectTopics);
         const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, `[${tag}] ${text}`);
-        const nodeId = findingStableId(scoreKey);
+        const nodeId = uniqueFindingId(findingStableId(scoreKey));
         taggedCount++;
         nodes.push({
           id: nodeId,
@@ -440,7 +452,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
       // Classify using dynamic topics
       const topic = classifyTopicForText(text, projectTopics);
       const scoreKey = entryScoreKey(project, FINDINGS_FILENAME, text);
-      const nodeId = findingStableId(scoreKey);
+      const nodeId = uniqueFindingId(findingStableId(scoreKey));
       untaggedAdded++;
       nodes.push({
         id: nodeId,
