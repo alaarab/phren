@@ -35,7 +35,7 @@ export const webUiManifest: CapabilityManifest = {
 
     // Graph
     "graph.read": { implemented: true, handler: "memory-ui-server.ts:/api/graph" },
-    "graph.visualize": { implemented: true, handler: "memory-ui-graph-app.ts:graph tab (Three.js / 3d-force-graph 3D)" },
+    "graph.visualize": { implemented: true, handler: "memory-ui-graph-app.ts:graph tab (holographic Three.js / 3d-force-graph, CSS2D labels)" },
     "graph.link_findings": { implemented: false, reason: "No link findings action in web UI" },
 
     // Config

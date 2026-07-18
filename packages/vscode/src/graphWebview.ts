@@ -1353,6 +1353,24 @@ ${graphScript}
     });
   }
 
+  // Project totals for tooltips/labels — counted from the payload itself
+  // (the extension's node shape has no findingCount/taskCount fields).
+  var projectTotals = {};
+  for (var totalsIdx = 0; totalsIdx < graphNodes.length; totalsIdx++) {
+    var totalsNode = graphNodes[totalsIdx];
+    if (totalsNode.group === 'project' || !totalsNode.project) continue;
+    var totals = projectTotals[totalsNode.project] || (projectTotals[totalsNode.project] = { findings: 0, tasks: 0 });
+    if (totalsNode.group.indexOf('topic:') === 0) totals.findings++;
+    else if (totalsNode.group.indexOf('task-') === 0) totals.tasks++;
+  }
+  for (var projIdx = 0; projIdx < graphNodes.length; projIdx++) {
+    var projNode = graphNodes[projIdx];
+    if (projNode.group !== 'project') continue;
+    var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0, tasks: 0 };
+    projNode.findingCount = projTotals.findings;
+    projNode.taskCount = projTotals.tasks;
+  }
+
   var topics = [];
   if (payload.topics && payload.topics.length) {
     for (var topicIndex = 0; topicIndex < payload.topics.length; topicIndex++) {
