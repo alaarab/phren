@@ -29,8 +29,8 @@ function isValidProjectName(name: string): boolean {
 function loadGraphScript(): string {
   const candidates = [
     path.resolve(__dirname, "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "generated", "memory-ui-graph.browser.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "memory-ui-graph.runtime.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "generated", "memory-ui-graph.browser.js"),
   ];
   for (const candidate of candidates) {
     try {
@@ -993,16 +993,26 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     }
     * { box-sizing: border-box; }
     body { margin: 0; height: 100vh; overflow: hidden; color: var(--ink); background: var(--vscode-editor-background); }
-    #graph-filter, #graph-project-filter, #graph-limit-row {
+    /* Full-bleed: the graph fills the whole panel and the renderer's filter bar
+       floats over the canvas (top-right), matching the immersive web-ui. The
+       old fixed 100vh-120px band left dead space below and a chrome strip on
+       top; the renderer now builds all its HUD inside #graph-filter. */
+    #graph-project-filter, #graph-limit-row { display: none; }
+    #graph-filter {
+      position: absolute;
+      top: 12px;
+      right: 58px;
+      left: auto;
+      width: min(560px, 60%);
+      z-index: 12;
       display: flex;
       gap: 8px;
-      padding: 8px 12px;
       align-items: center;
-      flex-wrap: wrap;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      background: transparent;
+      border: none;
+      padding: 0;
     }
-    .graph-shell { height: calc(100vh - 120px); position: relative; overflow: hidden; }
+    .graph-shell { height: 100vh; position: relative; overflow: hidden; }
     .graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
     #graph-canvas { width: 100%; height: 100%; display: block; }
     #ambient-canvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:2; }
