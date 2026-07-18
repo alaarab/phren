@@ -212,15 +212,25 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
   hideTooltip();
   const duration = 280;
   const start = performance.now();
+  let finalized = false;
+  const finalizeOnce = () => {
+    if (finalized) return;
+    finalized = true;
+    finalize();
+  };
   const step = (now: number) => {
+    if (finalized) return;
     const t = Math.min(1, (now - start) / duration);
     const scale = (1 - t) * (1 - t) * (1 - t);
     // Breathing renders __focusScale each frame, so shrink via that.
     fgNode.__focusScale = Math.max(0.01, scale);
     if (t < 1) requestAnimationFrame(step);
-    else finalize();
+    else finalizeOnce();
   };
   requestAnimationFrame(step);
+  // rAF cadence collapses under load (software GL, tracing) — a wall-clock
+  // backstop keeps the data-layer removal on schedule regardless of fps.
+  setTimeout(finalizeOnce, duration + 40);
   return true;
 }
 
