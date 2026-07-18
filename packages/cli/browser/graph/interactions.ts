@@ -200,9 +200,12 @@ export function getNodeAt(x: number, y: number): NodeDetail | null {
 // 500ms cover fade. Honors prefers-reduced-motion.
 
 /**
- * Compute the camera position that frames the whole graph, from the node
- * bbox and camera FOV. Deterministic — zoomToFit's async tween can't be
- * sampled reliably on slow (software-GL) frames.
+ * Camera position that frames the whole graph. Deterministic box-fit: unlike
+ * zoomToFit (which fits the bounding SPHERE to the frame height and leaves a
+ * wide-and-flat graph filling only ~20% of the viewport), this fits the
+ * projected box silhouette — width against the HORIZONTAL fov, height against
+ * the vertical — so the horizontal store row actually fills the frame. A slice
+ * of depth is folded in as slack so the 3/4 view never clips near/far faces.
  */
 function computeFitCamera(): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
   const fg = state.fg;
@@ -214,20 +217,40 @@ function computeFitCamera(): { pos: THREE.Vector3; target: THREE.Vector3 } | nul
     (bbox.y[0] + bbox.y[1]) / 2,
     (bbox.z[0] + bbox.z[1]) / 2,
   );
-  const span = Math.max(bbox.x[1] - bbox.x[0], bbox.y[1] - bbox.y[0], bbox.z[1] - bbox.z[0], 60);
+  const w = bbox.x[1] - bbox.x[0];
+  const h = bbox.y[1] - bbox.y[0];
+  const d = bbox.z[1] - bbox.z[0];
   const camera = fg.camera();
-  const fovRad = ((camera.fov || 50) * Math.PI) / 180;
-  const distance = (span / 2) / Math.tan(fovRad / 2) * 1.18 + 60;
+  const vfov = ((camera.fov || 50) * Math.PI) / 180;
+  const size = containerSize();
+  const aspect = size.w / size.h;
+  const halfH = h / 2 + d * 0.28;
+  const halfW = w / 2 + d * 0.28;
+  const distH = halfH / Math.tan(vfov / 2);
+  const distW = halfW / (Math.tan(vfov / 2) * aspect);
+  const distance = Math.max(distH, distW, 80) * 1.1 + 30;
   const dir = camera.position.clone().sub(center);
-  if (dir.lengthSq() < 1) dir.set(0.35, 0.3, 1);
+  if (dir.lengthSq() < 1) dir.set(0.42, 0.32, 1);
   dir.normalize();
   return { pos: center.clone().add(dir.multiplyScalar(distance)), target: center };
 }
 
+// Screen padding for the zoomToFit fallback when the bbox isn't ready yet.
+const FIT_PADDING = 48;
+
 export function fitCameraToGraph(duration: number): void {
-  if (!state.fg) return;
-  // 3d-force-graph's own fit — robust across layouts/GPUs. 90px screen padding.
-  state.fg.zoomToFit(duration, 90);
+  const fg = state.fg;
+  if (!fg) return;
+  const fit = computeFitCamera();
+  if (!fit) {
+    fg.zoomToFit(duration, FIT_PADDING);
+    return;
+  }
+  fg.cameraPosition(
+    { x: fit.pos.x, y: fit.pos.y, z: fit.pos.z },
+    { x: fit.target.x, y: fit.target.y, z: fit.target.z },
+    duration,
+  );
 }
 
 export function runIntro(): void {
@@ -242,7 +265,7 @@ export function runIntro(): void {
   const reducedMotion = typeof window.matchMedia === "function"
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reducedMotion) {
-    fg.zoomToFit(0, 90);
+    fitCameraToGraph(0);
     return;
   }
 
@@ -253,12 +276,12 @@ export function runIntro(): void {
     "position:absolute;inset:0;background:#05060f;z-index:6;pointer-events:none;opacity:1;transition:opacity 0.5s ease;";
   state.container?.appendChild(cover);
 
-  // Robust fit via the library, then a short settle. Fit again next frame in
+  // Snap-fit, stagger the nodes in, then ease the box-fit again next frame in
   // case node objects finished syncing after the first call.
-  fg.zoomToFit(0, 90);
+  fitCameraToGraph(0);
   startIntroStagger();
   requestAnimationFrame(() => {
-    fg.zoomToFit(1400, 90);
+    fitCameraToGraph(1400);
     cover.style.opacity = "0";
   });
   setTimeout(() => cover.remove(), 900);

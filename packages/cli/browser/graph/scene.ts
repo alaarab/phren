@@ -239,9 +239,11 @@ export function setupForceGraph(): void {
   const softwareGl = detectSwiftShader(renderer);
   renderer.setPixelRatio(softwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
 
-  // Slow idle orbit; any interaction pauses it (resumes after 18s idle).
-  fg.controls().autoRotate = true;
-  fg.controls().autoRotateSpeed = 0.25;
+  // Idle orbit stays OFF until the graph has settled and the user has been
+  // still for a while (tickIdleResume) — auto-rotating during load drifted the
+  // camera into the cluster before the fit finished.
+  fg.controls().autoRotate = false;
+  fg.controls().autoRotateSpeed = 0.22;
   const pauseRotate = () => noteInteraction();
   state.container.addEventListener("pointerdown", pauseRotate);
   state.container.addEventListener("wheel", pauseRotate, { passive: true });
@@ -257,15 +259,18 @@ export function setupForceGraph(): void {
   fg.d3Force("link", null);
   fg.d3Force("center", null);
 
-  // Restrained bloom at half resolution — the additive point-dots glow.
+  // Bloom does the glow for the tiny additive dots — lower threshold, tighter.
   if (!state.fxOff) {
     const size = containerSize();
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(Math.max(1, size.w / 2), Math.max(1, size.h / 2)), 0.45, 0.6, 0.32);
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(Math.max(1, size.w / 2), Math.max(1, size.h / 2)), 0.55, 0.5, 0.2);
     fg.postProcessingComposer().addPass(bloomPass);
   }
 
-  fg.scene().fog = new THREE.FogExp2(BG_COLOR, 0.0009);
+  fg.scene().fog = new THREE.FogExp2(BG_COLOR, 0.0006);
   ensureFocusHalos(fg.scene());
+
+  // Open on a 3/4 angle (the fit preserves the direction). Head-on read flat.
+  fg.cameraPosition({ x: 260, y: 190, z: 520 }, { x: 0, y: 0, z: 0 }, 0);
 
   // Expanding pulse ring around the active node.
   ringSprite = new THREE.Sprite(new THREE.SpriteMaterial({

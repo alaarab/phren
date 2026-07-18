@@ -3,10 +3,21 @@
 // immersive-dark in BOTH app themes (the 3D scene is always a dark void —
 // a light chrome ring around it read as unfinished).
 export const GRAPH_HUD_STYLES = `
-/* ── Full-bleed graph tab ─────────────────────────────────────────── */
+/* ── Full-bleed graph tab — total dark immersion (header included) ── */
+body:has(#tab-graph.active) { background: #04050b; }
 body:has(#tab-graph.active) .main { max-width: none; padding: 0; }
+body:has(#tab-graph.active) .header {
+  background: rgba(5, 6, 13, 0.92);
+  border-bottom: 1px solid rgba(103, 232, 249, 0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+body:has(#tab-graph.active) .header .nav-item { color: #7f8db8; }
+body:has(#tab-graph.active) .header .nav-item.active { color: #67e8f9; }
+body:has(#tab-graph.active) .header .brand-name,
+body:has(#tab-graph.active) .header-brand { color: #dbe6ff; }
 #tab-graph .graph-container {
-  background: #05060f;
+  background: #04050b;
   border: none;
   border-radius: 0;
   position: relative;
@@ -17,13 +28,15 @@ body:has(#tab-graph.active) .main { max-width: none; padding: 0; }
   min-height: 520px;
 }
 
-/* ── Overlay chrome ───────────────────────────────────────────────── */
+/* ── Overlay chrome — compact HUD clustered top-right (GraphRAG) ──── */
 #tab-graph .graph-filters {
   background: transparent;
   border: none;
   box-shadow: none;
   padding: 0;
+  left: auto;
   right: 60px;
+  width: min(560px, 60%);
   z-index: 10;
 }
 #tab-graph .graph-controls { z-index: 10; }
@@ -43,17 +56,47 @@ body:has(#tab-graph.active) .main { max-width: none; padding: 0; }
   color: #e6f6ff;
 }
 
-/* ── Docked dossier panel ─────────────────────────────────────────── */
+/* ── Docked dossier — left side, compact (GraphRAG inspector) ─────── */
 #graph-node-popover.phren-docked {
-  left: auto !important;
-  right: 60px !important;
+  left: 16px !important;
+  right: auto !important;
   top: 68px !important;
   bottom: 16px;
-  width: 420px;
-  max-width: min(440px, calc(100% - 32px));
+  width: 340px;
+  max-width: min(360px, calc(100% - 32px));
   pointer-events: none;
   z-index: 12;
 }
+/* GraphRAG-style stats row + relationships in the inspector */
+.phren-dossier-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid rgba(103, 232, 249, 0.16);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 12px 0 4px;
+}
+.phren-dossier-stats > div {
+  padding: 8px 10px;
+  border-right: 1px solid rgba(103, 232, 249, 0.12);
+}
+.phren-dossier-stats > div:last-child { border-right: 0; }
+.phren-dossier-stats .k {
+  font: 700 8.5px/1.4 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em; color: #6b76a0; text-transform: uppercase;
+}
+.phren-dossier-stats .v {
+  font: 700 14px/1.2 ui-monospace, Menlo, monospace; color: #67e8f9; margin-top: 3px;
+}
+.phren-rel-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid rgba(120, 150, 220, 0.08); cursor: pointer;
+}
+.phren-rel-row:last-child { border-bottom: 0; }
+.phren-rel-row .n { font-size: 12px; color: #d6e2ff; overflow: hidden; text-overflow: ellipsis; }
+.phren-rel-row .n small { display: block; color: #6b76a0; font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phren-rel-row .w { font: 600 11px/1.4 ui-monospace, Menlo, monospace; color: #67e8f9; font-variant-numeric: tabular-nums; }
+.phren-rel-row:hover .n { color: #eaf2ff; }
 #graph-node-popover.phren-docked #graph-node-popover-card {
   --surface: #0a0d1e;
   --surface-raised: rgba(22, 27, 52, 0.9);
@@ -80,11 +123,12 @@ body:has(#tab-graph.active) .main { max-width: none; padding: 0; }
   letter-spacing: 0.16em;
   text-transform: uppercase;
 }
+#graph-node-popover.phren-docked #graph-node-popover-card { padding: 14px 15px; }
 #graph-node-popover.phren-docked .phren-dossier-text {
   white-space: pre-wrap;
-  line-height: 1.7;
-  font-size: 14px;
-  color: #e8edff;
+  line-height: 1.6;
+  font-size: 13px;
+  color: #dde6fb;
 }
 .phren-dossier-section {
   font: 700 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

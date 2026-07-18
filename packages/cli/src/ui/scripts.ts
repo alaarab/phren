@@ -1981,6 +1981,33 @@ export function renderGraphHostScript(): string {
     }).slice(0, 4);
   }
 
+  // Neighbors of the node from the live graph links, scored so the panel can
+  // list "strongest relationships" like GraphRAG. Entities/findings first.
+  function strongestRelationships(node) {
+    var map = nodeMap();
+    var ids = neighborIds(node.id);
+    var out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var nb = map[ids[i]];
+      if (!nb || nb.kind === 'project') continue;
+      var w = 0.6;
+      if (nb.kind === 'entity') w = 0.7 + Math.min(0.28, (nb.refCount || 0) * 0.03);
+      else if (nb.kind === 'finding') w = typeof nb.qualityScore === 'number' ? 0.55 + nb.qualityScore * 0.4 : 0.6;
+      var name = nb.displayLabel || nb.label || nb.id;
+      var sub = nb.kind === 'entity' ? ((nb.refCount || 0) + ' references') : (nb.tooltipLabel || nb.fullLabel || '');
+      if (sub === name) sub = '';
+      out.push({ id: nb.id, name: name, sub: sub, w: w });
+    }
+    // same-topic siblings that aren't already linked, as softer relationships
+    var seen = {}; out.forEach(function(r) { seen[r.id] = true; });
+    relatedFindings(node).forEach(function(rel) {
+      if (seen[rel.id]) return;
+      out.push({ id: rel.id, name: rel.displayLabel || rel.label || rel.id, sub: 'same topic', w: 0.5 });
+    });
+    out.sort(function(a, b) { return b.w - a.w; });
+    return out.slice(0, 6);
+  }
+
   function gotoChip(label, nodeId, accent) {
     var border = accent ? 'var(--accent)' : 'var(--border)';
     var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
@@ -2035,18 +2062,27 @@ export function renderGraphHostScript(): string {
       body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
       body += '</div>';
     } else if (node.kind === 'finding') {
-      body += '<div id="graph-node-text" class="phren-dossier-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
-      if (node.projectName) {
-        body += '<div class="phren-dossier-section">Project</div>';
-        body += '<div style="display:flex;flex-wrap:wrap;gap:8px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
-      }
-      var related = relatedFindings(node);
-      if (related.length) {
-        body += '<div class="phren-dossier-section">Related · same topic</div>';
-        body += '<div style="display:flex;flex-wrap:wrap;gap:8px">' + related.map(function(rel) {
-          var relLabel = rel.displayLabel || rel.label || rel.id;
-          return gotoChip(relLabel, rel.id, false);
+      // GraphRAG-style stats row: links / project / helpful
+      var conn = node.connections || {};
+      var helpful = node.score && typeof node.score.helpful === 'number' ? node.score.helpful : 0;
+      body += '<div class="phren-dossier-stats">'
+        + '<div><div class="k">Links</div><div class="v">' + (conn.total || 0) + '</div></div>'
+        + '<div><div class="k">Project</div><div class="v" style="font-size:11px;letter-spacing:.04em;text-transform:none">' + esc(node.projectName || '—') + '</div></div>'
+        + '<div><div class="k">Helpful</div><div class="v">' + helpful + '</div></div>'
+        + '</div>';
+      body += '<div class="phren-dossier-section">◈ Description</div>';
+      body += '<div id="graph-node-text" class="phren-dossier-text">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      // Strongest relationships — related same-topic findings + entity neighbors
+      var rels = strongestRelationships(node);
+      if (rels.length) {
+        body += '<div class="phren-dossier-section">⟿ Strongest relationships · ' + rels.length + '</div>';
+        body += '<div style="margin-top:8px">' + rels.map(function(r) {
+          return '<div class="phren-rel-row" data-graph-goto="' + esc(r.id) + '"><div class="n">' + esc(r.name) + (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + '</div><div class="w">' + r.w.toFixed(2) + '</div></div>';
         }).join('') + '</div>';
+      }
+      if (node.projectName) {
+        body += '<div class="phren-dossier-section">Community</div>';
+        body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
       }
       var nav = findingNav(node);
       if (nav.total > 1 && nav.index !== -1) {

@@ -59,7 +59,7 @@ export const state = {
   filterProject: "all",
   filterStore: "all",
   searchQuery: "",
-  nodeLimit: 2000,
+  nodeLimit: 4000,
   theme: "dark" as "dark" | "light",
   lastMouse: { x: 0, y: 0 },
   firstSettle: true,
