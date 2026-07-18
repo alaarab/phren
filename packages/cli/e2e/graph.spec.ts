@@ -849,4 +849,86 @@ test.describe.serial("graph visualization e2e", () => {
     const errorTexts = errors.map((e) => e.text());
     expect(errorTexts).toEqual([]);
   });
+
+  test("project labels render as CSS2D DOM with a bounded label pool", async ({ page }) => {
+    await openGraphTab(page);
+    await page.waitForTimeout(1500);
+
+    // Eager project labels are always-on DOM elements
+    await expect.poll(async () => page.locator(".phren-label--project").count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // The pool + eager labels stay hard-capped
+    const total = await page.locator(".phren-label").count();
+    expect(total).toBeLessThanOrEqual(90);
+  });
+
+  test("selecting a finding shows its complete text in the dossier", async ({ page }) => {
+    await openGraphTab(page);
+
+    const selected = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const finding = pg.getData().nodes.find((n: any) => n.kind === "finding" && (n.fullLabel || "").length > 0);
+      if (!finding) return null;
+      pg.selectNode(finding.id);
+      return { id: finding.id, fullLabel: finding.fullLabel };
+    });
+    expect(selected).toBeTruthy();
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    // The dossier body must contain the COMPLETE finding text, not a truncation
+    await expect(page.locator("#graph-node-content")).toContainText(selected!.fullLabel, { timeout: 8_000 });
+  });
+
+  test("dossier prev/next cycles findings within the project", async ({ page }) => {
+    await openGraphTab(page);
+
+    const start = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const findings = pg.getData().nodes.filter((n: any) => n.kind === "finding");
+      const byProject: Record<string, any[]> = {};
+      for (const f of findings) (byProject[f.projectName] = byProject[f.projectName] || []).push(f);
+      const project = Object.keys(byProject).find((k) => byProject[k].length > 1);
+      if (!project) return null;
+      const first = byProject[project][0];
+      pg.selectNode(first.id);
+      return first.fullLabel || first.label;
+    });
+    expect(start).toBeTruthy();
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    const nextBtn = page.locator('[data-graph-action="next-finding"]');
+    await expect(nextBtn).toBeVisible({ timeout: 8_000 });
+    await nextBtn.click();
+    // Selection flies to the sibling; the dossier re-renders with different content
+    await expect(page.locator("#graph-node-content")).not.toContainText(start!, { timeout: 8_000 });
+  });
+
+  test("search Enter flies to the best hit and opens the dossier", async ({ page }) => {
+    await openGraphTab(page);
+
+    const query = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const finding = pg.getData().nodes.find((n: any) => n.kind === "finding");
+      // A word from a real finding guarantees a match
+      const word = String(finding?.fullLabel || finding?.label || "").split(/\s+/).find((w: string) => w.length > 4);
+      return word || null;
+    });
+    expect(query).toBeTruthy();
+
+    const searchInput = page.locator("input[data-search-filter]");
+    await searchInput.fill(query!);
+    await page.waitForTimeout(400);
+    await searchInput.press("Enter");
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+
+    await searchInput.fill("");
+    await page.waitForTimeout(300);
+  });
+
+  test("HUD stats readout reflects the visible graph", async ({ page }) => {
+    await openGraphTab(page);
+    const stats = page.locator(".phren-hud-stats");
+    await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
+  });
 });
