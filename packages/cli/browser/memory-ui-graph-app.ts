@@ -1,6 +1,6 @@
-import Graph from "graphology";
-import Sigma from "sigma";
-import forceAtlas2 from "graphology-layout-forceatlas2";
+import ForceGraph3D from "3d-force-graph";
+import * as THREE from "three";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { PHREN_SPRITE_B64 } from "./phren-sprite.js";
 
 type ScoreEntry = {
@@ -30,6 +30,8 @@ type RawNode = {
   connectedProjects?: string[];
   topicSlug?: string;
   topicLabel?: string;
+  findingCount?: number;
+  taskCount?: number;
 };
 
 type RawLink = { source: string; target: string };
@@ -70,6 +72,29 @@ type NodeDetail = RuntimeNode & {
   score?: ScoreEntry;
 };
 
+/** A node object handed to 3d-force-graph. Force layout mutates x/y/z/vx/vy/vz onto it. */
+type FGNode = {
+  id: string;
+  raw: RuntimeNode;
+  x?: number;
+  y?: number;
+  z?: number;
+  fx?: number;
+  fy?: number;
+  fz?: number;
+  __group?: THREE.Group;
+  __core?: THREE.Mesh;
+  __shell?: THREE.Mesh;
+  __wire?: THREE.Mesh;
+  __halo?: THREE.Sprite;
+  __label?: THREE.Sprite;
+  __focusScale?: number;
+  __phase?: number;
+};
+
+/** A link object handed to 3d-force-graph. Force layout swaps source/target to node refs. */
+type FGLink = { source: string | FGNode; target: string | FGNode };
+
 type SelectCallback = (node: NodeDetail, x: number, y: number) => void;
 type ClearCallback = () => void;
 
@@ -107,6 +132,7 @@ const ROOT = window as unknown as {
   phrenGraph?: PhrenGraphApi;
   graphZoom?: (factor: number) => void;
   graphReset?: () => void;
+  graphResetLayout?: () => void;
   graphClearSelection?: () => void;
 };
 
@@ -142,64 +168,12 @@ const KIND_COLORS = {
 const STORE_COLORS = ["#f59e0b", "#8b5cf6", "#06b6d4", "#ef4444", "#10b981", "#ec4899"];
 let _storeColorMap: Map<string, string> | null = null;
 function storeColor(storeName?: string): string | null {
-  if (!storeName || storeName === "primary") return null; // primary keeps default orange
+  if (!storeName || storeName === "primary") return null;
   if (!_storeColorMap) _storeColorMap = new Map();
   if (_storeColorMap.has(storeName)) return _storeColorMap.get(storeName)!;
   const idx = (_storeColorMap.size + 1) % STORE_COLORS.length;
   _storeColorMap.set(storeName, STORE_COLORS[idx]);
   return STORE_COLORS[idx];
-}
-
-function drawCustomLabel(
-  context: CanvasRenderingContext2D,
-  data: { label: string; x: number; y: number; size: number; color: string },
-  settings: { labelSize: number; labelFont: string; labelWeight: string; labelColor: { color: string } },
-): void {
-  if (!data.label) return;
-  const fontSize = settings.labelSize;
-  const font = `${settings.labelWeight} ${fontSize}px ${settings.labelFont}`;
-  context.font = font;
-  const textWidth = context.measureText(data.label).width;
-  const padX = 6;
-  const padY = 3;
-  const pillX = data.x + data.size + 4;
-  const pillY = data.y - fontSize / 2 - padY;
-  const pillW = textWidth + padX * 2;
-  const pillH = fontSize + padY * 2;
-  const radius = pillH / 2;
-
-  context.beginPath();
-  context.roundRect(pillX, pillY, pillW, pillH, radius);
-  context.fillStyle = "rgba(10, 12, 16, 0.72)";
-  context.fill();
-
-  context.fillStyle = settings.labelColor.color;
-  context.font = font;
-  context.fillText(data.label, pillX + padX, data.y + fontSize / 3);
-}
-
-function drawCustomHover(
-  context: CanvasRenderingContext2D,
-  data: { label: string; x: number; y: number; size: number; color: string },
-  settings: { labelSize: number; labelFont: string; labelWeight: string; labelColor: { color: string } },
-): void {
-  const glowRadius = data.size * 3;
-  const gradient = context.createRadialGradient(data.x, data.y, data.size * 0.5, data.x, data.y, glowRadius);
-  gradient.addColorStop(0, hexToRgba(data.color, 0.4));
-  gradient.addColorStop(0.5, hexToRgba(data.color, 0.12));
-  gradient.addColorStop(1, "rgba(0,0,0,0)");
-  context.beginPath();
-  context.arc(data.x, data.y, glowRadius, 0, Math.PI * 2);
-  context.fillStyle = gradient;
-  context.fill();
-
-  context.beginPath();
-  context.arc(data.x, data.y, data.size + 2, 0, Math.PI * 2);
-  context.strokeStyle = hexToRgba(data.color, 0.8);
-  context.lineWidth = 2;
-  context.stroke();
-
-  drawCustomLabel(context, data, settings);
 }
 
 const state = {
@@ -213,14 +187,13 @@ const state = {
   visibleNodes: [] as RuntimeNode[],
   visibleLinks: [] as RawLink[],
   hostNodes: [] as NodeDetail[],
-  graph: null as Graph | null,
-  renderer: null as Sigma | null,
+  fg: null as any,
+  fgNodeById: new Map<string, FGNode>(),
   container: null as HTMLElement | null,
   tooltip: null as HTMLElement | null,
   selectedNodeId: null as string | null,
   hoveredNodeId: null as string | null,
   focusedProjectId: null as string | null,
-  cameraRatio: 1 as number,
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
   rightClickCallbacks: [] as Array<(node: NodeDetail, x: number, y: number) => void>,
@@ -238,12 +211,17 @@ const state = {
   searchQuery: "",
   nodeLimit: 2000,
   theme: "dark" as "dark" | "light",
-  draggedNode: null as string | null,
-  isDragging: false,
-  neighborPositions: new Map<string, { x: number; y: number }>(),
-  mascotRafId: 0,
-  mascotCanvas: null as HTMLCanvasElement | null,
+  lastMouse: { x: 0, y: 0 },
+  firstSettle: true,
+  bloomPass: null as UnrealBloomPass | null,
+  starfield: null as THREE.Points | null,
+  nebula: null as THREE.Group | null,
+  ringSprite: null as THREE.Sprite | null,
+  ringPhase: 0,
+  vignetteEl: null as HTMLElement | null,
+  ambientRafId: 0,
   themeObserver: null as MutationObserver | null,
+  resizeObserver: null as ResizeObserver | null,
   cleanupFns: [] as Array<() => void>,
 };
 
@@ -251,43 +229,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function esc(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function currentTheme(): "dark" | "light" {
   const theme = document.documentElement.getAttribute("data-theme");
   return theme === "light" ? "light" : "dark";
 }
 
-function baseBackground(theme: "dark" | "light"): string {
-  if (theme === "light") {
-    return "radial-gradient(circle at 18% 16%, rgba(212,137,46,0.10), transparent 28%), radial-gradient(circle at 82% 14%, rgba(58,123,174,0.10), transparent 26%), linear-gradient(180deg, #f7f4ed 0%, #f2eee4 52%, #ebe6db 100%)";
-  }
-  return "radial-gradient(circle at 18% 16%, rgba(212,137,46,0.16), transparent 28%), radial-gradient(circle at 82% 14%, rgba(58,123,174,0.18), transparent 26%), linear-gradient(180deg, #090d10 0%, #0c1013 52%, #12161a 100%)";
-}
-
-function hexToRgba(color: string, alpha: number): string {
-  if (/^rgba?\(/.test(color)) {
-    const numbers = color.match(/[\d.]+/g) || [];
-    const r = numbers[0] || "0";
-    const g = numbers[1] || "0";
-    const b = numbers[2] || "0";
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-
-  const hex = color.replace("#", "");
-  const normalized = hex.length === 3
-    ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
-    : hex.padEnd(6, "0").slice(0, 6);
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+// The 3D scene is always a dark cosmos — additive glow can't survive a light
+// backdrop. Only the DOM chrome (filter bar, popover, tooltip) follows the UI theme.
+function spaceBackground(): string {
+  return "#04050b";
 }
 
 function hashString(value: string): number {
@@ -335,11 +285,9 @@ function scoreForNode(node: RawNode): ScoreEntry | undefined {
 
 function inferHealth(score?: ScoreEntry): RuntimeNode["health"] {
   if (!score || !score.lastUsedAt) return "healthy";
-
   const ageMs = Date.now() - new Date(score.lastUsedAt).getTime();
   const ageDays = Number.isFinite(ageMs) ? ageMs / 86400000 : 0;
   const penalties = (score.repromptPenalty || 0) + (score.regressionPenalty || 0) * 2;
-
   if (ageDays > 150 || penalties >= 4) return "stale";
   if (ageDays > 60 || penalties >= 2) return "decaying";
   return "healthy";
@@ -374,7 +322,6 @@ function sizeForNode(node: RawNode): number {
   const refCount = Math.max(0, node.refCount || 0);
   const score = scoreForNode(node);
   const helpful = Math.max(0, score?.helpful || 0);
-
   if (kind === "project") return clamp(20 + Math.sqrt(refCount + 4) * 4, 24, 38);
   if (kind === "entity") return clamp(8 + Math.sqrt(refCount + 1) * 2.3, 10, 22);
   if (kind === "finding") return clamp(7.5 + Math.sqrt(helpful + 1) * 1.8 + (node.tagged ? 1.4 : 0), 9, 18);
@@ -400,14 +347,15 @@ function searchTextForNode(node: RawNode): string {
 
 function normalizeNode(node: RawNode): RuntimeNode {
   const score = scoreForNode(node);
+  const kind = deriveKind(node);
   return {
     ...node,
-    kind: deriveKind(node),
+    kind,
     searchText: searchTextForNode(node),
     health: inferHealth(score),
     baseColor: baseColorForNode(node),
     size: sizeForNode(node),
-    forceLabel: deriveKind(node) === "project" || (deriveKind(node) === "entity" && (node.refCount || 0) >= 12),
+    forceLabel: kind === "project" || (kind === "entity" && (node.refCount || 0) >= 12),
   };
 }
 
@@ -419,9 +367,7 @@ function ensureTopicFilters(): void {
 
 function buildFullAdjacency(): void {
   state.fullAdjacency = new Map();
-  for (const node of state.rawNodes) {
-    state.fullAdjacency.set(node.id, new Set());
-  }
+  for (const node of state.rawNodes) state.fullAdjacency.set(node.id, new Set());
   for (const link of state.rawLinks) {
     if (!state.fullAdjacency.has(link.source) || !state.fullAdjacency.has(link.target)) continue;
     state.fullAdjacency.get(link.source)!.add(link.target);
@@ -430,18 +376,9 @@ function buildFullAdjacency(): void {
 }
 
 function connectionCounts(nodeId: string): NodeDetail["connections"] {
-  const counts = {
-    total: 0,
-    projects: 0,
-    findings: 0,
-    tasks: 0,
-    entities: 0,
-    references: 0,
-  };
-
+  const counts = { total: 0, projects: 0, findings: 0, tasks: 0, entities: 0, references: 0 };
   const adjacency = state.fullAdjacency.get(nodeId);
   if (!adjacency) return counts;
-
   counts.total = adjacency.size;
   adjacency.forEach((neighborId) => {
     const neighbor = state.nodeById.get(neighborId);
@@ -460,7 +397,6 @@ function isInProjectNetwork(nodeId: string, projectId: string): boolean {
   if (nodeId === projectId) return true;
   const neighbors = state.visibleAdjacency.get(projectId);
   if (neighbors?.has(nodeId)) return true;
-  // Also include nodes that share an edge with any direct neighbor (cross-project links)
   const nodeNeighbors = state.visibleAdjacency.get(nodeId);
   if (nodeNeighbors) {
     for (const nn of nodeNeighbors) {
@@ -490,7 +426,6 @@ function nodeMatchesFilters(node: RuntimeNode): boolean {
   if (!state.filterTypes[node.kind]) return false;
   if (node.kind === "finding" && node.topicSlug && state.filterTopics[node.topicSlug] === false) return false;
   if (state.filterHealth !== "all" && node.health !== state.filterHealth) return false;
-
   if (state.filterStore !== "all" && node.store && node.store !== state.filterStore) return false;
 
   if (state.filterProject !== "all") {
@@ -510,10 +445,8 @@ function nodeMatchesFilters(node: RuntimeNode): boolean {
   }
 
   if (state.searchQuery) {
-    const query = state.searchQuery.toLowerCase();
-    if (!node.searchText.includes(query)) return false;
+    if (!node.searchText.includes(state.searchQuery.toLowerCase())) return false;
   }
-
   return true;
 }
 
@@ -536,13 +469,10 @@ function nodeRank(node: RuntimeNode): number {
 
 function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
   const filteredNodes = state.rawNodes.filter(nodeMatchesFilters);
-
   const selectedId = state.selectedNodeId;
   let limitedNodes = filteredNodes.slice();
   if (limitedNodes.length > state.nodeLimit) {
-    const sorted = limitedNodes
-      .slice()
-      .sort((a, b) => nodeRank(b) - nodeRank(a));
+    const sorted = limitedNodes.slice().sort((a, b) => nodeRank(b) - nodeRank(a));
     const keepIds = new Set<string>();
     for (const node of sorted) {
       if (keepIds.size >= state.nodeLimit) break;
@@ -570,7 +500,6 @@ function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
     connectedIds.add(link.source);
     connectedIds.add(link.target);
   });
-  // Keep nodes if: not a project, OR has visible connections, OR is the selected project, OR project type is filtered but has no connections
   const prunedNodes = limitedNodes.filter((node) =>
     node.kind !== "project" || connectedIds.has(node.id) || (node.project || "") === state.filterProject || state.filterTypes.project
   );
@@ -583,206 +512,577 @@ function rebuildHostNodes(): void {
     .filter((node): node is NodeDetail => Boolean(node));
 }
 
-function projectAnchors(nodes: RuntimeNode[]): Map<string, { x: number; y: number }> {
-  const projects = nodes.filter((node) => node.kind === "project");
-  const anchors = new Map<string, { x: number; y: number }>();
+// ── 3D rendering layer ──────────────────────────────────────────────────
 
-  // Shuffle projects using deterministic seeded hash so layout is stable
-  const shuffled = [...projects].sort(
-    (a, b) => seeded(a.id, "shuffle") - seeded(b.id, "shuffle"),
-  );
+const NODE_GEOM = new THREE.SphereGeometry(1, 18, 18);
+const PROJECT_GEOM = new THREE.IcosahedronGeometry(1, 1);
 
-  const totalNodes = nodes.length;
-  const cols = Math.max(1, Math.ceil(Math.sqrt(shuffled.length)));
-  const rows = Math.max(1, Math.ceil(shuffled.length / cols));
-  // Scale cell size based on total node count for appropriate density
-  const cellSize = Math.max(180, Math.sqrt(totalNodes) * 28);
-
-  shuffled.forEach((node, index) => {
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    // Center the grid around origin
-    const baseX = (col - (cols - 1) / 2) * cellSize;
-    const baseY = (row - (rows - 1) / 2) * cellSize;
-    // Add ±30% jitter so it doesn't look like a perfect grid
-    const jitterX = (seeded(node.id, "jitterX") - 0.5) * cellSize * 0.6;
-    const jitterY = (seeded(node.id, "jitterY") - 0.5) * cellSize * 0.6;
-    anchors.set(node.id, { x: baseX + jitterX, y: baseY + jitterY });
-  });
-
-  return anchors;
+let _glowTexture: THREE.Texture | null = null;
+function glowTexture(): THREE.Texture {
+  if (_glowTexture) return _glowTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.35, "rgba(255,255,255,0.55)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  _glowTexture = new THREE.CanvasTexture(canvas);
+  return _glowTexture;
 }
 
-function linkedProjects(node: RuntimeNode): string[] {
-  const projects = new Set<string>();
-  if (node.project) projects.add(node.project);
-  (node.connectedProjects || []).forEach((project) => projects.add(project));
-  const neighbors = state.fullAdjacency.get(node.id);
-  neighbors?.forEach((neighborId) => {
-    const neighbor = state.nodeById.get(neighborId);
-    if (neighbor?.kind === "project") projects.add(neighbor.id);
-  });
-  return [...projects];
+let _ringTexture: THREE.Texture | null = null;
+function ringTexture(): THREE.Texture {
+  if (_ringTexture) return _ringTexture;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(64, 64, 54, 0, Math.PI * 2);
+  ctx.stroke();
+  _ringTexture = new THREE.CanvasTexture(canvas);
+  return _ringTexture;
 }
 
-function seedNodeCoordinates(nodes: RuntimeNode[]): Map<string, { x: number; y: number }> {
-  const anchors = projectAnchors(nodes);
-  const positions = new Map<string, { x: number; y: number }>();
-
-  nodes.forEach((node, index) => {
-    if (node.kind === "project") {
-      positions.set(node.id, anchors.get(node.id) || { x: index * 20, y: 0 });
-      return;
-    }
-
-    const projectIds = linkedProjects(node);
-    let anchor = { x: 0, y: 0 };
-    if (projectIds.length) {
-      projectIds.forEach((projectId) => {
-        const projectAnchor = anchors.get(projectId) || { x: 0, y: 0 };
-        anchor.x += projectAnchor.x;
-        anchor.y += projectAnchor.y;
-      });
-      anchor.x /= projectIds.length;
-      anchor.y /= projectIds.length;
-    }
-
-    const kindRadius = node.kind === "finding"
-      ? 60
-      : node.kind === "task"
-        ? 80
-        : node.kind === "entity"
-          ? 190
-          : 50;
-    const radius = kindRadius + seeded(node.id, "radius") * 120 + (node.refCount || 0) * 1.2;
-    const angle = seeded(node.id, "angle") * Math.PI * 2;
-
-    positions.set(node.id, {
-      x: anchor.x + Math.cos(angle) * radius + (seeded(node.id, "jx") - 0.5) * 28,
-      y: anchor.y + Math.sin(angle) * radius + (seeded(node.id, "jy") - 0.5) * 28,
-    });
-  });
-
-  return positions;
-}
-
-function normalizeGraphPositions(graph: Graph): void {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  graph.forEachNode((nodeId, attributes: { x: number; y: number }) => {
-    minX = Math.min(minX, attributes.x);
-    minY = Math.min(minY, attributes.y);
-    maxX = Math.max(maxX, attributes.x);
-    maxY = Math.max(maxY, attributes.y);
-  });
-
-  const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, maxY - minY);
-  const centerX = minX + spanX / 2;
-  const centerY = minY + spanY / 2;
-  const scale = 2.8 / Math.max(spanX, spanY);
-
-  graph.forEachNode((nodeId, attributes: { x: number; y: number }) => {
-    graph.mergeNodeAttributes(nodeId, {
-      x: (attributes.x - centerX) * scale,
-      y: (attributes.y - centerY) * scale,
-    });
-  });
-}
-
-function buildGraph(nodes: RuntimeNode[], links: RawLink[]): Graph {
-  const graph = new Graph();
-  const positions = seedNodeCoordinates(nodes);
-
-  nodes.forEach((node, index) => {
-    if (graph.hasNode(node.id)) return; // guard against duplicate IDs across stores
-    const position = positions.get(node.id) || { x: index * 0.01, y: index * 0.01 };
-    graph.addNode(node.id, {
-      x: position.x,
-      y: position.y,
-      size: node.size,
-      label: node.label,
-      color: node.baseColor,
-      forceLabel: node.forceLabel,
-      highlighted: false,
-      hidden: false,
-      zIndex: node.kind === "project" ? 10 : node.kind === "entity" ? 6 : 3,
-      type: "circle",
-      raw: node,
-    });
-  });
-
-  links.forEach((link, index) => {
-    if (!graph.hasNode(link.source) || !graph.hasNode(link.target)) return;
-    const source = state.nodeById.get(link.source);
-    const target = state.nodeById.get(link.target);
-    if (!source || !target) return;
-    const weight = source.kind === "project" || target.kind === "project"
-      ? 2.2
-      : source.kind === "entity" || target.kind === "entity"
-        ? 1.5
-        : 1.1;
-    graph.addEdgeWithKey(`edge:${index}:${link.source}:${link.target}`, link.source, link.target, {
-      label: null,
-      size: weight,
-      weight,
-      color: hexToRgba(currentTheme() === "dark" ? "#8ca0b6" : "#64748b", currentTheme() === "dark" ? 0.25 : 0.18),
-      zIndex: 1,
-    });
-  });
-
-  // Add weak inter-project edges for entities shared across projects
-  const projectPairsSeen = new Set<string>();
-  nodes.forEach((node) => {
-    if (node.kind !== "entity") return;
-    const projects = linkedProjects(node).filter((p) => graph.hasNode(p));
-    for (let i = 0; i < projects.length; i++) {
-      for (let j = i + 1; j < projects.length; j++) {
-        const key = [projects[i], projects[j]].sort().join("|");
-        if (projectPairsSeen.has(key)) continue;
-        projectPairsSeen.add(key);
-        if (!graph.hasEdge(projects[i], projects[j]) && !graph.hasEdge(projects[j], projects[i])) {
-          graph.addEdgeWithKey(`shared:${key}`, projects[i], projects[j], {
-            label: null,
-            size: 0.3,
-            weight: 0.3,
-            color: hexToRgba(currentTheme() === "dark" ? "#8ca0b6" : "#64748b", currentTheme() === "dark" ? 0.08 : 0.05),
-            zIndex: 0,
-          });
-        }
+/** Fresnel rim-glow shell — node silhouettes glow brighter than their centers. */
+function makeShellMaterial(color: string): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uOpacity: { value: 1 },
+      uRimPower: { value: 2.4 },
+    },
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
       }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uOpacity;
+      uniform float uRimPower;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        float fres = pow(1.0 - max(dot(vNormal, vView), 0.0), uRimPower);
+        vec3 col = uColor * (0.25 + fres * 1.15);
+        gl_FragColor = vec4(col, uOpacity * (0.12 + fres * 0.62));
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+}
+
+function makeLabelSprite(text: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  const fontSize = 64;
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+  const padding = 28;
+  const textWidth = ctx.measureText(text).width;
+  canvas.width = Math.ceil(textWidth + padding * 2);
+  canvas.height = fontSize + padding;
+  const ctx2 = canvas.getContext("2d")!;
+  ctx2.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+  ctx2.fillStyle = "rgba(8,10,14,0.74)";
+  const radius = canvas.height / 2;
+  ctx2.beginPath();
+  ctx2.roundRect(0, 0, canvas.width, canvas.height, radius);
+  ctx2.fill();
+  ctx2.fillStyle = "#f3eadd";
+  ctx2.textBaseline = "middle";
+  ctx2.fillText(text, padding, canvas.height / 2 + 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  const scale = 0.16;
+  sprite.scale.set(canvas.width * scale, canvas.height * scale, 1);
+  return sprite;
+}
+
+function nodeRadius(node: RuntimeNode): number {
+  return clamp(node.size * 0.5, 4, 18);
+}
+
+function buildNodeObject(fgNode: FGNode): THREE.Group {
+  if (fgNode.__group) return fgNode.__group;
+  const node = fgNode.raw;
+  const group = new THREE.Group();
+  group.userData.phrenNodeId = node.id;
+  const radius = nodeRadius(node);
+  const color = new THREE.Color(node.baseColor);
+  const shellGeom = node.kind === "project" ? PROJECT_GEOM : NODE_GEOM;
+
+  // Bright inner core — blooms hot.
+  const core = new THREE.Mesh(NODE_GEOM, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 }));
+  core.scale.setScalar(radius * 0.55);
+  group.add(core);
+
+  // Fresnel shell — rim-lit translucent orb of light.
+  const shell = new THREE.Mesh(shellGeom, makeShellMaterial(node.baseColor));
+  shell.scale.setScalar(radius);
+  group.add(shell);
+
+  // Project hubs get a slowly rotating wireframe cage.
+  if (node.kind === "project") {
+    const wire = new THREE.Mesh(PROJECT_GEOM, new THREE.MeshBasicMaterial({
+      color,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+    }));
+    wire.scale.setScalar(radius * 1.5);
+    group.add(wire);
+    fgNode.__wire = wire;
+  }
+
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(),
+    color,
+    transparent: true,
+    opacity: 0.22,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  halo.scale.setScalar(radius * (node.kind === "project" ? 3.4 : 3));
+  group.add(halo);
+
+  if (node.forceLabel) {
+    const label = makeLabelSprite(node.label);
+    label.position.set(0, radius + 6, 0);
+    label.material.opacity = 0.92;
+    group.add(label);
+    fgNode.__label = label;
+  }
+
+  fgNode.__group = group;
+  fgNode.__core = core;
+  fgNode.__shell = shell;
+  fgNode.__halo = halo;
+  fgNode.__focusScale = 1;
+  return group;
+}
+
+/** Apply hover / selection / focus dimming directly to node materials. */
+function applyHighlight(): void {
+  const focus = state.hoveredNodeId || state.selectedNodeId;
+  const focusProject = state.focusedProjectId;
+  const neighbors = focus ? state.visibleAdjacency.get(focus) : null;
+
+  state.fgNodeById.forEach((fgNode, id) => {
+    if (!fgNode.__core || !fgNode.__shell) return;
+    let lit = true;
+    if (focusProject) {
+      lit = isInProjectNetwork(id, focusProject);
+    } else if (focus) {
+      lit = id === focus || Boolean(neighbors?.has(id));
     }
+    const isSelected = id === state.selectedNodeId || id === focusProject;
+    const isHovered = id === state.hoveredNodeId;
+    const coreMat = fgNode.__core.material as THREE.MeshBasicMaterial;
+    const shellMat = fgNode.__shell.material as THREE.ShaderMaterial;
+    const haloMat = fgNode.__halo!.material as THREE.SpriteMaterial;
+    coreMat.opacity = lit ? 1 : 0.08;
+    shellMat.uniforms.uOpacity.value = lit ? 1 : 0.05;
+    haloMat.opacity = lit ? (isSelected || isHovered ? 0.5 : 0.22) : 0.02;
+    if (fgNode.__wire) {
+      (fgNode.__wire.material as THREE.MeshBasicMaterial).opacity = lit ? 0.34 : 0.04;
+    }
+    if (fgNode.__label) {
+      (fgNode.__label.material as THREE.SpriteMaterial).opacity = lit ? 0.92 : 0.06;
+    }
+    // Breathing applies this each frame; here we only set the target.
+    fgNode.__focusScale = isSelected ? 1.18 : isHovered ? 1.12 : 1;
   });
 
-  if (graph.order > 1) {
-    const settings = forceAtlas2.inferSettings(graph);
-    forceAtlas2.assign(graph, {
-      iterations: graph.order < 80 ? 200 : graph.order < 240 ? 160 : 130,
-      settings: {
-        ...settings,
-        linLogMode: true,
-        adjustSizes: true,
-        gravity: 0.3,
-        scalingRatio: Math.max(4, settings.scalingRatio || 0, 7.5),
-        slowDown: graph.order > 240 ? 8 : 5,
-        barnesHutOptimize: graph.order > 120,
-      },
+  if (state.fg) {
+    // Re-evaluate link styling accessors.
+    state.fg
+      .linkColor(state.fg.linkColor())
+      .linkWidth(state.fg.linkWidth())
+      .linkDirectionalParticles(state.fg.linkDirectionalParticles());
+  }
+}
+
+function linkEndpointId(end: string | FGNode): string {
+  return typeof end === "string" ? end : end.id;
+}
+
+function linkIsFocused(link: FGLink): boolean {
+  const focus = state.hoveredNodeId || state.selectedNodeId;
+  const s = linkEndpointId(link.source);
+  const t = linkEndpointId(link.target);
+  if (focus) return s === focus || t === focus;
+  if (state.focusedProjectId) {
+    return isInProjectNetwork(s, state.focusedProjectId) && isInProjectNetwork(t, state.focusedProjectId);
+  }
+  return false;
+}
+
+function linkTouchesProject(link: FGLink): boolean {
+  const s = state.nodeById.get(linkEndpointId(link.source));
+  const t = state.nodeById.get(linkEndpointId(link.target));
+  return s?.kind === "project" || t?.kind === "project";
+}
+
+function linkColor(link: FGLink): string {
+  if (linkIsFocused(link)) return "rgba(255,217,102,0.9)";
+  const focus = state.hoveredNodeId || state.selectedNodeId || state.focusedProjectId;
+  if (focus) return state.theme === "dark" ? "rgba(120,140,170,0.04)" : "rgba(90,105,130,0.04)";
+  // Tint each edge by a blend of its two endpoint colours so links read as relationships.
+  const s = state.nodeById.get(linkEndpointId(link.source));
+  const t = state.nodeById.get(linkEndpointId(link.target));
+  if (s && t) {
+    const c = new THREE.Color(s.baseColor).lerp(new THREE.Color(t.baseColor), 0.5);
+    const r = Math.round(c.r * 255);
+    const g = Math.round(c.g * 255);
+    const b = Math.round(c.b * 255);
+    return `rgba(${r},${g},${b},0.52)`;
+  }
+  return "rgba(140,165,210,0.4)";
+}
+
+function linkWidth(link: FGLink): number {
+  return linkIsFocused(link) ? 2 : 0.7;
+}
+
+function linkParticles(link: FGLink): number {
+  if (linkIsFocused(link)) return 4;
+  const focus = state.hoveredNodeId || state.selectedNodeId || state.focusedProjectId;
+  if (focus) return 0;
+  return linkTouchesProject(link) ? 1 : 0;
+}
+
+function buildStarfield(): THREE.Points {
+  const count = 2200;
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const radius = 2600 + Math.random() * 3200;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = radius * Math.cos(phi);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0xaab6ff,
+    size: 13,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    fog: false,
+  });
+  return new THREE.Points(geometry, material);
+}
+
+/** Soft coloured nebula blooms parked far behind the graph. */
+function buildNebula(): THREE.Group {
+  const group = new THREE.Group();
+  const blooms: Array<{ color: number; pos: [number, number, number]; scale: number }> = [
+    { color: 0x6d3bd4, pos: [-1500, 600, -2800], scale: 900 },
+    { color: 0x1f9fd0, pos: [1600, -500, -3000], scale: 1000 },
+    { color: 0x8b7ff0, pos: [500, 1100, -3200], scale: 1050 },
+  ];
+  for (const bloom of blooms) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture(),
+      color: bloom.color,
+      transparent: true,
+      opacity: 0.06,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    }));
+    sprite.scale.setScalar(bloom.scale);
+    sprite.position.set(...bloom.pos);
+    group.add(sprite);
+  }
+  return group;
+}
+
+const GRAIN_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E";
+
+/** A pointer-transparent DOM layer over the canvas: vignette + animated film grain. */
+function buildCinematicOverlay(): HTMLElement {
+  if (!document.getElementById("graph-grain-keyframes")) {
+    const style = document.createElement("style");
+    style.id = "graph-grain-keyframes";
+    style.textContent =
+      "@keyframes graphGrain {0%{transform:translate(0,0)}25%{transform:translate(-6%,4%)}" +
+      "50%{transform:translate(5%,-5%)}75%{transform:translate(-4%,6%)}100%{transform:translate(0,0)}}";
+    document.head.appendChild(style);
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "graph-cinematic";
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden;";
+
+  const vignette = document.createElement("div");
+  vignette.className = "graph-vignette";
+  vignette.style.cssText =
+    "position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.6) 100%);";
+
+  const grain = document.createElement("div");
+  grain.style.cssText =
+    `position:absolute;inset:-20%;opacity:0.05;mix-blend-mode:overlay;` +
+    `background-image:url("${GRAIN_SVG}");background-size:180px 180px;` +
+    `animation:graphGrain 0.6s steps(2) infinite;will-change:transform;`;
+
+  overlay.appendChild(vignette);
+  overlay.appendChild(grain);
+  state.vignetteEl = vignette;
+  return overlay;
+}
+
+// The 3D scene is fixed to its dark cosmos; only state.theme is tracked for the
+// DOM-side bits (the host renders the filter bar / popover with theme variables).
+function applyTheme(): void {
+  state.theme = currentTheme();
+}
+
+function fgNodeFor(node: RuntimeNode): FGNode {
+  let fgNode = state.fgNodeById.get(node.id);
+  if (!fgNode) {
+    fgNode = { id: node.id, raw: node };
+    // Deterministic seed so layout is stable across reloads.
+    const spread = 600;
+    fgNode.x = (seeded(node.id, "x") - 0.5) * spread;
+    fgNode.y = (seeded(node.id, "y") - 0.5) * spread;
+    fgNode.z = (seeded(node.id, "z") - 0.5) * spread;
+    state.fgNodeById.set(node.id, fgNode);
+  } else {
+    fgNode.raw = node;
+  }
+  return fgNode;
+}
+
+function pushGraphData(): void {
+  const nodes = state.visibleNodes.map(fgNodeFor);
+  const visibleIds = new Set(nodes.map((n) => n.id));
+  const links: FGLink[] = state.visibleLinks
+    .filter((link) => visibleIds.has(link.source) && visibleIds.has(link.target))
+    .map((link) => ({ source: link.source, target: link.target }));
+  state.fg.graphData({ nodes, links });
+  applyHighlight();
+}
+
+function setupForceGraph(): void {
+  if (!state.container || state.fg) return;
+  state.theme = currentTheme();
+  state.container.style.position = "relative";
+
+  const fg = new ForceGraph3D(state.container, { controlType: "orbit" })
+    .backgroundColor(spaceBackground())
+    .showNavInfo(false)
+    .nodeId("id")
+    .nodeThreeObject((node: FGNode) => buildNodeObject(node))
+    .nodeThreeObjectExtend(false)
+    .linkColor((link: FGLink) => linkColor(link))
+    .linkWidth((link: FGLink) => linkWidth(link))
+    .linkCurvature(0.28)
+    .linkOpacity(1)
+    .linkDirectionalParticles((link: FGLink) => linkParticles(link))
+    .linkDirectionalParticleSpeed(0.012)
+    .linkDirectionalParticleWidth(1.6)
+    .linkDirectionalParticleColor(() => "#ffd966")
+    .enableNodeDrag(true)
+    .warmupTicks(24)
+    .cooldownTicks(220)
+    .onNodeHover((node: FGNode | null) => onHover(node))
+    .onNodeClick((node: FGNode) => onNodeClick(node))
+    .onNodeRightClick((node: FGNode, event: MouseEvent) => onNodeRightClick(node, event))
+    .onNodeDragEnd((node: FGNode) => {
+      node.fx = node.x;
+      node.fy = node.y;
+      node.fz = node.z;
+    })
+    .onBackgroundClick(() => {
+      if (state.selectedNodeId || state.focusedProjectId) clearSelection();
+    });
+
+  state.fg = fg;
+
+  // Orbit controls with gentle idle auto-rotate.
+  fg.controls().autoRotate = true;
+  fg.controls().autoRotateSpeed = 0.35;
+  const pauseRotate = () => {
+    fg.controls().autoRotate = false;
+  };
+  state.container.addEventListener("pointerdown", pauseRotate);
+  state.container.addEventListener("wheel", pauseRotate, { passive: true });
+  state.cleanupFns.push(() => {
+    state.container?.removeEventListener("pointerdown", pauseRotate);
+    state.container?.removeEventListener("wheel", pauseRotate);
+  });
+
+  // Force tuning for an airy 3D spread.
+  const charge = fg.d3Force("charge");
+  if (charge) charge.strength(-95);
+  const linkForce = fg.d3Force("link");
+  if (linkForce) {
+    linkForce.distance((link: FGLink) => {
+      const s = state.nodeById.get(linkEndpointId(link.source))?.kind;
+      const t = state.nodeById.get(linkEndpointId(link.target))?.kind;
+      if (s === "project" || t === "project") return 52;
+      if (s === "entity" || t === "entity") return 38;
+      return 26;
     });
   }
 
-  normalizeGraphPositions(graph);
-  return graph;
+  // Bloom post-processing for the glow.
+  const size = containerSize();
+  // strength / radius / threshold — thresholded so only bright cores bloom.
+  state.bloomPass = new UnrealBloomPass(new THREE.Vector2(size.w, size.h), 0.48, 0.4, 0.32);
+  fg.postProcessingComposer().addPass(state.bloomPass);
+
+  // Gentle exponential fog so depth reads — far nodes melt into the background.
+  fg.scene().fog = new THREE.FogExp2(spaceBackground(), 0.001);
+
+  // Starfield + nebula backdrop.
+  state.starfield = buildStarfield();
+  fg.scene().add(state.starfield);
+  state.nebula = buildNebula();
+  fg.scene().add(state.nebula);
+
+  // Expanding pulse ring shown around the selected node.
+  state.ringSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: ringTexture(),
+    color: 0xffd966,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  }));
+  state.ringSprite.visible = false;
+  state.ringSprite.renderOrder = 998;
+  fg.scene().add(state.ringSprite);
+
+  // Cinematic vignette + film-grain overlay.
+  const overlay = buildCinematicOverlay();
+  state.container.appendChild(overlay);
+  state.cleanupFns.push(() => overlay.remove());
+
+  applyTheme();
+
+  // Mouse tracking for tooltip placement.
+  const onMouseMove = (event: MouseEvent) => {
+    const rect = state.container!.getBoundingClientRect();
+    state.lastMouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (state.tooltip && state.tooltip.style.opacity === "1") {
+      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
+      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
+    }
+  };
+  state.container.addEventListener("mousemove", onMouseMove);
+  state.cleanupFns.push(() => state.container?.removeEventListener("mousemove", onMouseMove));
+
+  const onKeydown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") return;
+    if (!state.selectedNodeId && !state.focusedProjectId) return;
+    clearSelection();
+  };
+  document.addEventListener("keydown", onKeydown);
+  state.cleanupFns.push(() => document.removeEventListener("keydown", onKeydown));
+
+  // Resize handling.
+  const onResize = () => {
+    const next = containerSize();
+    state.fg?.width(next.w).height(next.h);
+  };
+  if (typeof ResizeObserver === "function") {
+    state.resizeObserver = new ResizeObserver(onResize);
+    state.resizeObserver.observe(state.container);
+  } else {
+    window.addEventListener("resize", onResize);
+    state.cleanupFns.push(() => window.removeEventListener("resize", onResize));
+  }
+  onResize();
+
+  fg.onEngineStop(() => {
+    if (state.firstSettle) {
+      state.firstSettle = false;
+      fg.zoomToFit(700, 40);
+    }
+  });
+
+  // Theme observer.
+  const observer = new MutationObserver(() => {
+    if (currentTheme() === state.theme) return;
+    applyTheme();
+  });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  state.themeObserver = observer;
+
+  // Ambient loop: drift the starfield + animate the mascot.
+  let lastTime = 0;
+  const ambientTick = (timestamp: number) => {
+    const dt = lastTime > 0 ? Math.min(0.05, (timestamp - lastTime) / 1000) : 0.016;
+    lastTime = timestamp;
+    const now = timestamp * 0.001;
+    if (state.starfield) {
+      state.starfield.rotation.y += dt * 0.012;
+      state.starfield.rotation.x += dt * 0.004;
+    }
+    if (state.nebula) {
+      state.nebula.rotation.z += dt * 0.006;
+    }
+    // Per-node breathing + project wireframe spin.
+    state.fgNodeById.forEach((fgNode) => {
+      if (!fgNode.__group) return;
+      if (fgNode.__phase === undefined) fgNode.__phase = seeded(fgNode.id, "breathe") * 6.283;
+      const breathe = 1 + 0.04 * Math.sin(now * 1.5 + fgNode.__phase);
+      fgNode.__group.scale.setScalar((fgNode.__focusScale ?? 1) * breathe);
+      if (fgNode.__wire) {
+        fgNode.__wire.rotation.y += dt * 0.4;
+        fgNode.__wire.rotation.x += dt * 0.15;
+      }
+    });
+    // Expanding pulse ring around the active node.
+    if (state.ringSprite) {
+      const activeId = state.selectedNodeId || state.focusedProjectId;
+      const pos = activeId ? nodeWorldPos(activeId) : null;
+      if (pos) {
+        state.ringSprite.visible = true;
+        state.ringSprite.position.copy(pos);
+        state.ringPhase = (state.ringPhase + dt * 0.85) % 1;
+        const baseR = nodeRadius(state.nodeById.get(activeId!)!) || 8;
+        state.ringSprite.scale.setScalar(baseR * (2 + state.ringPhase * 5.5));
+        (state.ringSprite.material as THREE.SpriteMaterial).opacity = (1 - state.ringPhase) * 0.7;
+      } else {
+        state.ringSprite.visible = false;
+      }
+    }
+    mascotUpdate(dt);
+    state.ambientRafId = requestAnimationFrame(ambientTick);
+  };
+  state.ambientRafId = requestAnimationFrame(ambientTick);
 }
 
-function positionForNode(nodeId: string): { x: number; y: number } | null {
-  if (!state.renderer || !state.graph?.hasNode(nodeId)) return null;
-  const attrs = state.graph.getNodeAttributes(nodeId);
-  if (attrs.x == null || attrs.y == null) return null;
-  return state.renderer.graphToViewport({ x: attrs.x as number, y: attrs.y as number });
+function containerSize(): { w: number; h: number } {
+  const w = state.container?.clientWidth || 800;
+  const h = state.container?.clientHeight || 600;
+  return { w: Math.max(1, w), h: Math.max(1, h) };
 }
+
+// ── Interaction ─────────────────────────────────────────────────────────
 
 function hideTooltip(): void {
   if (!state.tooltip) return;
@@ -790,65 +1090,82 @@ function hideTooltip(): void {
   state.tooltip.innerHTML = "";
 }
 
-function showTooltip(nodeId: string, event: { x: number; y: number }): void {
-  if (!state.tooltip) return;
-
-  const node = state.nodeById.get(nodeId);
-  if (!node) return;
-
-  let preview = "";
-
+function tooltipText(node: RuntimeNode): string {
   if (node.kind === "finding") {
-    // Show first 100 chars of the finding + date
     const text = node.fullLabel || node.label || "";
-    const truncated = text.length > 100 ? text.slice(0, 97) + "..." : text;
-    preview = truncated;
+    let preview = text.length > 100 ? text.slice(0, 97) + "..." : text;
     const score = scoreForNode(node);
     const rawDate = node.date && node.date !== "unknown" ? node.date : "";
     const dateStr = rawDate || score?.lastUsedAt || "";
     if (dateStr) {
-      try {
-        const d = new Date(dateStr);
-        if (!isNaN(d.getTime())) {
-          const days = Math.floor((Date.now() - d.getTime()) / 86400000);
-          const rel = days < 1 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
-          preview += `\n${node.date ? rel : "seen " + rel}`;
-        }
-      } catch { /* skip */ }
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+        const rel = days < 1 ? "today" : days === 1 ? "yesterday" : days < 30 ? `${days}d ago` : days < 365 ? `${Math.floor(days / 30)}mo ago` : `${Math.floor(days / 365)}y ago`;
+        preview += `\n${node.date ? rel : "seen " + rel}`;
+      }
     }
-  } else if (node.kind === "task") {
-    // Show task line + section + priority
+    return preview;
+  }
+  if (node.kind === "task") {
     const line = node.fullLabel || node.label || "";
     const section = node.section ? `[${node.section}]` : "";
     const priority = node.priority ? `${node.priority}◆` : "";
-    preview = `${line}\n${[section, priority].filter(Boolean).join(" ")}`;
-  } else if (node.kind === "entity") {
-    // Show type + ref count + connected projects
-    const refCount = node.refCount || 0;
-    const projects = node.connectedProjects?.length || 0;
-    preview = `${node.label}\n${refCount} refs • ${projects} projects`;
-  } else if (node.kind === "project") {
-    // Show finding count + task count
-    const findingCount = node.findingCount || 0;
-    const taskCount = node.taskCount || 0;
-    preview = `${node.label}\n${findingCount} findings • ${taskCount} tasks`;
-  } else {
-    // Default: just show the label
-    preview = node.label || node.id;
+    return `${line}\n${[section, priority].filter(Boolean).join(" ")}`;
   }
+  if (node.kind === "entity") {
+    return `${node.label}\n${node.refCount || 0} refs • ${node.connectedProjects?.length || 0} projects`;
+  }
+  if (node.kind === "project") {
+    return `${node.label}\n${node.findingCount || 0} findings • ${node.taskCount || 0} tasks`;
+  }
+  return node.label || node.id;
+}
 
-  if (preview) {
-    state.tooltip.textContent = preview;
-    state.tooltip.style.left = event.x + 12 + "px";
-    state.tooltip.style.top = event.y + 12 + "px";
-    state.tooltip.style.opacity = "1";
+function onHover(fgNode: FGNode | null): void {
+  state.hoveredNodeId = fgNode ? fgNode.id : null;
+  if (state.container) state.container.style.cursor = fgNode ? "pointer" : "default";
+  if (fgNode && state.tooltip) {
+    const text = tooltipText(fgNode.raw);
+    if (text) {
+      state.tooltip.textContent = text;
+      state.tooltip.style.left = state.lastMouse.x + 14 + "px";
+      state.tooltip.style.top = state.lastMouse.y + 14 + "px";
+      state.tooltip.style.opacity = "1";
+    }
+  } else {
+    hideTooltip();
+  }
+  applyHighlight();
+}
+
+function flyToNode(fgNode: FGNode, duration: number): void {
+  if (!state.fg || fgNode.x == null) return;
+  const distance = 155 + nodeRadius(fgNode.raw) * 9;
+  const len = Math.hypot(fgNode.x, fgNode.y || 0, fgNode.z || 0) || 1;
+  const ratio = 1 + distance / len;
+  state.fg.cameraPosition(
+    { x: (fgNode.x || 0) * ratio, y: (fgNode.y || 0) * ratio, z: (fgNode.z || 0) * ratio },
+    { x: fgNode.x || 0, y: fgNode.y || 0, z: fgNode.z || 0 },
+    duration,
+  );
+}
+
+function screenPosFor(nodeId: string): { x: number; y: number } | null {
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (!fgNode || !state.fg || fgNode.x == null) return null;
+  try {
+    const coords = state.fg.graph2ScreenCoords(fgNode.x, fgNode.y || 0, fgNode.z || 0);
+    return { x: coords.x, y: coords.y };
+  } catch {
+    return null;
   }
 }
 
 function notifySelection(nodeId: string): void {
   const detail = nodeDetail(nodeId);
-  const position = positionForNode(nodeId);
-  if (!detail || !position) return;
+  const position = screenPosFor(nodeId) || { x: state.lastMouse.x, y: state.lastMouse.y };
+  if (!detail) return;
   state.nodeSelectCallbacks.forEach((callback) => callback(detail, position.x, position.y));
 }
 
@@ -856,426 +1173,107 @@ function notifyClear(): void {
   state.selectionClearCallbacks.forEach((callback) => callback());
 }
 
-function refreshRenderer(resetCamera: boolean): void {
-  if (!state.container) return;
+function onNodeClick(fgNode: FGNode): void {
+  selectNode(fgNode.id);
+}
 
-  state.theme = currentTheme();
-  state.container.style.background = baseBackground(state.theme);
-  state.container.style.position = "relative";
+function onNodeRightClick(fgNode: FGNode, event: MouseEvent): void {
+  event.preventDefault();
+  const detail = nodeDetail(fgNode.id);
+  if (!detail) return;
+  const rect = state.container?.getBoundingClientRect();
+  const x = rect ? event.clientX - rect.left : event.clientX;
+  const y = rect ? event.clientY - rect.top : event.clientY;
+  state.rightClickCallbacks.forEach((cb) => cb(detail, x, y));
+}
 
-  if (!state.renderer) {
-    if (!state.graph) return;
-    state.renderer = new Sigma(state.graph, state.container, {
-      allowInvalidContainer: true,
-      hideEdgesOnMove: false,
-      hideLabelsOnMove: false,
-      labelFont: "Inter, system-ui, sans-serif",
-      labelSize: 13,
-      labelWeight: "500",
-      labelColor: { color: state.theme === "dark" ? "#f3eadd" : "#1e1c18" },
-      labelDensity: 0.7,
-      labelRenderedSizeThreshold: 12,
-      labelGridCellSize: 200,
-      defaultDrawNodeLabel: drawCustomLabel as unknown as Sigma["settings"]["defaultDrawNodeLabel"],
-      defaultDrawNodeHover: drawCustomHover as unknown as Sigma["settings"]["defaultDrawNodeHover"],
-      minCameraRatio: 0.06,
-      maxCameraRatio: 4,
-      zIndex: true,
-      nodeReducer(nodeId, data) {
-        const next: Record<string, unknown> = { ...data };
-        const node = state.nodeById.get(nodeId);
-        const kind = node?.kind ?? "finding";
-        const ratio = state.cameraRatio;
+function clearSelection(): void {
+  if (!state.selectedNodeId && !state.focusedProjectId) return;
+  state.selectedNodeId = null;
+  state.focusedProjectId = null;
+  state.hoveredNodeId = null;
+  hideTooltip();
+  applyHighlight();
+  notifyClear();
+}
 
-        // Semantic zoom: fade nodes based on zoom level.
-        // Skip semantic zoom if:
-        //   - the user actively filtered types (their explicit choice overrides zoom), or
-        //   - they narrowed to a specific project (they want to see that project's
-        //     full network, not a dimmed overview), or
-        //   - they are hovering/selecting/focusing a specific node.
-        const allTypesOn = state.filterTypes.project && state.filterTypes.finding && state.filterTypes.task && state.filterTypes.entity && state.filterTypes.reference;
-        const projectFilterActive = state.filterProject !== "all";
-        if (allTypesOn && !projectFilterActive && !state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId) {
-          if (ratio > 0.65 && kind !== "project") {
-            const fade = kind === "finding" || kind === "task" ? 0.12 : 0.04;
-            next.color = hexToRgba(String(data.color), fade);
-            next.label = null;
-            next.zIndex = 1;
-            return next;
-          }
-          if (ratio > 0.35 && (kind === "entity" || kind === "reference")) {
-            next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.10 : 0.12);
-            next.label = null;
-            next.zIndex = 1;
-            return next;
-          }
-        }
+function selectNode(nodeId: string): boolean {
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (!fgNode) return false;
+  const node = state.nodeById.get(nodeId);
 
-        // Entities/fragments always render smaller (ambient, not dominant)
-        if (kind === "entity") {
-          next.size = Math.min(data.size, 5);
-        }
-
-        // Focus mode: project is focused — fade everything outside its network
-        if (state.focusedProjectId) {
-          if (nodeId === state.focusedProjectId) {
-            next.highlighted = true;
-            next.forceLabel = true;
-            next.zIndex = 20;
-          } else if (isInProjectNetwork(nodeId, state.focusedProjectId)) {
-            next.zIndex = 10;
-            next.forceLabel = data.size >= 10;
-          } else {
-            next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.08 : 0.10);
-            next.label = null;
-            next.zIndex = 1;
-          }
-          return next;
-        }
-
-        // Normal selection/hover
-        const focus = state.hoveredNodeId || state.selectedNodeId;
-        if (nodeId === state.selectedNodeId) {
-          next.size = Math.max(data.size * 1.18, data.size + 2);
-          next.highlighted = true;
-          next.forceLabel = true;
-          next.zIndex = 20;
-        } else if (nodeId === state.hoveredNodeId) {
-          next.size = data.size * 1.08;
-          next.forceLabel = true;
-          next.zIndex = 16;
-        } else if (focus) {
-          const neighbors = state.visibleAdjacency.get(focus);
-          if (neighbors?.has(nodeId)) {
-            const focusNode = state.nodeById.get(focus);
-            next.zIndex = 10;
-            next.forceLabel = focusNode?.kind === "project" || data.size >= 12;
-          } else {
-            next.color = hexToRgba(String(data.color), state.theme === "dark" ? 0.22 : 0.25);
-            next.label = null;
-          }
-        }
-        return next;
-      },
-      edgeReducer(edgeId, data) {
-        const next: Record<string, unknown> = { ...data };
-        const ratio = state.cameraRatio;
-
-        // Semantic zoom for edges: at high zoom levels, only show project-to-project edges
-        if (!state.focusedProjectId && !state.hoveredNodeId && !state.selectedNodeId && ratio > 0.65) {
-          const extremities = state.graph?.extremities(edgeId);
-          if (extremities) {
-            const srcKind = state.nodeById.get(extremities[0])?.kind;
-            const tgtKind = state.nodeById.get(extremities[1])?.kind;
-            if (srcKind !== "project" || tgtKind !== "project") {
-              next.color = hexToRgba("#888", 0.02);
-              next.size = 0.3;
-              return next;
-            }
-          }
-        }
-
-        // Focus mode: only edges within the focused project's network stay visible
-        if (state.focusedProjectId) {
-          const extremities = state.graph?.extremities(edgeId);
-          if (!extremities) return next;
-          const srcIn = isInProjectNetwork(extremities[0], state.focusedProjectId);
-          const tgtIn = isInProjectNetwork(extremities[1], state.focusedProjectId);
-          if (srcIn && tgtIn) {
-            next.color = hexToRgba(String(data.color || "#888"), state.theme === "dark" ? 0.6 : 0.5);
-            next.size = Math.max(1.5, data.size);
-          } else {
-            next.color = hexToRgba("#888", state.theme === "dark" ? 0.03 : 0.04);
-            next.size = 0.5;
-          }
-          return next;
-        }
-
-        // Distance-based edge fading — long stretched edges fade out
-        const extremitiesForDist = state.graph?.extremities(edgeId);
-        if (extremitiesForDist && state.graph) {
-          const srcA = state.graph.getNodeAttributes(extremitiesForDist[0]);
-          const tgtA = state.graph.getNodeAttributes(extremitiesForDist[1]);
-          const dx = srcA.x - tgtA.x;
-          const dy = srcA.y - tgtA.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist > 300) {
-            const fade = Math.max(0.03, 1 - (dist - 300) / 400);
-            next.color = hexToRgba(String(data.color || "#888"), fade * 0.3);
-            next.size = Math.max(0.3, (data.size || 1) * fade);
-          }
-        }
-
-        // Normal selection/hover
-        const focus = state.hoveredNodeId || state.selectedNodeId;
-        if (!focus) return next;
-        const extremities = state.graph?.extremities(edgeId);
-        const isFocused = extremities ? extremities[0] === focus || extremities[1] === focus : false;
-        if (isFocused) {
-          next.color = hexToRgba("#ffd966", state.theme === "dark" ? 0.82 : 0.7);
-          next.size = Math.max(2.4, data.size * 1.35);
-          next.zIndex = 8;
-        } else {
-          next.color = hexToRgba(state.theme === "dark" ? "#94a3b8" : "#64748b", state.theme === "dark" ? 0.06 : 0.05);
-        }
-        return next;
-      },
-    });
-
-    state.renderer.on("enterNode", (payload) => {
-      state.hoveredNodeId = payload.node;
-      showTooltip(payload.node, payload.event);
-      state.renderer?.refresh();
-    });
-
-    state.renderer.on("leaveNode", () => {
-      state.hoveredNodeId = null;
-      hideTooltip();
-      state.renderer?.refresh();
-    });
-
-    state.renderer.on("clickNode", (payload) => {
-      payload.preventSigmaDefault();
-      if (state.isDragging) return;
-      state.selectedNodeId = payload.node;
-      state.hoveredNodeId = payload.node;
-      hideTooltip();
-      state.renderer?.refresh();
-      const detail = nodeDetail(payload.node);
-      let animating = false;
-      if (detail && detail.kind !== "project" && state.renderer) {
-        const graphPosition = state.renderer.getNodeDisplayData(payload.node);
-        if (graphPosition) {
-          animating = true;
-          state.renderer.getCamera().animate({
-            x: graphPosition.x,
-            y: graphPosition.y,
-            ratio: Math.max(state.renderer.getCamera().ratio * 0.85, 0.16),
-          }, { duration: 220 });
-        }
-      }
-      // Delay notification until after camera animation so popover lands next to the node
-      if (animating) {
-        setTimeout(() => notifySelection(payload.node), 240);
-      } else {
-        notifySelection(payload.node);
-      }
-      // Send phren mascot to the clicked node
-      if (mascot.initialized && payload.node !== mascot.currentNodeId) {
-        mascotMoveTo(payload.node);
-      }
-    });
-
-    state.renderer.on("rightClickNode", (payload) => {
-      payload.preventSigmaDefault();
-      (payload.event.original as Event).preventDefault();
-      const detail = nodeDetail(payload.node);
-      if (!detail) return;
-      state.rightClickCallbacks.forEach((cb) => cb(detail, payload.event.x, payload.event.y));
-    });
-
-    state.renderer.on("clickStage", () => {
-      if (!state.selectedNodeId && !state.focusedProjectId) return;
+  if (node?.kind === "project") {
+    if (state.focusedProjectId === nodeId) {
       clearSelection();
-    });
-
-    const onKeydown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (!state.selectedNodeId && !state.focusedProjectId) return;
-      clearSelection();
-    };
-
-    // Track camera ratio for semantic zoom
-    state.renderer.getCamera().on("updated", () => {
-      const ratio = state.renderer?.getCamera().ratio ?? 1;
-      if (Math.abs(ratio - state.cameraRatio) > 0.02) {
-        state.cameraRatio = ratio;
-        state.renderer?.refresh();
-      }
-    });
-    document.addEventListener("keydown", onKeydown);
-    state.cleanupFns.push(() => document.removeEventListener("keydown", onKeydown));
-
-    // --- Node dragging ---
-    state.renderer.on("downNode", (payload) => {
-      state.draggedNode = payload.node;
-      state.isDragging = false;
-      state.renderer?.setSettings({ enableCameraPanning: false });
-      if (state.container) state.container.style.cursor = "grabbing";
-      // Capture relative positions of all neighbors (offsets from project center)
-      state.neighborPositions.clear();
-      if (state.graph) {
-        const projAttrs = state.graph.getNodeAttributes(payload.node);
-        state.neighborPositions.set(payload.node, { x: projAttrs.x, y: projAttrs.y });
-        const neighbors = state.visibleAdjacency.get(payload.node);
-        if (neighbors) {
-          neighbors.forEach((neighborId) => {
-            const n = state.nodeById.get(neighborId);
-            if (!n || n.kind === "project") return;
-            try {
-              const nAttrs = state.graph!.getNodeAttributes(neighborId);
-              // Store offset FROM project, not absolute position
-              state.neighborPositions.set(neighborId, { x: nAttrs.x - projAttrs.x, y: nAttrs.y - projAttrs.y });
-            } catch { /* skip */ }
-          });
-        }
-      }
-    });
-
-    state.renderer.on("enterNode", () => {
-      if (!state.draggedNode && state.container) state.container.style.cursor = "grab";
-    });
-
-    state.renderer.on("leaveNode", () => {
-      if (!state.draggedNode && state.container) state.container.style.cursor = "default";
-    });
-
-    const onMouseMove = (event: MouseEvent) => {
-      if (!state.draggedNode || !state.renderer || !state.graph) return;
-      state.isDragging = true;
-      const graphCoords = state.renderer.viewportToGraph({ x: event.offsetX, y: event.offsetY });
-      state.graph.mergeNodeAttributes(state.draggedNode, { x: graphCoords.x, y: graphCoords.y });
-      // Gentle gravitational pull — neighbors drift toward the project during drag
-      const curPos = state.graph.getNodeAttributes(state.draggedNode);
-      state.neighborPositions.forEach((offset, neighborId) => {
-        if (neighborId === state.draggedNode) return;
-        try {
-          const nAttrs = state.graph!.getNodeAttributes(neighborId);
-          // Target: orbital position around new project location
-          const targetX = curPos.x + offset.x;
-          const targetY = curPos.y + offset.y;
-          // Ease toward target (gravitational drift, not rigid lock)
-          state.graph!.setNodeAttribute(neighborId, "x", nAttrs.x + (targetX - nAttrs.x) * 0.08);
-          state.graph!.setNodeAttribute(neighborId, "y", nAttrs.y + (targetY - nAttrs.y) * 0.08);
-        } catch { /* skip */ }
-      });
-    };
-    const endDrag = () => {
-      if (state.draggedNode) {
-        state.renderer?.setSettings({ enableCameraPanning: true });
-        if (state.container) state.container.style.cursor = "default";
-
-        // Continue gravitational drift — animate neighbors to orbital positions around new location
-        const projPos = state.graph?.getNodeAttributes(state.draggedNode);
-        if (projPos && state.graph) {
-          const positions = new Map(state.neighborPositions);
-          positions.delete(state.draggedNode);
-          let frame = 0;
-          const maxFrames = 30;
-          const drift = () => {
-            if (frame >= maxFrames || !state.graph) return;
-            frame++;
-            let settled = true;
-            positions.forEach((offset, neighborId) => {
-              try {
-                const cur = state.graph!.getNodeAttributes(neighborId);
-                const targetX = projPos.x + offset.x;
-                const targetY = projPos.y + offset.y;
-                const dx = targetX - cur.x;
-                const dy = targetY - cur.y;
-                if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) settled = false;
-                state.graph!.setNodeAttribute(neighborId, "x", cur.x + dx * 0.15);
-                state.graph!.setNodeAttribute(neighborId, "y", cur.y + dy * 0.15);
-              } catch { /* skip */ }
-            });
-            if (!settled) requestAnimationFrame(drift);
-          };
-          requestAnimationFrame(drift);
-        }
-
-        state.draggedNode = null;
-        state.neighborPositions.clear();
-        setTimeout(() => { state.isDragging = false; }, 0);
-      }
-    };
-    state.container.addEventListener("mousemove", onMouseMove);
-    state.container.addEventListener("mouseup", endDrag);
-    state.container.addEventListener("mouseleave", endDrag);
-    state.cleanupFns.push(() => {
-      state.container?.removeEventListener("mousemove", onMouseMove);
-      state.container?.removeEventListener("mouseup", endDrag);
-      state.container?.removeEventListener("mouseleave", endDrag);
-    });
-
-    // --- Atmospheric glow: per-theme bloom + slow breathe.
-    // Single drop-shadow pass (cheaper than stacking two); will-change: filter
-    // promotes the canvas to its own compositor layer so the filter doesn't
-    // re-rasterize the scene each frame.
-    const sigmaCanvases = state.container.querySelectorAll<HTMLCanvasElement>("canvas");
-    const glowFilterDark = "brightness(1.12) saturate(1.4) drop-shadow(0 0 14px rgba(124, 58, 237, 0.42))";
-    const glowFilterLight = "brightness(1.02) saturate(1.15)";
-    const applyGlow = () => {
-      const filter = currentTheme() === "dark" ? glowFilterDark : glowFilterLight;
-      sigmaCanvases.forEach((canvas) => {
-        canvas.style.filter = filter;
-        canvas.style.willChange = "filter";
-        canvas.style.transition = "filter 400ms ease-out";
-      });
-    };
-    applyGlow();
-    // Re-apply after theme flips so dark bloom disappears in light mode.
-    const glowObserver = new MutationObserver(applyGlow);
-    glowObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
-    // Ambient nebula that breathes behind the graph (dark mode only).
-    // Rendered with a pre-baked blur on a single element and animated via
-    // transform so it stays on the GPU compositor and never reflows.
-    if (!state.container.querySelector(".graph-nebula")) {
-      const nebula = document.createElement("div");
-      nebula.className = "graph-nebula";
-      nebula.setAttribute("aria-hidden", "true");
-      nebula.style.cssText = [
-        "position: absolute",
-        "inset: 0",
-        "pointer-events: none",
-        "z-index: 0",
-        "background:" +
-          " radial-gradient(600px 420px at 25% 35%, rgba(124,58,237,0.22), transparent 62%)," +
-          " radial-gradient(520px 380px at 78% 62%, rgba(40,211,242,0.15), transparent 62%)," +
-          " radial-gradient(700px 500px at 58% 12%, rgba(156,143,248,0.12), transparent 60%)",
-        "filter: blur(24px)",
-        "opacity: 0",
-        "transition: opacity 600ms ease",
-        "will-change: transform, opacity",
-        "transform: translateZ(0)",
-        "animation: graphNebulaBreathe 14s ease-in-out infinite",
-      ].join(";");
-      state.container.insertBefore(nebula, state.container.firstChild);
-      const syncNebula = () => { nebula.style.opacity = currentTheme() === "dark" ? "1" : "0"; };
-      syncNebula();
-      const nebulaObserver = new MutationObserver(syncNebula);
-      nebulaObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
-      if (!document.getElementById("graph-nebula-keyframes")) {
-        const style = document.createElement("style");
-        style.id = "graph-nebula-keyframes";
-        style.textContent =
-          "@keyframes graphNebulaBreathe { 0%,100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(12px,-8px,0) scale(1.08); } }";
-        document.head.appendChild(style);
-      }
+      return true;
     }
-
-    const observer = new MutationObserver(() => {
-      const nextTheme = currentTheme();
-      if (nextTheme === state.theme) return;
-      state.theme = nextTheme;
-      applyFilters({ resetCamera: false, emitSelection: Boolean(state.selectedNodeId) });
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    state.themeObserver = observer;
-  } else if (state.graph) {
-    state.renderer.setGraph(state.graph);
-    state.renderer.setSettings({
-      labelColor: { color: state.theme === "dark" ? "#f3eadd" : "#1e1c18" },
-    });
-    state.renderer.refresh();
+    state.focusedProjectId = nodeId;
+    state.selectedNodeId = null;
+    state.hoveredNodeId = null;
+    applyHighlight();
+    flyToNode(fgNode, 900);
+    setTimeout(() => notifySelection(nodeId), 950);
+    mascotMoveTo(nodeId, true);
+    return true;
   }
 
-  if (state.renderer && resetCamera) {
-    setTimeout(() => {
-      state.renderer?.getCamera().animatedReset({ duration: 220 });
-    }, 0);
+  state.focusedProjectId = null;
+  state.selectedNodeId = nodeId;
+  state.hoveredNodeId = nodeId;
+  hideTooltip();
+  applyHighlight();
+  flyToNode(fgNode, 800);
+  setTimeout(() => notifySelection(nodeId), 850);
+  mascotMoveTo(nodeId, true);
+  return true;
+}
+
+function getNodeAt(x: number, y: number): NodeDetail | null {
+  if (!state.fg) return null;
+  const size = containerSize();
+  const ndc = new THREE.Vector2((x / size.w) * 2 - 1, -(y / size.h) * 2 + 1);
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, state.fg.camera());
+  const hits = raycaster.intersectObjects(state.fg.scene().children, true);
+  for (const hit of hits) {
+    let obj: THREE.Object3D | null = hit.object;
+    while (obj) {
+      const id = obj.userData?.phrenNodeId;
+      if (typeof id === "string") return nodeDetail(id);
+      obj = obj.parent;
+    }
   }
+  return null;
+}
+
+function applyFilters(options: { resetCamera?: boolean; emitSelection?: boolean } = {}): void {
+  const visibleData = buildVisibleData();
+  state.visibleNodes = visibleData.nodes;
+  state.visibleLinks = visibleData.links;
+  rebuildHostNodes();
+  if (state.fg) pushGraphData();
+  updateFilterBarCounter();
+
+  if (state.selectedNodeId && !state.visibleAdjacency.has(state.selectedNodeId)) {
+    state.selectedNodeId = null;
+    notifyClear();
+  } else if (options.emitSelection && state.selectedNodeId) {
+    setTimeout(() => notifySelection(state.selectedNodeId!), 0);
+  }
+  if (options.resetCamera && state.fg) {
+    // onEngineStop fits the camera once the layout settles.
+    state.firstSettle = true;
+  }
+}
+
+// ── Filter bar ──────────────────────────────────────────────────────────
+
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function buildFilterBar(): void {
@@ -1285,15 +1283,11 @@ function buildFilterBar(): void {
   if (!filterEl) return;
 
   const projectNames = Array.from(new Set(
-    state.rawNodes
-      .filter((node) => node.kind === "project")
-      .map((node) => node.project || node.id)
+    state.rawNodes.filter((node) => node.kind === "project").map((node) => node.project || node.id)
   )).sort((a, b) => a.localeCompare(b));
 
   const storeNames = Array.from(new Set(
-    state.rawNodes
-      .map((node) => node.store)
-      .filter((store): store is string => Boolean(store))
+    state.rawNodes.map((node) => node.store).filter((store): store is string => Boolean(store))
   )).sort((a, b) => a.localeCompare(b));
 
   const typeDefs = [
@@ -1443,22 +1437,7 @@ function updateFilterBarCounter(): void {
   if (counter) counter.textContent = `${state.visibleNodes.length} / ${state.rawNodes.length}`;
 }
 
-function applyFilters(options: { resetCamera?: boolean; emitSelection?: boolean } = {}): void {
-  const visibleData = buildVisibleData();
-  state.visibleNodes = visibleData.nodes;
-  state.visibleLinks = visibleData.links;
-  rebuildHostNodes();
-  state.graph = buildGraph(visibleData.nodes, visibleData.links);
-  refreshRenderer(Boolean(options.resetCamera));
-  updateFilterBarCounter();
-
-  if (state.selectedNodeId && !state.graph.hasNode(state.selectedNodeId)) {
-    state.selectedNodeId = null;
-    notifyClear();
-  } else if (options.emitSelection && state.selectedNodeId) {
-    setTimeout(() => notifySelection(state.selectedNodeId!), 0);
-  }
-}
+// ── Public lifecycle ────────────────────────────────────────────────────
 
 function mount(payload: GraphPayload): void {
   state.container = document.getElementById("graph-canvas");
@@ -1468,23 +1447,24 @@ function mount(payload: GraphPayload): void {
     return;
   }
 
-  // Style tooltip
   if (state.tooltip) {
-    state.tooltip.style.position = "absolute";
-    state.tooltip.style.pointerEvents = "none";
-    state.tooltip.style.zIndex = "1000";
-    state.tooltip.style.maxWidth = "300px";
-    state.tooltip.style.padding = "8px 12px";
-    state.tooltip.style.borderRadius = "6px";
-    state.tooltip.style.fontSize = "13px";
-    state.tooltip.style.backgroundColor = "rgba(0, 0, 0, 0.85)";
-    state.tooltip.style.color = "#fff";
-    state.tooltip.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.3)";
-    state.tooltip.style.opacity = "0";
-    state.tooltip.style.transition = "opacity 150ms ease-in-out";
-    state.tooltip.style.whiteSpace = "pre-wrap";
-    state.tooltip.style.wordBreak = "break-word";
-    state.tooltip.style.lineHeight = "1.4";
+    Object.assign(state.tooltip.style, {
+      position: "absolute",
+      pointerEvents: "none",
+      zIndex: "1000",
+      maxWidth: "300px",
+      padding: "8px 12px",
+      borderRadius: "6px",
+      fontSize: "13px",
+      backgroundColor: "rgba(0, 0, 0, 0.85)",
+      color: "#fff",
+      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+      opacity: "0",
+      transition: "opacity 150ms ease-in-out",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+      lineHeight: "1.4",
+    });
     state.tooltip.classList.add("graph-tooltip");
   }
 
@@ -1503,40 +1483,36 @@ function mount(payload: GraphPayload): void {
 
   state.nodeById = new Map();
   state.rawNodes.forEach((node) => state.nodeById.set(node.id, node));
+
+  // Rebuild from scratch so node meshes reflect the fresh payload — three-forcegraph
+  // keys its cached objects off the node reference, so new payloads need new objects.
+  state.fgNodeById.forEach(disposeNodeObject);
+  state.fgNodeById.clear();
+
   buildFullAdjacency();
   buildFilterBar();
+  setupForceGraph();
+  state.firstSettle = true;
   applyFilters({ resetCamera: true, emitSelection: Boolean(state.selectedNodeId) });
-  startPhrenMascot();
+  startMascot();
 }
 
-function clearSelection(): void {
-  if (!state.selectedNodeId && !state.focusedProjectId) return;
-  state.selectedNodeId = null;
-  state.focusedProjectId = null;
-  state.hoveredNodeId = null;
-  hideTooltip();
-  state.renderer?.refresh();
-  notifyClear();
-}
-
-function pruneNodeState(nodeId: string): void {
-  state.rawNodes = state.rawNodes.filter((node) => node.id !== nodeId);
-  state.rawLinks = state.rawLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
-  state.visibleNodes = state.visibleNodes.filter((node) => node.id !== nodeId);
-  state.visibleLinks = state.visibleLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
-  state.hostNodes = state.hostNodes.filter((node) => node.id !== nodeId);
-  state.nodeById.delete(nodeId);
-  state.fullAdjacency.forEach((set) => set.delete(nodeId));
-  state.fullAdjacency.delete(nodeId);
-  state.visibleAdjacency.forEach((set) => set.delete(nodeId));
-  state.visibleAdjacency.delete(nodeId);
-  if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
-  if (state.hoveredNodeId === nodeId) state.hoveredNodeId = null;
-  if (state.focusedProjectId === nodeId) state.focusedProjectId = null;
-  if (state.draggedNode === nodeId) state.draggedNode = null;
-  if (mascot.currentNodeId === nodeId) mascot.currentNodeId = null;
-  if (mascot.targetNodeId === nodeId) mascot.targetNodeId = null;
-  if (mascot.lastVisited === nodeId) mascot.lastVisited = null;
+function disposeNodeObject(fgNode: FGNode): void {
+  if (fgNode.__core) (fgNode.__core.material as THREE.Material).dispose();
+  if (fgNode.__shell) (fgNode.__shell.material as THREE.Material).dispose();
+  if (fgNode.__wire) (fgNode.__wire.material as THREE.Material).dispose();
+  if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).dispose();
+  if (fgNode.__label) {
+    const mat = fgNode.__label.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.dispose();
+  }
+  fgNode.__group = undefined;
+  fgNode.__core = undefined;
+  fgNode.__shell = undefined;
+  fgNode.__wire = undefined;
+  fgNode.__halo = undefined;
+  fgNode.__label = undefined;
 }
 
 function updateNode(
@@ -1559,24 +1535,19 @@ function updateNode(
   if (typeof changes.priority === "string") node.priority = changes.priority;
   if (typeof changes.topicSlug === "string") node.topicSlug = changes.topicSlug;
   if (typeof changes.topicLabel === "string") node.topicLabel = changes.topicLabel;
-
   if (typeof changes.text === "string") {
     node.fullLabel = changes.text;
-    if (!changes.label) {
-      node.label = changes.text.slice(0, 40) + (changes.text.length > 40 ? "…" : "");
-    }
+    if (!changes.label) node.label = changes.text.slice(0, 40) + (changes.text.length > 40 ? "…" : "");
   }
   if (typeof changes.fullLabel === "string") node.fullLabel = changes.fullLabel;
   if (typeof changes.label === "string") node.label = changes.label;
 
-  // If caller didn't pin a color, re-derive from the new section/topic.
-  const nextColor = changes.color || baseColorForNode(node);
-  node.baseColor = nextColor;
+  node.baseColor = changes.color || baseColorForNode(node);
   node.searchText = searchTextForNode(node);
 
-  const nodeDetailEntry = state.hostNodes.find((host) => host.id === nodeId);
-  if (nodeDetailEntry) {
-    Object.assign(nodeDetailEntry, {
+  const hostEntry = state.hostNodes.find((host) => host.id === nodeId);
+  if (hostEntry) {
+    Object.assign(hostEntry, {
       section: node.section,
       priority: node.priority,
       topicSlug: node.topicSlug,
@@ -1587,256 +1558,206 @@ function updateNode(
     });
   }
 
-  if (state.graph?.hasNode(nodeId)) {
-    state.graph.mergeNodeAttributes(nodeId, {
-      label: node.label,
-      color: nextColor,
-    });
-    const rawAttr = state.graph.getNodeAttribute(nodeId, "raw") as RuntimeNode | undefined;
-    if (rawAttr) {
-      rawAttr.section = node.section;
-      rawAttr.priority = node.priority;
-      rawAttr.topicSlug = node.topicSlug;
-      rawAttr.topicLabel = node.topicLabel;
-      rawAttr.label = node.label;
-      rawAttr.fullLabel = node.fullLabel;
-      rawAttr.baseColor = node.baseColor;
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (fgNode?.__core) {
+    (fgNode.__core.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
+    (fgNode.__halo!.material as THREE.SpriteMaterial).color.set(node.baseColor);
+    if (fgNode.__shell) {
+      (fgNode.__shell.material as THREE.ShaderMaterial).uniforms.uColor.value.set(node.baseColor);
     }
-    state.renderer?.refresh();
+    if (fgNode.__wire) {
+      (fgNode.__wire.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
+    }
   }
   return true;
 }
 
 function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
-  const hasRaw = state.nodeById.has(nodeId);
-  const hasGraphNode = Boolean(state.graph?.hasNode(nodeId));
-  if (!hasRaw && !hasGraphNode) return false;
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (!state.nodeById.has(nodeId) && !fgNode) return false;
 
+  const wasSelected = state.selectedNodeId === nodeId;
   const reducedMotion = typeof window.matchMedia === "function"
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const animate = opts?.animate !== false && !reducedMotion;
-  const wasSelected = state.selectedNodeId === nodeId;
+  const animate = opts?.animate !== false && !reducedMotion && Boolean(fgNode?.__group);
 
   const finalize = () => {
-    if (state.graph?.hasNode(nodeId)) {
-      try { state.graph.dropNode(nodeId); } catch { /* ignore */ }
+    state.rawNodes = state.rawNodes.filter((node) => node.id !== nodeId);
+    state.rawLinks = state.rawLinks.filter((link) => link.source !== nodeId && link.target !== nodeId);
+    state.nodeById.delete(nodeId);
+    if (state.selectedNodeId === nodeId) state.selectedNodeId = null;
+    if (state.hoveredNodeId === nodeId) state.hoveredNodeId = null;
+    if (state.focusedProjectId === nodeId) state.focusedProjectId = null;
+    if (fgNode) {
+      disposeNodeObject(fgNode);
+      state.fgNodeById.delete(nodeId);
     }
-    pruneNodeState(nodeId);
+    if (mascot.currentNodeId === nodeId) mascot.currentNodeId = null;
+    if (mascot.targetNodeId === nodeId) mascot.targetNodeId = null;
+    buildFullAdjacency();
     hideTooltip();
-    updateFilterBarCounter();
-    state.renderer?.refresh();
+    applyFilters({ resetCamera: false, emitSelection: false });
     if (wasSelected) notifyClear();
   };
 
-  if (!animate || !state.graph || !state.graph.hasNode(nodeId) || !state.renderer) {
+  if (!animate || !fgNode?.__group) {
     finalize();
     return true;
   }
 
-  const graph = state.graph;
-  const renderer = state.renderer;
-  const baseAttrs = graph.getNodeAttributes(nodeId);
-  const startSize = typeof baseAttrs.size === "number" ? baseAttrs.size : 8;
-  const startColor = typeof baseAttrs.color === "string" ? baseAttrs.color : "#888888";
-
-  const edgeKeys: string[] = [];
-  const edgeStart: Record<string, { size: number; color: string }> = {};
-  graph.forEachEdge(nodeId, (edgeKey, attrs) => {
-    edgeKeys.push(edgeKey);
-    edgeStart[edgeKey] = {
-      size: typeof attrs.size === "number" ? attrs.size : 1,
-      color: typeof attrs.color === "string" ? attrs.color : "rgba(140,160,182,0.25)",
-    };
-  });
-
-  // Hide tooltip / clear selection during animation so popover doesn't hang on a vanishing node.
   if (wasSelected) clearSelection();
   hideTooltip();
-
   const duration = 280;
   const start = performance.now();
-
-  function step(now: number): void {
-    const elapsed = now - start;
-    const t = Math.min(1, elapsed / duration);
-    const eased = 1 - (1 - t) * (1 - t) * (1 - t); // easeOutCubic
-    const scale = 1 - eased;
-
-    if (graph.hasNode(nodeId)) {
-      graph.setNodeAttribute(nodeId, "size", Math.max(0.01, startSize * scale));
-      graph.setNodeAttribute(nodeId, "color", hexToRgba(startColor, Math.max(0, 1 - eased)));
-    }
-    for (const edgeKey of edgeKeys) {
-      if (!graph.hasEdge(edgeKey)) continue;
-      const baseline = edgeStart[edgeKey];
-      graph.setEdgeAttribute(edgeKey, "size", Math.max(0.01, baseline.size * scale));
-      graph.setEdgeAttribute(edgeKey, "color", hexToRgba(baseline.color, Math.max(0, 1 - eased) * 0.6));
-    }
-
-    renderer.refresh();
-
-    if (t < 1) {
-      requestAnimationFrame(step);
-    } else {
-      finalize();
-    }
-  }
-
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / duration);
+    const scale = (1 - t) * (1 - t) * (1 - t);
+    // Breathing renders __focusScale each frame, so shrink via that.
+    fgNode.__focusScale = Math.max(0.01, scale);
+    if (t < 1) requestAnimationFrame(step);
+    else finalize();
+  };
   requestAnimationFrame(step);
   return true;
 }
 
-function selectNode(nodeId: string): boolean {
-  if (!state.graph?.hasNode(nodeId)) return false;
-
-  // Project click → toggle focus mode
-  const node = state.nodeById.get(nodeId);
-  if (node?.kind === "project") {
-    if (state.focusedProjectId === nodeId) {
-      // Already focused on this project — unfocus
-      clearSelection();
-      return true;
-    }
-    state.focusedProjectId = nodeId;
-    state.selectedNodeId = null;
-    state.hoveredNodeId = null;
-    state.renderer?.refresh();
-    const display = state.renderer?.getNodeDisplayData(nodeId);
-    if (display && state.renderer) {
-      state.renderer.getCamera().animate({
-        x: display.x,
-        y: display.y,
-        ratio: Math.max(state.renderer.getCamera().ratio * 0.8, 0.12),
-      }, { duration: 280 });
-    }
-    // Delay so popover lands at post-animation position
-    setTimeout(() => notifySelection(nodeId), 300);
-    if (mascot.initialized && nodeId !== mascot.currentNodeId) {
-      mascotMoveTo(nodeId);
-    }
-    return true;
-  }
-
-  // Non-project click → normal selection (clear focus mode)
-  state.focusedProjectId = null;
-  state.selectedNodeId = nodeId;
-  state.hoveredNodeId = nodeId;
-  state.renderer?.refresh();
-  let hasAnim = false;
-  const display = state.renderer?.getNodeDisplayData(nodeId);
-  if (display && state.renderer) {
-    hasAnim = true;
-    state.renderer.getCamera().animate({
-      x: display.x,
-      y: display.y,
-      ratio: Math.max(state.renderer.getCamera().ratio * 0.9, 0.16),
-    }, { duration: 220 });
-  }
-  if (hasAnim) {
-    setTimeout(() => notifySelection(nodeId), 240);
-  } else {
-    notifySelection(nodeId);
-  }
-  if (mascot.initialized && nodeId !== mascot.currentNodeId) {
-    mascotMoveTo(nodeId);
-  }
-  return true;
-}
-
-function getNodeAt(x: number, y: number): NodeDetail | null {
-  const renderer = state.renderer as Sigma & { getNodeAtPosition?: (position: { x: number; y: number }) => string | null };
-  const nodeId = renderer?.getNodeAtPosition ? renderer.getNodeAtPosition({ x, y }) : null;
-  return nodeId ? nodeDetail(nodeId) : null;
-}
-
 function destroy(): void {
-  stopPhrenMascot();
+  stopMascot();
   hideTooltip();
+  if (state.ambientRafId) cancelAnimationFrame(state.ambientRafId);
+  state.ambientRafId = 0;
   state.themeObserver?.disconnect();
   state.themeObserver = null;
+  state.resizeObserver?.disconnect();
+  state.resizeObserver = null;
   state.cleanupFns.forEach((fn) => fn());
   state.cleanupFns = [];
-  state.renderer?.kill();
-  state.renderer = null;
-  state.graph = null;
+  state.fgNodeById.forEach(disposeNodeObject);
+  state.fgNodeById.clear();
+  if (state.starfield) {
+    state.starfield.geometry.dispose();
+    (state.starfield.material as THREE.Material).dispose();
+  }
+  state.nebula?.children.forEach((child) => {
+    ((child as THREE.Sprite).material as THREE.SpriteMaterial).dispose();
+  });
+  if (state.ringSprite) (state.ringSprite.material as THREE.SpriteMaterial).dispose();
+  if (state.fg) {
+    try { state.fg._destructor?.(); } catch { /* ignore */ }
+  }
+  state.fg = null;
+  state.starfield = null;
+  state.nebula = null;
+  state.ringSprite = null;
+  state.vignetteEl = null;
+  state.bloomPass = null;
   state.container = null;
   state.tooltip = null;
 }
 
-// ── Phren mascot (sprite-based, ported from pre-sigma version) ──────────
-
-const phrenImg = new Image();
-let phrenImgReady = false;
-phrenImg.onload = () => { phrenImgReady = true; };
-phrenImg.src = PHREN_SPRITE_B64;
+// ── Phren mascot — a sprite that flies the 3D graph ─────────────────────
 
 const mascot = {
-  // Graph-space coordinates (camera-independent)
-  gx: 0,
-  gy: 0,
-  targetGx: 0,
-  targetGy: 0,
+  sprite: null as THREE.Sprite | null,
+  glow: null as THREE.Sprite | null,
+  pos: new THREE.Vector3(),
+  target: new THREE.Vector3(),
   moving: false,
-  arriving: false,
-  arriveTimer: 0,
-  idlePhase: 0,
-  trailPoints: [] as Array<{ gx: number; gy: number; age: number }>,
   initialized: false,
-  tripDist: 0,
-  tripProgress: 0,
-  targetNodeId: null as string | null,
-  currentNodeId: null as string | null,
-  lastVisited: null as string | null,
+  bobPhase: 0,
   idleTimer: 0,
-  idlePause: 30.0,
+  idlePause: 6,
+  tripT: 0,
+  currentNodeId: null as string | null,
+  targetNodeId: null as string | null,
+  lastVisited: null as string | null,
   userTarget: false,
 };
 
-function mascotGraphPos(nodeId: string): { x: number; y: number } | null {
-  if (!state.graph?.hasNode(nodeId)) return null;
-  const attrs = state.graph.getNodeAttributes(nodeId);
-  if (attrs.x == null || attrs.y == null) return null;
-  return { x: attrs.x as number, y: attrs.y as number };
+function nodeWorldPos(nodeId: string): THREE.Vector3 | null {
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (!fgNode || fgNode.x == null) return null;
+  return new THREE.Vector3(fgNode.x, fgNode.y || 0, fgNode.z || 0);
 }
 
-function mascotToViewport(gx: number, gy: number): { x: number; y: number } | null {
-  if (!state.renderer) return null;
-  return state.renderer.graphToViewport({ x: gx, y: gy });
+function startMascot(): void {
+  stopMascot();
+  if (!state.fg) return;
+  const texture = new THREE.TextureLoader().load(PHREN_SPRITE_B64);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+  }));
+  sprite.scale.setScalar(21);
+  sprite.renderOrder = 999;
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(),
+    color: 0x9c8ff8,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  glow.scale.setScalar(46);
+  state.fg.scene().add(glow);
+  state.fg.scene().add(sprite);
+  mascot.sprite = sprite;
+  mascot.glow = glow;
+
+  if (state.visibleNodes.length) {
+    const start = state.visibleNodes[Math.floor(Math.random() * state.visibleNodes.length)];
+    const pos = nodeWorldPos(start.id);
+    if (pos) {
+      mascot.pos.copy(pos);
+      mascot.target.copy(pos);
+      mascot.currentNodeId = start.id;
+      mascot.initialized = true;
+    }
+  }
+}
+
+function stopMascot(): void {
+  if (mascot.sprite) {
+    state.fg?.scene().remove(mascot.sprite);
+    const mat = mascot.sprite.material as THREE.SpriteMaterial;
+    mat.map?.dispose();
+    mat.dispose();
+  }
+  if (mascot.glow) {
+    state.fg?.scene().remove(mascot.glow);
+    (mascot.glow.material as THREE.SpriteMaterial).dispose();
+  }
+  mascot.sprite = null;
+  mascot.glow = null;
+  mascot.initialized = false;
+  mascot.moving = false;
+  mascot.currentNodeId = null;
+  mascot.targetNodeId = null;
 }
 
 function mascotPickTarget(): string | null {
   if (!mascot.currentNodeId) return null;
   const neighbors = state.visibleAdjacency.get(mascot.currentNodeId);
   if (!neighbors || neighbors.size === 0) return null;
-  const candidates = [...neighbors].filter((id) => id !== mascot.lastVisited);
-  if (candidates.length === 0) return [...neighbors][Math.floor(Math.random() * neighbors.size)];
-  return candidates[Math.floor(Math.random() * candidates.length)];
+  const candidates = [...neighbors].filter((id) => id !== mascot.lastVisited && state.fgNodeById.has(id));
+  const pool = candidates.length ? candidates : [...neighbors].filter((id) => state.fgNodeById.has(id));
+  if (!pool.length) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function mascotMoveTo(targetId: string, userTriggered = false): void {
-  // Don't let auto-wander override a user-triggered walk
+  if (!mascot.initialized) return;
   if (mascot.moving && mascot.userTarget && !userTriggered) return;
-  const targetPos = mascotGraphPos(targetId);
-  if (!targetPos) return;
-  // Snap to current node's graph position before starting
-  if (mascot.currentNodeId && !mascot.moving) {
-    const curPos = mascotGraphPos(mascot.currentNodeId);
-    if (curPos) {
-      mascot.gx = curPos.x;
-      mascot.gy = curPos.y;
-    }
-  }
-  mascot.targetGx = targetPos.x;
-  mascot.targetGy = targetPos.y;
-  mascot.moving = true;
-  mascot.arriving = false;
-  mascot.userTarget = userTriggered;
-  mascot.trailPoints = [{ gx: mascot.gx, gy: mascot.gy, age: 0 }];
-  const dx = targetPos.x - mascot.gx;
-  const dy = targetPos.y - mascot.gy;
-  mascot.tripDist = Math.sqrt(dx * dx + dy * dy);
-  mascot.tripProgress = 0;
+  const pos = nodeWorldPos(targetId);
+  if (!pos) return;
+  mascot.target.copy(pos);
   mascot.targetNodeId = targetId;
+  mascot.moving = true;
+  mascot.tripT = 0;
+  mascot.userTarget = userTriggered;
 }
 
 let _lastWalkPanAt = 0;
@@ -1878,64 +1799,29 @@ function walkMascotTo(nodeId: string): boolean {
 }
 
 function mascotUpdate(dt: number): void {
-  mascot.idlePhase += dt;
+  if (!mascot.initialized || !mascot.sprite || !mascot.glow) return;
+  mascot.bobPhase += dt;
 
   if (mascot.moving) {
-    // Re-resolve target graph position (node may have been dragged)
     if (mascot.targetNodeId) {
-      const pos = mascotGraphPos(mascot.targetNodeId);
-      if (pos) {
-        mascot.targetGx = pos.x;
-        mascot.targetGy = pos.y;
-      }
+      const pos = nodeWorldPos(mascot.targetNodeId);
+      if (pos) mascot.target.copy(pos);
     }
-
-    const dx = mascot.targetGx - mascot.gx;
-    const dy = mascot.targetGy - mascot.gy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-
-    if (dist < 0.008) {
-      mascot.gx = mascot.targetGx;
-      mascot.gy = mascot.targetGy;
+    mascot.tripT = Math.min(1, mascot.tripT + dt / (mascot.userTarget ? 0.7 : 1.3));
+    const eased = 0.5 - 0.5 * Math.cos(Math.PI * mascot.tripT);
+    mascot.pos.lerpVectors(mascot.pos.clone(), mascot.target, eased * 0.5 + dt * 2);
+    if (mascot.tripT >= 1 || mascot.pos.distanceTo(mascot.target) < 0.6) {
+      mascot.pos.copy(mascot.target);
       mascot.moving = false;
-      mascot.arriving = true;
-      mascot.arriveTimer = 0;
-      mascot.trailPoints = [];
-      if (mascot.targetNodeId) {
-        mascot.lastVisited = mascot.currentNodeId;
-        mascot.currentNodeId = mascot.targetNodeId;
-      }
+      mascot.lastVisited = mascot.currentNodeId;
+      mascot.currentNodeId = mascot.targetNodeId;
       mascot.idleTimer = 0;
-      mascot.idlePause = mascot.userTarget ? 30.0 + Math.random() * 5.0 : 30.0 + Math.random() * 10.0;
-    } else {
-      // User clicks: ~0.4s to cross. Auto-wander: ~0.7s brisk walk.
-      const divisor = mascot.userTarget ? 20 : 35;
-      const t = mascot.tripDist > 0 ? Math.min(1, mascot.tripProgress / mascot.tripDist) : 1;
-      const easeInOut = 0.5 - 0.5 * Math.cos(Math.PI * t);
-      const baseSpeed = Math.max(mascot.userTarget ? 0.020 : 0.008, mascot.tripDist / divisor);
-      const speed = Math.min(dist, Math.max(0.005, baseSpeed * (0.25 + 0.75 * easeInOut)));
-      mascot.gx += (dx / dist) * speed;
-      mascot.gy += (dy / dist) * speed;
-      mascot.tripProgress += speed;
-      mascot.trailPoints.push({ gx: mascot.gx, gy: mascot.gy, age: 0 });
-      if (mascot.trailPoints.length > 50) mascot.trailPoints.shift();
+      mascot.idlePause = 5 + Math.random() * 6;
     }
-  }
-
-  if (mascot.arriving) {
-    mascot.arriveTimer += dt;
-    if (mascot.arriveTimer > 1.0) mascot.arriving = false;
-  }
-
-  // Auto-wander: when idle long enough, pick a neighbor
-  if (!mascot.moving && !mascot.arriving && mascot.initialized) {
-    // If current node was deleted, relocate to a random visible node
-    if (mascot.currentNodeId && !state.graph?.hasNode(mascot.currentNodeId)) {
-      if (state.visibleNodes.length > 0) {
-        const fallback = state.visibleNodes[Math.floor(Math.random() * state.visibleNodes.length)];
-        const pos = mascotGraphPos(fallback.id);
-        if (pos) { mascot.gx = pos.x; mascot.gy = pos.y; mascot.currentNodeId = fallback.id; }
-      }
+  } else {
+    if (mascot.currentNodeId) {
+      const pos = nodeWorldPos(mascot.currentNodeId);
+      if (pos) mascot.pos.lerp(pos, Math.min(1, dt * 4));
     }
     mascot.idleTimer += dt;
     if (mascot.idleTimer >= mascot.idlePause) {
@@ -1945,191 +1831,38 @@ function mascotUpdate(dt: number): void {
     }
   }
 
-  // Snap to current node graph position when idle (tracks dragged nodes)
-  if (!mascot.moving && mascot.currentNodeId) {
-    const pos = mascotGraphPos(mascot.currentNodeId);
-    if (pos) {
-      mascot.gx = pos.x;
-      mascot.gy = pos.y;
-    }
-  }
-
-  // Age trail
-  for (let i = mascot.trailPoints.length - 1; i >= 0; i--) {
-    mascot.trailPoints[i].age += dt;
-    if (mascot.trailPoints[i].age > 2.0) mascot.trailPoints.splice(i, 1);
-  }
+  const bob = Math.sin(mascot.bobPhase * 2.2) * 3;
+  mascot.sprite.position.set(mascot.pos.x + 14, mascot.pos.y + 14 + bob, mascot.pos.z);
+  mascot.glow.position.copy(mascot.sprite.position);
+  const pulse = 0.5 + 0.18 * Math.sin(mascot.bobPhase * 3);
+  (mascot.glow.material as THREE.SpriteMaterial).opacity = mascot.moving ? pulse + 0.2 : pulse;
 }
 
-function mascotDraw(ctx: CanvasRenderingContext2D): void {
-  if (!mascot.initialized) return;
-  // Convert graph coords to viewport coords at draw time
-  const vp = mascotToViewport(mascot.gx, mascot.gy);
-  if (!vp) return;
-  const px = vp.x;
-  const py = vp.y;
-
-  // Trail (convert each point from graph to viewport)
-  if (mascot.trailPoints.length > 1) {
-    for (let i = 1; i < mascot.trailPoints.length; i++) {
-      const ptVp = mascotToViewport(mascot.trailPoints[i].gx, mascot.trailPoints[i].gy);
-      const prevVp = mascotToViewport(mascot.trailPoints[i - 1].gx, mascot.trailPoints[i - 1].gy);
-      if (!ptVp || !prevVp) continue;
-      const fadeT = 1 - mascot.trailPoints[i].age / 2.0;
-      const alpha = Math.max(0, 0.38 * fadeT * fadeT);
-      ctx.beginPath();
-      ctx.strokeStyle = `rgba(123,104,174,${alpha})`;
-      ctx.lineWidth = 3.0 * fadeT;
-      ctx.moveTo(prevVp.x, prevVp.y);
-      ctx.lineTo(ptVp.x, ptVp.y);
-      ctx.stroke();
-    }
-  }
-
-  // Sprite
-  if (phrenImgReady) {
-    ctx.save();
-    let spriteSize = 36;
-    if (mascot.arriving && mascot.arriveTimer < 0.4) {
-      spriteSize += 6 * (1 - mascot.arriveTimer / 0.4);
-    }
-    const walkPhase = mascot.tripDist > 0
-      ? (mascot.tripProgress / mascot.tripDist) * Math.PI * 6
-      : mascot.idlePhase * 8;
-    const bobOffset = mascot.moving ? Math.sin(walkPhase) * 2.5 : 0;
-    const bounceOffset = (mascot.arriving && mascot.arriveTimer < 0.55)
-      ? -3 * Math.sin(mascot.arriveTimer * Math.PI * 4.5) * Math.exp(-mascot.arriveTimer * 8)
-      : 0;
-    const idleScale = (!mascot.moving && !mascot.arriving)
-      ? 1.0 + 0.02 * Math.sin(mascot.idlePhase * (2 * Math.PI / 3))
-      : 1.0;
-    const totalYOffset = bobOffset + bounceOffset;
-
-    ctx.imageSmoothingEnabled = false;
-    if (idleScale !== 1.0) {
-      ctx.translate(px, py);
-      ctx.scale(idleScale, idleScale);
-      ctx.translate(-px, -py);
-    }
-    // Draw offset from node center so mascot sits beside, not on top
-    const offsetX = spriteSize * 0.6;
-    const offsetY = -spriteSize * 0.3;
-    ctx.drawImage(
-      phrenImg,
-      px - spriteSize / 2 + offsetX,
-      py - spriteSize / 2 + totalYOffset + offsetY,
-      spriteSize,
-      spriteSize,
-    );
-    ctx.restore();
-  }
-}
-
-function startPhrenMascot(): void {
-  if (!state.container || !state.renderer) return;
-  // Clean up previous mascot if mount() called without destroy()
-  stopPhrenMascot();
-
-  // Create overlay canvas
-  const canvas = document.createElement("canvas");
-  canvas.style.position = "absolute";
-  canvas.style.top = "0";
-  canvas.style.left = "0";
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.pointerEvents = "none";
-  canvas.style.zIndex = "5";
-  state.container.appendChild(canvas);
-  state.mascotCanvas = canvas;
-
-  // Initialize mascot at a random visible node (graph coordinates)
-  if (state.visibleNodes.length > 0) {
-    const startIdx = Math.floor(Math.random() * state.visibleNodes.length);
-    const startNode = state.visibleNodes[startIdx];
-    const pos = mascotGraphPos(startNode.id);
-    if (pos) {
-      mascot.gx = pos.x;
-      mascot.gy = pos.y;
-      mascot.targetGx = pos.x;
-      mascot.targetGy = pos.y;
-      mascot.currentNodeId = startNode.id;
-      mascot.initialized = true;
-    }
-  }
-
-  let lastTime = 0;
-  function mascotTick(timestamp: number): void {
-    if (!state.mascotCanvas) return;
-    const dt = lastTime > 0 ? Math.min(0.05, (timestamp - lastTime) / 1000) : 0.016;
-    lastTime = timestamp;
-
-    // Sync canvas size (CSS pixels — graphToViewport returns CSS coords)
-    const container = state.container;
-    if (container) {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-      }
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, w, h);
-        mascotUpdate(dt);
-        mascotDraw(ctx);
-      }
-    }
-
-    state.mascotRafId = requestAnimationFrame(mascotTick);
-  }
-
-  state.mascotRafId = requestAnimationFrame(mascotTick);
-}
-
-function stopPhrenMascot(): void {
-  if (state.mascotRafId) {
-    cancelAnimationFrame(state.mascotRafId);
-    state.mascotRafId = 0;
-  }
-  if (state.mascotCanvas) {
-    state.mascotCanvas.remove();
-    state.mascotCanvas = null;
-  }
-  mascot.initialized = false;
-}
+// ── Window globals ──────────────────────────────────────────────────────
 
 ROOT.graphZoom = function graphZoom(factor: number): void {
-  const renderer = state.renderer;
-  if (!renderer) return;
-  const camera = renderer.getCamera();
-  if (factor >= 1) {
-    void camera.animatedZoom({ factor, duration: 140 });
-  } else {
-    void camera.animatedUnzoom({ factor: 1 / Math.max(factor, 0.001), duration: 140 });
-  }
+  if (!state.fg) return;
+  const camera = state.fg.camera();
+  const target = state.fg.controls()?.target || new THREE.Vector3();
+  const dir = new THREE.Vector3().subVectors(camera.position, target);
+  dir.multiplyScalar(1 / Math.max(factor, 0.05));
+  const next = new THREE.Vector3().addVectors(target, dir);
+  state.fg.cameraPosition({ x: next.x, y: next.y, z: next.z }, undefined, 160);
 };
 
 ROOT.graphReset = function graphReset(): void {
-  state.renderer?.getCamera().animatedReset({ duration: 180 });
+  state.fg?.zoomToFit(500, 40);
 };
 
 ROOT.graphResetLayout = function graphResetLayout(): void {
-  if (!state.graph || state.graph.order <= 1) return;
-  const settings = forceAtlas2.inferSettings(state.graph);
-  forceAtlas2.assign(state.graph, {
-    iterations: state.graph.order < 80 ? 200 : state.graph.order < 240 ? 160 : 130,
-    settings: {
-      ...settings,
-      linLogMode: true,
-      adjustSizes: true,
-      gravity: 0.3,
-      scalingRatio: Math.max(4, settings.scalingRatio || 0, 7.5),
-      slowDown: state.graph.order > 240 ? 8 : 5,
-      barnesHutOptimize: state.graph.order > 120,
-    },
+  if (!state.fg) return;
+  state.fgNodeById.forEach((fgNode) => {
+    fgNode.fx = undefined;
+    fgNode.fy = undefined;
+    fgNode.fz = undefined;
   });
-  state.renderer?.refresh();
-  state.renderer?.getCamera().animatedReset({ duration: 220 });
+  state.firstSettle = true;
+  state.fg.d3ReheatSimulation();
 };
 
 ROOT.graphClearSelection = function graphClearSelection(): void {
@@ -2137,7 +1870,7 @@ ROOT.graphClearSelection = function graphClearSelection(): void {
 };
 
 ROOT.phrenGraph = {
-  __renderer: "sigma",
+  __renderer: "three",
   mount,
   onNodeSelect(callback: SelectCallback) {
     state.nodeSelectCallbacks.push(callback);
