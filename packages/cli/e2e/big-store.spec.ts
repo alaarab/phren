@@ -21,7 +21,7 @@ async function openGraph(page: Page): Promise<void> {
   await page.locator("button.nav-item").filter({ hasText: "Graph" }).click();
   await page.waitForFunction(() => {
     const g = (window as unknown as { phrenGraph?: { __renderer?: string; getData?: () => { nodes: unknown[] } } }).phrenGraph;
-    return !!g && g.__renderer === "sigma" && !!g.getData && g.getData().nodes.length > 0;
+    return !!g && g.__renderer === "three" && !!g.getData && g.getData().nodes.length > 0;
   }, undefined, { timeout: 25_000 });
 }
 
