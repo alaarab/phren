@@ -3,6 +3,7 @@ import type { FGNode, RuntimeNode } from "./types.js";
 import { ACCENT_AMBER, ACCENT_CYAN } from "./types.js";
 import { clamp, focusMode, isInProjectNetwork, nodeRadius, seeded, state } from "./state.js";
 import { attachEagerLabel, refreshLabels } from "./labels.js";
+import { refreshCageFocus } from "./cages.js";
 
 // ── Shared geometries (5 singletons for every node in the scene) ────────
 
@@ -129,6 +130,13 @@ function dotColor(node: FGNode["raw"]): THREE.Color {
   return c.lerp(new THREE.Color(0xffffff), 0.3);
 }
 
+/** Re-apply the dot tint after a node's data (color/topic/tag) changes. */
+export function refreshNodeVisual(fgNode: FGNode): void {
+  if (!fgNode.__dot) return;
+  (fgNode.__dot.material as THREE.SpriteMaterial).color.copy(dotColor(fgNode.raw));
+  fgNode.__dot.scale.setScalar(dotSize(fgNode.raw));
+}
+
 export function buildNodeObject(fgNode: FGNode): THREE.Group {
   if (fgNode.__group) return fgNode.__group;
   const node = fgNode.raw;
@@ -201,6 +209,16 @@ export function applyHighlight(): void {
       .linkWidth(state.fg.linkWidth())
       .linkDirectionalParticles(state.fg.linkDirectionalParticles());
   }
+
+  // Cage focus tracks selection, not just data swaps: brighten the focused
+  // project's cage and dim the rest. The cage id is derived from the node's
+  // project NAME + store (node ids differ between hosts — "acme-auth" in the
+  // web UI, "project:acme-auth" in VS Code — but cage ids are name-keyed).
+  const focusedProject = state.focusedProjectId ? state.nodeById.get(state.focusedProjectId) : null;
+  refreshCageFocus(
+    focusedProject ? `project:${focusedProject.store || "primary"}:${focusedProject.project || focusedProject.id}` : null,
+    focusedProject ? focusedProject.store || "primary" : null,
+  );
   refreshLabels();
 }
 

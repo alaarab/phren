@@ -10,7 +10,7 @@ import {
   searchTextForNode,
   state,
 } from "./state.js";
-import { applyHighlight } from "./nodes.js";
+import { applyHighlight, refreshNodeVisual } from "./nodes.js";
 import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
@@ -92,6 +92,7 @@ function mount(payload: GraphPayload): void {
 }
 
 function disposeNodeObject(fgNode: FGNode): void {
+  if (fgNode.__dot) (fgNode.__dot.material as THREE.SpriteMaterial).dispose();
   if (fgNode.__core) (fgNode.__core.material as THREE.Material).dispose();
   if (fgNode.__shell) (fgNode.__shell.material as THREE.Material).dispose();
   if (fgNode.__wire) (fgNode.__wire.material as THREE.Material).dispose();
@@ -99,6 +100,7 @@ function disposeNodeObject(fgNode: FGNode): void {
   if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).dispose();
   if (fgNode.__labelEl) fgNode.__labelEl.remove();
   fgNode.__group = undefined;
+  fgNode.__dot = undefined;
   fgNode.__core = undefined;
   fgNode.__shell = undefined;
   fgNode.__wire = undefined;
@@ -152,19 +154,11 @@ function updateNode(
   }
 
   const fgNode = state.fgNodeById.get(nodeId);
-  if (fgNode?.__core) {
-    const color = new THREE.Color(node.baseColor);
-    (fgNode.__core.material as THREE.MeshBasicMaterial).color.copy(
-      color.clone().lerp(new THREE.Color("#ffffff"), node.kind === "project" ? 0.55 : 0.25),
-    );
-    if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).color.copy(color);
-    if (fgNode.__shell) {
-      const mat = fgNode.__shell.material as THREE.ShaderMaterial;
-      if (mat.uniforms?.uColor) mat.uniforms.uColor.value.set(node.baseColor);
-      else (fgNode.__shell.material as THREE.MeshBasicMaterial).color?.set(node.baseColor);
-    }
-    if (fgNode.__wire) (fgNode.__wire.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
-    if (fgNode.__ring) (fgNode.__ring.material as THREE.MeshBasicMaterial).color.set(node.baseColor);
+  if (fgNode) {
+    // Nodes are dot sprites — re-tint/re-size the dot (the old __core branch
+    // targeted holographic-era meshes that no longer exist, so edits never
+    // updated the visual).
+    refreshNodeVisual(fgNode);
     updateEagerLabelText(fgNode);
   }
   refreshLabels();
@@ -203,34 +197,50 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
     state.selectionClearCallbacks.forEach((callback) => callback());
   };
 
-  if (!animate || !fgNode?.__group) {
+  if (!animate || !fgNode?.__group || !state.fg?.scene) {
     finalize();
     return true;
   }
 
-  if (wasSelected) clearSelection();
-  hideTooltip();
+  // Snapshot the dot's appearance BEFORE finalize disposes it, then remove
+  // from the data layer IMMEDIATELY — getData()/adjacency are correct the
+  // moment this returns. Only a detached ghost sprite animates the shrink,
+  // so a stalled rAF (software GL, tracing) can never delay the removal
+  // itself (the old deferred finalize raced pollers under load).
+  const scene = state.fg.scene();
+  const pos = new THREE.Vector3(fgNode.x || 0, fgNode.y || 0, fgNode.z || 0);
+  const srcMat = fgNode.__dot?.material as THREE.SpriteMaterial | undefined;
+  const ghostMap = srcMat?.map ?? null;
+  const ghostColor = srcMat ? srcMat.color.clone() : new THREE.Color("#ffffff");
+  const baseScale = fgNode.__dot ? fgNode.__dot.scale.x : 3;
+  finalize(); // also emits the selection-clear callback when needed
+
+  const ghost = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: ghostMap,
+    color: ghostColor,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  }));
+  ghost.position.copy(pos);
+  ghost.scale.setScalar(baseScale);
+  scene.add(ghost);
   const duration = 280;
   const start = performance.now();
-  let finalized = false;
-  const finalizeOnce = () => {
-    if (finalized) return;
-    finalized = true;
-    finalize();
-  };
   const step = (now: number) => {
-    if (finalized) return;
     const t = Math.min(1, (now - start) / duration);
-    const scale = (1 - t) * (1 - t) * (1 - t);
-    // Breathing renders __focusScale each frame, so shrink via that.
-    fgNode.__focusScale = Math.max(0.01, scale);
+    const k = (1 - t) * (1 - t) * (1 - t);
+    ghost.scale.setScalar(Math.max(0.01, baseScale * k));
+    (ghost.material as THREE.SpriteMaterial).opacity = k;
     if (t < 1) requestAnimationFrame(step);
-    else finalizeOnce();
+    else {
+      scene.remove(ghost);
+      (ghost.material as THREE.Material).dispose();
+    }
   };
   requestAnimationFrame(step);
-  // rAF cadence collapses under load (software GL, tracing) — a wall-clock
-  // backstop keeps the data-layer removal on schedule regardless of fps.
-  setTimeout(finalizeOnce, duration + 40);
   return true;
 }
 

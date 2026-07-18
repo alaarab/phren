@@ -1998,11 +1998,18 @@ export function renderGraphHostScript(): string {
       if (sub === name) sub = '';
       out.push({ id: nb.id, name: name, sub: sub, w: w });
     }
-    // same-topic siblings that aren't already linked, as softer relationships
-    var seen = {}; out.forEach(function(r) { seen[r.id] = true; });
+    // same-topic siblings that aren't already linked, as softer relationships.
+    // Dedupe by display TEXT too — stores can hold near-duplicate findings and
+    // two identical rows read as a rendering bug.
+    var seen = {}; var seenName = {};
+    out.forEach(function(r) { seen[r.id] = true; seenName[r.name.toLowerCase()] = true; });
     relatedFindings(node).forEach(function(rel) {
       if (seen[rel.id]) return;
-      out.push({ id: rel.id, name: rel.displayLabel || rel.label || rel.id, sub: 'same topic', w: 0.5 });
+      var relName = rel.displayLabel || rel.label || rel.id;
+      if (seenName[relName.toLowerCase()]) return;
+      seenName[relName.toLowerCase()] = true;
+      var relSub = 'same topic' + (rel.projectName && rel.projectName !== node.projectName ? ' · ' + rel.projectName : '');
+      out.push({ id: rel.id, name: relName, sub: relSub, w: 0.5 });
     });
     out.sort(function(a, b) { return b.w - a.w; });
     return out.slice(0, 6);

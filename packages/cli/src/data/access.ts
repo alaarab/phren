@@ -200,6 +200,22 @@ function collectFindingBulletLines(lines: string[]): FindingBulletLine[] {
   return bulletLines;
 }
 
+/** Bullet content with metadata comments removed — what the user actually sees. */
+function bulletContentKey(line: string): string {
+  return line.replace(/<!--.*?-->/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Multiple matches are only truly ambiguous when their CONTENT differs. When a
+ * store carries literal duplicate bullets (same text, same tag), acting on the
+ * first occurrence is what the caller means — refusing made duplicate findings
+ * uneditable/undeletable from every host UI.
+ */
+function resolveDuplicateMatches(matches: FindingBulletLine[]): FindingBulletLine | null {
+  const first = bulletContentKey(matches[0].line);
+  return matches.every(({ line }) => bulletContentKey(line) === first) ? matches[0] : null;
+}
+
 function findMatchingFindingBullet(
   bulletLines: FindingBulletLine[],
   needle: string,
@@ -218,10 +234,14 @@ function findMatchingFindingBullet(
   if (fidMatch.length === 1) return { kind: "found", idx: fidMatch[0].i };
   if (exactMatches.length === 1) return { kind: "found", idx: exactMatches[0].i };
   if (exactMatches.length > 1) {
+    const dup = resolveDuplicateMatches(exactMatches);
+    if (dup) return { kind: "found", idx: dup.i };
     return { kind: "ambiguous", error: `"${match}" is ambiguous (${exactMatches.length} exact matches). Use a more specific phrase.` };
   }
   if (partialMatches.length === 1) return { kind: "found", idx: partialMatches[0].i };
   if (partialMatches.length > 1) {
+    const dup = resolveDuplicateMatches(partialMatches);
+    if (dup) return { kind: "found", idx: dup.i };
     return { kind: "ambiguous", error: `"${match}" is ambiguous (${partialMatches.length} partial matches). Use a more specific phrase.` };
   }
   return { kind: "not_found" };
@@ -569,7 +589,12 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
     const existing = lines[idx];
     const metaMatch = existing.match(/(<!--.*?-->)/g);
     const metaSuffix = metaMatch ? " " + metaMatch.join(" ") : "";
-    lines[idx] = `- ${newTextTrimmed}${metaSuffix}`;
+    // Preserve the bullet's [tag] prefix: host UIs display (and send back)
+    // tag-stripped text, and losing the tag silently demoted the finding to
+    // untagged. Keep the old tag unless the new text supplies its own.
+    const existingTag = existing.match(/^-\s*(\[[a-z][a-z0-9_-]*\])\s/)?.[1];
+    const tagPrefix = existingTag && !/^\[[a-z][a-z0-9_-]*\]/.test(newTextTrimmed) ? `${existingTag} ` : "";
+    lines[idx] = `- ${tagPrefix}${newTextTrimmed}${metaSuffix}`;
     const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     const tmp = findingsPath + ".tmp." + process.pid;
     fs.writeFileSync(tmp, normalized);

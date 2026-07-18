@@ -1359,7 +1359,8 @@ ${graphScript}
       connectedProjects: n.connectedProjects || [],
       topicSlug: n.topicSlug || '',
       topicLabel: n.topicLabel || '',
-      tagged: n.kind === 'finding'
+      tagged: n.kind === 'finding',
+      store: n.store || ''
     });
   }
 
