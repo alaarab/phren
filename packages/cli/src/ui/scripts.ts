@@ -2206,7 +2206,8 @@ export function renderGraphHostScript(): string {
     }
     graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'PUT', {
       old_text: currentNode.tooltipLabel || currentNode.fullLabel || '',
-      new_text: nextText
+      new_text: nextText,
+      score_key: currentNode.scoreKey || ''
     }).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
       graphToast('Finding updated', 'ok');
@@ -2256,7 +2257,8 @@ export function renderGraphHostScript(): string {
     if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
     if (currentNode.kind === 'finding') {
       graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'DELETE', {
-        text: currentNode.tooltipLabel || currentNode.fullLabel || ''
+        text: currentNode.tooltipLabel || currentNode.fullLabel || '',
+        score_key: currentNode.scoreKey || ''
       }).then(function(result) {
         if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
         graphToast('Finding deleted', 'ok');

@@ -24,6 +24,7 @@ import {
   TASKS_FILENAME,
   FINDINGS_FILENAME,
 } from "../data/access.js";
+import { entryScoreKey } from "../governance/scores.js";
 import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "../utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import {
@@ -1210,6 +1211,30 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
   });
 }
 
+/**
+ * Resolve a graph node's score_key back to the exact FINDINGS.md bullet text
+ * (including its [tag] prefix). Score keys are minted per-bullet by the graph
+ * builder, so this pins the precise entry even when display texts are
+ * ambiguous (e.g. two findings differing only by tag). Returns null when the
+ * key doesn't resolve — callers fall back to text matching.
+ */
+function findBulletTextByScoreKey(phrenPath: string, project: string, scoreKey: string): string | null {
+  try {
+    const file = path.join(phrenPath, project, FINDINGS_FILENAME);
+    if (!fs.existsSync(file)) return null;
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      const tag = line.match(/^-\s+\[([a-z_-]+)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
+      const plain = tag ? null : line.match(/^-\s+(.+?)(?:\s*<!--.*-->)?$/);
+      const entry = tag ? `[${tag[1]}] ${tag[2].trim()}` : plain ? plain[1].trim() : null;
+      if (!entry) continue;
+      if (entryScoreKey(project, FINDINGS_FILENAME, entry) === scoreKey) return entry;
+    }
+  } catch {
+    // unreadable file — fall back to text matching
+  }
+  return null;
+}
+
 function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, ctx: RouteCtx): void {
   const project = decodeURIComponent(pathname.slice("/api/findings/".length));
   if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
@@ -1226,7 +1251,9 @@ function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, 
       const oldText = String(parsed.old_text || "");
       const newText = String(parsed.new_text || "");
       if (!oldText || !newText) return jsonErr(res, "old_text and new_text are required");
-      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      const scoreKey = String(parsed.score_key || "");
+      const resolved = scoreKey ? findBulletTextByScoreKey(ctx.phrenPath, project, scoreKey) : null;
+      const result = editFinding(ctx.phrenPath, project, resolved || oldText, newText);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     });
   } else {
@@ -1234,7 +1261,9 @@ function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, 
     withPostBody(req, res, url, ctx, (parsed) => {
       const text = String(parsed.text || "");
       if (!text) return jsonErr(res, "text is required");
-      const result = removeFinding(ctx.phrenPath, project, text);
+      const scoreKey = String(parsed.score_key || "");
+      const resolved = scoreKey ? findBulletTextByScoreKey(ctx.phrenPath, project, scoreKey) : null;
+      const result = removeFinding(ctx.phrenPath, project, resolved || text);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     });
   }
