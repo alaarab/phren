@@ -37,8 +37,8 @@ export function dotTexture(): THREE.Texture {
   const ctx = canvas.getContext("2d")!;
   const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
   gradient.addColorStop(0, "rgba(255,255,255,1)");
-  gradient.addColorStop(0.45, "rgba(255,255,255,0.9)");
-  gradient.addColorStop(0.7, "rgba(255,255,255,0.35)");
+  gradient.addColorStop(0.3, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.5, "rgba(255,255,255,0.25)");
   gradient.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 64, 64);
@@ -112,11 +112,11 @@ function makeHoloMaterial(color: string, bodyAlpha: number, rimPower: number): T
 
 /** Point-node size (world units) by kind — GraphRAG-style small glowing dots. */
 function dotSize(node: FGNode["raw"]): number {
-  if (node.kind === "project") return 5.4;
-  if (node.kind === "finding") return node.tagged ? 4 : 3.4;
-  if (node.kind === "task") return 3.8;
-  if (node.kind === "reference") return 2.8;
-  return 2.6; // entity
+  if (node.kind === "project") return 4.5;
+  if (node.kind === "finding") return node.tagged ? 3 : 2.6;
+  if (node.kind === "task") return 2.8;
+  if (node.kind === "reference") return 2.2;
+  return 2; // entity
 }
 
 /** Point-node tint by kind — findings brightest, entities dim satellites. */

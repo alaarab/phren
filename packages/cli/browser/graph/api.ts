@@ -14,7 +14,7 @@ import { applyHighlight } from "./nodes.js";
 import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
-import { clearSelection, getNodeAt, hideTooltip, runIntro, selectNode } from "./interactions.js";
+import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, runIntro, selectNode } from "./interactions.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
 
 function mount(payload: GraphPayload): void {
@@ -271,7 +271,7 @@ ROOT.graphZoom = function graphZoom(factor: number): void {
 };
 
 ROOT.graphReset = function graphReset(): void {
-  state.fg?.zoomToFit(500, 40);
+  fitCameraToGraph(500);
 };
 
 ROOT.graphResetLayout = function graphResetLayout(): void {

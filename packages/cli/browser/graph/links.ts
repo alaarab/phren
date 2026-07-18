@@ -1,10 +1,9 @@
-import * as THREE from "three";
 import type { FGLink } from "./types.js";
 import { focusMode, isInProjectNetwork, state } from "./state.js";
 
-// Links render as THREE.Line primitives (linkWidth 0) — far cheaper than
-// the cylinder meshes width>0 forces, and the thin hairline reads better.
-// All emphasis comes from per-state alpha, not geometry.
+// Links render as THREE.Line primitives (linkWidth 0). Idle links are a
+// uniform pale filament web — the GraphRAG look — not per-edge color blends.
+// Emphasis (amber) appears only on the focused node's edges.
 
 export function linkEndpointId(end: string | FGLink["source"]): string {
   return typeof end === "string" ? end : (end as { id: string }).id;
@@ -18,30 +17,25 @@ export function linkIsFocused(link: FGLink): boolean {
   return s === focus || t === focus;
 }
 
-function endpointLerpColor(link: FGLink, alpha: number): string {
+const FILAMENT = "rgba(190,210,240,0.10)";
+const FILAMENT_ENTITY = "rgba(170,195,235,0.06)";
+const DIM_LINK = "rgba(120,140,180,0.025)";
+
+function isEntityLink(link: FGLink): boolean {
   const s = state.nodeById.get(linkEndpointId(link.source));
   const t = state.nodeById.get(linkEndpointId(link.target));
-  if (s && t) {
-    const c = new THREE.Color(s.baseColor).lerp(new THREE.Color(t.baseColor), 0.5);
-    const r = Math.round(c.r * 255);
-    const g = Math.round(c.g * 255);
-    const b = Math.round(c.b * 255);
-    return `rgba(${r},${g},${b},${alpha})`;
-  }
-  return `rgba(140,165,210,${alpha})`;
+  return s?.kind === "entity" || t?.kind === "entity";
 }
 
-const DIM_LINK = "rgba(120,140,180,0.03)";
-
 export function linkColor(link: FGLink): string {
-  if (linkIsFocused(link)) return "rgba(255,209,102,0.85)";
+  if (linkIsFocused(link)) return "rgba(255,209,102,0.8)";
   const mode = focusMode();
   if (mode === "project") {
     const s = linkEndpointId(link.source);
     const t = linkEndpointId(link.target);
     const projectId = state.focusedProjectId!;
     if (isInProjectNetwork(s, projectId) && isInProjectNetwork(t, projectId)) {
-      return endpointLerpColor(link, 0.55);
+      return "rgba(200,220,248,0.28)";
     }
     return DIM_LINK;
   }
@@ -50,11 +44,11 @@ export function linkColor(link: FGLink): string {
     const s = linkEndpointId(link.source);
     const t = linkEndpointId(link.target);
     if (state.searchMatchIds.has(s) && state.searchMatchIds.has(t)) {
-      return endpointLerpColor(link, 0.3);
+      return "rgba(200,220,248,0.24)";
     }
-    return "rgba(120,140,180,0.05)";
+    return DIM_LINK;
   }
-  return endpointLerpColor(link, 0.16);
+  return isEntityLink(link) ? FILAMENT_ENTITY : FILAMENT;
 }
 
 export function linkWidth(): number {

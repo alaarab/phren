@@ -12,14 +12,14 @@ type Cage = { seg: LineSegments2; mat: LineMaterial; spec: CageSpec };
 let cages: Cage[] = [];
 let galaxy: THREE.Points | null = null;
 
-// dimness knobs (we'll expose these to the user to tweak)
-const STORE_OPACITY = 0.14;
-const STORE_OPACITY_DIM = 0.06;
-const PROJECT_OPACITY = 0.28;
-const PROJECT_OPACITY_DIM = 0.1;
-const PROJECT_OPACITY_FOCUS = 0.7;
-const STORE_WIDTH = 1.1;
-const PROJECT_WIDTH = 1.4;
+// dimness knobs (exposed for tuning)
+const STORE_OPACITY = 0.1;
+const STORE_OPACITY_DIM = 0.05;
+const PROJECT_OPACITY = 0.22;
+const PROJECT_OPACITY_DIM = 0.08;
+const PROJECT_OPACITY_FOCUS = 0.6;
+const STORE_WIDTH = 1.0;
+const PROJECT_WIDTH = 1.3;
 
 function boxEdges(min: THREE.Vector3, max: THREE.Vector3): number[] {
   const c = [
