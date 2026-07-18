@@ -225,13 +225,9 @@ function computeFitCamera(): { pos: THREE.Vector3; target: THREE.Vector3 } | nul
 }
 
 export function fitCameraToGraph(duration: number): void {
-  const fit = computeFitCamera();
-  if (!fit || !state.fg) return;
-  state.fg.cameraPosition(
-    { x: fit.pos.x, y: fit.pos.y, z: fit.pos.z },
-    { x: fit.target.x, y: fit.target.y, z: fit.target.z },
-    duration,
-  );
+  if (!state.fg) return;
+  // 3d-force-graph's own fit — robust across layouts/GPUs. 90px screen padding.
+  state.fg.zoomToFit(duration, 90);
 }
 
 export function runIntro(): void {
@@ -243,16 +239,10 @@ export function runIntro(): void {
   }
   state.introPlayed = true;
 
-  const fit = computeFitCamera();
-  if (!fit) {
-    fg.zoomToFit(700, 70);
-    return;
-  }
-
   const reducedMotion = typeof window.matchMedia === "function"
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reducedMotion) {
-    fitCameraToGraph(0);
+    fg.zoomToFit(0, 90);
     return;
   }
 
@@ -263,15 +253,12 @@ export function runIntro(): void {
     "position:absolute;inset:0;background:#05060f;z-index:6;pointer-events:none;opacity:1;transition:opacity 0.5s ease;";
   state.container?.appendChild(cover);
 
-  // Jump wide and slightly elevated, then dolly down into the fitted
-  // framing while nodes stagger-fade in behind the cover fade.
-  const dir = fit.pos.clone().sub(fit.target);
-  const wide = fit.target.clone().add(dir.clone().multiplyScalar(2.6));
-  wide.y += dir.length() * 0.35;
-  fg.cameraPosition({ x: wide.x, y: wide.y, z: wide.z }, { x: fit.target.x, y: fit.target.y, z: fit.target.z }, 0);
-  fg.cameraPosition({ x: fit.pos.x, y: fit.pos.y, z: fit.pos.z }, { x: fit.target.x, y: fit.target.y, z: fit.target.z }, 1600);
+  // Robust fit via the library, then a short settle. Fit again next frame in
+  // case node objects finished syncing after the first call.
+  fg.zoomToFit(0, 90);
   startIntroStagger();
   requestAnimationFrame(() => {
+    fg.zoomToFit(1400, 90);
     cover.style.opacity = "0";
   });
   setTimeout(() => cover.remove(), 900);

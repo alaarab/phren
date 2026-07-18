@@ -81,6 +81,7 @@ export type FGNode = {
   fy?: number;
   fz?: number;
   __group?: THREE.Group;
+  __dot?: THREE.Sprite;
   __core?: THREE.Mesh;
   __shell?: THREE.Mesh;
   __wire?: THREE.Mesh;
