@@ -967,6 +967,16 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
 </html>`;
 }
 
+/**
+ * Test-only: render the webview HTML with a stub webview so the exact markup,
+ * CSS, and inline host script can be driven in a plain browser (mirrors the
+ * web-ui's renderPageForTests). Not used by the extension at runtime.
+ */
+export function renderGraphHtmlForTests(payload: GraphPayload): string {
+  const stub = { cspSource: "vscode-webview:", asWebviewUri: (uri: unknown) => uri } as unknown as vscode.Webview;
+  return renderGraphHtml(stub, payload);
+}
+
 function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string {
   const nonce = getNonce();
   const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
