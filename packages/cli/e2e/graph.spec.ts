@@ -932,6 +932,30 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
 
+  test("remount clears stale eager project labels", async ({ page }) => {
+    await openGraphTab(page);
+    const mountPayload = (proj: string, label: string) => ({
+      nodes: [
+        { id: `project:${proj}`, label, group: "project", project: proj, findingCount: 1 },
+        { id: `finding:${proj}:0`, label: `${proj} finding`, group: "topic:general", project: proj },
+      ],
+      links: [{ source: `project:${proj}`, target: `finding:${proj}:0` }],
+      topics: [],
+    });
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("alpha", "alpha-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label--project", { hasText: "alpha-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+
+    // Remount with a different project — the previous project's label must not
+    // linger as a CSS2D ghost.
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("beta", "beta-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label", { hasText: "beta-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+    await expect(page.locator(".phren-label", { hasText: "alpha-proj" })).toHaveCount(0);
+  });
+
   test("project navigator dock lists projects and selects one on click", async ({ page }) => {
     await openGraphTab(page);
 
@@ -994,6 +1018,37 @@ test.describe.serial("graph visualization e2e", () => {
     // The close button clears selection and hides the pane.
     await panel.locator("[data-pp-close]").click();
     await expect(panel).toBeHidden();
+  });
+
+  test("contents pane collapses to a tab and reopens", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    await panel.locator("[data-pp-collapse]").click();
+    await expect(page.locator(".phren-pp-reopen")).toBeVisible();
+    await expect(panel).toBeHidden();
+
+    await page.locator(".phren-pp-reopen").click();
+    await expect(panel).toBeVisible();
+    await expect(page.locator(".phren-pp-reopen")).toBeHidden();
+  });
+
+  test("interacting with the contents pane keeps the project focused", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The navigator orb reflects the focused project.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+
+    // Clicking a filter chip inside the pane must not clear the graph selection.
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
   });
 
   test("project contents pane filter narrows the list", async ({ page }) => {

@@ -2413,6 +2413,9 @@ export function renderGraphHostScript(): string {
     var popover = document.getElementById('graph-node-popover-card');
     if (!currentNode || !popover) return;
     if (popover.contains(event.target)) return;
+    // Renderer-owned HUD overlays are legitimate UI, not a click-away dismiss.
+    var t = event.target;
+    if (t && t.closest && t.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 
