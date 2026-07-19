@@ -1,6 +1,6 @@
 import type { NodeDetail, RuntimeNode } from "./types.js";
 import { clamp, esc, nodeDetail, state } from "./state.js";
-import { clearSelection, selectNode } from "./interactions.js";
+import { clearSelection, peekNode, selectNode } from "./interactions.js";
 
 // Project contents pane — a right-docked, scrollable index of a project's
 // findings and tasks. It appears whenever a project is "in context" (its orb
@@ -144,6 +144,13 @@ const PANEL_CSS = `
 }
 .phren-pp-row:hover .phren-pp-del,.phren-pp-row.active .phren-pp-del{display:grid}
 .phren-pp-del:hover{border-color:rgba(255,84,112,0.7);background:rgba(255,84,112,0.18);color:#ffb3c1}
+.phren-pp-peek{
+  flex:0 0 auto;width:22px;height:22px;padding:0;border-radius:6px;cursor:pointer;
+  border:1px solid rgba(103,232,249,0.28);background:rgba(103,232,249,0.06);
+  color:#67e8f9;font-size:11px;line-height:1;display:none;place-items:center;
+}
+.phren-pp-row:hover .phren-pp-peek,.phren-pp-row.active .phren-pp-peek{display:grid}
+.phren-pp-peek:hover{border-color:rgba(103,232,249,0.7);background:rgba(103,232,249,0.16);color:#aef1ff}
 .phren-pp-check{
   flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;
   border:1px solid rgba(103,232,249,0.35);background:rgba(12,15,30,0.9);
@@ -197,6 +204,28 @@ const picked = new Set<string>();
 // Fixed right offset of the pane (matches `.phren-project-panel { right: 58px }`).
 const PANE_RIGHT = 58;
 
+// Persisted UI preferences (width, collapsed, sort) — survive reloads in both
+// hosts via localStorage. Filters/query stay transient (reset each session).
+const PREFS_KEY = "phren.graph.pane";
+let prefsLoaded = false;
+function loadPrefs(): void {
+  if (prefsLoaded) return;
+  prefsLoaded = true;
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw) as { width?: unknown; collapsed?: unknown; sort?: unknown };
+    if (typeof p.width === "number" && p.width > 0) panelWidth = p.width;
+    if (typeof p.collapsed === "boolean") collapsed = p.collapsed;
+    if (p.sort === "aging" || p.sort === "recent" || p.sort === "az") filters.sort = p.sort;
+  } catch { /* storage unavailable — use defaults */ }
+}
+function savePrefs(): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ width: panelWidth, collapsed, sort: filters.sort }));
+  } catch { /* ignore */ }
+}
+
 /** Begin an edge-drag resize of the pane. */
 function startResize(event: PointerEvent): void {
   if (!panelEl || !state.container) return;
@@ -217,6 +246,7 @@ function startResize(event: PointerEvent): void {
     handle.classList.remove("dragging");
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    savePrefs();
   };
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
@@ -257,6 +287,7 @@ function showReopenTab(projectName: string): void {
     reopenEl.addEventListener("click", (event) => {
       event.stopPropagation();
       collapsed = false;
+      savePrefs();
       refreshProjectPanel();
     });
     reopenEl.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -318,9 +349,10 @@ function rowHtml(node: RuntimeNode): string {
   const chip = node.kind === "task"
     ? (node.section || "task")
     : (node.topicLabel || node.topicSlug || node.health);
-  // In select mode rows carry a checkbox; otherwise a hover delete button
-  // (only when a host registered an action handler).
+  // In select mode rows carry a checkbox; otherwise hover actions: peek (fly the
+  // camera without opening the dossier) and delete (only when a host supports it).
   const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
+  const peek = !selectMode ? `<span class="phren-pp-peek" data-pp-peek title="Show in graph">◎</span>` : "";
   const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
@@ -330,6 +362,7 @@ function rowHtml(node: RuntimeNode): string {
     `<span class="phren-pp-dot" style="background:${esc(dotColor)};color:${esc(dotColor)}"></span>` +
     `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
     `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
+    peek +
     del +
     `</button>`
   );
@@ -422,6 +455,7 @@ function buildPanel(projectId: string): void {
       }
       if (target?.closest("[data-pp-collapse]")) {
         collapsed = true;
+        savePrefs();
         refreshProjectPanel();
         return;
       }
@@ -468,6 +502,10 @@ function buildPanel(projectId: string): void {
         const check = row.querySelector(".phren-pp-check");
         if (check) check.textContent = picked.has(id) ? "✓" : "";
         renderBulkBar();
+        return;
+      }
+      if (target?.closest("[data-pp-peek]")) {
+        peekNode(id);
         return;
       }
       if (target?.closest("[data-pp-del]")) {
@@ -556,9 +594,12 @@ function buildPanel(projectId: string): void {
     "</div>",
   ].join("");
 
-  // Keep any user-chosen width, and (re)attach the edge resize handle (innerHTML
-  // above wiped the previous one).
-  if (panelWidth) panelEl.style.width = `${panelWidth}px`;
+  // Keep any user-chosen width (clamped to the current viewport), and (re)attach
+  // the edge resize handle (the innerHTML above wiped the previous one).
+  if (panelWidth) {
+    const cw = state.container.getBoundingClientRect().width;
+    panelEl.style.width = `${clamp(panelWidth, 260, Math.max(260, cw - 420))}px`;
+  }
   const resize = document.createElement("div");
   resize.className = "phren-pp-resize";
   resize.setAttribute("aria-hidden", "true");
@@ -574,6 +615,7 @@ function buildPanel(projectId: string): void {
   const sortSelect = panelEl.querySelector<HTMLSelectElement>("[data-pp-sort]");
   sortSelect?.addEventListener("change", () => {
     filters.sort = (sortSelect.value as typeof filters.sort) || "aging";
+    savePrefs();
     renderList();
   });
 
@@ -646,6 +688,7 @@ function syncActiveRow(): void {
  */
 export function refreshProjectPanel(opts?: { data?: boolean }): void {
   if (!state.container) return;
+  loadPrefs();
   const ctx = contextProjectId();
   if (!ctx) {
     if (panelEl) {

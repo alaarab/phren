@@ -1046,6 +1046,42 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
   });
 
+  test("row peek flies to a node without changing selection", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The focused project shows an active navigator orb; no row is selected yet.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+
+    // Peek a finding row → camera flies, but selection/focus is untouched.
+    const row = panel.locator(".phren-pp-row").first();
+    await row.hover();
+    await row.locator("[data-pp-peek]").click();
+    await page.waitForTimeout(300);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
+  });
+
+  test("pane sort preference persists across reload", async ({ page }) => {
+    await openGraphTab(page);
+    let projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator("[data-pp-sort]").selectOption("recent");
+
+    // Reload the app (same origin → localStorage persists), reopen a project.
+    await openGraphTab(page);
+    projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator("[data-pp-sort]")).toHaveValue("recent");
+  });
+
   test("contents pane is resizable via its edge handle", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
