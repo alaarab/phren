@@ -1094,6 +1094,22 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel).toBeHidden();
   });
 
+  test("merge button appears only for two same-project findings", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    // Restrict to findings, enter select mode, pick all (fixture: 2 findings).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    const merge = panel.locator("[data-pp-bulk-merge]");
+    await expect(merge).toBeHidden(); // nothing picked yet
+    await panel.locator("[data-pp-bulk-all]").click();
+    await expect(merge).toBeVisible(); // exactly two same-project findings
+  });
+
   test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
