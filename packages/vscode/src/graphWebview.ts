@@ -2089,10 +2089,25 @@ ${graphScript}
       vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
     }
   }
+  function editNodeFromPane(node) {
+    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    if (window.phrenGraph && window.phrenGraph.selectNode) window.phrenGraph.selectNode(node.id);
+    setTimeout(function() {
+      if (currentNode && currentNode.id === node.id) {
+        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+        var point = currentPoint();
+        renderPopover(currentNode, point.x, point.y);
+        var editor = document.getElementById('node-editor');
+        if (editor) editor.focus();
+      }
+    }, 220);
+  }
   if (window.phrenGraph && window.phrenGraph.onItemAction) {
     window.phrenGraph.onItemAction(function(payload, action) {
       if (action === 'delete') {
         deleteNodeMsg(payload);
+      } else if (action === 'edit') {
+        editNodeFromPane(payload);
       } else if (action === 'delete-batch' && Array.isArray(payload)) {
         // One message → one confirm on the extension side (not N modals).
         vscode.postMessage({ command: 'deleteBatch', items: payload.map(function(n) {

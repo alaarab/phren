@@ -2377,6 +2377,22 @@ export function renderGraphHostScript(): string {
     deleteNode(currentNode);
   }
 
+  // Open the dossier in edit mode for a finding/task chosen in the contents pane.
+  function editNodeFromPane(node) {
+    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    var api = graphApi();
+    if (api && api.selectNode) api.selectNode(node.id);
+    setTimeout(function() {
+      if (currentNode && currentNode.id === node.id) {
+        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+        var point = currentPopoverPoint();
+        renderPopover(currentNode, point.x, point.y);
+        var editor = document.getElementById('graph-node-editor');
+        if (editor) editor.focus();
+      }
+    }, 220);
+  }
+
   function completeCurrentTask() {
     if (!currentNode) return;
     graphRequest('/api/tasks/complete', 'POST', {
@@ -2496,6 +2512,7 @@ export function renderGraphHostScript(): string {
       api.onItemAction(function(payload, action) {
         if (action === 'delete') deleteNode(payload);
         else if (action === 'delete-batch') deleteNodes(payload);
+        else if (action === 'edit') editNodeFromPane(payload);
       });
     }
     return true;

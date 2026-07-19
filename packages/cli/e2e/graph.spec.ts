@@ -1138,6 +1138,20 @@ test.describe.serial("graph visualization e2e", () => {
     expect(after).toBeGreaterThan(before + 60);
   });
 
+  test("row edit action opens the dossier editor for that finding", async ({ page }) => {
+    await openGraphTab(page);
+    // Select a project that has findings, so the pane lists editable rows.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const row = panel.locator('.phren-pp-row').filter({ has: page.locator("[data-pp-edit]") }).first();
+    await row.hover();
+    await row.locator("[data-pp-edit]").click();
+    // The dossier opens in edit mode (its textarea appears).
+    await expect(page.locator("#graph-node-editor")).toBeVisible({ timeout: 8_000 });
+  });
+
   test("row peek flies to a node without changing selection", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
