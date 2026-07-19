@@ -1901,6 +1901,33 @@ export function renderGraphHostScript(): string {
   // The dossier docks to the right edge of the graph viewport — a stable
   // reading pane instead of a cursor-chasing popover. Signature kept for
   // callers; the x/y hint is no longer needed.
+  function ensureDossierResize(popover) {
+    if (!popover || popover.querySelector('.phren-dossier-resize')) return;
+    var handle = document.createElement('div');
+    handle.className = 'phren-dossier-resize';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.addEventListener('pointerdown', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handle.classList.add('dragging');
+      try { handle.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+      function move(e) {
+        var rect = popover.getBoundingClientRect();
+        var w = Math.max(280, Math.min(680, e.clientX - rect.left));
+        popover.style.width = w + 'px';
+        popover.style.maxWidth = 'none';
+      }
+      function up() {
+        handle.classList.remove('dragging');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+    popover.appendChild(handle);
+  }
+
   function positionPopover(x, y) {
     var popover = document.getElementById('graph-node-popover');
     if (!popover) return;
@@ -1909,6 +1936,7 @@ export function renderGraphHostScript(): string {
     popover.style.top = '';
     popover.style.visibility = 'visible';
     popover.style.display = 'block';
+    ensureDossierResize(popover);
   }
 
   function currentPopoverPoint() {

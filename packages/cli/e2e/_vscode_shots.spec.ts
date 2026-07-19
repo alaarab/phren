@@ -37,6 +37,15 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   expect(box!.height).toBeGreaterThan(vp.height * 0.5); // full-height pane
   await page.screenshot({ path: `${SHOT_DIR}/vscode-01-finding-docked.png` });
 
+  // The docked dossier is resizable via its right-edge handle.
+  const dossierW = box!.width;
+  const dh = (await popover.locator(".dossier-resize").boundingBox())!;
+  await page.mouse.move(dh.x + dh.width / 2, dh.y + dh.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dh.x + 120, dh.y + dh.height / 2, { steps: 8 });
+  await page.mouse.up();
+  expect((await popover.boundingBox())!.width).toBeGreaterThan(dossierW + 50);
+
   // A project selection should also dock left, with the contents pane at right.
   await page.evaluate(() => (window as any).phrenGraph.selectNode("project:api-server"));
   await page.waitForTimeout(1000);

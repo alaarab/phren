@@ -1046,6 +1046,24 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
   });
 
+  test("left detail dossier is resizable", async ({ page }) => {
+    await openGraphTab(page);
+    const findingId = await selectNodeOfKind(page, "finding");
+    expect(findingId).toBeTruthy();
+    const pop = page.locator("#graph-node-popover");
+    await expect(pop).toBeVisible({ timeout: 8_000 });
+
+    const before = (await pop.boundingBox())!.width;
+    const handle = pop.locator(".phren-dossier-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x + 130, hb.y + hb.height / 2, { steps: 8 }); // drag outward → wider
+    await page.mouse.up();
+    const after = (await pop.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
   test("row peek flies to a node without changing selection", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
