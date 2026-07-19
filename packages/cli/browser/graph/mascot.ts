@@ -112,7 +112,7 @@ export function mascotMoveTo(targetId: string, userTriggered = false): void {
 type Pulse = { sprite: THREE.Sprite; t: number; active: boolean };
 const pulses: Pulse[] = [];
 
-function spawnLookupPulse(nodeId: string): void {
+export function spawnLookupPulse(nodeId: string): void {
   if (!state.fg) return;
   const pos = nodeWorldPos(nodeId);
   if (!pos) return;

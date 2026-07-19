@@ -1,7 +1,8 @@
 import { KIND_COLORS, TOPIC_COLORS } from "./types.js";
-import { bestSearchMatch, clamp, esc, recomputeSearchMatches, state, topicColor } from "./state.js";
+import { clamp, esc, recomputeSearchMatches, state, topicColor } from "./state.js";
 import { applyHighlight } from "./nodes.js";
 import { selectNode } from "./interactions.js";
+import { spawnLookupPulse } from "./mascot.js";
 import { applyFilters } from "./scene.js";
 
 // HUD chrome: the filter bar keeps its exact contract data-attributes
@@ -10,7 +11,7 @@ import { applyFilters } from "./scene.js";
 // dims non-matches (focus mode "search") and Enter flies to the best hit.
 
 const HUD_CSS = `
-#graph-filter .phren-hud-row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;width:100%}
+#graph-filter .phren-hud-row{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;width:100%;position:relative}
 .phren-hud-search{
   flex:1 1 auto;min-width:180px;padding:9px 14px;border-radius:8px;
   background:rgba(8,10,22,0.85);color:#dbe4ff;
@@ -76,6 +77,56 @@ const HUD_CSS = `
 }
 .phren-legend-chip:hover{border-color:rgba(103,232,249,0.45)}
 .phren-legend-chip.off{opacity:0.32}
+.phren-hud-results{
+  position:absolute;left:0;right:0;top:calc(100% + 8px);z-index:29;
+  max-height:360px;overflow:auto;padding:8px;
+  border:1px solid rgba(103,232,249,0.22);border-radius:10px;
+  background:rgba(8,10,22,0.94);box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 24px rgba(103,232,249,0.06);
+  color:#dbe4ff;opacity:0;transform:translateY(-4px);
+  transition:opacity 180ms ease,transform 180ms ease;
+}
+.phren-hud-results.visible{opacity:1;transform:translateY(0)}
+.phren-hud-results[hidden]{display:none}
+.phren-hud-results-head{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  position:sticky;top:0;background:rgba(8,10,22,0.94);padding:2px 4px 8px;
+}
+.phren-hud-results-title{
+  font:700 9.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#67e8f9;text-transform:uppercase;letter-spacing:0.14em;
+}
+.phren-hud-results-nav{display:flex;align-items:center;gap:6px}
+.phren-hud-results-count{
+  font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#8b96c9;letter-spacing:0.05em;min-width:44px;text-align:center;
+}
+.phren-hud-results-nav button{
+  cursor:pointer;width:22px;height:20px;padding:0;font-size:10px;line-height:1;
+  color:#dbe4ff;background:rgba(8,10,22,0.85);
+  border:1px solid rgba(103,232,249,0.18);border-radius:6px;
+}
+.phren-hud-results-nav button:hover{border-color:rgba(103,232,249,0.5)}
+.phren-hud-result-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;
+  text-align:left;cursor:pointer;background:transparent;border:1px solid transparent;
+  border-radius:6px;padding:5px 8px;margin-bottom:2px;color:#dbe4ff;
+  font:500 11px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+.phren-hud-result-row:hover{background:rgba(103,232,249,0.06);border-color:rgba(103,232,249,0.18)}
+.phren-hud-result-row.active{background:rgba(103,232,249,0.12);border-color:rgba(103,232,249,0.5);box-shadow:0 0 12px rgba(103,232,249,0.12)}
+.phren-hud-result-label{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phren-hud-result-chip{
+  flex:0 0 auto;font:600 8.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  text-transform:uppercase;letter-spacing:0.06em;color:#8b96c9;
+  background:rgba(12,15,30,0.9);border:1px solid rgba(103,232,249,0.14);
+  border-radius:999px;padding:2px 7px;
+}
+.phren-hud-result-more{
+  padding:5px 8px;color:#5b6488;
+  font:600 9px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  text-transform:uppercase;letter-spacing:0.08em;
+}
+@media (prefers-reduced-motion: reduce){.phren-hud-results{transition:none}}
 `;
 
 export function injectHudCss(): void {
@@ -139,7 +190,7 @@ export function buildFilterBar(): void {
 
   filterEl.innerHTML = [
     '<div class="phren-hud-row">',
-    `<input type="text" class="phren-hud-search" data-search-filter placeholder="Search the archive… (Enter flies to best hit)" value="${esc(state.searchQuery)}" />`,
+    `<input type="text" class="phren-hud-search" data-search-filter placeholder="Search… (Enter next · Shift+Enter prev)" value="${esc(state.searchQuery)}" />`,
     '<div data-filter-menu style="position:relative;flex:0 0 auto">',
     '<button class="phren-hud-btn" data-filter-toggle>Filters</button>',
     '<div class="phren-hud-panel" data-filter-panel>',
@@ -164,6 +215,17 @@ export function buildFilterBar(): void {
     '</div>',
     '</div>',
     `<span class="phren-hud-counter" data-filter-counter>${state.visibleNodes.length} / ${state.rawNodes.length}</span>`,
+    '<div class="phren-hud-results" data-search-results hidden>',
+    '<div class="phren-hud-results-head">',
+    '<span class="phren-hud-results-title" data-match-title>MATCHES</span>',
+    '<span class="phren-hud-results-nav">',
+    '<button type="button" data-match-prev aria-label="Previous match">▲</button>',
+    '<span class="phren-hud-results-count" data-match-count>– / 0</span>',
+    '<button type="button" data-match-next aria-label="Next match">▼</button>',
+    '</span>',
+    '</div>',
+    '<div class="phren-hud-results-list" data-match-list></div>',
+    '</div>',
     "</div>",
   ].join("");
 
@@ -180,24 +242,38 @@ export function buildFilterBar(): void {
   searchInput?.addEventListener("input", () => {
     state.searchQuery = searchInput.value;
     recomputeSearchMatches();
+    state.currentMatchIndex = -1;
     applyHighlight();
     updateFilterBarCounter();
+    renderResultsPane();
   });
   searchInput?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
-      const best = bestSearchMatch();
-      if (best) selectNode(best.id);
+      stepMatch(event.shiftKey ? -1 : 1);
+      event.preventDefault();
       event.stopPropagation();
     } else if (event.key === "Escape") {
       searchInput.value = "";
       state.searchQuery = "";
       recomputeSearchMatches();
+      state.currentMatchIndex = -1;
       applyHighlight();
       updateFilterBarCounter();
+      renderResultsPane();
       searchInput.blur();
       event.stopPropagation();
     }
   });
+
+  const resultsList = filterEl.querySelector<HTMLElement>("[data-match-list]");
+  resultsList?.addEventListener("click", (event) => {
+    const row = (event.target as HTMLElement | null)?.closest("[data-match-index]");
+    if (!row) return;
+    const idx = Number.parseInt(row.getAttribute("data-match-index") || "", 10);
+    if (Number.isFinite(idx)) jumpToMatch(idx);
+  });
+  filterEl.querySelector<HTMLElement>("[data-match-prev]")?.addEventListener("click", () => stepMatch(-1));
+  filterEl.querySelector<HTMLElement>("[data-match-next]")?.addEventListener("click", () => stepMatch(1));
 
   filterEl.querySelectorAll<HTMLInputElement>("[data-filter-type-check]").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
@@ -258,6 +334,9 @@ export function buildFilterBar(): void {
     document.addEventListener("click", closePanel);
     state.cleanupFns.push(() => document.removeEventListener("click", closePanel));
   }
+
+  // Reflect any pre-existing query (e.g. after a rebuild) in the results pane.
+  renderResultsPane();
 }
 
 export function updateFilterBarCounter(): void {
@@ -265,8 +344,114 @@ export function updateFilterBarCounter(): void {
   if (!filterEl) return;
   const counter = filterEl.querySelector<HTMLElement>("[data-filter-counter]");
   if (!counter) return;
-  const visible = state.searchQuery.trim() ? state.searchMatchIds.size : state.visibleNodes.length;
+  const query = state.searchQuery.trim();
+  if (query && state.currentMatchIndex >= 0 && state.searchResults.length) {
+    counter.textContent = `${state.currentMatchIndex + 1} / ${state.searchResults.length}`;
+    return;
+  }
+  const visible = query ? state.searchMatchIds.size : state.visibleNodes.length;
   counter.textContent = `${visible} / ${state.rawNodes.length}`;
+}
+
+// ── Search-result navigation (pane + keyboard cycling) ──────────────────
+
+function reducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Select the match at idx: fly camera, pulse it, sync the pane + counter. */
+function activateMatch(idx: number): void {
+  const node = state.searchResults[idx];
+  if (!node) return;
+  state.currentMatchIndex = idx;
+  selectNode(node.id);
+  if (!reducedMotion()) spawnLookupPulse(node.id);
+  renderResultsPane();
+  updateFilterBarCounter();
+}
+
+/** Cycle to the next (+1) or previous (-1) match, wrapping around. */
+function stepMatch(delta: number): void {
+  const n = state.searchResults.length;
+  if (!n) return;
+  const cur = state.currentMatchIndex;
+  const idx = cur < 0 ? (delta > 0 ? 0 : n - 1) : (cur + delta + n) % n;
+  activateMatch(idx);
+}
+
+/** Jump straight to a match by index (row / chevron clicks). */
+function jumpToMatch(index: number): void {
+  const n = state.searchResults.length;
+  if (!n) return;
+  activateMatch(clamp(index, 0, n - 1));
+}
+
+/**
+ * Re-sync the cursor after a filter change (results were just recomputed):
+ * keep the same match by id if it survived, else clamp, else drop to -1.
+ */
+export function syncResultsAfterFilter(prevMatchId: string | null): void {
+  const n = state.searchResults.length;
+  if (!n) {
+    state.currentMatchIndex = -1;
+  } else if (state.currentMatchIndex >= 0) {
+    const found = prevMatchId ? state.searchResults.findIndex((r) => r.id === prevMatchId) : -1;
+    state.currentMatchIndex = found >= 0 ? found : Math.min(state.currentMatchIndex, n - 1);
+  }
+  renderResultsPane();
+  updateFilterBarCounter();
+}
+
+/** Render (or hide) the search-results pane from state.searchResults. */
+export function renderResultsPane(): void {
+  const filterEl = document.getElementById("graph-filter");
+  if (!filterEl) return;
+  const pane = filterEl.querySelector<HTMLElement>("[data-search-results]");
+  if (!pane) return;
+  const results = state.searchResults;
+  const n = results.length;
+  if (n === 0) {
+    pane.classList.remove("visible");
+    pane.setAttribute("hidden", "");
+    return;
+  }
+  const idx = state.currentMatchIndex;
+  const titleEl = pane.querySelector<HTMLElement>("[data-match-title]");
+  const countEl = pane.querySelector<HTMLElement>("[data-match-count]");
+  const listEl = pane.querySelector<HTMLElement>("[data-match-list]");
+  if (titleEl) titleEl.textContent = `MATCHES (${n})`;
+  if (countEl) countEl.textContent = `${idx >= 0 ? idx + 1 : "–"} / ${n}`;
+  if (listEl) {
+    const ROW_CAP = 200;
+    let start = 0;
+    if (n > ROW_CAP) {
+      const anchor = idx >= 0 ? idx : 0;
+      start = clamp(anchor - Math.floor(ROW_CAP / 2), 0, n - ROW_CAP);
+    }
+    const end = Math.min(n, start + ROW_CAP);
+    const rows: string[] = [];
+    if (start > 0) rows.push(`<div class="phren-hud-result-more">…${start} above</div>`);
+    for (let i = start; i < end; i++) {
+      const node = results[i];
+      const chip = `${esc(node.kind)}·${esc(node.project || "—")}`;
+      rows.push(
+        `<button type="button" class="phren-hud-result-row${i === idx ? " active" : ""}" data-match-index="${i}">` +
+        `<span class="phren-hud-result-label">${esc(node.label)}</span>` +
+        `<span class="phren-hud-result-chip">${chip}</span>` +
+        `</button>`,
+      );
+    }
+    if (end < n) rows.push(`<div class="phren-hud-result-more">+${n - end} more…</div>`);
+    listEl.innerHTML = rows.join("");
+  }
+  pane.removeAttribute("hidden");
+  if (reducedMotion()) {
+    pane.classList.add("visible");
+  } else {
+    requestAnimationFrame(() => requestAnimationFrame(() => pane.classList.add("visible")));
+  }
+  const activeRow = listEl?.querySelector<HTMLElement>(".phren-hud-result-row.active");
+  activeRow?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
 }
 
 // ── Stats readout + legend chips (renderer-owned scene overlays) ────────
