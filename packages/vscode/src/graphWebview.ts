@@ -438,7 +438,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       );
       if (confirmed !== "Delete") return;
 
-      let ok = 0;
+      const deleted: Array<{ kind: string; projectName: string; text: string; item: string }> = [];
       await mutate(async () => {
         for (const it of items) {
           const kind = asString(it.kind);
@@ -446,11 +446,13 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           if (!projectName || !isValidProjectName(projectName)) continue;
           try {
             if (kind === "finding") {
-              await client.removeFinding(projectName, asString(it.text) ?? "");
-              ok++;
+              const text = asString(it.text) ?? "";
+              await client.removeFinding(projectName, text);
+              deleted.push({ kind, projectName, text, item: "" });
             } else if (kind === "task") {
-              await client.removeTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
-              ok++;
+              const item = asString(it.item) ?? asString(it.text) ?? "";
+              await client.removeTask(projectName, item);
+              deleted.push({ kind, projectName, text: asString(it.text) ?? "", item });
             }
           } catch {
             // Skip failures; the refresh below reflects whatever succeeded.
@@ -458,9 +460,36 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
         }
       });
       await refreshGraph();
-      if (ok < items.length) {
-        vscode.window.showWarningMessage(`Deleted ${ok} of ${items.length} items.`);
+      // Offer an in-graph undo for the whole batch.
+      void panel.webview.postMessage({
+        type: "batchRemoved",
+        undo: { items: deleted, label: `Deleted ${deleted.length} item${deleted.length === 1 ? "" : "s"}` },
+      });
+      if (deleted.length < items.length) {
+        vscode.window.showWarningMessage(`Deleted ${deleted.length} of ${items.length} items.`);
       }
+      return;
+    }
+
+    if (command === "undoDeleteBatch") {
+      const items = asArray(message.items)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+      if (!items.length) return;
+      await mutate(async () => {
+        for (const it of items) {
+          const kind = asString(it.kind);
+          const projectName = asString(it.projectName);
+          if (!projectName || !isValidProjectName(projectName)) continue;
+          try {
+            if (kind === "finding") await client.addFinding(projectName, asString(it.text) ?? "");
+            else if (kind === "task") await client.addTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
+          } catch {
+            // best-effort restore
+          }
+        }
+      });
+      await refreshGraph();
       return;
     }
 
@@ -1203,6 +1232,32 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       overflow: auto;
     }
     #node-popover.docked #node-popover-handle { display: none; }
+    #node-popover.docked .dossier-resize {
+      position: absolute;
+      right: -4px;
+      top: 0;
+      bottom: 0;
+      width: 9px;
+      cursor: ew-resize;
+      z-index: 20;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    #node-popover.docked .dossier-resize::after {
+      content: "";
+      position: absolute;
+      right: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 38px;
+      border-radius: 999px;
+      background: rgba(103, 232, 249, 0.28);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    #node-popover.docked .dossier-resize:hover::after,
+    #node-popover.docked .dossier-resize.dragging::after { opacity: 1; }
     #node-popover-content {
       display: flex;
       flex-direction: column;
@@ -1626,6 +1681,33 @@ ${graphScript}
   // The dossier docks to the left edge of the graph viewport — a stable reading
   // pane instead of a cursor-chasing popover that covered the node you clicked.
   // The x/y hint is kept for callers but no longer used for placement.
+  function ensureDossierResize() {
+    if (!popover || popover.querySelector('.dossier-resize')) return;
+    var handle = document.createElement('div');
+    handle.className = 'dossier-resize';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.addEventListener('pointerdown', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handle.classList.add('dragging');
+      try { handle.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+      function move(e) {
+        var rect = popover.getBoundingClientRect();
+        var w = Math.max(280, Math.min(680, e.clientX - rect.left));
+        popover.style.width = w + 'px';
+        popover.style.maxWidth = 'none';
+      }
+      function up() {
+        handle.classList.remove('dragging');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+    popover.appendChild(handle);
+  }
+
   function positionPopover(x, y) {
     if (!popover || !popoverCard) return;
     popover.classList.add('docked');
@@ -1634,6 +1716,7 @@ ${graphScript}
     popover.setAttribute('aria-hidden', 'false');
     popover.style.visibility = 'visible';
     popover.style.display = 'block';
+    ensureDossierResize();
   }
 
   function renderDocs(node) {
@@ -1815,7 +1898,8 @@ ${graphScript}
   function outsidePointer(event) {
     if (!currentNode || !popoverCard) return;
     var target = event.target;
-    if (target instanceof Node && popoverCard.contains(target)) return;
+    // Anywhere inside the popover (card OR its resize handle) is not "outside".
+    if (target instanceof Node && ((popover && popover.contains(target)) || popoverCard.contains(target))) return;
     // Renderer-owned HUD overlays (project navigator, contents pane + its
     // re-open tab, filter bar, zoom controls) are legitimate UI, not a
     // click-away dismiss. The 3D background still clears via onBackgroundClick.
@@ -1980,6 +2064,12 @@ ${graphScript}
           }
         });
       }
+    }
+    if (data.type === 'batchRemoved' && data.undo && data.undo.items && data.undo.items.length) {
+      var batch = data.undo;
+      showUndoToast(batch.label || ('Deleted ' + batch.items.length + ' items'), function() {
+        vscode.postMessage({ command: 'undoDeleteBatch', items: batch.items });
+      });
     }
   });
 

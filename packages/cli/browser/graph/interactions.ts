@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { FGNode, NodeDetail, RuntimeNode } from "./types.js";
 import { focusMode, nodeDetail, nodeRadius, scoreForNode, state } from "./state.js";
 import { applyHighlight, startIntroStagger } from "./nodes.js";
-import { mascotMoveTo } from "./mascot.js";
+import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
@@ -182,6 +182,19 @@ export function selectNode(nodeId: string): boolean {
   setTimeout(() => notifySelection(nodeId), 120);
   mascotMoveTo(nodeId, true);
   return true;
+}
+
+/**
+ * Fly the camera to a node and pulse it WITHOUT changing the selection — a
+ * lightweight "show me where this is" that leaves the dossier alone.
+ */
+export function peekNode(nodeId: string): void {
+  const fgNode = state.fgNodeById.get(nodeId);
+  if (!fgNode) return;
+  flyToNode(fgNode, 700);
+  const reducedMotion = typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reducedMotion) spawnLookupPulse(nodeId);
 }
 
 export function getNodeAt(x: number, y: number): NodeDetail | null {
