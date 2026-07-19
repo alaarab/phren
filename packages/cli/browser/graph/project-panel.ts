@@ -151,6 +151,13 @@ const PANEL_CSS = `
 }
 .phren-pp-row:hover .phren-pp-peek,.phren-pp-row.active .phren-pp-peek{display:grid}
 .phren-pp-peek:hover{border-color:rgba(103,232,249,0.7);background:rgba(103,232,249,0.16);color:#aef1ff}
+.phren-pp-edit{
+  flex:0 0 auto;width:22px;height:22px;padding:0;border-radius:6px;cursor:pointer;
+  border:1px solid rgba(255,209,102,0.3);background:rgba(255,209,102,0.08);
+  color:#ffd166;font-size:11px;line-height:1;display:none;place-items:center;
+}
+.phren-pp-row:hover .phren-pp-edit,.phren-pp-row.active .phren-pp-edit{display:grid}
+.phren-pp-edit:hover{border-color:rgba(255,209,102,0.7);background:rgba(255,209,102,0.18);color:#ffe1a3}
 .phren-pp-check{
   flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;
   border:1px solid rgba(103,232,249,0.35);background:rgba(12,15,30,0.9);
@@ -196,11 +203,40 @@ let panelEl: HTMLElement | null = null;
 let reopenEl: HTMLElement | null = null;
 let renderedProjectId: string | null = null;
 let renderedFragmentId: string | null = null;
+let renderedReview = false;
 let cursorId: string | null = null;
 let collapsed = false;
 let selectMode = false;
+let reviewMode = false; // global "needs review" pane (aging findings, all projects)
 let panelWidth: number | null = null; // user-resized width (px), null = default
 const picked = new Set<string>();
+
+/** Count of aging (decaying/stale) findings across every project. */
+export function countAgingFindings(): number {
+  return state.rawNodes.reduce(
+    (n, node) => n + (node.kind === "finding" && node.health !== "healthy" ? 1 : 0),
+    0,
+  );
+}
+
+/** Open (or refresh) the cross-project review pane. */
+export function openReviewPane(): void {
+  reviewMode = true;
+  refreshProjectPanel({ data: true });
+}
+
+/** Rebuild whichever pane is currently active (project / fragment / review). */
+function rebuildPane(): void {
+  if (reviewMode) buildReviewPanel();
+  else if (renderedFragmentId) buildFragmentPanel(renderedFragmentId);
+  else if (renderedProjectId) buildPanel(renderedProjectId);
+}
+
+/** Re-render just the row list for the active pane. */
+function renderCurrentList(): void {
+  if (reviewMode) renderReviewList();
+  else renderList();
+}
 
 // Fixed right offset of the pane (matches `.phren-project-panel { right: 58px }`).
 const PANE_RIGHT = 58;
@@ -258,6 +294,18 @@ const filters = {
   health: "all" as "all" | "aging" | "healthy" | "decaying" | "stale",
   sort: "aging" as "aging" | "recent" | "az",
 };
+
+// Shared bulk-action footer (project + review panes). Merge is revealed by
+// renderBulkBar only when exactly two same-project findings are picked.
+const BULK_BAR_HTML = [
+  '<div class="phren-pp-bulk" data-pp-bulk hidden>',
+  '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
+  '<button type="button" data-pp-bulk-merge hidden>Merge</button>',
+  '<button type="button" data-pp-bulk-all>Select all</button>',
+  '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
+  '<button type="button" data-pp-bulk-done>Done</button>',
+  "</div>",
+].join("");
 
 /** Comparator for the current sort mode (applied within each group). */
 function sortComparator(a: RuntimeNode, b: RuntimeNode): number {
@@ -357,6 +405,9 @@ function rowHtml(node: RuntimeNode): string {
   // camera without opening the dossier) and delete (only when a host supports it).
   const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
   const peek = !selectMode ? `<span class="phren-pp-peek" data-pp-peek title="Show in graph">◎</span>` : "";
+  const edit = !selectMode && hasActions
+    ? `<span class="phren-pp-edit" data-pp-edit title="Edit this ${esc(node.kind)}">✎</span>`
+    : "";
   const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
@@ -367,6 +418,7 @@ function rowHtml(node: RuntimeNode): string {
     `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
     `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
     peek +
+    edit +
     del +
     `</button>`
   );
@@ -408,7 +460,7 @@ function renderList(): void {
 function setSelectMode(on: boolean): void {
   selectMode = on;
   if (!on) picked.clear();
-  if (renderedProjectId) buildPanel(renderedProjectId);
+  rebuildPane();
 }
 
 /** Refresh the bulk-action footer (count, delete-enabled, visibility). */
@@ -425,6 +477,28 @@ function renderBulkBar(): void {
     del.disabled = picked.size === 0;
     del.textContent = picked.size ? `Delete ${picked.size}` : "Delete";
   }
+  // Merge is offered only for exactly two same-project findings.
+  const merge = bar.querySelector<HTMLButtonElement>("[data-pp-bulk-merge]");
+  if (merge) merge.toggleAttribute("hidden", !mergeEligible());
+}
+
+/** True when the current picks are exactly two findings in the same project. */
+function mergeEligible(): boolean {
+  if (picked.size !== 2) return false;
+  const nodes = [...picked].map((id) => state.nodeById.get(id));
+  return nodes.every((n) => n?.kind === "finding") && nodes[0]?.project === nodes[1]?.project;
+}
+
+/** Hand the two picked findings to the host to merge into one. */
+function commitMerge(): void {
+  if (!mergeEligible()) return;
+  const details = [...picked]
+    .map((id) => nodeDetail(id))
+    .filter((detail): detail is NodeDetail => Boolean(detail));
+  if (details.length !== 2) return;
+  state.itemActionCallbacks.forEach((cb) => cb(details, "merge"));
+  selectMode = false;
+  picked.clear();
 }
 
 /** Hand the picked items to the host as a batch delete, then leave select mode. */
@@ -456,7 +530,9 @@ function ensurePanelEl(): void {
       event.stopPropagation();
       const target = event.target as HTMLElement | null;
       if (target?.closest("[data-pp-close]")) {
+        reviewMode = false;
         clearSelection();
+        refreshProjectPanel();
         return;
       }
       if (target?.closest("[data-pp-collapse]")) {
@@ -471,7 +547,7 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-bulk-all]")) {
         rowIdsInOrder().forEach((rid) => picked.add(rid));
-        renderList();
+        renderCurrentList();
         renderBulkBar();
         return;
       }
@@ -481,6 +557,10 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-bulk-delete]")) {
         commitBulkDelete();
+        return;
+      }
+      if (target?.closest("[data-pp-bulk-merge]")) {
+        commitMerge();
         return;
       }
       const chip = target?.closest<HTMLElement>("[data-pp-chip]");
@@ -512,6 +592,11 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-peek]")) {
         peekNode(id);
+        return;
+      }
+      if (target?.closest("[data-pp-edit]")) {
+        const detail = nodeDetail(id);
+        if (detail) state.itemActionCallbacks.forEach((cb) => cb(detail, "edit"));
         return;
       }
       if (target?.closest("[data-pp-del]")) {
@@ -598,12 +683,7 @@ function buildPanel(projectId: string): void {
     "</div>",
     "</div>",
     '<div class="phren-pp-list" data-pp-list></div>',
-    '<div class="phren-pp-bulk" data-pp-bulk hidden>',
-    '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
-    '<button type="button" data-pp-bulk-all>Select all</button>',
-    '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
-    '<button type="button" data-pp-bulk-done>Done</button>',
-    "</div>",
+    BULK_BAR_HTML,
   ].join("");
 
   // Keep any user-chosen width and (re)attach the edge resize handle (the
@@ -711,6 +791,87 @@ function buildFragmentPanel(entityId: string): void {
   renderedProjectId = null;
 }
 
+/** All aging (decaying/stale) findings, grouped by project, newest-worst first. */
+function agingByProject(): Array<{ project: string; items: RuntimeNode[] }> {
+  const q = filters.query.trim().toLowerCase();
+  const groups = new Map<string, RuntimeNode[]>();
+  for (const node of state.rawNodes) {
+    if (node.kind !== "finding" || node.health === "healthy") continue;
+    if (q && !node.searchText.includes(q)) continue;
+    const key = node.project || "—";
+    const list = groups.get(key) ?? (groups.set(key, []).get(key) as RuntimeNode[]);
+    list.push(node);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([project, items]) => ({
+      project,
+      items: items.sort((a, b) => HEALTH_RANK[b.health] - HEALTH_RANK[a.health]),
+    }));
+}
+
+function renderReviewList(): void {
+  if (!panelEl) return;
+  const listEl = panelEl.querySelector<HTMLElement>("[data-pp-list]");
+  if (!listEl) return;
+  const groups = agingByProject();
+  if (!groups.length) {
+    listEl.innerHTML = `<div class="phren-pp-empty">Nothing needs review 🎉</div>`;
+    cursorId = null;
+    renderBulkBar();
+    return;
+  }
+  listEl.innerHTML = groups
+    .map((g) => `<div class="phren-pp-group">${esc(g.project)} · ${g.items.length}</div>` + g.items.map(rowHtml).join(""))
+    .join("");
+  if (cursorId && !rowIdsInOrder().includes(cursorId)) cursorId = null;
+  paintCursor();
+  renderBulkBar();
+}
+
+/** Cross-project review pane: every aging finding, ready to prune in bulk. */
+function buildReviewPanel(): void {
+  if (!state.container) return;
+  ensurePanelEl();
+  if (!panelEl) return;
+
+  const total = countAgingFindings();
+  panelEl.innerHTML = [
+    '<div class="phren-pp-head">',
+    '<div class="phren-pp-title">',
+    '<div class="phren-pp-kind" style="color:#ffb648">⚠ Needs review</div>',
+    `<div class="phren-pp-name">${total} aging finding${total === 1 ? "" : "s"}</div>`,
+    '<div class="phren-pp-sub">decaying + stale, across all projects</div>',
+    "</div>",
+    '<div class="phren-pp-headbtns">',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
+    "</div>",
+    "</div>",
+    '<div class="phren-pp-controls">',
+    `<input type="text" class="phren-pp-search" data-pp-search placeholder="Filter aging findings…" value="${esc(filters.query)}" />`,
+    '<div class="phren-pp-chips">',
+    state.itemActionCallbacks.length
+      ? `<span class="phren-pp-chip${selectMode ? " on" : ""}" data-pp-select title="Select multiple to delete">☑ Select</span>`
+      : "",
+    "</div>",
+    "</div>",
+    '<div class="phren-pp-list" data-pp-list></div>',
+    BULK_BAR_HTML,
+  ].join("");
+
+  attachResizeAndWidth();
+  const searchInput = panelEl.querySelector<HTMLInputElement>("[data-pp-search]");
+  searchInput?.addEventListener("input", () => {
+    filters.query = searchInput.value;
+    renderReviewList();
+  });
+
+  renderedProjectId = null;
+  renderedFragmentId = null;
+  renderReviewList();
+}
+
 function applyChip(chip: HTMLElement): void {
   const health = chip.getAttribute("data-health");
   if (health === "aging") {
@@ -776,6 +937,32 @@ function syncActiveRow(): void {
 export function refreshProjectPanel(opts?: { data?: boolean }): void {
   if (!state.container) return;
   loadPrefs();
+
+  // Focusing a project exits the global review pane.
+  if (reviewMode && state.focusedProjectId) reviewMode = false;
+
+  // Global review pane: every aging finding across projects (selection-driven
+  // context is ignored while it's open).
+  if (reviewMode) {
+    setLegendHidden(true);
+    if (collapsed) {
+      if (panelEl) panelEl.setAttribute("hidden", "");
+      showReopenTab("needs review");
+      return;
+    }
+    hideReopenTab();
+    if (!renderedReview || !panelEl || !panelEl.isConnected) {
+      buildReviewPanel();
+      renderedReview = true;
+    } else if (opts?.data) {
+      renderReviewList();
+    }
+    panelEl?.removeAttribute("hidden");
+    syncActiveRow();
+    return;
+  }
+  renderedReview = false;
+
   const ctx = contextNode();
   if (!ctx) {
     if (panelEl) {
