@@ -1,6 +1,7 @@
 import type { RuntimeNode } from "./types.js";
 import { esc, state } from "./state.js";
 import { clearSelection, selectNode } from "./interactions.js";
+import { countAgingFindings, openReviewPane } from "./project-panel.js";
 
 // Project navigator dock — a row of clickable project "orbs" pinned to the
 // canvas (top-left). Clicking one selects/focuses that project directly, so a
@@ -28,6 +29,15 @@ const NAV_CSS = `
   color:#67e8f9;letter-spacing:0.14em;text-transform:uppercase;
   padding:0 4px 0 3px;opacity:0.7;user-select:none;
 }
+.phren-project-review{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  padding:5px 11px;border-radius:999px;white-space:nowrap;user-select:none;
+  background:rgba(255,182,72,0.12);border:1px solid rgba(255,182,72,0.35);
+  font:700 10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#ffd8a1;letter-spacing:0.04em;transition:border-color 0.15s ease,background 0.15s ease;
+}
+.phren-project-review:hover{border-color:rgba(255,182,72,0.7);background:rgba(255,182,72,0.2)}
+.phren-project-nav-div{flex:0 0 auto;width:1px;height:18px;background:rgba(103,232,249,0.16)}
 .phren-project-orb{
   flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;
   cursor:pointer;padding:5px 11px 5px 9px;border-radius:999px;
@@ -103,7 +113,12 @@ export function buildProjectNav(): void {
     navEl.addEventListener("pointerdown", (event) => event.stopPropagation());
     navEl.addEventListener("click", (event) => {
       event.stopPropagation();
-      const orb = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-project-id]");
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("[data-review-open]")) {
+        openReviewPane();
+        return;
+      }
+      const orb = target?.closest<HTMLElement>("[data-project-id]");
       if (!orb) return;
       const id = orb.getAttribute("data-project-id");
       if (id) selectNode(id);
@@ -133,7 +148,14 @@ export function buildProjectNav(): void {
     );
   }).join("");
 
-  navEl.innerHTML = `<span class="phren-project-nav-tag">◆</span>${orbs}`;
+  // A leading "needs review" pill when any aging findings exist — one click to
+  // the cross-project prune view.
+  const aging = countAgingFindings();
+  const reviewPill = aging > 0
+    ? `<button type="button" class="phren-project-review" data-review-open title="Review ${aging} aging findings across all projects">⚠ ${aging}</button><span class="phren-project-nav-div"></span>`
+    : "";
+
+  navEl.innerHTML = `<span class="phren-project-nav-tag">◆</span>${reviewPill}${orbs}`;
 }
 
 /** Reflect the focused project in the dock without rebuilding the whole list. */

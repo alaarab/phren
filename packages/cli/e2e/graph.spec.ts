@@ -932,6 +932,46 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
 
+  test("global review pill opens a cross-project aging list", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      const stale = new Date(Date.now() - 300 * 86400000).toISOString();
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha" },
+          { id: "project:beta", label: "beta", group: "project", project: "beta" },
+          { id: "finding:a1", label: "alpha stale one", group: "topic:general", project: "alpha", scoreKey: "ka1" },
+          { id: "finding:a2", label: "alpha healthy", group: "topic:general", project: "alpha", scoreKey: "ka2" },
+          { id: "finding:b1", label: "beta stale one", group: "topic:general", project: "beta", scoreKey: "kb1" },
+        ],
+        links: [
+          { source: "project:alpha", target: "finding:a1" },
+          { source: "project:alpha", target: "finding:a2" },
+          { source: "project:beta", target: "finding:b1" },
+        ],
+        scores: { ka1: { lastUsedAt: stale }, kb1: { lastUsedAt: stale } },
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    // The nav shows a "⚠ 2" review pill (a1 + b1 are stale; a2 is healthy).
+    const pill = page.locator(".phren-project-review");
+    await expect(pill).toBeVisible();
+    await expect(pill).toContainText("2");
+
+    await pill.click();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".phren-pp-kind")).toContainText("Needs review");
+    // Both projects' aging findings show; the healthy one does not.
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:b1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a2"]')).toHaveCount(0);
+    await expect(panel.locator(".phren-pp-group", { hasText: "alpha" })).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "beta" })).toBeVisible();
+  });
+
   test("selecting a fragment shows its connected projects and references", async ({ page }) => {
     await openGraphTab(page);
     await page.evaluate(() => {

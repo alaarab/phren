@@ -87,4 +87,10 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
   await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
   await page.screenshot({ path: `${SHOT_DIR}/vscode-05-fragment.png` });
+
+  // Global "needs review" pane via the nav pill.
+  await page.locator(".phren-project-review").click();
+  await page.waitForTimeout(600);
+  await expect(panel.locator(".phren-pp-kind")).toContainText("Needs review");
+  await page.screenshot({ path: `${SHOT_DIR}/vscode-06-review.png` });
 });

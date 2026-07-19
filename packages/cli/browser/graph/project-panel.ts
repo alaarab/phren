@@ -196,11 +196,40 @@ let panelEl: HTMLElement | null = null;
 let reopenEl: HTMLElement | null = null;
 let renderedProjectId: string | null = null;
 let renderedFragmentId: string | null = null;
+let renderedReview = false;
 let cursorId: string | null = null;
 let collapsed = false;
 let selectMode = false;
+let reviewMode = false; // global "needs review" pane (aging findings, all projects)
 let panelWidth: number | null = null; // user-resized width (px), null = default
 const picked = new Set<string>();
+
+/** Count of aging (decaying/stale) findings across every project. */
+export function countAgingFindings(): number {
+  return state.rawNodes.reduce(
+    (n, node) => n + (node.kind === "finding" && node.health !== "healthy" ? 1 : 0),
+    0,
+  );
+}
+
+/** Open (or refresh) the cross-project review pane. */
+export function openReviewPane(): void {
+  reviewMode = true;
+  refreshProjectPanel({ data: true });
+}
+
+/** Rebuild whichever pane is currently active (project / fragment / review). */
+function rebuildPane(): void {
+  if (reviewMode) buildReviewPanel();
+  else if (renderedFragmentId) buildFragmentPanel(renderedFragmentId);
+  else if (renderedProjectId) buildPanel(renderedProjectId);
+}
+
+/** Re-render just the row list for the active pane. */
+function renderCurrentList(): void {
+  if (reviewMode) renderReviewList();
+  else renderList();
+}
 
 // Fixed right offset of the pane (matches `.phren-project-panel { right: 58px }`).
 const PANE_RIGHT = 58;
@@ -408,7 +437,7 @@ function renderList(): void {
 function setSelectMode(on: boolean): void {
   selectMode = on;
   if (!on) picked.clear();
-  if (renderedProjectId) buildPanel(renderedProjectId);
+  rebuildPane();
 }
 
 /** Refresh the bulk-action footer (count, delete-enabled, visibility). */
@@ -456,7 +485,9 @@ function ensurePanelEl(): void {
       event.stopPropagation();
       const target = event.target as HTMLElement | null;
       if (target?.closest("[data-pp-close]")) {
+        reviewMode = false;
         clearSelection();
+        refreshProjectPanel();
         return;
       }
       if (target?.closest("[data-pp-collapse]")) {
@@ -471,7 +502,7 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-bulk-all]")) {
         rowIdsInOrder().forEach((rid) => picked.add(rid));
-        renderList();
+        renderCurrentList();
         renderBulkBar();
         return;
       }
@@ -711,6 +742,92 @@ function buildFragmentPanel(entityId: string): void {
   renderedProjectId = null;
 }
 
+/** All aging (decaying/stale) findings, grouped by project, newest-worst first. */
+function agingByProject(): Array<{ project: string; items: RuntimeNode[] }> {
+  const q = filters.query.trim().toLowerCase();
+  const groups = new Map<string, RuntimeNode[]>();
+  for (const node of state.rawNodes) {
+    if (node.kind !== "finding" || node.health === "healthy") continue;
+    if (q && !node.searchText.includes(q)) continue;
+    const key = node.project || "—";
+    const list = groups.get(key) ?? (groups.set(key, []).get(key) as RuntimeNode[]);
+    list.push(node);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([project, items]) => ({
+      project,
+      items: items.sort((a, b) => HEALTH_RANK[b.health] - HEALTH_RANK[a.health]),
+    }));
+}
+
+function renderReviewList(): void {
+  if (!panelEl) return;
+  const listEl = panelEl.querySelector<HTMLElement>("[data-pp-list]");
+  if (!listEl) return;
+  const groups = agingByProject();
+  if (!groups.length) {
+    listEl.innerHTML = `<div class="phren-pp-empty">Nothing needs review 🎉</div>`;
+    cursorId = null;
+    renderBulkBar();
+    return;
+  }
+  listEl.innerHTML = groups
+    .map((g) => `<div class="phren-pp-group">${esc(g.project)} · ${g.items.length}</div>` + g.items.map(rowHtml).join(""))
+    .join("");
+  if (cursorId && !rowIdsInOrder().includes(cursorId)) cursorId = null;
+  paintCursor();
+  renderBulkBar();
+}
+
+/** Cross-project review pane: every aging finding, ready to prune in bulk. */
+function buildReviewPanel(): void {
+  if (!state.container) return;
+  ensurePanelEl();
+  if (!panelEl) return;
+
+  const total = countAgingFindings();
+  panelEl.innerHTML = [
+    '<div class="phren-pp-head">',
+    '<div class="phren-pp-title">',
+    '<div class="phren-pp-kind" style="color:#ffb648">⚠ Needs review</div>',
+    `<div class="phren-pp-name">${total} aging finding${total === 1 ? "" : "s"}</div>`,
+    '<div class="phren-pp-sub">decaying + stale, across all projects</div>',
+    "</div>",
+    '<div class="phren-pp-headbtns">',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
+    "</div>",
+    "</div>",
+    '<div class="phren-pp-controls">',
+    `<input type="text" class="phren-pp-search" data-pp-search placeholder="Filter aging findings…" value="${esc(filters.query)}" />`,
+    '<div class="phren-pp-chips">',
+    state.itemActionCallbacks.length
+      ? `<span class="phren-pp-chip${selectMode ? " on" : ""}" data-pp-select title="Select multiple to delete">☑ Select</span>`
+      : "",
+    "</div>",
+    "</div>",
+    '<div class="phren-pp-list" data-pp-list></div>',
+    '<div class="phren-pp-bulk" data-pp-bulk hidden>',
+    '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
+    '<button type="button" data-pp-bulk-all>Select all</button>',
+    '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
+    '<button type="button" data-pp-bulk-done>Done</button>',
+    "</div>",
+  ].join("");
+
+  attachResizeAndWidth();
+  const searchInput = panelEl.querySelector<HTMLInputElement>("[data-pp-search]");
+  searchInput?.addEventListener("input", () => {
+    filters.query = searchInput.value;
+    renderReviewList();
+  });
+
+  renderedProjectId = null;
+  renderedFragmentId = null;
+  renderReviewList();
+}
+
 function applyChip(chip: HTMLElement): void {
   const health = chip.getAttribute("data-health");
   if (health === "aging") {
@@ -776,6 +893,32 @@ function syncActiveRow(): void {
 export function refreshProjectPanel(opts?: { data?: boolean }): void {
   if (!state.container) return;
   loadPrefs();
+
+  // Focusing a project exits the global review pane.
+  if (reviewMode && state.focusedProjectId) reviewMode = false;
+
+  // Global review pane: every aging finding across projects (selection-driven
+  // context is ignored while it's open).
+  if (reviewMode) {
+    setLegendHidden(true);
+    if (collapsed) {
+      if (panelEl) panelEl.setAttribute("hidden", "");
+      showReopenTab("needs review");
+      return;
+    }
+    hideReopenTab();
+    if (!renderedReview || !panelEl || !panelEl.isConnected) {
+      buildReviewPanel();
+      renderedReview = true;
+    } else if (opts?.data) {
+      renderReviewList();
+    }
+    panelEl?.removeAttribute("hidden");
+    syncActiveRow();
+    return;
+  }
+  renderedReview = false;
+
   const ctx = contextNode();
   if (!ctx) {
     if (panelEl) {
