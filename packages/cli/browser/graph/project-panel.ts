@@ -79,6 +79,14 @@ const PANEL_CSS = `
   writing-mode:vertical-rl;font:700 9.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   letter-spacing:0.14em;text-transform:uppercase;max-height:180px;overflow:hidden;text-overflow:ellipsis;
 }
+/* Drag handle on the pane's inner (left) edge to widen/narrow it. */
+.phren-pp-resize{position:absolute;left:-4px;top:0;bottom:0;width:9px;cursor:ew-resize;z-index:3;touch-action:none}
+.phren-pp-resize::after{
+  content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);
+  width:3px;height:38px;border-radius:999px;background:rgba(103,232,249,0.28);
+  opacity:0;transition:opacity 0.15s ease;
+}
+.phren-pp-resize:hover::after,.phren-pp-resize.dragging::after{opacity:1}
 .phren-pp-controls{padding:10px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid rgba(103,232,249,0.1)}
 .phren-pp-search{
   width:100%;padding:8px 11px;border-radius:8px;
@@ -183,7 +191,36 @@ let renderedProjectId: string | null = null;
 let cursorId: string | null = null;
 let collapsed = false;
 let selectMode = false;
+let panelWidth: number | null = null; // user-resized width (px), null = default
 const picked = new Set<string>();
+
+// Fixed right offset of the pane (matches `.phren-project-panel { right: 58px }`).
+const PANE_RIGHT = 58;
+
+/** Begin an edge-drag resize of the pane. */
+function startResize(event: PointerEvent): void {
+  if (!panelEl || !state.container) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const handle = event.currentTarget as HTMLElement;
+  handle.classList.add("dragging");
+  try { handle.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+  const onMove = (ev: PointerEvent) => {
+    if (!panelEl || !state.container) return;
+    const rect = state.container.getBoundingClientRect();
+    const rightEdge = rect.right - PANE_RIGHT;
+    const width = clamp(rightEdge - ev.clientX, 260, Math.max(260, rect.width - 420));
+    panelWidth = width;
+    panelEl.style.width = `${width}px`;
+  };
+  const onUp = () => {
+    handle.classList.remove("dragging");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
 const filters = {
   query: "",
   kind: "all" as "all" | "finding" | "task",
@@ -518,6 +555,15 @@ function buildPanel(projectId: string): void {
     '<button type="button" data-pp-bulk-done>Done</button>',
     "</div>",
   ].join("");
+
+  // Keep any user-chosen width, and (re)attach the edge resize handle (innerHTML
+  // above wiped the previous one).
+  if (panelWidth) panelEl.style.width = `${panelWidth}px`;
+  const resize = document.createElement("div");
+  resize.className = "phren-pp-resize";
+  resize.setAttribute("aria-hidden", "true");
+  resize.addEventListener("pointerdown", startResize);
+  panelEl.appendChild(resize);
 
   const searchInput = panelEl.querySelector<HTMLInputElement>("[data-pp-search]");
   searchInput?.addEventListener("input", () => {

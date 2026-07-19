@@ -1656,11 +1656,14 @@ ${graphScript}
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
-      body += '<div class="node-grid">'
-        + '<div class="node-metric"><div class="node-metric-label">Findings</div><div class="node-metric-value">' + counts.finding + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Tasks</div><div class="node-metric-value">' + counts.task + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Fragments</div><div class="node-metric-value">' + counts.entity + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">References</div><div class="node-metric-value">' + counts.reference + '</div></div>'
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky metric grid was redundant.
+      var pstat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:14px;font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:14px;padding:4px 0 2px">'
+        + pstat(counts.finding, 'findings') + pstat(counts.task, 'tasks')
+        + pstat(counts.entity, 'fragments') + pstat(counts.reference, 'refs')
         + '</div>';
       if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
     } else if (node.kind === 'finding') {

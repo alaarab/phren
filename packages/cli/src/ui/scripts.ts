@@ -2062,12 +2062,16 @@ export function renderGraphHostScript(): string {
       // Server totals beat visible-adjacency counts (filters can hide nodes)
       var findingTotal = typeof node.findingCount === 'number' && node.findingCount > counts.finding ? node.findingCount : counts.finding;
       var taskTotal = typeof node.taskCount === 'number' && node.taskCount > counts.task ? node.taskCount : counts.task;
-      body += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + findingTotal + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + taskTotal + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Fragments</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.entity + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
-      body += '</div>';
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky card grid was redundant.
+      var stat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:var(--text-md);font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:10px 0">'
+        + stat(findingTotal, 'findings') + stat(taskTotal, 'tasks')
+        + stat(counts.entity, 'fragments') + stat(counts.reference, 'refs')
+        + '</div>';
+      body += '<div class="text-muted" style="font-size:var(--text-sm)">Browse and prune this project\\'s findings and tasks in the contents pane →</div>';
     } else if (node.kind === 'finding') {
       // GraphRAG-style stats row: links / project / helpful
       var conn = node.connections || {};
