@@ -67,6 +67,37 @@ body:has(#tab-graph.active) .header-brand { color: #dbe6ff; }
   pointer-events: none;
   z-index: 12;
 }
+/* Edge drag handle to widen/narrow the docked dossier (symmetric with the
+   contents pane). The popover itself is pointer-transparent, so the handle
+   re-enables pointer events for itself. */
+#graph-node-popover.phren-docked .phren-dossier-resize {
+  position: absolute;
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: ew-resize;
+  z-index: 20;
+  pointer-events: auto;
+  touch-action: none;
+}
+#graph-node-popover.phren-docked .phren-dossier-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 38px;
+  border-radius: 999px;
+  background: rgba(103, 232, 249, 0.28);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+#graph-node-popover.phren-docked .phren-dossier-resize:hover::after,
+#graph-node-popover.phren-docked .phren-dossier-resize.dragging::after {
+  opacity: 1;
+}
 /* GraphRAG-style stats row + relationships in the inspector */
 .phren-dossier-stats {
   display: grid;
