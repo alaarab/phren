@@ -931,4 +931,59 @@ test.describe.serial("graph visualization e2e", () => {
     const stats = page.locator(".phren-hud-stats");
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
+
+  test("project navigator dock lists projects and selects one on click", async ({ page }) => {
+    await openGraphTab(page);
+
+    // The dock renders one orb per visible project (the fixture seeds two).
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Each orb carries the project node id it targets.
+    const firstOrbId = await orbs.first().getAttribute("data-project-id");
+    expect(firstOrbId).toBeTruthy();
+    const isProjectNode = await page.evaluate((id) => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.id === id);
+      return node?.kind === "project";
+    }, firstOrbId);
+    expect(isProjectNode).toBe(true);
+
+    // Clicking the orb focuses that project — no finding/task selection needed —
+    // and opens the dossier for it.
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+
+    // The clicked orb is marked active and the graph reports the focused project.
+    await expect(orbs.first()).toHaveClass(/active/);
+    const focused = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      // getData reflects host nodes; focus is internal — assert via the active orb.
+      return document.querySelector(".phren-project-orb.active")?.getAttribute("data-project-id") || null;
+    });
+    expect(focused).toBe(firstOrbId);
+
+    // Clicking the active orb again toggles focus off (clears selection).
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toHaveCSS("display", "none");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
+  });
+
+  test("arrow keys cycle project focus through the navigator", async ({ page }) => {
+    await openGraphTab(page);
+
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(1);
+
+    // Focus the canvas (not a text field), then step forward with ArrowRight.
+    await page.locator("#graph-canvas").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    const firstActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+
+    // ArrowRight again moves to a different project.
+    await page.keyboard.press("ArrowRight");
+    const secondActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+    expect(secondActive).not.toBe(firstActive);
+  });
 });
