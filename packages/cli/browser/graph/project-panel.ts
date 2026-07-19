@@ -151,6 +151,13 @@ const PANEL_CSS = `
 }
 .phren-pp-row:hover .phren-pp-peek,.phren-pp-row.active .phren-pp-peek{display:grid}
 .phren-pp-peek:hover{border-color:rgba(103,232,249,0.7);background:rgba(103,232,249,0.16);color:#aef1ff}
+.phren-pp-edit{
+  flex:0 0 auto;width:22px;height:22px;padding:0;border-radius:6px;cursor:pointer;
+  border:1px solid rgba(255,209,102,0.3);background:rgba(255,209,102,0.08);
+  color:#ffd166;font-size:11px;line-height:1;display:none;place-items:center;
+}
+.phren-pp-row:hover .phren-pp-edit,.phren-pp-row.active .phren-pp-edit{display:grid}
+.phren-pp-edit:hover{border-color:rgba(255,209,102,0.7);background:rgba(255,209,102,0.18);color:#ffe1a3}
 .phren-pp-check{
   flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;
   border:1px solid rgba(103,232,249,0.35);background:rgba(12,15,30,0.9);
@@ -386,6 +393,9 @@ function rowHtml(node: RuntimeNode): string {
   // camera without opening the dossier) and delete (only when a host supports it).
   const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
   const peek = !selectMode ? `<span class="phren-pp-peek" data-pp-peek title="Show in graph">◎</span>` : "";
+  const edit = !selectMode && hasActions
+    ? `<span class="phren-pp-edit" data-pp-edit title="Edit this ${esc(node.kind)}">✎</span>`
+    : "";
   const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
@@ -396,6 +406,7 @@ function rowHtml(node: RuntimeNode): string {
     `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
     `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
     peek +
+    edit +
     del +
     `</button>`
   );
@@ -543,6 +554,11 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-peek]")) {
         peekNode(id);
+        return;
+      }
+      if (target?.closest("[data-pp-edit]")) {
+        const detail = nodeDetail(id);
+        if (detail) state.itemActionCallbacks.forEach((cb) => cb(detail, "edit"));
         return;
       }
       if (target?.closest("[data-pp-del]")) {
