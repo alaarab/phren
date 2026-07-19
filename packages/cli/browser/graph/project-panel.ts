@@ -57,12 +57,28 @@ const PANEL_CSS = `
 }
 .phren-pp-healthkey button:hover{color:#eaf2ff}
 .phren-pp-healthkey i{width:7px;height:7px;border-radius:999px;font-style:normal}
-.phren-pp-close{
-  flex:0 0 auto;width:26px;height:26px;border-radius:999px;cursor:pointer;
+.phren-pp-headbtns{flex:0 0 auto;display:flex;gap:6px}
+.phren-pp-iconbtn{
+  width:26px;height:26px;border-radius:999px;cursor:pointer;
   border:1px solid rgba(103,232,249,0.2);background:rgba(12,15,30,0.9);
-  color:#c3ccef;font-size:15px;line-height:1;display:grid;place-items:center;
+  color:#c3ccef;font-size:14px;line-height:1;display:grid;place-items:center;padding:0;
 }
-.phren-pp-close:hover{border-color:rgba(103,232,249,0.55);color:#eaf2ff}
+.phren-pp-iconbtn:hover{border-color:rgba(103,232,249,0.55);color:#eaf2ff}
+/* Slim tab shown when the pane is collapsed — click to reopen. */
+.phren-pp-reopen{
+  position:absolute;right:0;top:50%;transform:translateY(-50%);z-index:9;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 7px;
+  border:1px solid rgba(103,232,249,0.22);border-right:none;border-radius:10px 0 0 10px;
+  background:rgba(8,10,22,0.9);color:#c3ccef;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  box-shadow:-6px 0 24px rgba(0,0,0,0.4);
+}
+.phren-pp-reopen:hover{border-color:rgba(103,232,249,0.5);color:#eaf2ff}
+.phren-pp-reopen[hidden]{display:none}
+.phren-pp-reopen-label{
+  writing-mode:vertical-rl;font:700 9.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:0.14em;text-transform:uppercase;max-height:180px;overflow:hidden;text-overflow:ellipsis;
+}
 .phren-pp-controls{padding:10px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid rgba(103,232,249,0.1)}
 .phren-pp-search{
   width:100%;padding:8px 11px;border-radius:8px;
@@ -134,8 +150,10 @@ function injectPanelCss(): void {
 }
 
 let panelEl: HTMLElement | null = null;
+let reopenEl: HTMLElement | null = null;
 let renderedProjectId: string | null = null;
 let cursorId: string | null = null;
+let collapsed = false;
 const filters = {
   query: "",
   kind: "all" as "all" | "finding" | "task",
@@ -159,6 +177,30 @@ function sortComparator(a: RuntimeNode, b: RuntimeNode): number {
 function setLegendHidden(hidden: boolean): void {
   const legend = state.container?.querySelector<HTMLElement>(".phren-hud-legend");
   if (legend) legend.style.display = hidden ? "none" : "";
+}
+
+/** Show/refresh the slim re-open tab shown while the pane is collapsed. */
+function showReopenTab(projectName: string): void {
+  if (!state.container) return;
+  if (!reopenEl || !reopenEl.isConnected) {
+    reopenEl = document.createElement("button");
+    reopenEl.setAttribute("type", "button");
+    reopenEl.className = "phren-pp-reopen";
+    reopenEl.setAttribute("aria-label", "Expand project contents");
+    reopenEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      collapsed = false;
+      refreshProjectPanel();
+    });
+    reopenEl.addEventListener("pointerdown", (event) => event.stopPropagation());
+    state.container.appendChild(reopenEl);
+  }
+  reopenEl.innerHTML = `<span aria-hidden="true">‹</span><span class="phren-pp-reopen-label">${esc(projectName)}</span>`;
+  reopenEl.removeAttribute("hidden");
+}
+
+function hideReopenTab(): void {
+  reopenEl?.setAttribute("hidden", "");
 }
 
 function projectNodeByName(name: string): RuntimeNode | undefined {
@@ -270,6 +312,11 @@ function buildPanel(projectId: string): void {
         clearSelection();
         return;
       }
+      if (target?.closest("[data-pp-collapse]")) {
+        collapsed = true;
+        refreshProjectPanel();
+        return;
+      }
       const chip = target?.closest<HTMLElement>("[data-pp-chip]");
       if (chip) {
         applyChip(chip);
@@ -342,7 +389,10 @@ function buildPanel(projectId: string): void {
     `<div class="phren-pp-sub">${findingCount} findings · ${taskCount} tasks</div>`,
     healthBar,
     "</div>",
-    '<button type="button" class="phren-pp-close" data-pp-close aria-label="Close">×</button>',
+    '<div class="phren-pp-headbtns">',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
+    "</div>",
     "</div>",
     '<div class="phren-pp-controls">',
     `<input type="text" class="phren-pp-search" data-pp-search placeholder="Filter in project…" value="${esc(filters.query)}" />`,
@@ -448,11 +498,21 @@ export function refreshProjectPanel(opts?: { data?: boolean }): void {
       panelEl.setAttribute("hidden", "");
       panelEl.innerHTML = "";
     }
+    hideReopenTab();
     renderedProjectId = null;
     setLegendHidden(false);
     return;
   }
   setLegendHidden(true);
+
+  // Collapsed: hide the full pane, show a slim re-open tab instead.
+  if (collapsed) {
+    if (panelEl) panelEl.setAttribute("hidden", "");
+    const project = state.nodeById.get(ctx);
+    showReopenTab(project ? project.label || project.project || project.id : "project");
+    return;
+  }
+  hideReopenTab();
   if (ctx !== renderedProjectId || !panelEl || !panelEl.isConnected) {
     buildPanel(ctx);
     panelEl?.removeAttribute("hidden");

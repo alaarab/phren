@@ -41,4 +41,16 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.evaluate(() => (window as any).phrenGraph.selectNode("project:api-server"));
   await page.waitForTimeout(1000);
   await page.screenshot({ path: `${SHOT_DIR}/vscode-02-project.png` });
+
+  // Collapse the contents pane → slim re-open tab reclaims graph space.
+  await page.locator(".phren-project-panel [data-pp-collapse]").click();
+  await page.waitForTimeout(500);
+  await expect(page.locator(".phren-pp-reopen")).toBeVisible();
+  await expect(page.locator(".phren-project-panel")).toBeHidden();
+  await page.screenshot({ path: `${SHOT_DIR}/vscode-03-collapsed.png` });
+
+  // Re-open restores the pane.
+  await page.locator(".phren-pp-reopen").click();
+  await page.waitForTimeout(500);
+  await expect(page.locator(".phren-project-panel")).toBeVisible();
 });
