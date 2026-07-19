@@ -2062,12 +2062,16 @@ export function renderGraphHostScript(): string {
       // Server totals beat visible-adjacency counts (filters can hide nodes)
       var findingTotal = typeof node.findingCount === 'number' && node.findingCount > counts.finding ? node.findingCount : counts.finding;
       var taskTotal = typeof node.taskCount === 'number' && node.taskCount > counts.task ? node.taskCount : counts.task;
-      body += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + findingTotal + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + taskTotal + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Fragments</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.entity + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
-      body += '</div>';
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky card grid was redundant.
+      var stat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:var(--text-md);font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:10px 0">'
+        + stat(findingTotal, 'findings') + stat(taskTotal, 'tasks')
+        + stat(counts.entity, 'fragments') + stat(counts.reference, 'refs')
+        + '</div>';
+      body += '<div class="text-muted" style="font-size:var(--text-sm)">Browse and prune this project\\'s findings and tasks in the contents pane →</div>';
     } else if (node.kind === 'finding') {
       // GraphRAG-style stats row: links / project / helpful
       var conn = node.connections || {};
@@ -2252,34 +2256,48 @@ export function renderGraphHostScript(): string {
     });
   }
 
+  // Fire the delete API for one node (no confirm, no reload) — reused by single
+  // and batch delete so a bulk prune reloads the graph just once at the end.
+  function deleteNodeRequest(node) {
+    if (!node) return Promise.resolve({ ok: false, error: 'no node' });
+    if (node.kind === 'finding') {
+      return graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
+        text: node.tooltipLabel || node.fullLabel || '',
+        score_key: node.scoreKey || ''
+      });
+    }
+    if (node.kind === 'task') {
+      return graphRequest('/api/tasks/remove', 'POST', {
+        project: node.projectName,
+        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
+      });
+    }
+    return Promise.resolve({ ok: false, error: 'unsupported' });
+  }
+
   function deleteNode(node) {
     if (!node) return;
     if (!confirm('Delete this ' + (node.kind || 'node') + '?')) return;
-    if (node.kind === 'finding') {
-      graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
-        text: node.tooltipLabel || node.fullLabel || '',
-        score_key: node.scoreKey || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Finding deleted', 'ok');
-        return reloadGraph(null);
-      }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
-      });
-      return;
-    }
-    if (node.kind === 'task') {
-      graphRequest('/api/tasks/remove', 'POST', {
-        project: node.projectName,
-        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Task removed', 'ok');
-        return reloadGraph(null);
-      }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
-      });
-    }
+    deleteNodeRequest(node).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
+      graphToast(node.kind === 'task' ? 'Task removed' : 'Finding deleted', 'ok');
+      return reloadGraph(null);
+    }).catch(function(err) {
+      graphToast('Delete failed: ' + err.message, 'err');
+    });
+  }
+
+  function deleteNodes(nodes) {
+    if (!nodes || !nodes.length) return;
+    if (nodes.length === 1) { deleteNode(nodes[0]); return; }
+    if (!confirm('Delete ' + nodes.length + ' items?')) return;
+    Promise.all(nodes.map(function(n) {
+      return deleteNodeRequest(n).catch(function() { return { ok: false }; });
+    })).then(function(results) {
+      var ok = results.filter(function(r) { return r && r.ok; }).length;
+      graphToast('Deleted ' + ok + ' of ' + nodes.length, ok === nodes.length ? 'ok' : 'err');
+      return reloadGraph(null);
+    });
   }
 
   function deleteCurrentNode() {
@@ -2402,8 +2420,9 @@ export function renderGraphHostScript(): string {
       });
     }
     if (typeof api.onItemAction === 'function') {
-      api.onItemAction(function(node, action) {
-        if (action === 'delete') deleteNode(node);
+      api.onItemAction(function(payload, action) {
+        if (action === 'delete') deleteNode(payload);
+        else if (action === 'delete-batch') deleteNodes(payload);
       });
     }
     return true;

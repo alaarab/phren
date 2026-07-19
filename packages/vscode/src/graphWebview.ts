@@ -425,6 +425,45 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       return;
     }
 
+    if (command === "deleteBatch") {
+      const items = asArray(message.items)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+      if (!items.length) return;
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete ${items.length} item${items.length > 1 ? "s" : ""}?`,
+        { modal: true },
+        "Delete",
+      );
+      if (confirmed !== "Delete") return;
+
+      let ok = 0;
+      await mutate(async () => {
+        for (const it of items) {
+          const kind = asString(it.kind);
+          const projectName = asString(it.projectName);
+          if (!projectName || !isValidProjectName(projectName)) continue;
+          try {
+            if (kind === "finding") {
+              await client.removeFinding(projectName, asString(it.text) ?? "");
+              ok++;
+            } else if (kind === "task") {
+              await client.removeTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
+              ok++;
+            }
+          } catch {
+            // Skip failures; the refresh below reflects whatever succeeded.
+          }
+        }
+      });
+      await refreshGraph();
+      if (ok < items.length) {
+        vscode.window.showWarningMessage(`Deleted ${ok} of ${items.length} items.`);
+      }
+      return;
+    }
+
     if (command === "undoDeleteTask") {
       const projectName = asString(message.projectName);
       const item = asString(message.item);
@@ -1617,11 +1656,14 @@ ${graphScript}
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
-      body += '<div class="node-grid">'
-        + '<div class="node-metric"><div class="node-metric-label">Findings</div><div class="node-metric-value">' + counts.finding + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Tasks</div><div class="node-metric-value">' + counts.task + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Fragments</div><div class="node-metric-value">' + counts.entity + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">References</div><div class="node-metric-value">' + counts.reference + '</div></div>'
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky metric grid was redundant.
+      var pstat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:14px;font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:14px;padding:4px 0 2px">'
+        + pstat(counts.finding, 'findings') + pstat(counts.task, 'tasks')
+        + pstat(counts.entity, 'fragments') + pstat(counts.reference, 'refs')
         + '</div>';
       if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
     } else if (node.kind === 'finding') {
@@ -1944,6 +1986,29 @@ ${graphScript}
   if (window.phrenGraph && window.phrenGraph.onSelectionClear) {
     window.phrenGraph.onSelectionClear(function() {
       hidePopover(true);
+    });
+  }
+
+  // Row actions fired from the contents pane (delete). Deleting a specific node
+  // (not the selected one), so post messages from the node's own fields.
+  function deleteNodeMsg(node) {
+    if (!node) return;
+    if (node.kind === 'finding') {
+      vscode.postMessage({ command: 'deleteFinding', projectName: node.projectName, text: node.text || node.fullLabel || '', nodeId: node.id });
+    } else if (node.kind === 'task') {
+      vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
+    }
+  }
+  if (window.phrenGraph && window.phrenGraph.onItemAction) {
+    window.phrenGraph.onItemAction(function(payload, action) {
+      if (action === 'delete') {
+        deleteNodeMsg(payload);
+      } else if (action === 'delete-batch' && Array.isArray(payload)) {
+        // One message → one confirm on the extension side (not N modals).
+        vscode.postMessage({ command: 'deleteBatch', items: payload.map(function(n) {
+          return { kind: n.kind, projectName: n.projectName, text: n.text || n.fullLabel || '', item: (n.taskItemId || n.text || n.fullLabel || '') };
+        }) });
+      }
     });
   }
 

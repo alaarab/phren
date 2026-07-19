@@ -53,4 +53,13 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.locator(".phren-pp-reopen").click();
   await page.waitForTimeout(500);
   await expect(page.locator(".phren-project-panel")).toBeVisible();
+
+  // Multi-select mode: checkboxes + bulk delete bar (select the aging ones).
+  await page.locator(".phren-project-panel [data-pp-select]").click();
+  await page.locator('.phren-project-panel [data-pp-chip][data-health="aging"]').click();
+  await page.waitForTimeout(200);
+  await page.locator(".phren-project-panel [data-pp-bulk-all]").click();
+  await page.waitForTimeout(300);
+  await expect(page.locator(".phren-project-panel [data-pp-bulk-delete]")).toBeEnabled();
+  await page.screenshot({ path: `${SHOT_DIR}/vscode-04-bulk-select.png` });
 });
