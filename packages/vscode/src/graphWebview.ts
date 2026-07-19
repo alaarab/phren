@@ -967,6 +967,16 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
 </html>`;
 }
 
+/**
+ * Test-only: render the webview HTML with a stub webview so the exact markup,
+ * CSS, and inline host script can be driven in a plain browser (mirrors the
+ * web-ui's renderPageForTests). Not used by the extension at runtime.
+ */
+export function renderGraphHtmlForTests(payload: GraphPayload): string {
+  const stub = { cspSource: "vscode-webview:", asWebviewUri: (uri: unknown) => uri } as unknown as vscode.Webview;
+  return renderGraphHtml(stub, payload);
+}
+
 function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string {
   const nonce = getNonce();
   const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
@@ -1138,6 +1148,22 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       place-items: center;
       z-index: 1;
     }
+    /* Docked reading pane: the card pins to the left edge instead of chasing
+       the cursor (which covered the node you just clicked). Mirrors the web-ui;
+       the contents pane docks to the right, so left = detail, right = list. */
+    #node-popover.docked {
+      left: 12px;
+      top: 58px;
+      bottom: 12px;
+      right: auto;
+      width: min(360px, calc(100% - 24px));
+      max-width: none;
+    }
+    #node-popover.docked #node-popover-card {
+      height: 100%;
+      overflow: auto;
+    }
+    #node-popover.docked #node-popover-handle { display: none; }
     #node-popover-content {
       display: flex;
       flex-direction: column;
@@ -1558,45 +1584,17 @@ ${graphScript}
     if (skipSelectionClear !== true) clearGraphSelection();
   }
 
+  // The dossier docks to the left edge of the graph viewport — a stable reading
+  // pane instead of a cursor-chasing popover that covered the node you clicked.
+  // The x/y hint is kept for callers but no longer used for placement.
   function positionPopover(x, y) {
     if (!popover || !popoverCard) return;
-    popover.style.display = 'block';
+    popover.classList.add('docked');
+    popover.style.left = '';
+    popover.style.top = '';
     popover.setAttribute('aria-hidden', 'false');
-    popover.style.visibility = 'hidden';
-    requestAnimationFrame(function() {
-      var container = document.querySelector('.graph-container');
-      var cw = container ? container.getBoundingClientRect().width : 900;
-      var ch = container ? container.getBoundingClientRect().height : 600;
-      var cardRect = popoverCard.getBoundingClientRect();
-      var cardW = cardRect.width;
-      var cardH = cardRect.height;
-      var pad = 10;
-      var gap = 12;
-      var left, top;
-
-      // Pick side with more space horizontally
-      if (x + gap + cardW + pad < cw) {
-        left = x + gap;
-      } else if (x - gap - cardW > pad) {
-        left = x - gap - cardW;
-      } else {
-        left = Math.max(pad, (cw - cardW) / 2);
-      }
-      // Pick side with more space vertically
-      if (y - cardH / 2 > pad && y + cardH / 2 < ch - pad) {
-        top = y - cardH / 2; // center vertically on click
-      } else if (y + gap + cardH + pad < ch) {
-        top = y + gap;
-      } else if (y - gap - cardH > pad) {
-        top = y - gap - cardH;
-      } else {
-        top = Math.max(pad, (ch - cardH) / 2);
-      }
-
-      popover.style.left = left + 'px';
-      popover.style.top = top + 'px';
-      popover.style.visibility = 'visible';
-    });
+    popover.style.visibility = 'visible';
+    popover.style.display = 'block';
   }
 
   function renderDocs(node) {
@@ -1776,6 +1774,10 @@ ${graphScript}
     if (!currentNode || !popoverCard) return;
     var target = event.target;
     if (target instanceof Node && popoverCard.contains(target)) return;
+    // Renderer-owned HUD overlays (project navigator, contents pane + its
+    // re-open tab, filter bar, zoom controls) are legitimate UI, not a
+    // click-away dismiss. The 3D background still clears via onBackgroundClick.
+    if (target && target.closest && target.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 
