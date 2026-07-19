@@ -1118,6 +1118,31 @@ test.describe.serial("graph visualization e2e", () => {
     expect(after).toBeGreaterThan(before + 60);
   });
 
+  test("bulk delete offers undo that restores the findings", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await openGraphTab(page);
+    const repoAFindings = () => page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    const before = await repoAFindings();
+    expect(before).toBeGreaterThan(1);
+
+    await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      pg.selectNode(pg.getData().nodes.find((n: any) => n.kind === "project" && n.projectName === "repo-a").id);
+    });
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    await panel.locator("[data-pp-bulk-all]").click();
+    await panel.locator("[data-pp-bulk-delete]").click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(0);
+
+    // The undo toast restores everything (leaves the fixture as it was).
+    await page.locator("#toast-container button", { hasText: "Undo" }).click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(before);
+  });
+
   test("contents pane collapses to a tab and reopens", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");

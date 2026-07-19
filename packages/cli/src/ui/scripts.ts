@@ -1863,6 +1863,28 @@ export function renderGraphHostScript(): string {
     }, 2600);
   }
 
+  function graphUndoToast(message, onUndo) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.style.gap = '10px';
+    var msg = document.createElement('span');
+    msg.textContent = message;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Undo';
+    btn.style.cssText = 'cursor:pointer;border:1px solid var(--accent,#67e8f9);background:transparent;color:var(--accent,#67e8f9);border-radius:6px;padding:2px 10px;font:inherit;font-size:12px';
+    var remove = function() { if (toast.parentNode) toast.parentNode.removeChild(toast); };
+    btn.addEventListener('click', function() { remove(); onUndo(); });
+    toast.appendChild(msg);
+    toast.appendChild(btn);
+    container.appendChild(toast);
+    setTimeout(remove, 8000);
+  }
+
   function fetchCsrfToken() {
     return fetch(authUrl('/api/csrf-token')).then(function(r) { return r.json(); }).then(function(data) {
       return data && data.ok ? (data.token || null) : null;
@@ -2315,16 +2337,39 @@ export function renderGraphHostScript(): string {
     });
   }
 
+  function reAddNodes(items) {
+    return Promise.all(items.map(function(it) {
+      if (it.kind === 'finding') {
+        return graphRequest('/api/findings/' + encodeURIComponent(it.projectName), 'POST', { text: it.text }).catch(function() { return { ok: false }; });
+      }
+      if (it.kind === 'task') {
+        return graphRequest('/api/tasks/add', 'POST', { project: it.projectName, item: it.item }).catch(function() { return { ok: false }; });
+      }
+      return Promise.resolve({ ok: false });
+    })).then(function() {
+      graphToast('Restored ' + items.length + ' items', 'ok');
+      return reloadGraph(null);
+    });
+  }
+
   function deleteNodes(nodes) {
     if (!nodes || !nodes.length) return;
     if (nodes.length === 1) { deleteNode(nodes[0]); return; }
     if (!confirm('Delete ' + nodes.length + ' items?')) return;
+    var undoItems = nodes.map(function(n) {
+      return {
+        kind: n.kind, projectName: n.projectName,
+        text: n.tooltipLabel || n.fullLabel || '',
+        item: n.stableId || n.id || n.tooltipLabel || n.fullLabel || n.displayLabel || ''
+      };
+    });
     Promise.all(nodes.map(function(n) {
       return deleteNodeRequest(n).catch(function() { return { ok: false }; });
     })).then(function(results) {
       var ok = results.filter(function(r) { return r && r.ok; }).length;
-      graphToast('Deleted ' + ok + ' of ' + nodes.length, ok === nodes.length ? 'ok' : 'err');
-      return reloadGraph(null);
+      return reloadGraph(null).then(function() {
+        graphUndoToast('Deleted ' + ok + ' item' + (ok === 1 ? '' : 's'), function() { reAddNodes(undoItems); });
+      });
     });
   }
 
