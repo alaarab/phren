@@ -1046,6 +1046,24 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
   });
 
+  test("contents pane is resizable via its edge handle", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const before = (await panel.boundingBox())!.width;
+    const handle = panel.locator(".phren-pp-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x - 130, hb.y + hb.height / 2, { steps: 8 }); // drag inward → wider
+    await page.mouse.up();
+    const after = (await panel.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
   test("contents pane collapses to a tab and reopens", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
