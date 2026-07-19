@@ -438,7 +438,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       );
       if (confirmed !== "Delete") return;
 
-      let ok = 0;
+      const deleted: Array<{ kind: string; projectName: string; text: string; item: string }> = [];
       await mutate(async () => {
         for (const it of items) {
           const kind = asString(it.kind);
@@ -446,11 +446,13 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           if (!projectName || !isValidProjectName(projectName)) continue;
           try {
             if (kind === "finding") {
-              await client.removeFinding(projectName, asString(it.text) ?? "");
-              ok++;
+              const text = asString(it.text) ?? "";
+              await client.removeFinding(projectName, text);
+              deleted.push({ kind, projectName, text, item: "" });
             } else if (kind === "task") {
-              await client.removeTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
-              ok++;
+              const item = asString(it.item) ?? asString(it.text) ?? "";
+              await client.removeTask(projectName, item);
+              deleted.push({ kind, projectName, text: asString(it.text) ?? "", item });
             }
           } catch {
             // Skip failures; the refresh below reflects whatever succeeded.
@@ -458,9 +460,36 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
         }
       });
       await refreshGraph();
-      if (ok < items.length) {
-        vscode.window.showWarningMessage(`Deleted ${ok} of ${items.length} items.`);
+      // Offer an in-graph undo for the whole batch.
+      void panel.webview.postMessage({
+        type: "batchRemoved",
+        undo: { items: deleted, label: `Deleted ${deleted.length} item${deleted.length === 1 ? "" : "s"}` },
+      });
+      if (deleted.length < items.length) {
+        vscode.window.showWarningMessage(`Deleted ${deleted.length} of ${items.length} items.`);
       }
+      return;
+    }
+
+    if (command === "undoDeleteBatch") {
+      const items = asArray(message.items)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+      if (!items.length) return;
+      await mutate(async () => {
+        for (const it of items) {
+          const kind = asString(it.kind);
+          const projectName = asString(it.projectName);
+          if (!projectName || !isValidProjectName(projectName)) continue;
+          try {
+            if (kind === "finding") await client.addFinding(projectName, asString(it.text) ?? "");
+            else if (kind === "task") await client.addTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
+          } catch {
+            // best-effort restore
+          }
+        }
+      });
+      await refreshGraph();
       return;
     }
 
@@ -2035,6 +2064,12 @@ ${graphScript}
           }
         });
       }
+    }
+    if (data.type === 'batchRemoved' && data.undo && data.undo.items && data.undo.items.length) {
+      var batch = data.undo;
+      showUndoToast(batch.label || ('Deleted ' + batch.items.length + ' items'), function() {
+        vscode.postMessage({ command: 'undoDeleteBatch', items: batch.items });
+      });
     }
   });
 

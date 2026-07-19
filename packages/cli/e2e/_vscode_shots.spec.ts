@@ -71,4 +71,12 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(page.locator(".phren-project-panel [data-pp-bulk-delete]")).toBeEnabled();
   await page.screenshot({ path: `${SHOT_DIR}/vscode-04-bulk-select.png` });
+
+  // Batch-undo toast wiring: simulate the extension's batchRemoved message and
+  // confirm the undo toast surfaces (the extension round-trip is covered by the
+  // web-ui undo e2e).
+  await page.evaluate(() => window.postMessage({ type: "batchRemoved", undo: { items: [{ kind: "finding", projectName: "api-server", text: "x" }], label: "Deleted 3 items" } }, "*"));
+  await page.waitForTimeout(300);
+  await expect(page.locator("#graph-toast")).toBeVisible();
+  await expect(page.locator("#graph-toast")).toContainText("Undo");
 });
