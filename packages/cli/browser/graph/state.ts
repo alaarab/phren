@@ -44,6 +44,10 @@ export const state = {
   hoveredNodeId: null as string | null,
   focusedProjectId: null as string | null,
   searchMatchIds: new Set<string>(),
+  /** Search matches ordered best→worst; mirrors searchMatchIds. */
+  searchResults: [] as RuntimeNode[],
+  /** Cursor into searchResults for next/prev cycling; -1 = no active match. */
+  currentMatchIndex: -1,
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
   rightClickCallbacks: [] as Array<(node: NodeDetail, x: number, y: number) => void>,
@@ -373,11 +377,25 @@ export function rebuildHostNodes(): void {
 /** Recompute the set of visible nodes matching the current search query. */
 export function recomputeSearchMatches(): void {
   state.searchMatchIds = new Set();
+  state.searchResults = [];
   const query = state.searchQuery.trim().toLowerCase();
   if (!query) return;
+  const matched: RuntimeNode[] = [];
   for (const node of state.visibleNodes) {
-    if (node.searchText.includes(query)) state.searchMatchIds.add(node.id);
+    if (node.searchText.includes(query)) {
+      state.searchMatchIds.add(node.id);
+      matched.push(node);
+    }
   }
+  matched.sort((a, b) => matchRank(b, query) - matchRank(a, query));
+  state.searchResults = matched;
+}
+
+/** Score a match the way Enter-to-fly ranks: label prefix > substring > deep text. */
+function matchRank(node: RuntimeNode, query: string): number {
+  const label = node.label.toLowerCase();
+  const score = label.startsWith(query) ? 3 : label.includes(query) ? 2 : 1;
+  return score * 100000 + nodeRank(node);
 }
 
 /** The active focus mode, in priority order. */
@@ -393,22 +411,5 @@ export function focusMode(): FocusMode {
  * substring beats deep-text substring; nodeRank breaks ties.
  */
 export function bestSearchMatch(): RuntimeNode | null {
-  const query = state.searchQuery.trim().toLowerCase();
-  if (!query) return null;
-  let best: RuntimeNode | null = null;
-  let bestScore = -1;
-  for (const node of state.visibleNodes) {
-    if (!state.searchMatchIds.has(node.id)) continue;
-    const label = node.label.toLowerCase();
-    let score = 0;
-    if (label.startsWith(query)) score = 3;
-    else if (label.includes(query)) score = 2;
-    else score = 1;
-    const rank = score * 100000 + nodeRank(node);
-    if (rank > bestScore) {
-      bestScore = rank;
-      best = node;
-    }
-  }
-  return best;
+  return state.searchResults.length ? state.searchResults[0] : null;
 }

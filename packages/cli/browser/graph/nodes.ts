@@ -266,7 +266,7 @@ export function ensureFocusHalos(scene: THREE.Scene): void {
     return sprite;
   };
   hoverHalo = make(ACCENT_CYAN, 0.2);
-  selectHalo = make(ACCENT_AMBER, 0.26);
+  selectHalo = make(ACCENT_AMBER, 0.14);
 }
 
 export function disposeFocusHalos(): void {

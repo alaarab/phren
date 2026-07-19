@@ -38,7 +38,7 @@ import {
 } from "./interactions.js";
 import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
 import { mascotUpdate } from "./mascot.js";
-import { updateFilterBarCounter, updateHudStats } from "./hud.js";
+import { syncResultsAfterFilter, updateFilterBarCounter, updateHudStats } from "./hud.js";
 import { computeHierarchicalLayout } from "./layout.js";
 import { buildCages, disposeCages, setCageResolution } from "./cages.js";
 
@@ -171,9 +171,13 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
   state.visibleLinks = visibleData.links;
   state.visibleIds = new Set(visibleData.nodes.map((node) => node.id));
   rebuildHostNodes();
+  const prevMatchId = state.currentMatchIndex >= 0
+    ? (state.searchResults[state.currentMatchIndex]?.id ?? null)
+    : null;
   recomputeSearchMatches();
   if (state.fg) pushGraphData();
   updateFilterBarCounter();
+  syncResultsAfterFilter(prevMatchId);
   updateHudStats();
 
   if (state.selectedNodeId && !state.visibleAdjacency.has(state.selectedNodeId)) {
@@ -373,10 +377,10 @@ export function setupForceGraph(): void {
       if (pos && activeNode) {
         ringSprite.visible = true;
         ringSprite.position.copy(pos);
-        ringPhase = (ringPhase + dt * 0.85) % 1;
+        ringPhase = (ringPhase + dt * 0.6) % 1;
         const baseR = nodeRadius(activeNode) || 8;
-        ringSprite.scale.setScalar(baseR * (2 + ringPhase * 5.5));
-        (ringSprite.material as THREE.SpriteMaterial).opacity = (1 - ringPhase) * 0.5;
+        ringSprite.scale.setScalar(baseR * (1.6 + ringPhase * 3));
+        (ringSprite.material as THREE.SpriteMaterial).opacity = (1 - ringPhase) * 0.2;
       } else {
         ringSprite.visible = false;
       }
