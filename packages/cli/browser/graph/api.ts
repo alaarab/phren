@@ -337,7 +337,7 @@ ROOT.phrenGraph = {
   onRightClick(callback: (node: NodeDetail, x: number, y: number) => void) {
     state.rightClickCallbacks.push(callback);
   },
-  onItemAction(callback: (node: NodeDetail, action: string) => void) {
+  onItemAction(callback: (node: NodeDetail | NodeDetail[], action: string) => void) {
     state.itemActionCallbacks.push(callback);
   },
   clearSelection,

@@ -1020,6 +1020,50 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel).toBeHidden();
   });
 
+  test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    // Enter select mode → checkboxes + a bulk bar with delete disabled.
+    await panel.locator("[data-pp-select]").click();
+    await expect(panel.locator(".phren-pp-check").first()).toBeVisible();
+    const bar = panel.locator("[data-pp-bulk]");
+    await expect(bar).toBeVisible();
+    await expect(panel.locator("[data-pp-bulk-delete]")).toBeDisabled();
+
+    // Select all → delete enabled with a count.
+    await panel.locator("[data-pp-bulk-all]").click();
+    await expect(panel.locator("[data-pp-bulk-delete]")).toBeEnabled();
+    await expect(panel.locator("[data-pp-bulk-count]")).toContainText("selected");
+    await expect(panel.locator(".phren-pp-row.picked").first()).toBeVisible();
+
+    // Done exits select mode.
+    await panel.locator("[data-pp-bulk-done]").click();
+    await expect(bar).toBeHidden();
+    await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
+  });
+
+  test("contents pane is resizable via its edge handle", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const before = (await panel.boundingBox())!.width;
+    const handle = panel.locator(".phren-pp-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x - 130, hb.y + hb.height / 2, { steps: 8 }); // drag inward → wider
+    await page.mouse.up();
+    const after = (await panel.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
   test("contents pane collapses to a tab and reopens", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
