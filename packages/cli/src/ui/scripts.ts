@@ -2252,34 +2252,48 @@ export function renderGraphHostScript(): string {
     });
   }
 
+  // Fire the delete API for one node (no confirm, no reload) — reused by single
+  // and batch delete so a bulk prune reloads the graph just once at the end.
+  function deleteNodeRequest(node) {
+    if (!node) return Promise.resolve({ ok: false, error: 'no node' });
+    if (node.kind === 'finding') {
+      return graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
+        text: node.tooltipLabel || node.fullLabel || '',
+        score_key: node.scoreKey || ''
+      });
+    }
+    if (node.kind === 'task') {
+      return graphRequest('/api/tasks/remove', 'POST', {
+        project: node.projectName,
+        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
+      });
+    }
+    return Promise.resolve({ ok: false, error: 'unsupported' });
+  }
+
   function deleteNode(node) {
     if (!node) return;
     if (!confirm('Delete this ' + (node.kind || 'node') + '?')) return;
-    if (node.kind === 'finding') {
-      graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
-        text: node.tooltipLabel || node.fullLabel || '',
-        score_key: node.scoreKey || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Finding deleted', 'ok');
-        return reloadGraph(null);
-      }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
-      });
-      return;
-    }
-    if (node.kind === 'task') {
-      graphRequest('/api/tasks/remove', 'POST', {
-        project: node.projectName,
-        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Task removed', 'ok');
-        return reloadGraph(null);
-      }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
-      });
-    }
+    deleteNodeRequest(node).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
+      graphToast(node.kind === 'task' ? 'Task removed' : 'Finding deleted', 'ok');
+      return reloadGraph(null);
+    }).catch(function(err) {
+      graphToast('Delete failed: ' + err.message, 'err');
+    });
+  }
+
+  function deleteNodes(nodes) {
+    if (!nodes || !nodes.length) return;
+    if (nodes.length === 1) { deleteNode(nodes[0]); return; }
+    if (!confirm('Delete ' + nodes.length + ' items?')) return;
+    Promise.all(nodes.map(function(n) {
+      return deleteNodeRequest(n).catch(function() { return { ok: false }; });
+    })).then(function(results) {
+      var ok = results.filter(function(r) { return r && r.ok; }).length;
+      graphToast('Deleted ' + ok + ' of ' + nodes.length, ok === nodes.length ? 'ok' : 'err');
+      return reloadGraph(null);
+    });
   }
 
   function deleteCurrentNode() {
@@ -2402,8 +2416,9 @@ export function renderGraphHostScript(): string {
       });
     }
     if (typeof api.onItemAction === 'function') {
-      api.onItemAction(function(node, action) {
-        if (action === 'delete') deleteNode(node);
+      api.onItemAction(function(payload, action) {
+        if (action === 'delete') deleteNode(payload);
+        else if (action === 'delete-batch') deleteNodes(payload);
       });
     }
     return true;

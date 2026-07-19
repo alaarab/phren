@@ -1,4 +1,4 @@
-import type { RuntimeNode } from "./types.js";
+import type { NodeDetail, RuntimeNode } from "./types.js";
 import { clamp, esc, nodeDetail, state } from "./state.js";
 import { clearSelection, selectNode } from "./interactions.js";
 
@@ -136,6 +136,34 @@ const PANEL_CSS = `
 }
 .phren-pp-row:hover .phren-pp-del,.phren-pp-row.active .phren-pp-del{display:grid}
 .phren-pp-del:hover{border-color:rgba(255,84,112,0.7);background:rgba(255,84,112,0.18);color:#ffb3c1}
+.phren-pp-check{
+  flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;
+  border:1px solid rgba(103,232,249,0.35);background:rgba(12,15,30,0.9);
+  font-size:10px;line-height:1;color:#05060f;
+}
+.phren-pp-row.picked .phren-pp-check{background:#67e8f9;border-color:#67e8f9}
+.phren-pp-row.picked{background:rgba(103,232,249,0.08);border-color:rgba(103,232,249,0.3)}
+.phren-pp-bulk{
+  display:flex;align-items:center;gap:8px;padding:9px 12px;
+  border-top:1px solid rgba(103,232,249,0.16);background:rgba(10,13,26,0.96);
+}
+.phren-pp-bulk[hidden]{display:none}
+.phren-pp-bulk-count{
+  flex:1 1 auto;font:600 10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#8b96c9;letter-spacing:0.05em;
+}
+.phren-pp-bulk button{
+  cursor:pointer;padding:6px 10px;border-radius:7px;
+  font:650 9.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  letter-spacing:0.05em;text-transform:uppercase;
+  border:1px solid rgba(103,232,249,0.2);background:rgba(12,15,30,0.9);color:#c3ccef;
+}
+.phren-pp-bulk button:hover{border-color:rgba(103,232,249,0.5);color:#eaf2ff}
+.phren-pp-bulk button[data-pp-bulk-delete]{
+  border-color:rgba(255,84,112,0.4);color:#ff7b93;background:rgba(255,84,112,0.08);
+}
+.phren-pp-bulk button[data-pp-bulk-delete]:hover{border-color:rgba(255,84,112,0.75);color:#ffb3c1}
+.phren-pp-bulk button[data-pp-bulk-delete][disabled]{opacity:0.4;cursor:default}
 .phren-pp-empty{padding:22px 12px;text-align:center;color:#5b6488;
   font:600 10px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:0.06em}
 @media (max-width: 900px){.phren-project-panel{width:min(300px, calc(100% - 32px))}}
@@ -154,6 +182,8 @@ let reopenEl: HTMLElement | null = null;
 let renderedProjectId: string | null = null;
 let cursorId: string | null = null;
 let collapsed = false;
+let selectMode = false;
+const picked = new Set<string>();
 const filters = {
   query: "",
   kind: "all" as "all" | "finding" | "task",
@@ -243,19 +273,23 @@ function matchesFilters(node: RuntimeNode): boolean {
 }
 
 function rowHtml(node: RuntimeNode): string {
-  const active = state.selectedNodeId === node.id ? " active" : "";
+  const hasActions = state.itemActionCallbacks.length > 0;
+  const active = !selectMode && state.selectedNodeId === node.id ? " active" : "";
+  const isPicked = selectMode && picked.has(node.id) ? " picked" : "";
   const dotColor = node.kind === "task" ? node.baseColor : HEALTH_COLOR[node.health] || "#8b96c9";
   const label = node.fullLabel || node.label || node.id;
   const chip = node.kind === "task"
     ? (node.section || "task")
     : (node.topicLabel || node.topicSlug || node.health);
-  // The delete affordance only appears when a host has registered a handler
-  // (web-ui does; a host without one simply never shows a dead button).
-  const del = state.itemActionCallbacks.length
+  // In select mode rows carry a checkbox; otherwise a hover delete button
+  // (only when a host registered an action handler).
+  const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
+  const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
   return (
-    `<button type="button" class="phren-pp-row${active}" data-node-id="${esc(node.id)}" title="${esc(label)}">` +
+    `<button type="button" class="phren-pp-row${active}${isPicked}" data-node-id="${esc(node.id)}" title="${esc(label)}">` +
+    check +
     `<span class="phren-pp-dot" style="background:${esc(dotColor)};color:${esc(dotColor)}"></span>` +
     `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
     `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
@@ -293,6 +327,43 @@ function renderList(): void {
   // Drop the cursor if its row was filtered out; otherwise repaint it.
   if (cursorId && !rowIdsInOrder().includes(cursorId)) cursorId = null;
   paintCursor();
+  renderBulkBar();
+}
+
+/** Enter/leave multi-select mode (rebuilds so checkboxes + bulk bar appear). */
+function setSelectMode(on: boolean): void {
+  selectMode = on;
+  if (!on) picked.clear();
+  if (renderedProjectId) buildPanel(renderedProjectId);
+}
+
+/** Refresh the bulk-action footer (count, delete-enabled, visibility). */
+function renderBulkBar(): void {
+  if (!panelEl) return;
+  const bar = panelEl.querySelector<HTMLElement>("[data-pp-bulk]");
+  if (!bar) return;
+  if (!selectMode) { bar.setAttribute("hidden", ""); return; }
+  bar.removeAttribute("hidden");
+  const count = bar.querySelector<HTMLElement>("[data-pp-bulk-count]");
+  if (count) count.textContent = `${picked.size} selected`;
+  const del = bar.querySelector<HTMLButtonElement>("[data-pp-bulk-delete]");
+  if (del) {
+    del.disabled = picked.size === 0;
+    del.textContent = picked.size ? `Delete ${picked.size}` : "Delete";
+  }
+}
+
+/** Hand the picked items to the host as a batch delete, then leave select mode. */
+function commitBulkDelete(): void {
+  if (!picked.size) return;
+  const details = [...picked]
+    .map((id) => nodeDetail(id))
+    .filter((detail): detail is NodeDetail => Boolean(detail));
+  if (!details.length) return;
+  state.itemActionCallbacks.forEach((cb) => cb(details, "delete-batch"));
+  // The host deletes + refreshes (which rebuilds the pane); leave select mode.
+  selectMode = false;
+  picked.clear();
 }
 
 function buildPanel(projectId: string): void {
@@ -317,6 +388,24 @@ function buildPanel(projectId: string): void {
         refreshProjectPanel();
         return;
       }
+      if (target?.closest("[data-pp-select]")) {
+        setSelectMode(!selectMode);
+        return;
+      }
+      if (target?.closest("[data-pp-bulk-all]")) {
+        rowIdsInOrder().forEach((rid) => picked.add(rid));
+        renderList();
+        renderBulkBar();
+        return;
+      }
+      if (target?.closest("[data-pp-bulk-done]")) {
+        setSelectMode(false);
+        return;
+      }
+      if (target?.closest("[data-pp-bulk-delete]")) {
+        commitBulkDelete();
+        return;
+      }
       const chip = target?.closest<HTMLElement>("[data-pp-chip]");
       if (chip) {
         applyChip(chip);
@@ -334,6 +423,16 @@ function buildPanel(projectId: string): void {
       if (!row) return;
       const id = row.getAttribute("data-node-id");
       if (!id) return;
+      // Select mode: clicking a row toggles its pick instead of flying to it.
+      if (selectMode) {
+        if (picked.has(id)) picked.delete(id);
+        else picked.add(id);
+        row.classList.toggle("picked", picked.has(id));
+        const check = row.querySelector(".phren-pp-check");
+        if (check) check.textContent = picked.has(id) ? "✓" : "";
+        renderBulkBar();
+        return;
+      }
       if (target?.closest("[data-pp-del]")) {
         const detail = nodeDetail(id);
         if (detail) state.itemActionCallbacks.forEach((cb) => cb(detail, "delete"));
@@ -401,6 +500,9 @@ function buildPanel(projectId: string): void {
     `<span class="phren-pp-chip${filters.kind === "finding" ? " on" : ""}" data-pp-chip data-kind="finding">Findings</span>`,
     `<span class="phren-pp-chip${filters.kind === "task" ? " on" : ""}" data-pp-chip data-kind="task">Tasks</span>`,
     `<span class="phren-pp-chip${filters.health === "aging" ? " on" : ""}" data-pp-chip data-health="aging" title="Show only decaying or stale">⚠ Aging</span>`,
+    state.itemActionCallbacks.length
+      ? `<span class="phren-pp-chip${selectMode ? " on" : ""}" data-pp-select title="Select multiple to delete">☑ Select</span>`
+      : "",
     `<select class="phren-pp-sort" data-pp-sort aria-label="Sort items" title="Sort">`,
     `<option value="aging"${filters.sort === "aging" ? " selected" : ""}>Aging first</option>`,
     `<option value="recent"${filters.sort === "recent" ? " selected" : ""}>Recent</option>`,
@@ -409,6 +511,12 @@ function buildPanel(projectId: string): void {
     "</div>",
     "</div>",
     '<div class="phren-pp-list" data-pp-list></div>',
+    '<div class="phren-pp-bulk" data-pp-bulk hidden>',
+    '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
+    '<button type="button" data-pp-bulk-all>Select all</button>',
+    '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
+    '<button type="button" data-pp-bulk-done>Done</button>',
+    "</div>",
   ].join("");
 
   const searchInput = panelEl.querySelector<HTMLInputElement>("[data-pp-search]");
@@ -514,6 +622,8 @@ export function refreshProjectPanel(opts?: { data?: boolean }): void {
   }
   hideReopenTab();
   if (ctx !== renderedProjectId || !panelEl || !panelEl.isConnected) {
+    // Switching projects drops any in-progress multi-select (picks are per-project).
+    if (ctx !== renderedProjectId) { selectMode = false; picked.clear(); }
     buildPanel(ctx);
     panelEl?.removeAttribute("hidden");
     return;
