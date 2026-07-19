@@ -79,4 +79,12 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(page.locator("#graph-toast")).toBeVisible();
   await expect(page.locator("#graph-toast")).toContainText("Undo");
+
+  // Fragment context: selecting a fragment lists its connected projects + refs.
+  await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:AuthService"));
+  await page.waitForTimeout(1000);
+  const panel = page.locator(".phren-project-panel");
+  await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
+  await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
+  await page.screenshot({ path: `${SHOT_DIR}/vscode-05-fragment.png` });
 });

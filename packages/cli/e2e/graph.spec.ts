@@ -932,6 +932,40 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
 
+  test("selecting a fragment shows its connected projects and references", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha", findingCount: 2, taskCount: 1 },
+          { id: "project:beta", label: "beta", group: "project", project: "beta", findingCount: 1, taskCount: 0 },
+          { id: "entity:auth", label: "AuthService", group: "entity", entityType: "class", refCount: 5, connectedProjects: ["alpha", "beta"] },
+          { id: "ref:alpha/auth.ts", label: "auth.ts", group: "reference", project: "alpha" },
+        ],
+        links: [
+          { source: "entity:auth", target: "project:alpha" },
+          { source: "entity:auth", target: "project:beta" },
+          { source: "entity:auth", target: "ref:alpha/auth.ts" },
+        ],
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:auth"));
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
+    await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:alpha"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:beta"]')).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "References" })).toBeVisible();
+
+    // Clicking a connected project navigates the pane to that project.
+    await panel.locator('.phren-pp-row[data-node-id="project:alpha"]').click();
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Project");
+  });
+
   test("remount clears stale eager project labels", async ({ page }) => {
     await openGraphTab(page);
     const mountPayload = (proj: string, label: string) => ({
