@@ -1774,6 +1774,10 @@ ${graphScript}
     if (!currentNode || !popoverCard) return;
     var target = event.target;
     if (target instanceof Node && popoverCard.contains(target)) return;
+    // Renderer-owned HUD overlays (project navigator, contents pane + its
+    // re-open tab, filter bar, zoom controls) are legitimate UI, not a
+    // click-away dismiss. The 3D background still clears via onBackgroundClick.
+    if (target && target.closest && target.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 

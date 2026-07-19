@@ -105,6 +105,10 @@ function disposeNodeObject(fgNode: FGNode): void {
   if (fgNode.__wire) (fgNode.__wire.material as THREE.Material).dispose();
   if (fgNode.__ring) (fgNode.__ring.material as THREE.Material).dispose();
   if (fgNode.__halo) (fgNode.__halo.material as THREE.SpriteMaterial).dispose();
+  // Detach the eager label's CSS2DObject from the scene graph BEFORE removing
+  // its element — otherwise CSS2DRenderer re-appends the element on its next
+  // pass and the label lingers as a ghost after a remount (e.g. post-delete).
+  fgNode.__labelObj?.removeFromParent();
   if (fgNode.__labelEl) fgNode.__labelEl.remove();
   fgNode.__group = undefined;
   fgNode.__dot = undefined;
