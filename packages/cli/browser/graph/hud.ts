@@ -4,6 +4,7 @@ import { applyHighlight } from "./nodes.js";
 import { selectNode } from "./interactions.js";
 import { spawnLookupPulse } from "./mascot.js";
 import { applyFilters } from "./scene.js";
+import { buildProjectNav } from "./project-nav.js";
 
 // HUD chrome: the filter bar keeps its exact contract data-attributes
 // (hosts and e2e tests depend on them) but is restyled as holographic
@@ -475,6 +476,7 @@ export function buildHudOverlays(): void {
   }
   renderLegend();
   updateHudStats();
+  buildProjectNav();
 }
 
 function renderLegend(): void {
