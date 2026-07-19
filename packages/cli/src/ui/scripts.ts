@@ -2373,8 +2373,47 @@ export function renderGraphHostScript(): string {
     });
   }
 
+  // Merge two same-project findings into one: remove the originals, then add
+  // their joined text as a single finding.
+  function mergeNodes(nodes) {
+    if (!nodes || nodes.length !== 2) return;
+    var proj = nodes[0].projectName;
+    var t1 = nodes[0].tooltipLabel || nodes[0].fullLabel || '';
+    var t2 = nodes[1].tooltipLabel || nodes[1].fullLabel || '';
+    if (!t1 || !t2) return;
+    if (!confirm('Merge these 2 findings into one?')) return;
+    Promise.all(nodes.map(function(n) {
+      return deleteNodeRequest(n).catch(function() { return { ok: false }; });
+    })).then(function() {
+      return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t1 + '\\n' + t2 });
+    }).then(function(r) {
+      if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'add failed');
+      graphToast('Merged 2 findings', 'ok');
+      return reloadGraph(null);
+    }).catch(function(err) {
+      graphToast('Merge failed: ' + err.message, 'err');
+      return reloadGraph(null);
+    });
+  }
+
   function deleteCurrentNode() {
     deleteNode(currentNode);
+  }
+
+  // Open the dossier in edit mode for a finding/task chosen in the contents pane.
+  function editNodeFromPane(node) {
+    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    var api = graphApi();
+    if (api && api.selectNode) api.selectNode(node.id);
+    setTimeout(function() {
+      if (currentNode && currentNode.id === node.id) {
+        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+        var point = currentPopoverPoint();
+        renderPopover(currentNode, point.x, point.y);
+        var editor = document.getElementById('graph-node-editor');
+        if (editor) editor.focus();
+      }
+    }, 220);
   }
 
   function completeCurrentTask() {
@@ -2496,6 +2535,8 @@ export function renderGraphHostScript(): string {
       api.onItemAction(function(payload, action) {
         if (action === 'delete') deleteNode(payload);
         else if (action === 'delete-batch') deleteNodes(payload);
+        else if (action === 'edit') editNodeFromPane(payload);
+        else if (action === 'merge') mergeNodes(payload);
       });
     }
     return true;

@@ -471,6 +471,32 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       return;
     }
 
+    if (command === "mergeFindings") {
+      const projectName = asString(message.projectName);
+      const text1 = asString(message.text1) ?? "";
+      const text2 = asString(message.text2) ?? "";
+      if (!projectName || !isValidProjectName(projectName) || !text1 || !text2) return;
+
+      const confirmed = await vscode.window.showWarningMessage(
+        "Merge these 2 findings into one?",
+        { modal: true },
+        "Merge",
+      );
+      if (confirmed !== "Merge") return;
+
+      try {
+        await mutate(async () => {
+          await client.removeFinding(projectName, text1);
+          await client.removeFinding(projectName, text2);
+          await client.addFinding(projectName, `${text1}\n${text2}`);
+        });
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to merge findings: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
     if (command === "undoDeleteBatch") {
       const items = asArray(message.items)
         .map((entry) => asRecord(entry))
@@ -2089,10 +2115,32 @@ ${graphScript}
       vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
     }
   }
+  function editNodeFromPane(node) {
+    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    if (window.phrenGraph && window.phrenGraph.selectNode) window.phrenGraph.selectNode(node.id);
+    setTimeout(function() {
+      if (currentNode && currentNode.id === node.id) {
+        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+        var point = currentPoint();
+        renderPopover(currentNode, point.x, point.y);
+        var editor = document.getElementById('node-editor');
+        if (editor) editor.focus();
+      }
+    }, 220);
+  }
   if (window.phrenGraph && window.phrenGraph.onItemAction) {
     window.phrenGraph.onItemAction(function(payload, action) {
       if (action === 'delete') {
         deleteNodeMsg(payload);
+      } else if (action === 'edit') {
+        editNodeFromPane(payload);
+      } else if (action === 'merge' && Array.isArray(payload) && payload.length === 2) {
+        vscode.postMessage({
+          command: 'mergeFindings',
+          projectName: payload[0].projectName,
+          text1: payload[0].text || payload[0].fullLabel || '',
+          text2: payload[1].text || payload[1].fullLabel || '',
+        });
       } else if (action === 'delete-batch' && Array.isArray(payload)) {
         // One message → one confirm on the extension side (not N modals).
         vscode.postMessage({ command: 'deleteBatch', items: payload.map(function(n) {

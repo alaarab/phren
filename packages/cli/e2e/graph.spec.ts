@@ -932,6 +932,46 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
 
+  test("global review pill opens a cross-project aging list", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      const stale = new Date(Date.now() - 300 * 86400000).toISOString();
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha" },
+          { id: "project:beta", label: "beta", group: "project", project: "beta" },
+          { id: "finding:a1", label: "alpha stale one", group: "topic:general", project: "alpha", scoreKey: "ka1" },
+          { id: "finding:a2", label: "alpha healthy", group: "topic:general", project: "alpha", scoreKey: "ka2" },
+          { id: "finding:b1", label: "beta stale one", group: "topic:general", project: "beta", scoreKey: "kb1" },
+        ],
+        links: [
+          { source: "project:alpha", target: "finding:a1" },
+          { source: "project:alpha", target: "finding:a2" },
+          { source: "project:beta", target: "finding:b1" },
+        ],
+        scores: { ka1: { lastUsedAt: stale }, kb1: { lastUsedAt: stale } },
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    // The nav shows a "⚠ 2" review pill (a1 + b1 are stale; a2 is healthy).
+    const pill = page.locator(".phren-project-review");
+    await expect(pill).toBeVisible();
+    await expect(pill).toContainText("2");
+
+    await pill.click();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".phren-pp-kind")).toContainText("Needs review");
+    // Both projects' aging findings show; the healthy one does not.
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:b1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a2"]')).toHaveCount(0);
+    await expect(panel.locator(".phren-pp-group", { hasText: "alpha" })).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "beta" })).toBeVisible();
+  });
+
   test("selecting a fragment shows its connected projects and references", async ({ page }) => {
     await openGraphTab(page);
     await page.evaluate(() => {
@@ -1054,6 +1094,22 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel).toBeHidden();
   });
 
+  test("merge button appears only for two same-project findings", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    // Restrict to findings, enter select mode, pick all (fixture: 2 findings).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    const merge = panel.locator("[data-pp-bulk-merge]");
+    await expect(merge).toBeHidden(); // nothing picked yet
+    await panel.locator("[data-pp-bulk-all]").click();
+    await expect(merge).toBeVisible(); // exactly two same-project findings
+  });
+
   test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
@@ -1096,6 +1152,20 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     const after = (await pop.boundingBox())!.width;
     expect(after).toBeGreaterThan(before + 60);
+  });
+
+  test("row edit action opens the dossier editor for that finding", async ({ page }) => {
+    await openGraphTab(page);
+    // Select a project that has findings, so the pane lists editable rows.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const row = panel.locator('.phren-pp-row').filter({ has: page.locator("[data-pp-edit]") }).first();
+    await row.hover();
+    await row.locator("[data-pp-edit]").click();
+    // The dossier opens in edit mode (its textarea appears).
+    await expect(page.locator("#graph-node-editor")).toBeVisible({ timeout: 8_000 });
   });
 
   test("row peek flies to a node without changing selection", async ({ page }) => {
