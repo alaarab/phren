@@ -969,6 +969,53 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
   });
 
+  test("project contents pane lists items and navigates on row click", async ({ page }) => {
+    await openGraphTab(page);
+
+    const panel = page.locator(".phren-project-panel");
+    // Hidden until a project is in context.
+    await expect(panel).toBeHidden();
+
+    // Focus a project — the pane appears with its findings/tasks.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const rows = panel.locator(".phren-pp-row");
+    await expect.poll(async () => rows.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Clicking a row flies to that node and opens its dossier; the pane stays
+    // open (the item's project is still in context) with the row marked active.
+    const firstRowId = await rows.first().getAttribute("data-node-id");
+    await rows.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(`.phren-pp-row.active[data-node-id="${firstRowId}"]`)).toHaveCount(1);
+
+    // The close button clears selection and hides the pane.
+    await panel.locator("[data-pp-close]").click();
+    await expect(panel).toBeHidden();
+  });
+
+  test("project contents pane filter narrows the list", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const rows = panel.locator(".phren-pp-row");
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(0);
+
+    // "Findings" chip restricts the list to findings only (no task rows).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(panel.locator('.phren-pp-group', { hasText: /Tasks/ })).toHaveCount(0);
+
+    // A nonsense query empties the list.
+    await panel.locator("[data-pp-search]").fill("zzzzz-no-such-item-qqqq");
+    await expect(panel.locator(".phren-pp-empty")).toHaveCount(1);
+  });
+
   test("arrow keys cycle project focus through the navigator", async ({ page }) => {
     await openGraphTab(page);
 

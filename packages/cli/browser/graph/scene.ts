@@ -40,6 +40,7 @@ import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
 import { mascotUpdate } from "./mascot.js";
 import { syncResultsAfterFilter, updateFilterBarCounter, updateHudStats } from "./hud.js";
 import { buildProjectNav, stepProject } from "./project-nav.js";
+import { refreshProjectPanel } from "./project-panel.js";
 import { computeHierarchicalLayout } from "./layout.js";
 import { buildCages, disposeCages, setCageResolution } from "./cages.js";
 
@@ -181,6 +182,7 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
   syncResultsAfterFilter(prevMatchId);
   updateHudStats();
   buildProjectNav();
+  refreshProjectPanel({ data: true });
 
   if (state.selectedNodeId && !state.visibleAdjacency.has(state.selectedNodeId)) {
     state.selectedNodeId = null;
