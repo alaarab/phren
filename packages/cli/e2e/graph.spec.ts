@@ -931,4 +931,161 @@ test.describe.serial("graph visualization e2e", () => {
     const stats = page.locator(".phren-hud-stats");
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
+
+  test("remount clears stale eager project labels", async ({ page }) => {
+    await openGraphTab(page);
+    const mountPayload = (proj: string, label: string) => ({
+      nodes: [
+        { id: `project:${proj}`, label, group: "project", project: proj, findingCount: 1 },
+        { id: `finding:${proj}:0`, label: `${proj} finding`, group: "topic:general", project: proj },
+      ],
+      links: [{ source: `project:${proj}`, target: `finding:${proj}:0` }],
+      topics: [],
+    });
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("alpha", "alpha-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label--project", { hasText: "alpha-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+
+    // Remount with a different project — the previous project's label must not
+    // linger as a CSS2D ghost.
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("beta", "beta-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label", { hasText: "beta-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+    await expect(page.locator(".phren-label", { hasText: "alpha-proj" })).toHaveCount(0);
+  });
+
+  test("project navigator dock lists projects and selects one on click", async ({ page }) => {
+    await openGraphTab(page);
+
+    // The dock renders one orb per visible project (the fixture seeds two).
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Each orb carries the project node id it targets.
+    const firstOrbId = await orbs.first().getAttribute("data-project-id");
+    expect(firstOrbId).toBeTruthy();
+    const isProjectNode = await page.evaluate((id) => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.id === id);
+      return node?.kind === "project";
+    }, firstOrbId);
+    expect(isProjectNode).toBe(true);
+
+    // Clicking the orb focuses that project — no finding/task selection needed —
+    // and opens the dossier for it.
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+
+    // The clicked orb is marked active and the graph reports the focused project.
+    await expect(orbs.first()).toHaveClass(/active/);
+    const focused = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      // getData reflects host nodes; focus is internal — assert via the active orb.
+      return document.querySelector(".phren-project-orb.active")?.getAttribute("data-project-id") || null;
+    });
+    expect(focused).toBe(firstOrbId);
+
+    // Clicking the active orb again toggles focus off (clears selection).
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toHaveCSS("display", "none");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
+  });
+
+  test("project contents pane lists items and navigates on row click", async ({ page }) => {
+    await openGraphTab(page);
+
+    const panel = page.locator(".phren-project-panel");
+    // Hidden until a project is in context.
+    await expect(panel).toBeHidden();
+
+    // Focus a project — the pane appears with its findings/tasks.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const rows = panel.locator(".phren-pp-row");
+    await expect.poll(async () => rows.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Clicking a row flies to that node and opens its dossier; the pane stays
+    // open (the item's project is still in context) with the row marked active.
+    const firstRowId = await rows.first().getAttribute("data-node-id");
+    await rows.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(`.phren-pp-row.active[data-node-id="${firstRowId}"]`)).toHaveCount(1);
+
+    // The close button clears selection and hides the pane.
+    await panel.locator("[data-pp-close]").click();
+    await expect(panel).toBeHidden();
+  });
+
+  test("contents pane collapses to a tab and reopens", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    await panel.locator("[data-pp-collapse]").click();
+    await expect(page.locator(".phren-pp-reopen")).toBeVisible();
+    await expect(panel).toBeHidden();
+
+    await page.locator(".phren-pp-reopen").click();
+    await expect(panel).toBeVisible();
+    await expect(page.locator(".phren-pp-reopen")).toBeHidden();
+  });
+
+  test("interacting with the contents pane keeps the project focused", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The navigator orb reflects the focused project.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+
+    // Clicking a filter chip inside the pane must not clear the graph selection.
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
+  });
+
+  test("project contents pane filter narrows the list", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const rows = panel.locator(".phren-pp-row");
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(0);
+
+    // "Findings" chip restricts the list to findings only (no task rows).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(panel.locator('.phren-pp-group', { hasText: /Tasks/ })).toHaveCount(0);
+
+    // A nonsense query empties the list.
+    await panel.locator("[data-pp-search]").fill("zzzzz-no-such-item-qqqq");
+    await expect(panel.locator(".phren-pp-empty")).toHaveCount(1);
+  });
+
+  test("arrow keys cycle project focus through the navigator", async ({ page }) => {
+    await openGraphTab(page);
+
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(1);
+
+    // Focus the canvas (not a text field), then step forward with ArrowRight.
+    await page.locator("#graph-canvas").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    const firstActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+
+    // ArrowRight again moves to a different project.
+    await page.keyboard.press("ArrowRight");
+    const secondActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+    expect(secondActive).not.toBe(firstActive);
+  });
 });

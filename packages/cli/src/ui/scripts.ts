@@ -2252,13 +2252,13 @@ export function renderGraphHostScript(): string {
     });
   }
 
-  function deleteCurrentNode() {
-    if (!currentNode) return;
-    if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
-    if (currentNode.kind === 'finding') {
-      graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'DELETE', {
-        text: currentNode.tooltipLabel || currentNode.fullLabel || '',
-        score_key: currentNode.scoreKey || ''
+  function deleteNode(node) {
+    if (!node) return;
+    if (!confirm('Delete this ' + (node.kind || 'node') + '?')) return;
+    if (node.kind === 'finding') {
+      graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
+        text: node.tooltipLabel || node.fullLabel || '',
+        score_key: node.scoreKey || ''
       }).then(function(result) {
         if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
         graphToast('Finding deleted', 'ok');
@@ -2268,10 +2268,10 @@ export function renderGraphHostScript(): string {
       });
       return;
     }
-    if (currentNode.kind === 'task') {
+    if (node.kind === 'task') {
       graphRequest('/api/tasks/remove', 'POST', {
-        project: currentNode.projectName,
-        item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
+        project: node.projectName,
+        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
       }).then(function(result) {
         if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
         graphToast('Task removed', 'ok');
@@ -2280,6 +2280,10 @@ export function renderGraphHostScript(): string {
         graphToast('Delete failed: ' + err.message, 'err');
       });
     }
+  }
+
+  function deleteCurrentNode() {
+    deleteNode(currentNode);
   }
 
   function completeCurrentTask() {
@@ -2397,6 +2401,11 @@ export function renderGraphHostScript(): string {
         if (popover) popover.style.display = 'none';
       });
     }
+    if (typeof api.onItemAction === 'function') {
+      api.onItemAction(function(node, action) {
+        if (action === 'delete') deleteNode(node);
+      });
+    }
     return true;
   }
 
@@ -2404,6 +2413,9 @@ export function renderGraphHostScript(): string {
     var popover = document.getElementById('graph-node-popover-card');
     if (!currentNode || !popover) return;
     if (popover.contains(event.target)) return;
+    // Renderer-owned HUD overlays are legitimate UI, not a click-away dismiss.
+    var t = event.target;
+    if (t && t.closest && t.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 

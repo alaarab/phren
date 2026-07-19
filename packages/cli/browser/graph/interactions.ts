@@ -3,6 +3,8 @@ import type { FGNode, NodeDetail, RuntimeNode } from "./types.js";
 import { focusMode, nodeDetail, nodeRadius, scoreForNode, state } from "./state.js";
 import { applyHighlight, startIntroStagger } from "./nodes.js";
 import { mascotMoveTo } from "./mascot.js";
+import { syncProjectNavActive } from "./project-nav.js";
+import { refreshProjectPanel } from "./project-panel.js";
 
 export function containerSize(): { w: number; h: number } {
   const w = state.container?.clientWidth || 800;
@@ -139,6 +141,8 @@ export function clearSelection(): void {
   state.hoveredNodeId = null;
   hideTooltip();
   applyHighlight();
+  syncProjectNavActive();
+  refreshProjectPanel();
   notifyClear();
 }
 
@@ -156,6 +160,8 @@ export function selectNode(nodeId: string): boolean {
     state.selectedNodeId = null;
     state.hoveredNodeId = null;
     applyHighlight();
+    syncProjectNavActive();
+    refreshProjectPanel();
     flyToNode(fgNode, 900);
     // Notify hosts right away — the docked dossier doesn't wait on the
     // camera, and delaying was a flake source under load. The short defer
@@ -170,6 +176,8 @@ export function selectNode(nodeId: string): boolean {
   state.hoveredNodeId = nodeId;
   hideTooltip();
   applyHighlight();
+  syncProjectNavActive();
+  refreshProjectPanel();
   flyToNode(fgNode, 800);
   setTimeout(() => notifySelection(nodeId), 120);
   mascotMoveTo(nodeId, true);

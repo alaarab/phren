@@ -39,6 +39,8 @@ import {
 import { createLabelRenderer, injectLabelCss, labelTick } from "./labels.js";
 import { mascotUpdate } from "./mascot.js";
 import { syncResultsAfterFilter, updateFilterBarCounter, updateHudStats } from "./hud.js";
+import { buildProjectNav, stepProject } from "./project-nav.js";
+import { refreshProjectPanel } from "./project-panel.js";
 import { computeHierarchicalLayout } from "./layout.js";
 import { buildCages, disposeCages, setCageResolution } from "./cages.js";
 
@@ -179,6 +181,8 @@ export function applyFilters(options: { resetCamera?: boolean; emitSelection?: b
   updateFilterBarCounter();
   syncResultsAfterFilter(prevMatchId);
   updateHudStats();
+  buildProjectNav();
+  refreshProjectPanel({ data: true });
 
   if (state.selectedNodeId && !state.visibleAdjacency.has(state.selectedNodeId)) {
     state.selectedNodeId = null;
@@ -316,9 +320,20 @@ export function setupForceGraph(): void {
   state.cleanupFns.push(() => state.container?.removeEventListener("mousemove", onMouseMove));
 
   const onKeydown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
-    if (!state.selectedNodeId && !state.focusedProjectId) return;
-    clearSelection();
+    // Never steal keys while the user is typing in the search box or a field.
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+    if (event.key === "Escape") {
+      if (!state.selectedNodeId && !state.focusedProjectId) return;
+      clearSelection();
+      return;
+    }
+    // ←/→ step through projects via the navigator dock (Alt/Ctrl/Meta reserved).
+    if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      stepProject(event.key === "ArrowRight" ? 1 : -1);
+      event.preventDefault();
+    }
   };
   document.addEventListener("keydown", onKeydown);
   state.cleanupFns.push(() => document.removeEventListener("keydown", onKeydown));

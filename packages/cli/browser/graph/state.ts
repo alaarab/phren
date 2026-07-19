@@ -51,6 +51,8 @@ export const state = {
   nodeSelectCallbacks: [] as SelectCallback[],
   selectionClearCallbacks: [] as ClearCallback[],
   rightClickCallbacks: [] as Array<(node: NodeDetail, x: number, y: number) => void>,
+  /** Host handlers for row actions (e.g. delete) fired from the contents pane. */
+  itemActionCallbacks: [] as Array<(node: NodeDetail, action: string) => void>,
   filterTypes: {
     project: true,
     finding: true,
