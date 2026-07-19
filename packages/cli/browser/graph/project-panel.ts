@@ -295,6 +295,18 @@ const filters = {
   sort: "aging" as "aging" | "recent" | "az",
 };
 
+// Shared bulk-action footer (project + review panes). Merge is revealed by
+// renderBulkBar only when exactly two same-project findings are picked.
+const BULK_BAR_HTML = [
+  '<div class="phren-pp-bulk" data-pp-bulk hidden>',
+  '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
+  '<button type="button" data-pp-bulk-merge hidden>Merge</button>',
+  '<button type="button" data-pp-bulk-all>Select all</button>',
+  '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
+  '<button type="button" data-pp-bulk-done>Done</button>',
+  "</div>",
+].join("");
+
 /** Comparator for the current sort mode (applied within each group). */
 function sortComparator(a: RuntimeNode, b: RuntimeNode): number {
   if (filters.sort === "az") return (a.label || "").localeCompare(b.label || "");
@@ -465,6 +477,28 @@ function renderBulkBar(): void {
     del.disabled = picked.size === 0;
     del.textContent = picked.size ? `Delete ${picked.size}` : "Delete";
   }
+  // Merge is offered only for exactly two same-project findings.
+  const merge = bar.querySelector<HTMLButtonElement>("[data-pp-bulk-merge]");
+  if (merge) merge.toggleAttribute("hidden", !mergeEligible());
+}
+
+/** True when the current picks are exactly two findings in the same project. */
+function mergeEligible(): boolean {
+  if (picked.size !== 2) return false;
+  const nodes = [...picked].map((id) => state.nodeById.get(id));
+  return nodes.every((n) => n?.kind === "finding") && nodes[0]?.project === nodes[1]?.project;
+}
+
+/** Hand the two picked findings to the host to merge into one. */
+function commitMerge(): void {
+  if (!mergeEligible()) return;
+  const details = [...picked]
+    .map((id) => nodeDetail(id))
+    .filter((detail): detail is NodeDetail => Boolean(detail));
+  if (details.length !== 2) return;
+  state.itemActionCallbacks.forEach((cb) => cb(details, "merge"));
+  selectMode = false;
+  picked.clear();
 }
 
 /** Hand the picked items to the host as a batch delete, then leave select mode. */
@@ -523,6 +557,10 @@ function ensurePanelEl(): void {
       }
       if (target?.closest("[data-pp-bulk-delete]")) {
         commitBulkDelete();
+        return;
+      }
+      if (target?.closest("[data-pp-bulk-merge]")) {
+        commitMerge();
         return;
       }
       const chip = target?.closest<HTMLElement>("[data-pp-chip]");
@@ -645,12 +683,7 @@ function buildPanel(projectId: string): void {
     "</div>",
     "</div>",
     '<div class="phren-pp-list" data-pp-list></div>',
-    '<div class="phren-pp-bulk" data-pp-bulk hidden>',
-    '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
-    '<button type="button" data-pp-bulk-all>Select all</button>',
-    '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
-    '<button type="button" data-pp-bulk-done>Done</button>',
-    "</div>",
+    BULK_BAR_HTML,
   ].join("");
 
   // Keep any user-chosen width and (re)attach the edge resize handle (the
@@ -824,12 +857,7 @@ function buildReviewPanel(): void {
     "</div>",
     "</div>",
     '<div class="phren-pp-list" data-pp-list></div>',
-    '<div class="phren-pp-bulk" data-pp-bulk hidden>',
-    '<span class="phren-pp-bulk-count" data-pp-bulk-count>0 selected</span>',
-    '<button type="button" data-pp-bulk-all>Select all</button>',
-    '<button type="button" data-pp-bulk-delete disabled>Delete</button>',
-    '<button type="button" data-pp-bulk-done>Done</button>',
-    "</div>",
+    BULK_BAR_HTML,
   ].join("");
 
   attachResizeAndWidth();
