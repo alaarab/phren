@@ -932,6 +932,40 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
   });
 
+  test("selecting a fragment shows its connected projects and references", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha", findingCount: 2, taskCount: 1 },
+          { id: "project:beta", label: "beta", group: "project", project: "beta", findingCount: 1, taskCount: 0 },
+          { id: "entity:auth", label: "AuthService", group: "entity", entityType: "class", refCount: 5, connectedProjects: ["alpha", "beta"] },
+          { id: "ref:alpha/auth.ts", label: "auth.ts", group: "reference", project: "alpha" },
+        ],
+        links: [
+          { source: "entity:auth", target: "project:alpha" },
+          { source: "entity:auth", target: "project:beta" },
+          { source: "entity:auth", target: "ref:alpha/auth.ts" },
+        ],
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:auth"));
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
+    await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:alpha"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:beta"]')).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "References" })).toBeVisible();
+
+    // Clicking a connected project navigates the pane to that project.
+    await panel.locator('.phren-pp-row[data-node-id="project:alpha"]').click();
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Project");
+  });
+
   test("remount clears stale eager project labels", async ({ page }) => {
     await openGraphTab(page);
     const mountPayload = (proj: string, label: string) => ({
@@ -1046,6 +1080,60 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
   });
 
+  test("left detail dossier is resizable", async ({ page }) => {
+    await openGraphTab(page);
+    const findingId = await selectNodeOfKind(page, "finding");
+    expect(findingId).toBeTruthy();
+    const pop = page.locator("#graph-node-popover");
+    await expect(pop).toBeVisible({ timeout: 8_000 });
+
+    const before = (await pop.boundingBox())!.width;
+    const handle = pop.locator(".phren-dossier-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x + 130, hb.y + hb.height / 2, { steps: 8 }); // drag outward → wider
+    await page.mouse.up();
+    const after = (await pop.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
+  test("row peek flies to a node without changing selection", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The focused project shows an active navigator orb; no row is selected yet.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+
+    // Peek a finding row → camera flies, but selection/focus is untouched.
+    const row = panel.locator(".phren-pp-row").first();
+    await row.hover();
+    await row.locator("[data-pp-peek]").click();
+    await page.waitForTimeout(300);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
+  });
+
+  test("pane sort preference persists across reload", async ({ page }) => {
+    await openGraphTab(page);
+    let projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator("[data-pp-sort]").selectOption("recent");
+
+    // Reload the app (same origin → localStorage persists), reopen a project.
+    await openGraphTab(page);
+    projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator("[data-pp-sort]")).toHaveValue("recent");
+  });
+
   test("contents pane is resizable via its edge handle", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
@@ -1062,6 +1150,31 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     const after = (await panel.boundingBox())!.width;
     expect(after).toBeGreaterThan(before + 60);
+  });
+
+  test("bulk delete offers undo that restores the findings", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await openGraphTab(page);
+    const repoAFindings = () => page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    const before = await repoAFindings();
+    expect(before).toBeGreaterThan(1);
+
+    await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      pg.selectNode(pg.getData().nodes.find((n: any) => n.kind === "project" && n.projectName === "repo-a").id);
+    });
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    await panel.locator("[data-pp-bulk-all]").click();
+    await panel.locator("[data-pp-bulk-delete]").click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(0);
+
+    // The undo toast restores everything (leaves the fixture as it was).
+    await page.locator("#toast-container button", { hasText: "Undo" }).click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(before);
   });
 
   test("contents pane collapses to a tab and reopens", async ({ page }) => {

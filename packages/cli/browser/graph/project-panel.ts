@@ -1,6 +1,6 @@
 import type { NodeDetail, RuntimeNode } from "./types.js";
 import { clamp, esc, nodeDetail, state } from "./state.js";
-import { clearSelection, selectNode } from "./interactions.js";
+import { clearSelection, peekNode, selectNode } from "./interactions.js";
 
 // Project contents pane — a right-docked, scrollable index of a project's
 // findings and tasks. It appears whenever a project is "in context" (its orb
@@ -144,6 +144,13 @@ const PANEL_CSS = `
 }
 .phren-pp-row:hover .phren-pp-del,.phren-pp-row.active .phren-pp-del{display:grid}
 .phren-pp-del:hover{border-color:rgba(255,84,112,0.7);background:rgba(255,84,112,0.18);color:#ffb3c1}
+.phren-pp-peek{
+  flex:0 0 auto;width:22px;height:22px;padding:0;border-radius:6px;cursor:pointer;
+  border:1px solid rgba(103,232,249,0.28);background:rgba(103,232,249,0.06);
+  color:#67e8f9;font-size:11px;line-height:1;display:none;place-items:center;
+}
+.phren-pp-row:hover .phren-pp-peek,.phren-pp-row.active .phren-pp-peek{display:grid}
+.phren-pp-peek:hover{border-color:rgba(103,232,249,0.7);background:rgba(103,232,249,0.16);color:#aef1ff}
 .phren-pp-check{
   flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;
   border:1px solid rgba(103,232,249,0.35);background:rgba(12,15,30,0.9);
@@ -188,6 +195,7 @@ function injectPanelCss(): void {
 let panelEl: HTMLElement | null = null;
 let reopenEl: HTMLElement | null = null;
 let renderedProjectId: string | null = null;
+let renderedFragmentId: string | null = null;
 let cursorId: string | null = null;
 let collapsed = false;
 let selectMode = false;
@@ -196,6 +204,28 @@ const picked = new Set<string>();
 
 // Fixed right offset of the pane (matches `.phren-project-panel { right: 58px }`).
 const PANE_RIGHT = 58;
+
+// Persisted UI preferences (width, collapsed, sort) — survive reloads in both
+// hosts via localStorage. Filters/query stay transient (reset each session).
+const PREFS_KEY = "phren.graph.pane";
+let prefsLoaded = false;
+function loadPrefs(): void {
+  if (prefsLoaded) return;
+  prefsLoaded = true;
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw) as { width?: unknown; collapsed?: unknown; sort?: unknown };
+    if (typeof p.width === "number" && p.width > 0) panelWidth = p.width;
+    if (typeof p.collapsed === "boolean") collapsed = p.collapsed;
+    if (p.sort === "aging" || p.sort === "recent" || p.sort === "az") filters.sort = p.sort;
+  } catch { /* storage unavailable — use defaults */ }
+}
+function savePrefs(): void {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ width: panelWidth, collapsed, sort: filters.sort }));
+  } catch { /* ignore */ }
+}
 
 /** Begin an edge-drag resize of the pane. */
 function startResize(event: PointerEvent): void {
@@ -217,6 +247,7 @@ function startResize(event: PointerEvent): void {
     handle.classList.remove("dragging");
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
+    savePrefs();
   };
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
@@ -257,6 +288,7 @@ function showReopenTab(projectName: string): void {
     reopenEl.addEventListener("click", (event) => {
       event.stopPropagation();
       collapsed = false;
+      savePrefs();
       refreshProjectPanel();
     });
     reopenEl.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -274,16 +306,19 @@ function projectNodeByName(name: string): RuntimeNode | undefined {
   return state.rawNodes.find((node) => node.kind === "project" && (node.project || node.id) === name);
 }
 
-/** The project node id whose contents the pane should show, or null to hide. */
-function contextProjectId(): string | null {
-  if (state.focusedProjectId) return state.focusedProjectId;
+type PaneContext = { kind: "project" | "fragment"; id: string };
+
+/** What the pane should show: a project's contents, a fragment's network, or nothing. */
+function contextNode(): PaneContext | null {
+  if (state.focusedProjectId) return { kind: "project", id: state.focusedProjectId };
   if (state.selectedNodeId) {
     const node = state.nodeById.get(state.selectedNodeId);
     if (node) {
-      if (node.kind === "project") return node.id;
+      if (node.kind === "project") return { kind: "project", id: node.id };
+      if (node.kind === "entity") return { kind: "fragment", id: node.id };
       if (node.project) {
         const project = projectNodeByName(node.project);
-        if (project) return project.id;
+        if (project) return { kind: "project", id: project.id };
       }
     }
   }
@@ -318,9 +353,10 @@ function rowHtml(node: RuntimeNode): string {
   const chip = node.kind === "task"
     ? (node.section || "task")
     : (node.topicLabel || node.topicSlug || node.health);
-  // In select mode rows carry a checkbox; otherwise a hover delete button
-  // (only when a host registered an action handler).
+  // In select mode rows carry a checkbox; otherwise hover actions: peek (fly the
+  // camera without opening the dossier) and delete (only when a host supports it).
   const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
+  const peek = !selectMode ? `<span class="phren-pp-peek" data-pp-peek title="Show in graph">◎</span>` : "";
   const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
@@ -330,6 +366,7 @@ function rowHtml(node: RuntimeNode): string {
     `<span class="phren-pp-dot" style="background:${esc(dotColor)};color:${esc(dotColor)}"></span>` +
     `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
     `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
+    peek +
     del +
     `</button>`
   );
@@ -403,13 +440,15 @@ function commitBulkDelete(): void {
   picked.clear();
 }
 
-function buildPanel(projectId: string): void {
+/** Create the pane element (once) with its shared pointer/keyboard handlers. */
+function ensurePanelEl(): void {
   if (!state.container) return;
   injectPanelCss();
-  if (!panelEl || !panelEl.isConnected) {
-    panelEl = document.createElement("aside");
-    panelEl.className = "phren-project-panel";
-    panelEl.setAttribute("aria-label", "Project contents");
+  if (panelEl && panelEl.isConnected) return;
+  panelEl = document.createElement("aside");
+  panelEl.className = "phren-project-panel";
+  panelEl.setAttribute("aria-label", "Project contents");
+  {
     // Inside the force-graph container: stop the pointer sequence so ForceGraph
     // doesn't read it as a background click and clear the selection.
     panelEl.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -422,6 +461,7 @@ function buildPanel(projectId: string): void {
       }
       if (target?.closest("[data-pp-collapse]")) {
         collapsed = true;
+        savePrefs();
         refreshProjectPanel();
         return;
       }
@@ -470,6 +510,10 @@ function buildPanel(projectId: string): void {
         renderBulkBar();
         return;
       }
+      if (target?.closest("[data-pp-peek]")) {
+        peekNode(id);
+        return;
+      }
       if (target?.closest("[data-pp-del]")) {
         const detail = nodeDetail(id);
         if (detail) state.itemActionCallbacks.forEach((cb) => cb(detail, "delete"));
@@ -490,8 +534,14 @@ function buildPanel(projectId: string): void {
         event.preventDefault();
       }
     });
-    state.container.appendChild(panelEl);
   }
+  state.container.appendChild(panelEl);
+}
+
+function buildPanel(projectId: string): void {
+  if (!state.container) return;
+  ensurePanelEl();
+  if (!panelEl) return;
 
   const project = state.nodeById.get(projectId);
   const projectName = project ? project.label || project.project || project.id : "";
@@ -556,14 +606,9 @@ function buildPanel(projectId: string): void {
     "</div>",
   ].join("");
 
-  // Keep any user-chosen width, and (re)attach the edge resize handle (innerHTML
-  // above wiped the previous one).
-  if (panelWidth) panelEl.style.width = `${panelWidth}px`;
-  const resize = document.createElement("div");
-  resize.className = "phren-pp-resize";
-  resize.setAttribute("aria-hidden", "true");
-  resize.addEventListener("pointerdown", startResize);
-  panelEl.appendChild(resize);
+  // Keep any user-chosen width and (re)attach the edge resize handle (the
+  // innerHTML above wiped the previous one).
+  attachResizeAndWidth();
 
   const searchInput = panelEl.querySelector<HTMLInputElement>("[data-pp-search]");
   searchInput?.addEventListener("input", () => {
@@ -574,12 +619,96 @@ function buildPanel(projectId: string): void {
   const sortSelect = panelEl.querySelector<HTMLSelectElement>("[data-pp-sort]");
   sortSelect?.addEventListener("change", () => {
     filters.sort = (sortSelect.value as typeof filters.sort) || "aging";
+    savePrefs();
     renderList();
   });
 
   renderedProjectId = projectId;
+  renderedFragmentId = null;
   renderList();
   syncActiveRow();
+}
+
+/** A resize handle + saved width, shared by the project and fragment panels. */
+function attachResizeAndWidth(): void {
+  if (!panelEl || !state.container) return;
+  if (panelWidth) {
+    const cw = state.container.getBoundingClientRect().width;
+    panelEl.style.width = `${clamp(panelWidth, 260, Math.max(260, cw - 420))}px`;
+  }
+  const resize = document.createElement("div");
+  resize.className = "phren-pp-resize";
+  resize.setAttribute("aria-hidden", "true");
+  resize.addEventListener("pointerdown", startResize);
+  panelEl.appendChild(resize);
+}
+
+/** Render the pane for a fragment (entity): its connected projects + references. */
+function buildFragmentPanel(entityId: string): void {
+  if (!state.container) return;
+  ensurePanelEl();
+  if (!panelEl) return;
+
+  const node = state.nodeById.get(entityId);
+  const name = node ? node.label || node.id : "fragment";
+  const type = node?.entityType || "fragment";
+  const refCount = node?.refCount || 0;
+  const adj = state.fullAdjacency.get(entityId) || new Set<string>();
+  const neighbors = [...adj]
+    .map((id) => state.nodeById.get(id))
+    .filter((n): n is RuntimeNode => Boolean(n));
+  const byName = (a: RuntimeNode, b: RuntimeNode) => (a.label || "").localeCompare(b.label || "");
+  const projects = neighbors.filter((n) => n.kind === "project").sort(byName);
+  const refs = neighbors.filter((n) => n.kind === "reference").sort(byName);
+
+  const fragRow = (n: RuntimeNode, chip: string) => {
+    const dot = n.baseColor || "#8b96c9";
+    const label = n.label || n.id;
+    const active = state.selectedNodeId === n.id ? " active" : "";
+    return (
+      `<button type="button" class="phren-pp-row${active}" data-node-id="${esc(n.id)}" title="${esc(label)}">` +
+      `<span class="phren-pp-dot" style="background:${esc(dot)};color:${esc(dot)}"></span>` +
+      `<span class="phren-pp-rowlabel">${esc(label)}</span>` +
+      `<span class="phren-pp-rowchip">${esc(chip)}</span>` +
+      `<span class="phren-pp-peek" data-pp-peek title="Show in graph">◎</span>` +
+      "</button>"
+    );
+  };
+  const projItems = (n: RuntimeNode) => {
+    const f = typeof n.findingCount === "number" ? n.findingCount : 0;
+    const t = typeof n.taskCount === "number" ? n.taskCount : 0;
+    return `${f + t} items`;
+  };
+
+  const rows: string[] = [];
+  if (projects.length) {
+    rows.push(`<div class="phren-pp-group">Connected projects · ${projects.length}</div>`);
+    rows.push(...projects.map((p) => fragRow(p, projItems(p))));
+  }
+  if (refs.length) {
+    rows.push(`<div class="phren-pp-group">References · ${refs.length}</div>`);
+    rows.push(...refs.map((r) => fragRow(r, "ref")));
+  }
+  if (!rows.length) rows.push('<div class="phren-pp-empty">No connections</div>');
+
+  panelEl.innerHTML = [
+    '<div class="phren-pp-head">',
+    '<div class="phren-pp-title">',
+    '<div class="phren-pp-kind">Fragment</div>',
+    `<div class="phren-pp-name" title="${esc(name)}">${esc(name)}</div>`,
+    `<div class="phren-pp-sub">${esc(type)} · ${refCount} refs · ${projects.length} project${projects.length === 1 ? "" : "s"}</div>`,
+    "</div>",
+    '<div class="phren-pp-headbtns">',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
+    "</div>",
+    "</div>",
+    `<div class="phren-pp-list" data-pp-list>${rows.join("")}</div>`,
+  ].join("");
+
+  attachResizeAndWidth();
+  renderedFragmentId = entityId;
+  renderedProjectId = null;
 }
 
 function applyChip(chip: HTMLElement): void {
@@ -646,7 +775,8 @@ function syncActiveRow(): void {
  */
 export function refreshProjectPanel(opts?: { data?: boolean }): void {
   if (!state.container) return;
-  const ctx = contextProjectId();
+  loadPrefs();
+  const ctx = contextNode();
   if (!ctx) {
     if (panelEl) {
       panelEl.setAttribute("hidden", "");
@@ -654,6 +784,7 @@ export function refreshProjectPanel(opts?: { data?: boolean }): void {
     }
     hideReopenTab();
     renderedProjectId = null;
+    renderedFragmentId = null;
     setLegendHidden(false);
     return;
   }
@@ -662,15 +793,29 @@ export function refreshProjectPanel(opts?: { data?: boolean }): void {
   // Collapsed: hide the full pane, show a slim re-open tab instead.
   if (collapsed) {
     if (panelEl) panelEl.setAttribute("hidden", "");
-    const project = state.nodeById.get(ctx);
-    showReopenTab(project ? project.label || project.project || project.id : "project");
+    const node = state.nodeById.get(ctx.id);
+    showReopenTab(node ? node.label || node.project || node.id : ctx.kind);
     return;
   }
   hideReopenTab();
-  if (ctx !== renderedProjectId || !panelEl || !panelEl.isConnected) {
+
+  // Fragment context: a node's connected projects + references.
+  if (ctx.kind === "fragment") {
+    if (ctx.id !== renderedFragmentId || !panelEl || !panelEl.isConnected) {
+      selectMode = false;
+      picked.clear();
+      buildFragmentPanel(ctx.id);
+    }
+    panelEl?.removeAttribute("hidden");
+    syncActiveRow();
+    return;
+  }
+
+  // Project context.
+  if (ctx.id !== renderedProjectId || !panelEl || !panelEl.isConnected) {
     // Switching projects drops any in-progress multi-select (picks are per-project).
-    if (ctx !== renderedProjectId) { selectMode = false; picked.clear(); }
-    buildPanel(ctx);
+    if (ctx.id !== renderedProjectId) { selectMode = false; picked.clear(); }
+    buildPanel(ctx.id);
     panelEl?.removeAttribute("hidden");
     return;
   }
@@ -684,7 +829,7 @@ export function refreshProjectPanel(opts?: { data?: boolean }): void {
     if (node && (node.kind === "finding" || node.kind === "task") && !matchesFilters(node)) {
       filters.kind = "all";
       filters.health = "all";
-      buildPanel(ctx);
+      buildPanel(ctx.id);
       return;
     }
   }

@@ -60,6 +60,13 @@ for (const proj of ["api-server", "web-app"]) {
     edges.push({ source: "project:" + proj, target: id });
   }
 }
+// A fragment (entity) touching both projects + a reference doc.
+nodes.push({ id: "entity:AuthService", kind: "entity", projectName: "", label: "AuthService", text: "AuthService (class) - 5 refs", subtype: "class", entityType: "class", refCount: 5, connectedProjects: ["api-server", "web-app"], docs: ["api-server/auth.ts"], radius: 10, color: "#00E5FF" });
+edges.push({ source: "entity:AuthService", target: "project:api-server" });
+edges.push({ source: "entity:AuthService", target: "project:web-app" });
+nodes.push({ id: "ref:api-server/auth.ts", kind: "reference", projectName: "api-server", label: "auth.ts", text: "api-server/auth.ts", subtype: "reference", radius: 6, color: "#14b8a6" });
+edges.push({ source: "entity:AuthService", target: "ref:api-server/auth.ts" });
+
 const payload = { nodes, edges, summaries: {}, scores: { schemaVersion: 1, entries }, topics: topics.map(([slug, label]) => ({ slug, label })) };
 
 let html = renderGraphHtmlForTests(payload);

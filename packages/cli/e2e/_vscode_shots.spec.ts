@@ -37,6 +37,15 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   expect(box!.height).toBeGreaterThan(vp.height * 0.5); // full-height pane
   await page.screenshot({ path: `${SHOT_DIR}/vscode-01-finding-docked.png` });
 
+  // The docked dossier is resizable via its right-edge handle.
+  const dossierW = box!.width;
+  const dh = (await popover.locator(".dossier-resize").boundingBox())!;
+  await page.mouse.move(dh.x + dh.width / 2, dh.y + dh.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(dh.x + 120, dh.y + dh.height / 2, { steps: 8 });
+  await page.mouse.up();
+  expect((await popover.boundingBox())!.width).toBeGreaterThan(dossierW + 50);
+
   // A project selection should also dock left, with the contents pane at right.
   await page.evaluate(() => (window as any).phrenGraph.selectNode("project:api-server"));
   await page.waitForTimeout(1000);
@@ -62,4 +71,20 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(page.locator(".phren-project-panel [data-pp-bulk-delete]")).toBeEnabled();
   await page.screenshot({ path: `${SHOT_DIR}/vscode-04-bulk-select.png` });
+
+  // Batch-undo toast wiring: simulate the extension's batchRemoved message and
+  // confirm the undo toast surfaces (the extension round-trip is covered by the
+  // web-ui undo e2e).
+  await page.evaluate(() => window.postMessage({ type: "batchRemoved", undo: { items: [{ kind: "finding", projectName: "api-server", text: "x" }], label: "Deleted 3 items" } }, "*"));
+  await page.waitForTimeout(300);
+  await expect(page.locator("#graph-toast")).toBeVisible();
+  await expect(page.locator("#graph-toast")).toContainText("Undo");
+
+  // Fragment context: selecting a fragment lists its connected projects + refs.
+  await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:AuthService"));
+  await page.waitForTimeout(1000);
+  const panel = page.locator(".phren-project-panel");
+  await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
+  await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
+  await page.screenshot({ path: `${SHOT_DIR}/vscode-05-fragment.png` });
 });
