@@ -111,6 +111,7 @@ export type PhrenGraphApi = {
   onNodeSelect: (callback: SelectCallback) => void;
   onSelectionClear: (callback: ClearCallback) => void;
   onRightClick: (callback: (node: NodeDetail, x: number, y: number) => void) => void;
+  onItemAction: (callback: (node: NodeDetail, action: string) => void) => void;
   clearSelection: () => void;
   selectNode: (nodeId: string) => boolean;
   focusNode: (nodeId: string) => boolean;
