@@ -40,3 +40,7 @@ LEARNINGS.md
 # User config
 *.local.yaml
 docs/wp*.png
+
+# Sandbox-only Playwright config for local screenshot harness (points at the
+# pre-installed browser); not for CI.
+pw.tmp.config.ts
