@@ -22,6 +22,7 @@ describe("taxonomy consistency", () => {
   it("DOC_TYPES includes findings and canonical", () => {
     expect(DOC_TYPES).toContain("findings");
     expect(DOC_TYPES).toContain("canonical");
+    expect(DOC_TYPES).toContain("notes");
   });
 
   it("FINDING_TYPES has all 6 unified tags", () => {

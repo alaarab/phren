@@ -136,6 +136,7 @@ function seedProjectFixtures(phrenDir: string): void {
       "",
       "- [pattern] Browser smoke finding",
       "- [decision] Web UI should launch from an isolated test store",
+      "- [pattern] Review me first",
       "",
     ].join("\n"),
   );

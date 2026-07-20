@@ -3,6 +3,7 @@ export { handleSkillsNamespace, handleHooksNamespace, handleSkillList, handleDet
 export { handleProjectsNamespace } from "./namespaces-projects.js";
 export { handleTaskNamespace } from "./namespaces-tasks.js";
 export { handleFindingNamespace } from "./namespaces-findings.js";
+export { handleNoteNamespace } from "./namespaces-notes.js";
 export { handleStoreNamespace, handlePromoteNamespace } from "./namespaces-store.js";
 export { handleProfileNamespace } from "./namespaces-profile.js";
 export { handleReviewNamespace } from "./namespaces-review.js";

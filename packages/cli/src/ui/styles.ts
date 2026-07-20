@@ -705,4 +705,63 @@ export const LAYOUT_VIEWPORT_STYLES = `
   }
 `;
 
+export const FINDING_CAPTURE_UI_STYLES = `
+  .project-detail-header .capture-finding-btn { margin-left: auto; }
+  .finding-capture-bar {
+    display: flex;
+    gap: 8px;
+    padding: 14px 14px 0;
+  }
+  .finding-capture-bar input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    background: var(--surface);
+    color: var(--ink);
+    font: var(--text-sm) var(--font);
+  }
+  .finding-capture-bar input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+`;
 
+export const NOTES_UI_STYLES = `
+  .capture-note-btn { white-space: nowrap; }
+  .notes-panel { padding: 14px; }
+  .note-capture {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-raised);
+    margin-bottom: 20px;
+  }
+  .note-capture textarea {
+    width: 100%; min-height: 76px; resize: vertical; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--ink); font: var(--text-base) var(--font); line-height: 1.5;
+  }
+  .note-capture textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .note-capture-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+  .note-capture-actions input { padding: 7px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); }
+  .note-day { display: flex; flex-direction: column; gap: 9px; margin-bottom: 20px; }
+  .note-day-heading { font-size: var(--text-xs); font-weight: 700; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .note-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; background: var(--surface-raised); }
+  .note-card-meta { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: var(--text-xs); margin-bottom: 8px; }
+  .note-card-meta code { font-family: var(--mono); }
+  .note-promoted { color: var(--success); background: var(--success-dim); border-radius: 999px; padding: 1px 7px; font-weight: 600; }
+  .note-card-text { color: var(--ink-secondary); font-size: var(--text-base); line-height: 1.6; overflow-wrap: anywhere; }
+  .note-card-actions { display: flex; gap: 7px; margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border-light); }
+  .note-card-actions .note-remove { margin-left: auto; color: var(--danger); }
+  @media (max-width: 680px) {
+    .note-capture { grid-template-columns: 1fr; }
+    .note-capture-actions { flex-direction: row; }
+    .project-detail-header { flex-wrap: wrap; }
+  }
+`;

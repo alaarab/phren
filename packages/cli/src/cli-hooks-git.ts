@@ -180,6 +180,7 @@ export const TEAM_STORE_PATHSPECS = [
   "*/phren.project.yaml",
   "*/reference/**",
   "*/skills/**",
+  "*/notes/**",
   ".phren-team.yaml",
 ] as const;
 

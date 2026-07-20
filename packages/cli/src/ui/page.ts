@@ -1,12 +1,14 @@
 import { WEB_UI_STYLES, renderWebUiScript } from "./assets.js";
 import { renderGraphScript } from "./graph.js";
-import { LAYOUT_VIEWPORT_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
+import { FINDING_CAPTURE_UI_STYLES, LAYOUT_VIEWPORT_STYLES, NOTES_UI_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
 import { PHREN_DEEP_VOID_STYLES } from "./deep-void.js";
 import { GRAPH_HUD_STYLES } from "./graph-chrome.js";
 import {
   renderSharedWebUiHelpers,
   renderSkillUiEnhancementScript,
   renderProfileSwitcherScript,
+  renderFindingCaptureEnhancementScript,
+  renderNotesEnhancementScript,
   renderProjectReferenceEnhancementScript,
   renderTasksAndSettingsScript,
   renderReviewQueueKeyboardScript,
@@ -46,6 +48,8 @@ ${REVIEW_UI_STYLES}
 ${PHREN_DEEP_VOID_STYLES}
 ${LAYOUT_VIEWPORT_STYLES}
 ${GRAPH_HUD_STYLES}
+${FINDING_CAPTURE_UI_STYLES}
+${NOTES_UI_STYLES}
   </style>
 </head>
 <body>
@@ -418,6 +422,12 @@ ${renderGraphHostScript()}
 </script>
 <script${nonceAttr}>
 ${renderSharedWebUiHelpers(authToken || "")}
+</script>
+<script${nonceAttr}>
+${renderFindingCaptureEnhancementScript()}
+</script>
+<script${nonceAttr}>
+${renderNotesEnhancementScript()}
 </script>
 <script${nonceAttr}>
 ${renderSkillUiEnhancementScript(h(authToken || ""))}

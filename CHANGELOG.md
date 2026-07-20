@@ -5,7 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [0.1.38] - 2026-07-19
+## [0.1.38] - 2026-07-20
+
+### Added
+
+- **First-class daily notes across CLI, MCP, web UI, and VS Code.** Notes live in
+  per-project daily Markdown files, support add/list/edit/remove operations, and can be
+  promoted into durable typed findings when they become reusable knowledge.
+- Notes are explicitly searchable and sync with team stores while remaining excluded
+  from automatic hook injection and the knowledge graph, keeping lightweight working
+  context separate from curated findings.
+- Project-level **Add finding** and **Add note** operations are now directly available
+  in both the web UI and VS Code activity bar, including multiline capture and complete
+  note management in the project view.
+- `phren doctor` now checks that root config is materialized on disk, not merely tracked
+  in git, and distinguishes sparse-checkout exclusion from an outright missing file.
+  `phren doctor --fix` repairs it by widening the sparse-checkout patterns.
 
 ### Fixed
 
@@ -20,12 +35,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `phren store list` reported `projects: 0` for every store. `countStoreProjects` used a
   CommonJS `require()` inside an ESM module, which always threw `ReferenceError` into a
   bare `catch` that returned `0`.
-
-### Added
-
-- `phren doctor` now checks that root config is materialized on disk, not merely tracked
-  in git, and distinguishes sparse-checkout exclusion from an outright missing file.
-  `phren doctor --fix` repairs it by widening the sparse-checkout patterns.
+- Web UI lifecycle hook rows are selectable again, hook config reads remain constrained
+  to the exact supported config files, and edited review items now retain working
+  approve/reject actions.
 
 ## [0.1.37] - 2026-07-19
 

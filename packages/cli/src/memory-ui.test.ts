@@ -46,11 +46,20 @@ async function postForm(
   route: string,
   body: Record<string, string>
 ): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+  return requestForm(port, "POST", route, body);
+}
+
+async function requestForm(
+  port: number,
+  method: "POST" | "PUT" | "DELETE",
+  route: string,
+  body: Record<string, string>
+): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
   const payload = querystring.stringify(body);
   return await new Promise((resolve, reject) => {
     const req = http.request(
       {
-        method: "POST",
+        method,
         host: "127.0.0.1",
         port,
         path: route,
@@ -203,6 +212,32 @@ describe.sequential("web-ui server", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.indexPolicy.includeGlobs).toContain("docs/**/*.md");
     expect(parsed.indexPolicy.includeHidden).toBe(true);
+  });
+
+  it("supports daily note CRUD and promotion through the web API", async () => {
+    const added = await postForm(port, "/api/notes/demo", { text: "Web daily note", date: "2026-07-20" });
+    const addedBody = JSON.parse(added.body);
+    expect(addedBody.ok).toBe(true);
+    const noteId = addedBody.data.note.id as string;
+
+    const read = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/notes/demo`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    expect(JSON.parse(read).data.notes[0].id).toBe(noteId);
+
+    const edited = await requestForm(port, "PUT", "/api/notes/demo", { note: noteId, text: "Edited web daily note" });
+    expect(JSON.parse(edited.body).ok).toBe(true);
+
+    const promoted = await postForm(port, "/api/notes/demo", { action: "promote", note: noteId, finding_type: "pattern" });
+    expect(JSON.parse(promoted.body).ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmpRoot, "demo", "FINDINGS.md"), "utf8")).toContain("[pattern] Edited web daily note");
+
+    const removed = await requestForm(port, "DELETE", "/api/notes/demo", { note: noteId });
+    expect(JSON.parse(removed.body).ok).toBe(true);
   });
 
   it("change token updates when project content changes", async () => {
@@ -448,6 +483,34 @@ describe("web-ui HTML rendering", () => {
       expect(body).toContain('id="graph-node-content"');
       expect(body).toContain("phrenGraph");
       expect(body).toContain("/api/tasks/update");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders a project-level finding capture operation with a working refresh bridge", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-capture-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("+ Add finding");
+      expect(body).toContain("window.selectProjectFile = function(file)");
+      expect(body).toContain("data-finding-capture-submit");
+      expect(body).toContain("Record durable knowledge");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders the daily notes tab and full note operations", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-notes-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("+ Add note");
+      expect(body).toContain("notes:daily");
+      expect(body).toContain("Promote to finding");
+      expect(body).toContain("What happened today?");
     } finally {
       cleanup();
     }

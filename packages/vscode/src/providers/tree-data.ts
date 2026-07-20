@@ -5,6 +5,7 @@ import { readDeviceContext } from "../profileConfig";
 import type {
   DateFilter,
   FindingSummary,
+  NoteSummary,
   MessageNode,
   PhrenNode,
   ProjectNode,
@@ -165,6 +166,37 @@ export class TreeDataSource {
         }));
     } catch (error) {
       return [this.errorNode("Failed to load findings", error)];
+    }
+  }
+
+  // --- Tasks ---
+
+  async getNoteDateGroups(projectName: string): Promise<PhrenNode[]> {
+    try {
+      const notes = await this.fetchNotes(projectName);
+      if (notes.length === 0) return [{ kind: "message", label: "No notes yet", iconId: "note" }];
+      const counts = new Map<string, number>();
+      for (const note of notes) counts.set(note.date, (counts.get(note.date) ?? 0) + 1);
+      return [...counts].map(([date, count]) => ({ kind: "noteDateGroup" as const, projectName, date, count }));
+    } catch (error) {
+      return [this.errorNode("Failed to load notes", error)];
+    }
+  }
+
+  async getNotesForDate(projectName: string, date: string): Promise<PhrenNode[]> {
+    try {
+      const notes = await this.fetchNotes(projectName);
+      return notes.filter((note) => note.date === date).map((note) => ({
+        kind: "note" as const,
+        projectName,
+        id: note.id,
+        date: note.date,
+        time: note.time,
+        text: note.text,
+        promoted: note.promoted,
+      }));
+    } catch (error) {
+      return [this.errorNode("Failed to load notes", error)];
     }
   }
 
@@ -1059,6 +1091,30 @@ export class TreeDataSource {
       }
 
       return tasks;
+    });
+  }
+
+  private fetchNotes(projectName: string): Promise<NoteSummary[]> {
+    return this.cachedFetch(`notes:${projectName}`, async () => {
+      const raw = await this.client.getNotes(projectName);
+      const data = responseData(raw);
+      const notes = asArray(data?.notes);
+      const parsed: NoteSummary[] = [];
+      for (const entry of notes) {
+        const record = asRecord(entry);
+        const id = asString(record?.id);
+        const text = asString(record?.text);
+        const date = asString(record?.date);
+        if (!id || !text || !date) continue;
+        parsed.push({
+          id,
+          text,
+          date,
+          time: asString(record?.time) ?? "00:00:00",
+          promoted: asBoolean(record?.promoted) ?? false,
+        });
+      }
+      return parsed;
     });
   }
 

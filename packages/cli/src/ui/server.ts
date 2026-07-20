@@ -12,7 +12,10 @@ import {
 import { getNonPrimaryStores, subscribeStoreProjects, unsubscribeStoreProjects } from "../store-registry.js";
 import {
   editFinding,
+  editQueueItem,
+  approveQueueItem,
   readReviewQueue,
+  rejectQueueItem,
   removeFinding,
   readFindings,
   addFinding as addFindingStore,
@@ -25,13 +28,14 @@ import {
   FINDINGS_FILENAME,
 } from "../data/access.js";
 import { entryScoreKey } from "../governance/scores.js";
-import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "../utils.js";
+import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import {
   buildGraph,
   collectProjectsForUI,
   collectSkillsForUI,
   getHooksData,
+  isAllowedHookConfigPath,
   isAllowedSkillPath,
   readSyncSnapshot,
   recentAccepted,
@@ -51,7 +55,7 @@ import {
   writeProjectTopics,
 } from "../project-topics.js";
 import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
-import { setAccessRoles, ACCESS_ROLE_KEYS, type AccessRolePatch } from "../governance/rbac.js";
+import { setAccessRoles, ACCESS_ROLE_KEYS, permissionDeniedError, type AccessRolePatch } from "../governance/rbac.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
 import { buildConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -59,6 +63,9 @@ import { findSkill } from "../skill/registry.js";
 import { setSkillEnabledAndSync } from "../skill/files.js";
 import { repairPreexistingInstall } from "../init/setup.js";
 import { logger } from "../logger.js";
+import { addNote, editNote, listNotes, removeNote } from "../data/notes.js";
+import { promoteNote } from "../core/note.js";
+import { FINDING_TYPES, type FindingType } from "../shared.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -585,7 +592,9 @@ function handleGetSkills(res: Res, ctx: RouteCtx): void {
 
 function handleGetSkillContent(res: Res, url: string, ctx: RouteCtx): void {
   const filePath = String(parseQs(url).path || "");
-  if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path", 400);
+  if (!filePath || (!isAllowedSkillPath(filePath, ctx.phrenPath) && !isAllowedHookConfigPath(filePath, ctx.phrenPath))) {
+    return jsonErr(res, "Invalid path", 400);
+  }
   if (!fs.existsSync(filePath)) return jsonErr(res, "File not found");
   jsonOk(res, { ok: true, content: fs.readFileSync(filePath, "utf8") });
 }
@@ -757,6 +766,17 @@ function handleGetFindings(res: Res, pathname: string, ctx: RouteCtx): void {
   jsonOk(res, result.ok ? { ok: true, data: { project, findings: result.data } } : { ok: false, error: result.error });
 }
 
+function handleGetNotes(res: Res, url: string, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/notes/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  const date = String(parseQs(url).date || "") || undefined;
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  const result = listNotes(basePath, project, { date, limit: 500 });
+  jsonOk(res, result.ok
+    ? { ok: true, data: { project, notes: result.data } }
+    : { ok: false, error: result.error, errorCode: result.code });
+}
+
 // ── POST handlers ─────────────────────────────────────────────────────────────
 
 function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
@@ -788,12 +808,8 @@ function handlePostApprove(req: Req, res: Res, url: string, ctx: RouteCtx): void
     const line = String(parsed.line || "");
     if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
     try {
-      const qPath = queueFilePath(ctx.phrenPath, project);
-      if (fs.existsSync(qPath)) {
-        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
-        fs.writeFileSync(qPath, lines.join("\n"));
-      }
-      jsonOk(res, { ok: true });
+      const result = approveQueueItem(ctx.phrenPath, project, line);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
     }
@@ -806,14 +822,8 @@ function handlePostReject(req: Req, res: Res, url: string, ctx: RouteCtx): void 
     const line = String(parsed.line || "");
     if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
     try {
-      const qPath = queueFilePath(ctx.phrenPath, project);
-      if (fs.existsSync(qPath)) {
-        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
-        fs.writeFileSync(qPath, lines.join("\n"));
-      }
-      const findingText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-      if (findingText) removeFinding(ctx.phrenPath, project, findingText);
-      jsonOk(res, { ok: true });
+      const result = rejectQueueItem(ctx.phrenPath, project, line);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
     }
@@ -827,8 +837,7 @@ function handlePostEdit(req: Req, res: Res, url: string, ctx: RouteCtx): void {
     const newText = String(parsed.new_text || "");
     if (!project || !isValidProjectName(project) || !line || !newText) return jsonErr(res, "Missing project, line, or new_text");
     try {
-      const oldText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      const result = editQueueItem(ctx.phrenPath, project, line, newText);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
@@ -840,7 +849,9 @@ function handlePostSkillSave(req: Req, res: Res, url: string, ctx: RouteCtx): vo
   withPostBody(req, res, url, ctx, (parsed) => {
     const filePath = String(parsed.path || "");
     const content = String(parsed.content || "");
-    if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path");
+    if (!filePath || (!isAllowedSkillPath(filePath, ctx.phrenPath) && !isAllowedHookConfigPath(filePath, ctx.phrenPath))) {
+      return jsonErr(res, "Invalid path");
+    }
     try {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
@@ -1269,6 +1280,57 @@ function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, 
   }
 }
 
+function handleNotesWrite(req: Req, res: Res, url: string, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/notes/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const selector = String(parsed.note || "");
+    if (req.method === "POST" && String(parsed.action || "") === "promote") {
+      if (!selector) return jsonErr(res, "note is required", 400);
+      const denied = permissionDeniedError(basePath, "promote_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const findingTypeRaw = String(parsed.finding_type || "");
+      if (findingTypeRaw && !FINDING_TYPES.includes(findingTypeRaw as FindingType)) {
+        return jsonErr(res, `Invalid finding type: ${findingTypeRaw}`, 400);
+      }
+      const result = promoteNote(basePath, project, selector, findingTypeRaw as FindingType | undefined);
+      return jsonOk(res, result.ok
+        ? { ok: true, data: result.data, message: `Promoted ${result.data.note.id} to a finding.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    if (req.method === "POST") {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required", 400);
+      const denied = permissionDeniedError(basePath, "add_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const date = String(parsed.date || "") || undefined;
+      const result = addNote(basePath, project, text, { date });
+      return jsonOk(res, result.ok
+        ? { ok: true, data: { note: result.data }, message: `Added ${result.data.id}.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    if (!selector) return jsonErr(res, "note is required", 400);
+    if (req.method === "PUT") {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required", 400);
+      const denied = permissionDeniedError(basePath, "edit_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const result = editNote(basePath, project, selector, text);
+      return jsonOk(res, result.ok
+        ? { ok: true, data: { note: result.data }, message: `Updated ${result.data.id}.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    const denied = permissionDeniedError(basePath, "remove_note", project);
+    if (denied) return jsonErr(res, denied, 403);
+    const result = removeNote(basePath, project, selector);
+    return jsonOk(res, result.ok
+      ? { ok: true, data: { note: result.data }, message: `Removed ${result.data.id}.` }
+      : { ok: false, error: result.error, errorCode: result.code });
+  });
+}
+
 // ── Main router ───────────────────────────────────────────────────────────────
 
 export function createWebUiHttpServer(
@@ -1334,6 +1396,7 @@ export function createWebUiHttpServer(
       if (pathname.startsWith("/api/skill-content")) return handleGetSkillContent(res, url, ctx);
       if (pathname.startsWith("/api/graph")) return await handleGetGraph(res, url, ctx);
       if (pathname.startsWith("/api/findings/")) return handleGetFindings(res, pathname, ctx);
+      if (pathname.startsWith("/api/notes/")) return handleGetNotes(res, url, pathname, ctx);
     }
 
     // ── POST/PUT/DELETE routes ──
@@ -1368,6 +1431,7 @@ export function createWebUiHttpServer(
       }
       // Prefix-matched write routes
       if (pathname.startsWith("/api/findings/")) return handleFindingsWrite(req, res, url, pathname, ctx);
+      if (pathname.startsWith("/api/notes/")) return handleNotesWrite(req, res, url, pathname, ctx);
     }
 
     res.writeHead(404, { "content-type": "text/plain" });

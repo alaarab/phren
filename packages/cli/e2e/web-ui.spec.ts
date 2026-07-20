@@ -98,9 +98,43 @@ test.describe.serial("web-ui browser e2e", () => {
 
     await page.locator("button.nav-item").filter({ hasText: "Graph" }).click();
     await expect(page.locator("#graph-canvas")).toBeVisible();
-    await expect(page.locator("#graph-project-filter")).toContainText("repo-a");
-    await page.locator("#graph-project-filter .graph-proj-btn").filter({ hasText: "repo-a" }).click();
-    await expect(page.locator("#graph-project-filter .graph-proj-btn.active")).toHaveText("repo-a");
+    const projectNav = page.getByRole("navigation", { name: "Project navigator" });
+    const repoAOrb = projectNav.locator('.phren-project-orb[data-project-id="repo-a"]');
+    await expect(repoAOrb).toBeVisible();
+    await repoAOrb.click();
+    await expect(repoAOrb).toHaveClass(/active/);
+  });
+
+  test("captures a finding from the project operation and refreshes the list", async ({ page }) => {
+    await openWebUi(page);
+
+    await page.locator(".project-card").filter({ hasText: "repo-b" }).click();
+    await page.getByRole("button", { name: "+ Add finding" }).click();
+
+    const text = `web-capture-${Date.now()}`;
+    await page.locator("#finding-add-input").fill(text);
+    await page.getByRole("button", { name: "Add finding", exact: true }).click();
+
+    await expect(page.locator("#project-content")).toContainText(text);
+    await expect(page.locator(".finding-detail-card summary").filter({ hasText: text })).not.toContainText("<!--");
+  });
+
+  test("captures and promotes a daily note from the project operation", async ({ page }) => {
+    await openWebUi(page);
+
+    await page.locator(".project-card").filter({ hasText: "repo-b" }).click();
+    await page.getByRole("button", { name: "+ Add note" }).click();
+    const text = `web-note-${Date.now()}`;
+    await page.locator("#note-add-text").fill(text);
+    await page.getByRole("button", { name: "Add note", exact: true }).click();
+    await expect(page.locator(".note-card").filter({ hasText: text })).toBeVisible();
+
+    page.once("dialog", async (dialog) => dialog.accept("pattern"));
+    await page.locator(".note-card").filter({ hasText: text }).getByRole("button", { name: "Promote to finding" }).click();
+    await expect(page.locator(".note-card").filter({ hasText: text })).toContainText("promoted");
+
+    await page.locator(".project-detail-tab").filter({ hasText: "Findings" }).click();
+    await expect(page.locator("#project-content")).toContainText(text);
   });
 
   test("edits and approves a queued memory end-to-end", async ({ page }) => {
@@ -119,7 +153,7 @@ test.describe.serial("web-ui browser e2e", () => {
 
     await page.locator(".review-card-check").click();
     await expect(page.locator("#batch-bar")).toContainText("1 selected");
-    await page.getByRole("button", { name: "Approve All" }).click();
+    await page.getByRole("button", { name: "Approve selected" }).click();
     await expect(page.locator(".review-card")).toHaveCount(0, { timeout: 8_000 });
 
     await page.locator("button.nav-item").filter({ hasText: "Projects" }).click();

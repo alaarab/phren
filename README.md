@@ -94,6 +94,7 @@ Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user pro
 phren                                   Interactive memory shell
 phren search <query>                    Full-text search with FTS5
 phren add-finding <project> "insight"
+phren note add <project> "daily note"  Add a lightweight daily note
 phren task add <project> "item"         Add a task
 phren session_start <project>           Start a session
 phren store list                        List personal + team stores
@@ -109,7 +110,7 @@ See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/)
 
 ## Team stores
 
-Shared knowledge repos for teams. One person creates with `phren team init`, others join with `phren team join`. Findings, tasks, and skills sync across team members.
+Shared knowledge repos for teams. One person creates with `phren team init`, others join with `phren team join`. Findings, daily notes, tasks, and skills sync across team members.
 
 Each team store can be configured with per-project subscriptions so people only see what they care about.
 
@@ -130,7 +131,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (54 tools, FTS5, hooks) |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 tools, FTS5, hooks) |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 
 ---

@@ -1574,7 +1574,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">All 54 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">All 59 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
 
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
@@ -1588,6 +1588,14 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">get_review_queue</span><span class="ref-card-desc">Items waiting for review</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">manage_review_item</span><span class="ref-card-desc">Approve, reject, or edit a review queue item</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, line, action, new_text?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">doctor_fix</span><span class="ref-card-desc">Run doctor self-heal and apply fixes</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+
+        <h2 id="mcp-notes">Daily Notes <span class="cat-badge cat-memory">5 tools</span> <a href="#mcp-notes" class="anchor-link">#</a></h2>
+        <p>Lightweight daily Markdown notes are explicitly searchable but are not automatically injected or included in finding lifecycle and graph processing.</p>
+        <details class="ref-card"><summary><span class="ref-card-name">get_notes</span><span class="ref-card-desc">List daily notes newest-first</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, date?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">add_note</span><span class="ref-card-desc">Add a daily Markdown note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, text, date?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">edit_note</span><span class="ref-card-desc">Replace note text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, text)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">remove_note</span><span class="ref-card-desc">Remove one note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">promote_note</span><span class="ref-card-desc">Copy a note to durable findings</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, findingType?)</div></div></details>
 
         <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">6 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
 
@@ -2079,7 +2087,7 @@ npm test</code></pre>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (53 public tools across 12 modules)</td></tr>
+            <tr><td><code>packages/cli/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (59 public tools across 13 modules)</td></tr>
             <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
             <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
             <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>

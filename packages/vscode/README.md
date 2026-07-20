@@ -2,12 +2,12 @@
 
 Phren inside the editor, where it belongs.
 
-This extension connects VS Code to your local Phren store and MCP server so you can inspect projects, search memory, review findings, work through tasks, and edit skills without leaving the editor.
+This extension connects VS Code to your local Phren store and MCP server so you can inspect projects, capture daily notes, search memory, review findings, work through tasks, and edit skills without leaving the editor.
 
 ## What It Does
 
 - Adds a dedicated **Phren** view in the activity bar.
-- Lists tracked Phren projects with drill-down sections for findings, tasks, sessions, review queue, and reference docs.
+- Lists tracked Phren projects with drill-down sections for findings, daily notes, tasks, sessions, review queue, and reference docs.
 - Shows **priority, pinned, and GitHub issue badges** on task tree items. At a glance you can see task priority (`high`/`medium`/`low`), whether a task is pinned, and which tasks are linked to a GitHub issue.
 - Shows **type and confidence badges** on finding tree items. Each finding displays its type tag (`[decision]`, `[pitfall]`, etc.) and a confidence indicator when confidence is below threshold.
 - Theme-aware **status bar** that uses VS Code color tokens for seamless integration with any installed theme.
@@ -15,6 +15,7 @@ This extension connects VS Code to your local Phren store and MCP server so you 
 - Updated **review queue viewer** with a contextual notice explaining what each queue section contains.
 - Opens findings, skills, reference files, queue items, and sessions in read-only or editable panels directly in VS Code.
 - Lets you add a finding from the editor context menu by selecting text and running **Phren: Add Finding**.
+- Lets you add lightweight notes from the Notes category or selected editor text, then edit, remove, or promote them to findings.
 - **Finding lifecycle commands**: supersede, retract, and resolve contradictions between findings directly from the sidebar.
 - **GitHub issue integration**: link tasks to existing issues or create new issues from tasks, all from the sidebar.
 - Syncs your Phren store (`git push`) without leaving VS Code.
@@ -48,7 +49,7 @@ Once set, open the Phren activity bar item and the extension loads your projects
 
 ## Commands
 
-### Command Palette (17)
+### Command Palette
 
 These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 
@@ -58,6 +59,7 @@ These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 | `Phren: Show Fragment Graph` | — | Open the fragment graph in a webview with animated nodes and keyboard navigation. |
 | `Phren: Refresh` | — | Reload all data from the Phren MCP server. |
 | `Phren: Add Finding` | — | Save a finding to the active project (also available in the editor context menu when text is selected). |
+| `Phren: Add Note` | — | Add a lightweight daily note to the active project or selected project category. |
 | `Phren: Set Active Project` | — | Switch the active project context. |
 | `Phren: Sync` | — | Commit and push all Phren changes to remote. |
 | `Phren: Doctor` | — | Run health checks and report any issues. |
@@ -72,7 +74,7 @@ These commands are available via `Ctrl+Shift+P` / `Cmd+Shift+P`:
 | `Phren: Open machines.yaml` | — | Open the machines config file directly. |
 | `Phren: Project Config` | — | View and edit project-level configuration. |
 
-### Sidebar and Context Menu (16)
+### Sidebar and Context Menu
 
 These commands fire from the Phren sidebar or editor context menu. They are not shown in the command palette by default:
 
@@ -88,6 +90,10 @@ These commands fire from the Phren sidebar or editor context menu. They are not 
 | `Phren: Pin Task` | Active task inline action | Pin a task so it stays visible across sessions. |
 | `Phren: Update Task` | Active task inline action | Edit a task's text or priority. |
 | `Phren: Remove Finding` | Finding item inline action | Remove a finding by match. |
+| `Phren: Open Note` | Note item click | Open a Markdown preview of the note. |
+| `Phren: Edit Note` | Note item context menu | Edit the note text. |
+| `Phren: Remove Note` | Note item context menu | Remove the note. |
+| `Phren: Promote Note to Finding` | Note item inline action | Copy a note to durable findings while keeping its daily source. |
 | `Phren: Supersede Finding` | Finding item context menu | Mark a finding as superseded by a newer one. |
 | `Phren: Retract Finding` | Finding item context menu | Retract a finding with a reason. |
 | `Phren: Resolve Contradiction` | Finding item context menu | Resolve a contradiction between two conflicting findings. |
@@ -103,7 +109,7 @@ Tree item clicks (findings, tasks, skills, queue items, project files) open deta
 
 The sidebar is structured around real Phren objects:
 
-- **Projects**: expands into Findings (with date groups), Tasks (Queue/Active/Done), Sessions, Review Queue, and Reference.
+- **Projects**: expands into Findings and Notes (both grouped by date), Tasks (Queue/Active/Done), Sessions, Review Queue, and Reference.
 - **Skills**: grouped by scope, project-local and global skills shown separately.
 - **Hooks**: current hook state for each registered tool.
 - **Fragment Graph**: one-click entry into the graph view.
