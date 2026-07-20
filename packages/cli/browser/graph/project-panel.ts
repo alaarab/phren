@@ -295,6 +295,24 @@ const filters = {
   sort: "aging" as "aging" | "recent" | "az",
 };
 
+/** Shared pane header (kind eyebrow · name · sub-line · optional extra block). */
+function paneHeadHtml(opts: { kind: string; name: string; sub: string; extra?: string; kindStyle?: string }): string {
+  return [
+    '<div class="phren-pp-head">',
+    '<div class="phren-pp-title">',
+    `<div class="phren-pp-kind"${opts.kindStyle ? ` style="${opts.kindStyle}"` : ""}>${opts.kind}</div>`,
+    `<div class="phren-pp-name" title="${esc(opts.name)}">${esc(opts.name)}</div>`,
+    `<div class="phren-pp-sub">${opts.sub}</div>`,
+    opts.extra || "",
+    "</div>",
+    '<div class="phren-pp-headbtns">',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
+    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
+    "</div>",
+    "</div>",
+  ].join("");
+}
+
 // Shared bulk-action footer (project + review panes). Merge is revealed by
 // renderBulkBar only when exactly two same-project findings are picked.
 const BULK_BAR_HTML = [
@@ -438,6 +456,7 @@ function renderList(): void {
   if (!findings.length && !tasks.length) {
     listEl.innerHTML = `<div class="phren-pp-empty">No matching items</div>`;
     cursorId = null;
+    renderBulkBar();
     return;
   }
   let html = "";
@@ -653,18 +672,12 @@ function buildPanel(projectId: string): void {
     : "";
 
   panelEl.innerHTML = [
-    '<div class="phren-pp-head">',
-    '<div class="phren-pp-title">',
-    '<div class="phren-pp-kind">Project</div>',
-    `<div class="phren-pp-name" title="${esc(projectName)}">${esc(projectName)}</div>`,
-    `<div class="phren-pp-sub">${findingCount} findings · ${taskCount} tasks</div>`,
-    healthBar,
-    "</div>",
-    '<div class="phren-pp-headbtns">',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
-    "</div>",
-    "</div>",
+    paneHeadHtml({
+      kind: "Project",
+      name: projectName,
+      sub: `${findingCount} findings · ${taskCount} tasks`,
+      extra: healthBar,
+    }),
     '<div class="phren-pp-controls">',
     `<input type="text" class="phren-pp-search" data-pp-search placeholder="Filter in project…" value="${esc(filters.query)}" />`,
     '<div class="phren-pp-chips">',
@@ -772,17 +785,11 @@ function buildFragmentPanel(entityId: string): void {
   if (!rows.length) rows.push('<div class="phren-pp-empty">No connections</div>');
 
   panelEl.innerHTML = [
-    '<div class="phren-pp-head">',
-    '<div class="phren-pp-title">',
-    '<div class="phren-pp-kind">Fragment</div>',
-    `<div class="phren-pp-name" title="${esc(name)}">${esc(name)}</div>`,
-    `<div class="phren-pp-sub">${esc(type)} · ${refCount} refs · ${projects.length} project${projects.length === 1 ? "" : "s"}</div>`,
-    "</div>",
-    '<div class="phren-pp-headbtns">',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
-    "</div>",
-    "</div>",
+    paneHeadHtml({
+      kind: "Fragment",
+      name,
+      sub: `${esc(type)} · ${refCount} refs · ${projects.length} project${projects.length === 1 ? "" : "s"}`,
+    }),
     `<div class="phren-pp-list" data-pp-list>${rows.join("")}</div>`,
   ].join("");
 
@@ -837,17 +844,12 @@ function buildReviewPanel(): void {
 
   const total = countAgingFindings();
   panelEl.innerHTML = [
-    '<div class="phren-pp-head">',
-    '<div class="phren-pp-title">',
-    '<div class="phren-pp-kind" style="color:#ffb648">⚠ Needs review</div>',
-    `<div class="phren-pp-name">${total} aging finding${total === 1 ? "" : "s"}</div>`,
-    '<div class="phren-pp-sub">decaying + stale, across all projects</div>',
-    "</div>",
-    '<div class="phren-pp-headbtns">',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-collapse aria-label="Collapse panel" title="Collapse">›</button>',
-    '<button type="button" class="phren-pp-iconbtn" data-pp-close aria-label="Close" title="Close">×</button>',
-    "</div>",
-    "</div>",
+    paneHeadHtml({
+      kind: "⚠ Needs review",
+      kindStyle: "color:#ffb648",
+      name: `${total} aging finding${total === 1 ? "" : "s"}`,
+      sub: "decaying + stale, across all projects",
+    }),
     '<div class="phren-pp-controls">',
     `<input type="text" class="phren-pp-search" data-pp-search placeholder="Filter aging findings…" value="${esc(filters.query)}" />`,
     '<div class="phren-pp-chips">',
