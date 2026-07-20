@@ -485,14 +485,38 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       if (confirmed !== "Merge") return;
 
       try {
+        const merged = `${text1}\n${text2}`;
         await mutate(async () => {
           await client.removeFinding(projectName, text1);
           await client.removeFinding(projectName, text2);
-          await client.addFinding(projectName, `${text1}\n${text2}`);
+          await client.addFinding(projectName, merged);
+        });
+        await refreshGraph();
+        // Offer an in-graph undo (restore originals, drop the merged bullet).
+        void panel.webview.postMessage({
+          type: "mergeDone",
+          undo: { projectName, merged, originals: [text1, text2] },
+        });
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to merge findings: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "undoMerge") {
+      const projectName = asString(message.projectName);
+      const merged = asString(message.merged) ?? "";
+      const originals = asArray(message.originals).filter((t): t is string => typeof t === "string");
+      if (!projectName || !isValidProjectName(projectName) || !merged || originals.length !== 2) return;
+      try {
+        await mutate(async () => {
+          await client.removeFinding(projectName, merged);
+          await client.addFinding(projectName, originals[0]);
+          await client.addFinding(projectName, originals[1]);
         });
         await refreshGraph();
       } catch (err) {
-        vscode.window.showErrorMessage(`Failed to merge findings: ${toErrorMessage(err)}`);
+        vscode.window.showErrorMessage(`Failed to undo merge: ${toErrorMessage(err)}`);
       }
       return;
     }
@@ -2095,6 +2119,12 @@ ${graphScript}
       var batch = data.undo;
       showUndoToast(batch.label || ('Deleted ' + batch.items.length + ' items'), function() {
         vscode.postMessage({ command: 'undoDeleteBatch', items: batch.items });
+      });
+    }
+    if (data.type === 'mergeDone' && data.undo && data.undo.merged) {
+      var mergeUndo = data.undo;
+      showUndoToast('Merged 2 findings', function() {
+        vscode.postMessage({ command: 'undoMerge', projectName: mergeUndo.projectName, merged: mergeUndo.merged, originals: mergeUndo.originals });
       });
     }
   });
