@@ -16,6 +16,7 @@ import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
 import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, runIntro, selectNode } from "./interactions.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
+import { refreshProjectPanel } from "./project-panel.js";
 
 function mount(payload: GraphPayload): void {
   state.container = document.getElementById("graph-canvas");
@@ -173,6 +174,7 @@ function updateNode(
     updateEagerLabelText(fgNode);
   }
   refreshLabels();
+  refreshProjectPanel({ data: true });
   return true;
 }
 

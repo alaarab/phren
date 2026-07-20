@@ -68,6 +68,10 @@ export type NodeDetail = RuntimeNode & {
     references: number;
   };
   score?: ScoreEntry;
+  /** Values supplied by the project pane's inline editor on save. */
+  editedText?: string;
+  editedSection?: string;
+  editedPriority?: string;
 };
 
 /** A node object handed to 3d-force-graph. Force layout mutates x/y/z/vx/vy/vz onto it. */

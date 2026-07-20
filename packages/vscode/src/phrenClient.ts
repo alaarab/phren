@@ -166,7 +166,9 @@ export class PhrenClient {
   }
 
   async getFindings(project: string): Promise<unknown> {
-    return this.callTool("get_findings", { project });
+    // The MCP tool defaults to 50. The extension renders findings directly and
+    // must not mistake that first page for the project's complete contents.
+    return this.callTool("get_findings", { project, limit: 200 });
   }
 
   async getNotes(project: string, date?: string): Promise<unknown> {
