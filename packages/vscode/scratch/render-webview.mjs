@@ -43,7 +43,7 @@ const entries = {};
 const ages = [4, 20, 80, 120, 220, 320];
 let k = 0;
 for (const proj of ["api-server", "web-app"]) {
-  nodes.push({ id: "project:" + proj, kind: "project", projectName: proj, label: proj, text: proj + " summary", subtype: "project", radius: 20, color: "#7B68AE" });
+  nodes.push({ id: "project:" + proj, kind: "project", projectName: proj, label: proj, text: proj + " summary", subtype: "project", radius: 20, color: "#7B68AE", findingCount: proj === "api-server" ? 71 : 12, taskCount: 4 });
   for (let i = 0; i < 12; i++) {
     const [slug, tlabel] = topics[i % topics.length];
     const id = "finding:" + proj + ":" + i;
@@ -73,8 +73,8 @@ let html = renderGraphHtmlForTests(payload);
 // Relax CSP + stub the VS Code API so the inline scripts run in a plain browser.
 html = html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, "");
 html = html.replace(
-  "<body>",
-  "<body>\n<script>window.acquireVsCodeApi=function(){return {postMessage:function(){},getState:function(){return {}},setState:function(){}}};</script>",
+  '<body class="phren-vscode-webview">',
+  '<body class="phren-vscode-webview">\n<script>window.__phrenPostedMessages=[];window.acquireVsCodeApi=function(){return {postMessage:function(message){window.__phrenPostedMessages.push(message)},getState:function(){return {}},setState:function(){}}};</script>',
 );
 fs.writeFileSync(outHtml, html);
 console.log("WROTE " + outHtml + " (" + html.length + " bytes)");

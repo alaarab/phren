@@ -6,6 +6,13 @@ import { mascotMoveTo, spawnLookupPulse } from "./mascot.js";
 import { syncProjectNavActive } from "./project-nav.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
+let projectPaneTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelProjectPaneReveal(): void {
+  if (projectPaneTimer) clearTimeout(projectPaneTimer);
+  projectPaneTimer = null;
+}
+
 export function containerSize(): { w: number; h: number } {
   const w = state.container?.clientWidth || 800;
   const h = state.container?.clientHeight || 600;
@@ -136,6 +143,7 @@ export function onNodeRightClick(fgNode: FGNode, event: MouseEvent): void {
 
 export function clearSelection(): void {
   if (!state.selectedNodeId && !state.focusedProjectId) return;
+  cancelProjectPaneReveal();
   state.selectedNodeId = null;
   state.focusedProjectId = null;
   state.hoveredNodeId = null;
@@ -161,8 +169,17 @@ export function selectNode(nodeId: string): boolean {
     state.hoveredNodeId = null;
     applyHighlight();
     syncProjectNavActive();
-    refreshProjectPanel();
+    // Keep the graph readable during the camera move, then slide the project's
+    // contents in once the destination has settled. A project click is an
+    // explicit request to see that pane, so it also overrides a stale
+    // persisted collapsed state.
+    cancelProjectPaneReveal();
+    refreshProjectPanel({ transitioning: true });
     flyToNode(fgNode, 900);
+    projectPaneTimer = setTimeout(() => {
+      projectPaneTimer = null;
+      if (state.focusedProjectId === nodeId) refreshProjectPanel({ forceOpen: true });
+    }, 900);
     // Notify hosts right away — the docked dossier doesn't wait on the
     // camera, and delaying was a flake source under load. The short defer
     // just lets the fly-to start before the host re-renders.
@@ -172,6 +189,7 @@ export function selectNode(nodeId: string): boolean {
   }
 
   state.focusedProjectId = null;
+  cancelProjectPaneReveal();
   state.selectedNodeId = nodeId;
   state.hoveredNodeId = nodeId;
   hideTooltip();
@@ -179,7 +197,17 @@ export function selectNode(nodeId: string): boolean {
   syncProjectNavActive();
   refreshProjectPanel();
   flyToNode(fgNode, 800);
-  setTimeout(() => notifySelection(nodeId), 120);
+  // The node's screen position changes throughout the camera flight. Re-anchor
+  // the contextual pane after the camera settles so it cannot end up covering
+  // the newly selected finding/task/fragment.
+  cancelProjectPaneReveal();
+  projectPaneTimer = setTimeout(() => {
+    projectPaneTimer = null;
+    if (state.selectedNodeId === nodeId) {
+      refreshProjectPanel();
+      notifySelection(nodeId);
+    }
+  }, 800);
   mascotMoveTo(nodeId, true);
   return true;
 }

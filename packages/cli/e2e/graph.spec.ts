@@ -1179,7 +1179,7 @@ test.describe.serial("graph visualization e2e", () => {
     expect(after).toBeGreaterThan(before + 60);
   });
 
-  test("row edit action opens the dossier editor for that finding", async ({ page }) => {
+  test("row edit action stays inline in the project pane", async ({ page }) => {
     await openGraphTab(page);
     // Select a project that has findings, so the pane lists editable rows.
     const projectId = await selectNodeOfKind(page, "project");
@@ -1189,8 +1189,8 @@ test.describe.serial("graph visualization e2e", () => {
     const row = panel.locator('.phren-pp-row').filter({ has: page.locator("[data-pp-edit]") }).first();
     await row.hover();
     await row.locator("[data-pp-edit]").click();
-    // The dossier opens in edit mode (its textarea appears).
-    await expect(page.locator("#graph-node-editor")).toBeVisible({ timeout: 8_000 });
+    await expect(row.locator("[data-pp-editor]")).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator("#graph-node-editor")).toBeHidden();
   });
 
   test("row peek flies to a node without changing selection", async ({ page }) => {
