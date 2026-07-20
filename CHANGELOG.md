@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-07-19
+
 ### Added
 
 - **The 3D memory viewer is now a full navigation and maintenance surface** (shared
