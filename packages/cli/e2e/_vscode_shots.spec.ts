@@ -1,7 +1,11 @@
 /* eslint-disable */
 // Local harness (CI-ignored via the `_` prefix): loads the REAL VS Code webview
-// HTML (rendered by scratch/render-webview.mjs) and screenshots the node
-// dossier so the docked-left placement can be verified outside the editor.
+// HTML (rendered by packages/vscode/scratch/render-webview.mjs) and drives the
+// docked dossier, contents pane, bulk bar, fragment view, and review pane so
+// the VS Code surface can be verified outside the editor.
+//
+// Run: node packages/vscode/scratch/render-webview.mjs && \
+//      SHOT_DIR=/tmp/shots npx playwright test --config playwright.local.config.ts _vscode_shots.spec.ts
 import { test, expect } from "@playwright/test";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +83,11 @@ test("vscode webview node dossier docks left", async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(page.locator("#graph-toast")).toBeVisible();
   await expect(page.locator("#graph-toast")).toContainText("Undo");
+
+  // Merge-undo toast wiring (extension round-trip covered by web-ui e2e).
+  await page.evaluate(() => window.postMessage({ type: "mergeDone", undo: { projectName: "api-server", merged: "a\nb", originals: ["a", "b"] } }, "*"));
+  await page.waitForTimeout(300);
+  await expect(page.locator("#graph-toast")).toContainText("Merged 2 findings");
 
   // Fragment context: selecting a fragment lists its connected projects + refs.
   await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:AuthService"));

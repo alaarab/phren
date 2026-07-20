@@ -5,6 +5,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **The 3D memory viewer is now a full navigation and maintenance surface** (shared
+  by the web UI Graph tab and the VS Code webview; see `docs/graph-viewer.md`):
+  - Project navigator dock: click an orb (or use `←`/`→`) to jump to any project
+    without hunting for its node.
+  - Contents pane: a right-docked, filterable, sortable index of the in-context
+    project's findings and tasks, with health tinting, a healthy/decaying/stale
+    bar, keyboard review (`↑`/`↓`/`Enter`/`Delete`), collapse, resize, and
+    preferences that persist across reloads.
+  - Row actions: peek (fly to a node without opening its dossier), edit
+    (open the dossier straight in edit mode), and delete.
+  - Select mode with bulk delete, plus Merge for two same-project findings —
+    both with an Undo toast that restores the previous state.
+  - A cross-project "needs review" pane (via the `⚠ N` navigator pill) listing
+    every decaying/stale finding, grouped by project, for store-wide pruning.
+  - Fragment context: selecting a fragment lists its connected projects and
+    reference docs.
+
+### Changed
+
+- **VS Code node dossier docks to the left edge** as a stable reading pane
+  instead of popping up over the clicked node and cursor, and is resizable —
+  matching the web UI (left = detail, right = contents).
+- The project dossier's stat-card grid was replaced with a compact one-line
+  stat; browsable detail lives in the contents pane.
+
+### Fixed
+
+- Stale project labels no longer linger as ghosts after the graph remounts
+  (e.g. following a delete).
+- Clicking the viewer's HUD overlays (navigator, contents pane, filters) no
+  longer clears the current selection in the VS Code webview.
+
 ## [0.1.36] - 2026-07-16
 
 ### Fixed

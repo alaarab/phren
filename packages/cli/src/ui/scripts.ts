@@ -2374,7 +2374,8 @@ export function renderGraphHostScript(): string {
   }
 
   // Merge two same-project findings into one: remove the originals, then add
-  // their joined text as a single finding.
+  // their joined text as a single finding. Offers an Undo that restores the
+  // originals and removes the merged bullet.
   function mergeNodes(nodes) {
     if (!nodes || nodes.length !== 2) return;
     var proj = nodes[0].projectName;
@@ -2382,18 +2383,34 @@ export function renderGraphHostScript(): string {
     var t2 = nodes[1].tooltipLabel || nodes[1].fullLabel || '';
     if (!t1 || !t2) return;
     if (!confirm('Merge these 2 findings into one?')) return;
+    var merged = t1 + '\\n' + t2;
     Promise.all(nodes.map(function(n) {
       return deleteNodeRequest(n).catch(function() { return { ok: false }; });
     })).then(function() {
-      return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t1 + '\\n' + t2 });
+      return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: merged });
     }).then(function(r) {
       if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'add failed');
-      graphToast('Merged 2 findings', 'ok');
-      return reloadGraph(null);
+      return reloadGraph(null).then(function() {
+        graphUndoToast('Merged 2 findings', function() { undoMerge(proj, merged, t1, t2); });
+      });
     }).catch(function(err) {
       graphToast('Merge failed: ' + err.message, 'err');
       return reloadGraph(null);
     });
+  }
+
+  // Reverse a merge: remove the combined bullet, restore the two originals.
+  function undoMerge(proj, merged, t1, t2) {
+    graphRequest('/api/findings/' + encodeURIComponent(proj), 'DELETE', { text: merged, score_key: '' })
+      .then(function() { return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t1 }); })
+      .then(function() { return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t2 }); })
+      .then(function() {
+        graphToast('Merge undone', 'ok');
+        return reloadGraph(null);
+      }).catch(function(err) {
+        graphToast('Undo failed: ' + err.message, 'err');
+        return reloadGraph(null);
+      });
   }
 
   function deleteCurrentNode() {

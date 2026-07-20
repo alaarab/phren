@@ -1110,6 +1110,31 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(merge).toBeVisible(); // exactly two same-project findings
   });
 
+  test("merge combines two findings and undo restores them", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await openGraphTab(page);
+    const repoAFindings = () => page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    const before = await repoAFindings();
+    expect(before).toBe(2);
+
+    await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      pg.selectNode(pg.getData().nodes.find((n: any) => n.kind === "project" && n.projectName === "repo-a").id);
+    });
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    await panel.locator("[data-pp-bulk-all]").click();
+    await panel.locator("[data-pp-bulk-merge]").click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(1);
+
+    // Undo splits the merged bullet back into the two originals (net-zero).
+    await page.locator("#toast-container button", { hasText: "Undo" }).click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(2);
+  });
+
   test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
     await openGraphTab(page);
     const projectId = await selectNodeOfKind(page, "project");
