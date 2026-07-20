@@ -35,9 +35,17 @@
       "types": "./dist/data/tasks.d.ts",
       "default": "./dist/data/tasks.js"
     },
+    "./data/notes": {
+      "types": "./dist/data/notes.d.ts",
+      "default": "./dist/data/notes.js"
+    },
     "./core/finding": {
       "types": "./dist/core/finding.d.ts",
       "default": "./dist/core/finding.js"
+    },
+    "./core/note": {
+      "types": "./dist/core/note.d.ts",
+      "default": "./dist/core/note.js"
     },
     "./auth/profiles": {
       "types": "./dist/auth/profiles.d.ts",

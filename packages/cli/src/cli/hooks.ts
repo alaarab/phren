@@ -241,6 +241,9 @@ export async function handleHookPrompt() {
       getPhrenPath()
     );
     rows = trustResult.rows;
+    // Notes are intentionally available to explicit search, but are personal scratch
+    // context and should never be injected into an agent prompt automatically.
+    rows = rows.filter((row) => row.type !== "notes");
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 

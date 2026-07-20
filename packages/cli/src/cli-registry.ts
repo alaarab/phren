@@ -371,6 +371,25 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "note",
+    aliases: ["notes"],
+    topic: "core",
+    usage: "phren note <add|list|edit|remove|promote>",
+    summary: "Manage lightweight daily notes",
+    subcommands: [
+      { name: "add", usage: 'phren note add <project> "<text>" [--date YYYY-MM-DD]', summary: "Add a daily note" },
+      { name: "list", usage: "phren note list <project> [--date YYYY-MM-DD]", summary: "List notes" },
+      { name: "edit", usage: 'phren note edit <project> <nid> "<text>"', summary: "Edit a note" },
+      { name: "remove", usage: "phren note remove <project> <nid>", summary: "Remove a note" },
+      { name: "promote", usage: "phren note promote <project> <nid> [--type <type>]", summary: "Promote a note to a finding" },
+    ],
+    featured: true,
+    run: async (args, ctx) => {
+      const { handleNoteNamespace } = await import("./cli/namespaces.js");
+      await handleNoteNamespace(args, ctx.profile());
+    },
+  },
+  {
     name: "search-fragments",
     topic: "core",
     usage: "phren search-fragments <query>",

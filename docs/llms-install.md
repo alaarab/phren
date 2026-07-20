@@ -64,13 +64,13 @@ List registered stores:
 phren team list
 ```
 
-Team stores sync independently via git. Findings and tasks in a team store are visible to all members through federated search and context injection.
+Team stores sync independently via git. Findings, notes, and tasks in a team store are visible to all members through federated search. Notes remain opt-in search context and are not automatically injected.
 
 ## Maintenance Safety
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (54)
+## MCP Tools (59)
 
 ### Search and Browse
 
@@ -81,6 +81,18 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `get_project_summary` | `name` | Returns a project's summary card, CLAUDE.md path, and list of indexed files. |
 | `list_projects` | `page?`, `page_size?` | Lists all projects in the active profile with pagination. |
 | `get_findings` | `project`, `limit?`, `include_superseded?`, `include_history?`, `status?` | Read recent findings, filterable by lifecycle status. |
+
+### Daily Notes
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_notes` | `project`, `date?`, `limit?` | List lightweight daily notes newest-first. |
+| `add_note` | `project`, `text`, `date?` | Add Markdown text to `<project>/notes/YYYY-MM-DD.md`. |
+| `edit_note` | `project`, `note`, `text` | Replace a note by stable `nid` or unambiguous match. |
+| `remove_note` | `project`, `note` | Remove one note. |
+| `promote_note` | `project`, `note`, `findingType?` | Copy a note to findings and retain it with a promoted marker. |
+
+Notes are explicitly searchable but excluded from automatic hook context, finding lifecycle/review, and the fragment graph.
 
 ### Task Management (`task` tools)
 

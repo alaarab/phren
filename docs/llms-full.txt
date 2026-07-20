@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (54 across 12 modules):
+MCP Tools (59 across 13 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -14,6 +14,13 @@ MCP Tools (54 across 12 modules):
     get_project_summary(name) - project summary card and file list
     list_projects(page?, page_size?) - all projects in active profile with pagination
     get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
+
+  Daily notes (searchable, never automatically injected):
+    get_notes(project, date?, limit?) - list daily notes newest-first
+    add_note(project, text, date?) - add Markdown text to notes/YYYY-MM-DD.md
+    edit_note(project, note, text) - replace a note by stable nid or unambiguous match
+    remove_note(project, note) - remove one note
+    promote_note(project, note, findingType?) - copy a note into findings and retain its promoted source
 
   Task management:
     get_tasks(project?, id?, item?, status?, limit?, done_limit?, offset?, summary?) - read tasks with pagination, summary mode, and section filtering

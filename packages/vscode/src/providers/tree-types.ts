@@ -1,5 +1,5 @@
 export type TaskSection = "Active" | "Queue" | "Done";
-export type PhrenCategory = "findings" | "truths" | "sessions" | "task" | "queue" | "reference" | "hooks";
+export type PhrenCategory = "findings" | "notes" | "truths" | "sessions" | "task" | "queue" | "reference" | "hooks";
 export type SessionBucket = "findings" | "tasks";
 export type QueueSection = "Review" | "Stale" | "Conflicts";
 
@@ -69,6 +69,23 @@ export interface FindingNode {
   supersedes?: string;
   contradicts?: string[];
   potentialDuplicates?: string[];
+}
+
+export interface NoteDateGroupNode {
+  kind: "noteDateGroup";
+  projectName: string;
+  date: string;
+  count: number;
+}
+
+export interface NoteNode {
+  kind: "note";
+  projectName: string;
+  id: string;
+  date: string;
+  time: string;
+  text: string;
+  promoted: boolean;
 }
 
 export interface TaskSectionGroupNode {
@@ -229,6 +246,8 @@ export type PhrenNode =
   | CategoryNode
   | FindingDateGroupNode
   | FindingNode
+  | NoteDateGroupNode
+  | NoteNode
   | TaskSectionGroupNode
   | GlobalTaskSectionGroupNode
   | TaskNode
@@ -266,6 +285,14 @@ export interface FindingSummary {
   supersedes?: string;
   contradicts?: string[];
   potentialDuplicates?: string[];
+}
+
+export interface NoteSummary {
+  id: string;
+  date: string;
+  time: string;
+  text: string;
+  promoted: boolean;
 }
 
 export interface TaskSummary {

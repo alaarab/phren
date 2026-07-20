@@ -210,6 +210,7 @@ function pathHasSegment(relPath: string, segment: string): boolean {
 
 export function classifyFile(filename: string, relPath: string): string {
   // Directory takes priority over filename-based classification
+  if (pathHasSegment(relPath, "notes")) return "notes";
   if (pathHasSegment(relPath, "reference")) return "reference";
   if (pathHasSegment(relPath, "skills")) return "skill";
   const mapped = FILE_TYPE_MAP[filename.toLowerCase()];

@@ -190,6 +190,7 @@ async function main() {
   // InputValidationError until the schema is fetched.
   const ALWAYS_LOAD_TOOLS = new Set([
     "add_finding",
+    "add_note",
     "add_task",
     "complete_task",
     "search_knowledge",
@@ -277,6 +278,7 @@ async function main() {
     import("./tools/hooks.js"),
     import("./tools/extract.js"),
     import("./tools/config.js"),
+    import("./tools/notes.js"),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
 

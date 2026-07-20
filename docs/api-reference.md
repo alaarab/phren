@@ -1,10 +1,10 @@
 # MCP API Reference
 
-Phren exposes 54 MCP tools across 12 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren exposes 59 MCP tools across 13 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 
-Module layout: search, tasks, findings, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration.
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration.
 
 ---
 
@@ -29,7 +29,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
-| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `notes`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
 | `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
 | `since` | string | no | Filter findings by creation date. Formats: `7d`, `30d`, `YYYY-MM`, `YYYY-MM-DD`. |
 | `status` | enum | no | Filter findings by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
@@ -64,6 +64,57 @@ List recent findings for a project without requiring a search query.
 | `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
+
+---
+
+## Daily Notes
+
+Notes are lightweight, user-authored scratch context stored in `<project>/notes/YYYY-MM-DD.md`. They are indexed for explicit search and synchronized with team stores, but are excluded from automatic prompt injection, finding decay/review, and the fragment graph. Promote a note when it becomes durable reusable knowledge.
+
+### `get_notes`
+
+List daily notes newest-first.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `date` | string | no | Filter to a `YYYY-MM-DD` date. |
+| `limit` | number | no | Maximum results (1-500, default 100). |
+
+### `add_note`
+
+Add Markdown text to a daily note file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `text` | string | yes | Note text; multiple lines and Markdown are supported. |
+| `date` | string | no | Target `YYYY-MM-DD`; defaults to today. |
+
+### `edit_note`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+| `text` | string | yes | Replacement Markdown text. |
+
+### `remove_note`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+
+### `promote_note`
+
+Copy a note into `FINDINGS.md` and mark the original as promoted without deleting it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+| `findingType` | enum | no | `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, or `bug`. |
 
 ---
 

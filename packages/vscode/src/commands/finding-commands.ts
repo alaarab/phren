@@ -6,23 +6,47 @@ export function registerFindingCommands(ctx: ExtensionContext): vscode.Disposabl
   const { phrenClient, statusBar, treeDataProvider } = ctx;
   const refreshTree = () => treeDataProvider.refresh();
 
-  const addFinding = vscode.commands.registerCommand("phren.addFinding", async () => {
-    const activeProject = statusBar.getActiveProjectName();
-    if (!activeProject) {
-      await vscode.window.showWarningMessage("No active Phren project selected.");
-      return;
+  const addFinding = vscode.commands.registerCommand("phren.addFinding", async (node?: { projectName?: string }) => {
+    let project = node?.projectName || statusBar.getActiveProjectName();
+    if (!project) {
+      let projectsRaw: unknown;
+      try {
+        projectsRaw = await phrenClient.listProjects();
+      } catch (error) {
+        await vscode.window.showErrorMessage(`Failed to list projects: ${toErrorMessage(error)}`);
+        return;
+      }
+      const projectsData = asRecord(asRecord(projectsRaw)?.data);
+      const projectNames = asArraySafe(projectsData?.projects)
+        .map((entry) => asRecord(entry))
+        .map((entry) => typeof entry?.name === "string" ? entry.name : undefined)
+        .filter((name): name is string => Boolean(name));
+      if (projectNames.length === 0) {
+        await vscode.window.showWarningMessage("No Phren projects found.");
+        return;
+      }
+      project = await vscode.window.showQuickPick(projectNames, { placeHolder: "Select a project" });
+      if (!project) return;
     }
 
-    const findingText = await vscode.window.showInputBox({ prompt: "Enter finding text" });
+    const editor = vscode.window.activeTextEditor;
+    const selectedText = editor && !editor.selection.isEmpty
+      ? editor.document.getText(editor.selection).trim()
+      : "";
+    const findingText = await vscode.window.showInputBox({
+      prompt: "Record durable knowledge worth carrying into future work",
+      placeHolder: "Decision, pattern, pitfall, workaround, or other reusable insight",
+      value: selectedText,
+    });
     const trimmedFindingText = findingText?.trim();
     if (!trimmedFindingText) {
       return;
     }
 
     try {
-      await phrenClient.addFinding(activeProject, trimmedFindingText);
+      await phrenClient.addFinding(project, trimmedFindingText);
       treeDataProvider.refresh();
-      await vscode.window.showInformationMessage(`Finding added to ${activeProject}`);
+      await vscode.window.showInformationMessage(`Finding added to ${project}`);
     } catch (error) {
       await vscode.window.showErrorMessage(`Failed to add finding: ${toErrorMessage(error)}`);
     }

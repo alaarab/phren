@@ -188,6 +188,15 @@ export function isAllowedSkillPath(filePath: string, phrenPath: string): boolean
   return segments.some((seg) => seg === "skills");
 }
 
+/** Allow only the four exact lifecycle-hook config files surfaced by the UI. */
+export function isAllowedHookConfigPath(filePath: string, phrenPath: string): boolean {
+  if (!isAllowedFilePath(filePath, phrenPath)) return false;
+  const resolved = path.resolve(filePath);
+  return Object.values(hookConfigPaths(phrenPath)).some(
+    (configPath) => path.resolve(configPath) === resolved,
+  );
+}
+
 export function collectSkillsForUI(phrenPath: string, profile = ""): Array<{ name: string; source: string; path: string; enabled: boolean }> {
   return getAllSkills(phrenPath, profile).map((skill) => ({
     name: skill.name,

@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage Phren knowledge directly from VS Code.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -53,7 +53,33 @@
       },
       {
         "command": "phren.addFinding",
-        "title": "Phren: Add Finding"
+        "title": "Phren: Add Finding",
+        "icon": "$(add)"
+      },
+      {
+        "command": "phren.addNote",
+        "title": "Phren: Add Note",
+        "icon": "$(note)"
+      },
+      {
+        "command": "phren.openNote",
+        "title": "Phren: Open Note",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "phren.editNote",
+        "title": "Phren: Edit Note",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "phren.removeNote",
+        "title": "Phren: Remove Note",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "phren.promoteNote",
+        "title": "Phren: Promote Note to Finding",
+        "icon": "$(arrow-up)"
       },
       {
         "command": "phren.setActiveProject",
@@ -292,6 +318,22 @@
           "when": "false"
         },
         {
+          "command": "phren.openNote",
+          "when": "false"
+        },
+        {
+          "command": "phren.editNote",
+          "when": "false"
+        },
+        {
+          "command": "phren.removeNote",
+          "when": "false"
+        },
+        {
+          "command": "phren.promoteNote",
+          "when": "false"
+        },
+        {
           "command": "phren.supersedeFinding",
           "when": "false"
         },
@@ -330,15 +372,46 @@
       ],
       "editor/context": [
         {
+          "command": "phren.addNote",
+          "when": "editorHasSelection",
+          "group": "phren@1"
+        },
+        {
           "command": "phren.addFinding",
-          "when": "editorHasSelection"
+          "when": "editorHasSelection",
+          "group": "phren@2"
         }
       ],
       "view/item/context": [
         {
+          "command": "phren.addFinding",
+          "when": "viewItem == phren.category.findings",
+          "group": "inline@1"
+        },
+        {
           "command": "phren.filterFindingsByDate",
           "when": "viewItem == phren.category.findings",
-          "group": "inline"
+          "group": "inline@2"
+        },
+        {
+          "command": "phren.addNote",
+          "when": "viewItem == phren.category.notes",
+          "group": "inline@1"
+        },
+        {
+          "command": "phren.promoteNote",
+          "when": "viewItem == phren.note",
+          "group": "inline@1"
+        },
+        {
+          "command": "phren.editNote",
+          "when": "viewItem == phren.note || viewItem == phren.note.promoted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "phren.removeNote",
+          "when": "viewItem == phren.note || viewItem == phren.note.promoted",
+          "group": "navigation@2"
         },
         {
           "command": "phren.toggleHook",

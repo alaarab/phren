@@ -151,6 +151,10 @@ describe("contributor role", () => {
     expect(permissionDeniedError(phrenPath, "add_task")).toBeNull();
     expect(permissionDeniedError(phrenPath, "complete_task")).toBeNull();
     expect(permissionDeniedError(phrenPath, "edit_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "edit_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "remove_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "promote_note")).toBeNull();
   });
 
   it("blocks contributors from admin-only actions", () => {
@@ -178,6 +182,7 @@ describe("reader role", () => {
     expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "remove_finding")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "add_task")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "manage_config")).not.toBeNull();
   });
 });

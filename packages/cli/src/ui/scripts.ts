@@ -87,6 +87,253 @@ export function renderProfileSwitcherScript(_authToken: string): string {
 })();`;
 }
 
+export function renderFindingCaptureEnhancementScript(): string {
+  return `(function() {
+  function selectedProject() {
+    var card = document.querySelector('.project-card.selected');
+    return card ? (card.getAttribute('data-project') || '') : '';
+  }
+
+  function findingsTab() {
+    return document.querySelector('.project-detail-tab[data-file="FINDINGS.md"]');
+  }
+
+  function wireCaptureBar() {
+    var container = document.getElementById('project-content');
+    var tab = findingsTab();
+    if (!container || !tab || !tab.classList.contains('active')) return;
+
+    container.querySelectorAll('.finding-detail-card summary').forEach(function(summary) {
+      summary.textContent = (summary.textContent || '').replace(/\\s*<!--.*?-->\\s*/g, ' ').trim();
+    });
+
+    var input = document.getElementById('finding-add-input');
+    if (!input) {
+      var project = selectedProject();
+      if (!project || container.querySelector('.project-detail-empty')) return;
+      var bar = document.createElement('div');
+      bar.className = 'finding-capture-bar';
+      bar.innerHTML = '<input id="finding-add-input" type="text" placeholder="Record durable knowledge…" aria-label="Finding text">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-finding-capture-submit>Add finding</button>';
+      container.insertBefore(bar, container.firstChild);
+      input = bar.querySelector('#finding-add-input');
+    } else {
+      var existingBar = input.parentElement;
+      if (existingBar) existingBar.classList.add('finding-capture-bar');
+    }
+
+    if (!input || input.getAttribute('data-capture-wired') === 'true') return;
+    input.setAttribute('data-capture-wired', 'true');
+    input.setAttribute('placeholder', 'Record durable knowledge…');
+    input.addEventListener('keydown', function(event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      window.phrenAddFinding(selectedProject());
+    });
+    var button = input.parentElement && input.parentElement.querySelector('button');
+    if (button) {
+      button.textContent = 'Add finding';
+      button.addEventListener('click', function(event) {
+        event.preventDefault();
+        window.phrenAddFinding(selectedProject());
+      });
+    }
+  }
+
+  window.selectProjectFile = function(file) {
+    var tab = document.querySelector('.project-detail-tab[data-file="' + file + '"]');
+    if (tab && typeof window.loadProjectFile === 'function') window.loadProjectFile(file, tab);
+  };
+
+  var baseSelectProject = window.selectProject;
+  if (typeof baseSelectProject === 'function') {
+    window.selectProject = function(name, el) {
+      baseSelectProject(name, el);
+      var header = document.querySelector('.project-detail-header');
+      if (header && !header.querySelector('.capture-finding-btn')) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-primary capture-finding-btn';
+        button.textContent = '+ Add finding';
+        button.addEventListener('click', function() {
+          window.selectProjectFile('FINDINGS.md');
+          window.setTimeout(function() {
+            wireCaptureBar();
+            var input = document.getElementById('finding-add-input');
+            if (input) input.focus();
+          }, 0);
+        });
+        header.appendChild(button);
+      }
+    };
+  }
+
+  var detailArea = document.getElementById('project-detail-area');
+  if (detailArea) {
+    new MutationObserver(function() { window.setTimeout(wireCaptureBar, 0); })
+      .observe(detailArea, { childList: true, subtree: true });
+  }
+})();`;
+}
+
+export function renderNotesEnhancementScript(): string {
+  return `(function() {
+  var esc = window._phrenEsc;
+  var authUrl = window._phrenAuthUrl;
+
+  function selectedProject() {
+    var card = document.querySelector('.project-card.selected');
+    return card ? (card.getAttribute('data-project') || '') : '';
+  }
+
+  function request(project, method, values, done) {
+    window._phrenFetchCsrfToken(function(csrfToken) {
+      var body = new URLSearchParams(values || {});
+      if (csrfToken) body.set('_csrf', csrfToken);
+      fetch(authUrl('/api/notes/' + encodeURIComponent(project)), {
+        method: method,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: window._phrenAuthBody(body.toString())
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Note operation failed');
+        done(data);
+      }).catch(function(err) { alert(String(err.message || err)); });
+    });
+  }
+
+  function renderNotes(project, notes) {
+    var container = document.getElementById('project-content');
+    if (!container) return;
+    var today = new Date().toISOString().slice(0, 10);
+    var html = '<div class="notes-panel">' +
+      '<div class="note-capture">' +
+        '<textarea id="note-add-text" rows="3" placeholder="What happened today? Markdown is welcome." aria-label="Note text"></textarea>' +
+        '<div class="note-capture-actions"><input id="note-add-date" type="date" value="' + today + '" aria-label="Note date">' +
+        '<button type="button" class="btn btn-primary" data-note-action="add">Add note</button></div>' +
+      '</div>';
+    if (!notes.length) {
+      html += '<div class="project-detail-empty">No notes yet. Add a quick daily note above.</div>';
+    } else {
+      var lastDate = '';
+      notes.forEach(function(note) {
+        if (note.date !== lastDate) {
+          if (lastDate) html += '</div>';
+          lastDate = note.date;
+          html += '<div class="note-day"><div class="note-day-heading">' + esc(note.date) + '</div>';
+        }
+        html += '<article class="note-card" data-note-id="' + esc(note.id) + '">' +
+          '<div class="note-card-meta"><span>' + esc(String(note.time || '').slice(0, 5)) + '</span>' +
+          '<code>' + esc(note.id) + '</code>' +
+          (note.promoted ? '<span class="note-promoted">promoted</span>' : '') + '</div>' +
+          '<div class="note-card-text">' + esc(note.text).replace(/\\n/g, '<br>') + '</div>' +
+          '<div class="note-card-actions">' +
+            '<button type="button" class="btn btn-sm" data-note-action="edit">Edit</button>' +
+            (!note.promoted ? '<button type="button" class="btn btn-sm" data-note-action="promote">Promote to finding</button>' : '') +
+            '<button type="button" class="btn btn-sm note-remove" data-note-action="remove">Remove</button>' +
+          '</div>' +
+          '<textarea class="note-raw-text" hidden>' + esc(note.text) + '</textarea>' +
+        '</article>';
+      });
+      if (lastDate) html += '</div>';
+    }
+    container.innerHTML = html + '</div>';
+  }
+
+  function loadNotes(focusCapture) {
+    var project = selectedProject();
+    var container = document.getElementById('project-content');
+    if (!project || !container) return;
+    container.innerHTML = '<div class="project-detail-empty">Loading notes...</div>';
+    fetch(authUrl('/api/notes/' + encodeURIComponent(project)))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Failed to load notes');
+        renderNotes(project, (data.data && data.data.notes) || []);
+        if (focusCapture) {
+          var input = document.getElementById('note-add-text');
+          if (input) input.focus();
+        }
+      }).catch(function(err) {
+        container.innerHTML = '<div class="project-detail-empty">' + esc(err.message || err) + '</div>';
+      });
+  }
+
+  var baseSelectProject = window.selectProject;
+  if (typeof baseSelectProject === 'function') {
+    window.selectProject = function(name, el) {
+      baseSelectProject(name, el);
+      var tabs = document.querySelector('.project-detail-tabs');
+      if (tabs && !tabs.querySelector('[data-file="notes:daily"]')) {
+        var tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'project-detail-tab';
+        tab.setAttribute('data-ui-action', 'loadProjectFile');
+        tab.setAttribute('data-file', 'notes:daily');
+        tab.textContent = 'Notes';
+        var reference = tabs.querySelector('[data-file="reference:browser"]');
+        tabs.insertBefore(tab, reference);
+      }
+      var header = document.querySelector('.project-detail-header');
+      if (header && !header.querySelector('.capture-note-btn')) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm capture-note-btn';
+        button.textContent = '+ Add note';
+        button.addEventListener('click', function() {
+          window.selectProjectFile('notes:daily');
+          window.setTimeout(function() { loadNotes(true); }, 0);
+        });
+        header.appendChild(button);
+      }
+    };
+  }
+
+  var baseLoadProjectFile = window.loadProjectFile;
+  window.loadProjectFile = function(file, btn) {
+    if (file !== 'notes:daily') return baseLoadProjectFile(file, btn);
+    document.querySelectorAll('.project-detail-tab').forEach(function(tab) { tab.classList.remove('active'); });
+    var notesTab = btn || document.querySelector('.project-detail-tab[data-file="notes:daily"]');
+    if (notesTab) notesTab.classList.add('active');
+    loadNotes(false);
+  };
+
+  document.addEventListener('click', function(event) {
+    var button = event.target && event.target.closest ? event.target.closest('[data-note-action]') : null;
+    if (!button) return;
+    var project = selectedProject();
+    if (!project) return;
+    var action = button.getAttribute('data-note-action');
+    if (action === 'add') {
+      var text = document.getElementById('note-add-text');
+      var date = document.getElementById('note-add-date');
+      if (!text || !text.value.trim()) return;
+      request(project, 'POST', { text: text.value.trim(), date: date ? date.value : '' }, function() { loadNotes(true); });
+      return;
+    }
+    var card = button.closest('.note-card');
+    if (!card) return;
+    var note = card.getAttribute('data-note-id') || '';
+    var raw = card.querySelector('.note-raw-text');
+    var current = raw ? raw.value : '';
+    if (action === 'edit') {
+      var next = prompt('Edit note', current);
+      if (next === null || !next.trim() || next === current) return;
+      request(project, 'PUT', { note: note, text: next.trim() }, function() { loadNotes(false); });
+    } else if (action === 'remove') {
+      if (!confirm('Remove this note?')) return;
+      request(project, 'DELETE', { note: note }, function() { loadNotes(false); });
+    } else if (action === 'promote') {
+      var findingType = prompt('Finding type (optional): decision, pitfall, pattern, tradeoff, architecture, bug', '');
+      if (findingType === null) return;
+      findingType = findingType.trim().toLowerCase();
+      var valid = ['', 'decision', 'pitfall', 'pattern', 'tradeoff', 'architecture', 'bug'];
+      if (valid.indexOf(findingType) === -1) { alert('Unknown finding type.'); return; }
+      request(project, 'POST', { action: 'promote', note: note, finding_type: findingType }, function() { loadNotes(false); });
+    }
+  });
+})();`;
+}
+
 export function renderSkillUiEnhancementScript(_authToken: string): string {
   return `(function() {
     var _skillCurrent = null;
@@ -1770,6 +2017,36 @@ export function renderEventWiringScript(): string {
     if (action === 'approve') { batchAction('approve'); }
     else if (action === 'reject') { batchAction('reject'); }
     else if (action === 'clear') { clearBatchSelection(); }
+  });
+
+  // The legacy hook rows use .hook-item rather than .split-item. Their original
+  // delegated handler therefore passes null to selectHookFromEl; wire the actual
+  // row here so lifecycle hook details remain selectable.
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    var hook = target.closest('.hook-item[data-ui-action="selectHookFromEl"]');
+    if (hook && typeof selectHookFromEl === 'function') selectHookFromEl(hook);
+  });
+
+  // Keep review-card action metadata aligned with the queue line after an edit.
+  // The base submit handler sends the old line first; this listener then updates
+  // the DOM identity used by subsequent approve/reject actions.
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || form.getAttribute('data-ui-action') !== 'reviewEditSubmit') return;
+    var card = form.closest('.review-card');
+    var textarea = form.querySelector('textarea[name="new_text"]');
+    if (!card || !textarea) return;
+    var oldLine = form.getAttribute('data-line') || '';
+    var text = String(textarea.value || '').replace(/[\\r\\n]+/g, ' ').trim();
+    if (!text) return;
+    var dateMatch = oldLine.match(/^- \\[(\\d{4}-\\d{2}-\\d{2})\\]\\s*/);
+    var updatedLine = dateMatch ? '- [' + dateMatch[1] + '] ' + text : '- ' + text;
+    var project = card.getAttribute('data-project') || form.getAttribute('data-project') || '';
+    card.setAttribute('data-key', project + '\\\\x00' + updatedLine);
+    form.setAttribute('data-line', updatedLine);
+    card.querySelectorAll('[data-line]').forEach(function(el) { el.setAttribute('data-line', updatedLine); });
   });
 
   // --- Graph controls ---

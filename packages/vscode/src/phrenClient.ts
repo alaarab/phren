@@ -169,6 +169,26 @@ export class PhrenClient {
     return this.callTool("get_findings", { project });
   }
 
+  async getNotes(project: string, date?: string): Promise<unknown> {
+    return this.callTool("get_notes", date ? { project, date } : { project });
+  }
+
+  async addNote(project: string, text: string, date?: string): Promise<unknown> {
+    return this.callTool("add_note", date ? { project, text, date } : { project, text });
+  }
+
+  async editNote(project: string, note: string, text: string): Promise<unknown> {
+    return this.callTool("edit_note", { project, note, text });
+  }
+
+  async removeNote(project: string, note: string): Promise<unknown> {
+    return this.callTool("remove_note", { project, note });
+  }
+
+  async promoteNote(project: string, note: string, findingType?: string): Promise<unknown> {
+    return this.callTool("promote_note", findingType ? { project, note, findingType } : { project, note });
+  }
+
   async getTasks(project: string, options: GetTasksOptions = {}): Promise<unknown> {
     return this.callTool("get_tasks", { project, ...options });
   }

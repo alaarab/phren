@@ -87,5 +87,6 @@ describe("addTeamPathspecs", () => {
     expect(TEAM_STORE_PATHSPECS).toContain("*/FINDINGS.md");
     expect(TEAM_STORE_PATHSPECS).toContain("*/reference/**");
     expect(TEAM_STORE_PATHSPECS).toContain("*/skills/**");
+    expect(TEAM_STORE_PATHSPECS).toContain("*/notes/**");
   });
 });

@@ -75,6 +75,14 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       return { kind: "findingDateGroup", projectName: element.projectName, date: element.date, count: 0 };
     }
 
+    if (element.kind === "noteDateGroup") {
+      return { kind: "category", projectName: element.projectName, category: "notes" };
+    }
+
+    if (element.kind === "note") {
+      return { kind: "noteDateGroup", projectName: element.projectName, date: element.date, count: 0 };
+    }
+
     if (element.kind === "taskSectionGroup") {
       return { kind: "category", projectName: element.projectName, category: "task" };
     }
@@ -136,6 +144,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "project") {
       return [
         { kind: "category", projectName: element.projectName, category: "findings" },
+        { kind: "category", projectName: element.projectName, category: "notes" },
         { kind: "category", projectName: element.projectName, category: "truths" },
         { kind: "category", projectName: element.projectName, category: "sessions" },
         { kind: "category", projectName: element.projectName, category: "task" },
@@ -148,6 +157,9 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "category") {
       if (element.category === "findings") {
         return this.data.getFindingDateGroups(element.projectName, this.dateFilter);
+      }
+      if (element.category === "notes") {
+        return this.data.getNoteDateGroups(element.projectName);
       }
       if (element.category === "truths") {
         return this.data.getTruthNodes(element.projectName);
@@ -196,6 +208,10 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
 
     if (element.kind === "findingDateGroup") {
       return this.data.getFindingsForDate(element.projectName, element.date, this.dateFilter);
+    }
+
+    if (element.kind === "noteDateGroup") {
+      return this.data.getNotesForDate(element.projectName, element.date);
     }
 
     if (element.kind === "globalTaskSectionGroup") {

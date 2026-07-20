@@ -5,6 +5,9 @@ export function categoryIconId(category: PhrenCategory): string {
   if (category === "findings") {
     return "list-flat";
   }
+  if (category === "notes") {
+    return "note";
+  }
   if (category === "truths") {
     return "pin";
   }
