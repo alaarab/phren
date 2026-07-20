@@ -6,7 +6,6 @@ import { ACCENT_AMBER, BG_COLOR } from "./types.js";
 import {
   buildVisibleData,
   currentTheme,
-  nodeRadius,
   rebuildHostNodes,
   recomputeSearchMatches,
   seeded,
@@ -18,7 +17,6 @@ import {
   disposeFocusHalos,
   ensureFocusHalos,
   glowTexture,
-  nodeWorldPos,
   ringTexture,
   tickNodes,
 } from "./nodes.js";
@@ -47,7 +45,6 @@ import { buildCages, disposeCages, setCageResolution } from "./cages.js";
 let starfield: THREE.Points | null = null;
 let nebula: THREE.Group | null = null;
 let ringSprite: THREE.Sprite | null = null;
-let ringPhase = 0;
 let bloomPass: UnrealBloomPass | null = null;
 let vignetteEl: HTMLElement | null = null;
 let labelRenderer: ReturnType<typeof createLabelRenderer> | null = null;
@@ -385,21 +382,9 @@ export function setupForceGraph(): void {
     labelTick(dt);
     tickIdleResume(timestamp);
 
-    if (ringSprite) {
-      const activeId = state.selectedNodeId || state.focusedProjectId;
-      const pos = activeId ? nodeWorldPos(activeId) : null;
-      const activeNode = activeId ? state.nodeById.get(activeId) : null;
-      if (pos && activeNode) {
-        ringSprite.visible = true;
-        ringSprite.position.copy(pos);
-        ringPhase = (ringPhase + dt * 0.6) % 1;
-        const baseR = nodeRadius(activeNode) || 8;
-        ringSprite.scale.setScalar(baseR * (1.6 + ringPhase * 3));
-        (ringSprite.material as THREE.SpriteMaterial).opacity = (1 - ringPhase) * 0.2;
-      } else {
-        ringSprite.visible = false;
-      }
-    }
+    // Selection is communicated by graph dimming and contextual UI. Do not
+    // draw an expanding ring around any selected node.
+    if (ringSprite) ringSprite.visible = false;
     mascotUpdate(dt);
   };
   state.ambientRafId = requestAnimationFrame(ambientTick);

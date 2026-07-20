@@ -343,5 +343,7 @@ export function tickNodes(dt: number, now: number): void {
   });
 
   positionFocusHalo(hoverHalo, state.hoveredNodeId);
-  positionFocusHalo(selectHalo, state.selectedNodeId || state.focusedProjectId);
+  // Selection is already clear from graph dimming and contextual UI. Avoid a
+  // second amber/yellow glow around projects, findings, tasks, or fragments.
+  positionFocusHalo(selectHalo, null);
 }

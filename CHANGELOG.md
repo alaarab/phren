@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-07-20
+
+### Changed
+
+- **The graph project pane is now the single reading and editing surface.** Selecting
+  a finding or task expands its complete text inline; Edit opens controls in that same
+  row instead of spawning a second dossier. Task status and priority are editable
+  inline, while finding topic and health remain visible for context.
+- The project pane is draggable in VS Code, starts taller, persists its position and
+  dimensions, and supports independent width/height resizing plus a diagonal corner
+  handle. Select now shares the filter row, and Select all toggles to Unselect all when
+  every visible item is selected.
+- Filters use an unambiguous cyan selected state, project rows show longer readable
+  previews, and graph scrollbars and HUD spacing are less visually intrusive.
+
+### Fixed
+
+- Removed the yellow radiating selection effect from projects, findings, tasks, and
+  other graph nodes.
+- Fixed project counts that stopped at exactly 50. The VS Code extension now requests
+  up to 200 findings and preserves the API's actual total rather than presenting the
+  first page length as the project total.
+- Fixed pane/card placement races after graph animations, overlapping graph controls,
+  inactive Edit actions, unclear health/filter selection, and saved inline edits not
+  refreshing in the project pane.
+- Released the coordinated VS Code extension patch as `0.6.2`.
+
 ## [0.1.38] - 2026-07-20
 
 ### Added

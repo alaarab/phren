@@ -2694,20 +2694,41 @@ export function renderGraphHostScript(): string {
     deleteNode(currentNode);
   }
 
-  // Open the dossier in edit mode for a finding/task chosen in the contents pane.
-  function editNodeFromPane(node) {
+  // Persist edits made directly inside the project pane. The pane owns the
+  // editor; the host only performs the mutation and updates the rendered node.
+  function saveInlineFromPane(node) {
     if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
-    var api = graphApi();
-    if (api && api.selectNode) api.selectNode(node.id);
-    setTimeout(function() {
-      if (currentNode && currentNode.id === node.id) {
-        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
-        var point = currentPopoverPoint();
-        renderPopover(currentNode, point.x, point.y);
-        var editor = document.getElementById('graph-node-editor');
-        if (editor) editor.focus();
-      }
-    }, 220);
+    var nextText = (node.editedText || '').trim();
+    if (!nextText) return;
+    if (node.kind === 'finding') {
+      graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'PUT', {
+        old_text: node.tooltipLabel || node.fullLabel || '',
+        new_text: nextText,
+        score_key: node.scoreKey || ''
+      }).then(function(result) {
+        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+        var api = graphApi();
+        if (api && api.updateNode) api.updateNode(node.id, { text: nextText });
+        graphToast('Finding updated', 'ok');
+      }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
+      return;
+    }
+    graphRequest('/api/tasks/update', 'POST', {
+      project: node.projectName,
+      item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || '',
+      text: nextText,
+      section: node.editedSection || node.section || 'Queue',
+      priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+      var api = graphApi();
+      if (api && api.updateNode) api.updateNode(node.id, {
+        text: nextText,
+        section: node.editedSection || node.section || 'Queue',
+        priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
+      });
+      graphToast('Task updated', 'ok');
+    }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
   }
 
   function completeCurrentTask() {
@@ -2829,7 +2850,7 @@ export function renderGraphHostScript(): string {
       api.onItemAction(function(payload, action) {
         if (action === 'delete') deleteNode(payload);
         else if (action === 'delete-batch') deleteNodes(payload);
-        else if (action === 'edit') editNodeFromPane(payload);
+        else if (action === 'save-inline') saveInlineFromPane(payload);
         else if (action === 'merge') mergeNodes(payload);
       });
     }
