@@ -8,6 +8,7 @@ import {
   addStoreToRegistry,
   removeStoreFromRegistry,
   generateStoreId,
+  getStoreProjectDirs,
   readTeamBootstrap,
   type StoreEntry,
 } from "../store-registry.js";
@@ -26,8 +27,7 @@ function printStoreUsage() {
 function countStoreProjects(store: StoreEntry): number {
   if (!fs.existsSync(store.path)) return 0;
   try {
-    const storeRegistry = require("../store-registry.js");
-    return storeRegistry.getStoreProjectDirs(store).length;
+    return getStoreProjectDirs(store).length;
   } catch {
     return 0;
   }

@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-07-19
+
+### Fixed
+
+- **Sparse-checkout no longer hides root config, which silently broke MCP and team
+  stores.** `setupSparseCheckout` omitted `phren.root.yaml` and `stores.yaml` from its
+  always-include list, leaving them tracked in git but absent from the working tree on
+  any profile-linked store. Both failures were silent: the MCP entrypoint gates on
+  reading the root manifest, so a missing one made `phren <store-path>` fall through to
+  "Unknown command" and exit — surfacing in clients as `Cannot call write after a stream
+  was destroyed` — while a missing `stores.yaml` made the registry fall back to a single
+  implicit store, hiding every configured team store.
+- `phren store list` reported `projects: 0` for every store. `countStoreProjects` used a
+  CommonJS `require()` inside an ESM module, which always threw `ReferenceError` into a
+  bare `catch` that returned `0`.
+
+### Added
+
+- `phren doctor` now checks that root config is materialized on disk, not merely tracked
+  in git, and distinguishes sparse-checkout exclusion from an outright missing file.
+  `phren doctor --fix` repairs it by widening the sparse-checkout patterns.
+
 ## [0.1.37] - 2026-07-19
 
 ### Added

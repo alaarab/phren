@@ -13,6 +13,8 @@ import {
   runtimeHealthFile,
 } from "../shared.js";
 import { migrateInvalidProjectNames, formatMigrationSummary } from "../project-migrate.js";
+import { ROOT_MANIFEST_FILENAME } from "../phren-paths.js";
+import { STORES_FILENAME } from "../store-registry.js";
 import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/shared.js";
 import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
@@ -109,6 +111,46 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
   }
 }
 
+/**
+ * Root-level config the CLI reads straight off disk. Sparse-checkout can leave these
+ * tracked-but-unmaterialized, and both failures are silent: without the root manifest
+ * the MCP entrypoint never recognizes the store path (so MCP never starts), and without
+ * stores.yaml the registry falls back to a single implicit store, hiding every team store.
+ */
+function rootConfigStatus(
+  phrenPath: string,
+  filename: string,
+): { present: boolean; trackedInHead: boolean } {
+  if (fs.existsSync(path.join(phrenPath, filename))) {
+    return { present: true, trackedInHead: false };
+  }
+  try {
+    execFileSync("git", ["cat-file", "-e", `HEAD:${filename}`], {
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return { present: false, trackedInHead: true };
+  } catch {
+    return { present: false, trackedInHead: false };
+  }
+}
+
+/** Materialize a tracked-but-excluded root config file by widening sparse-checkout. */
+function materializeRootConfig(phrenPath: string, filename: string): boolean {
+  try {
+    execFileSync("git", ["sparse-checkout", "add", `/${filename}`], {
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return fs.existsSync(path.join(phrenPath, filename));
+  } catch (err: unknown) {
+    debugLog(`materializeRootConfig(${filename}): ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 function pushSkillMirrorChecks(
   checks: Array<{ name: string; ok: boolean; detail: string }>,
   scope: string,
@@ -181,6 +223,38 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     ok: gitRemote.ok,
     detail: gitRemote.detail,
   });
+
+  // Root config must be materialized on disk, not merely tracked in git.
+  const manifestStatus = rootConfigStatus(phrenPath, ROOT_MANIFEST_FILENAME);
+  const manifestRepaired =
+    !manifestStatus.present && manifestStatus.trackedInHead && fix
+      ? materializeRootConfig(phrenPath, ROOT_MANIFEST_FILENAME)
+      : false;
+  checks.push({
+    name: "root-manifest",
+    ok: manifestStatus.present || manifestRepaired,
+    detail: manifestStatus.present
+      ? path.join(phrenPath, ROOT_MANIFEST_FILENAME)
+      : manifestRepaired
+        ? `${ROOT_MANIFEST_FILENAME} restored (was excluded by sparse-checkout)`
+        : manifestStatus.trackedInHead
+          ? `${ROOT_MANIFEST_FILENAME} is tracked in git but excluded by sparse-checkout — MCP cannot start; run 'phren doctor --fix'`
+          : `${ROOT_MANIFEST_FILENAME} missing from ${phrenPath}`,
+  });
+
+  // stores.yaml is optional (single-store installs have none), so this is only a
+  // failure when it exists in git but was never materialized.
+  const storesStatus = rootConfigStatus(phrenPath, STORES_FILENAME);
+  if (!storesStatus.present && storesStatus.trackedInHead) {
+    const storesRepaired = fix ? materializeRootConfig(phrenPath, STORES_FILENAME) : false;
+    checks.push({
+      name: "store-registry-materialized",
+      ok: storesRepaired,
+      detail: storesRepaired
+        ? `${STORES_FILENAME} restored (was excluded by sparse-checkout)`
+        : `${STORES_FILENAME} is tracked in git but excluded by sparse-checkout — team stores are hidden; run 'phren doctor --fix'`,
+    });
+  }
 
   checks.push({
     name: "machine-registered",

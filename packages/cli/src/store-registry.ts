@@ -43,7 +43,7 @@ export interface TeamBootstrap {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const STORES_FILENAME = "stores.yaml";
+export const STORES_FILENAME = "stores.yaml";
 const TEAM_BOOTSTRAP_FILENAME = ".phren-team.yaml";
 const VALID_ROLES: ReadonlySet<string> = new Set(["primary", "team", "readonly"]);
 const VALID_SYNC_MODES: ReadonlySet<string> = new Set(["managed-git", "pull-only"]);
