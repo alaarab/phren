@@ -40,6 +40,7 @@ Experimental (not published, not wired into the `phren` CLI):
 | `packages/cli/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
 | `packages/cli/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
 | `packages/cli/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
+| `packages/cli/browser/graph/` | Shared 3D memory-viewer renderer (bundled for the web UI and the VS Code webview): scene, project navigator, contents/review pane, labels |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
 | `packages/cli/skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |
 | `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
@@ -71,6 +72,7 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 - `feature-flags.md` -- optional features and their env flags
 - `performance.md` -- indexing and search performance notes
 - `shell.md` -- the interactive `phren` shell
+- `graph-viewer.md` -- the 3D memory viewer (web UI Graph tab + VS Code webview)
 
 Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<project>/`
 (archived per-topic docs), not a directory in this repo.
