@@ -74,6 +74,11 @@ interface FindingData {
   topicLabel: string;
 }
 
+interface FindingPage {
+  findings: FindingData[];
+  total: number;
+}
+
 interface TaskData {
   id: string;
   line: string;
@@ -116,6 +121,8 @@ interface GraphNode {
   taskItemId?: string;
   checked?: boolean;
   store?: string;
+  findingCount?: number;
+  taskCount?: number;
 }
 
 interface GraphEdge {
@@ -635,11 +642,12 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const edges: GraphEdge[] = [];
   const summaryMap: Record<string, ProjectSummaryData> = {};
   // Build project nodes (skip empty orphans)
-  for (const { projectName, summary, findings, tasks, topicConfig, store } of perProjectResults) {
-    if (findings.length === 0 && tasks.length === 0) continue;
+  for (const { projectName, summary, findings: findingPage, tasks, topicConfig, store } of perProjectResults) {
+    const findings = findingPage.findings;
+    if (findingPage.total === 0 && tasks.length === 0) continue;
 
     const projectNodeId = `project:${projectName}`;
-    summaryMap[projectName] = { ...summary, findingCount: findings.length, taskCount: tasks.length };
+    summaryMap[projectName] = { ...summary, findingCount: findingPage.total, taskCount: tasks.length };
 
     nodes.push({
       id: projectNodeId,
@@ -648,9 +656,11 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
       label: projectName,
       subtype: "project",
       text: summary.summary,
-      radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
+      radius: Math.min(14 + Math.sqrt(findingPage.total + tasks.length) * 1.5, 30),
       color: "#7B68AE",
       store,
+      findingCount: findingPage.total,
+      taskCount: tasks.length,
     });
 
     // Finding nodes
@@ -840,7 +850,7 @@ async function fetchProjectSummary(client: PhrenClient, project: string): Promis
   };
 }
 
-async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingData[]> {
+async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingPage> {
   const raw = await client.getFindings(project);
   const data = responseData(raw);
   const parsed: FindingData[] = [];
@@ -859,7 +869,8 @@ async function fetchFindings(client: PhrenClient, project: string, projectTopics
       topicLabel: topic.label,
     });
   }
-  return parsed;
+  const total = typeof data?.total === "number" && Number.isFinite(data.total) ? data.total : undefined;
+  return { findings: parsed, total: total === undefined ? parsed.length : total };
 }
 
 async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
@@ -1131,7 +1142,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     #graph-filter {
       position: absolute;
       top: 12px;
-      right: 58px;
+      right: 70px;
       left: auto;
       width: min(560px, 60%);
       z-index: 12;
@@ -1211,7 +1222,8 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       left: 0;
       top: 0;
       z-index: 20;
-      max-width: min(300px, calc(100% - 24px));
+      width: min(360px, calc(100% - 24px));
+      max-width: none;
       pointer-events: none;
     }
     /* The 3D canvas is immersive-dark in both editor themes; the popover,
@@ -1266,22 +1278,28 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       place-items: center;
       z-index: 1;
     }
-    /* Docked reading pane: the card pins to the left edge instead of chasing
-       the cursor (which covered the node you just clicked). Mirrors the web-ui;
-       the contents pane docks to the right, so left = detail, right = list. */
+    /* Contextual reading card: placed after the camera settles, adjacent to
+       the selected node and project pane. The grab handle keeps it movable. */
     #node-popover.docked {
-      left: 12px;
-      top: 58px;
-      bottom: 12px;
+      bottom: auto;
       right: auto;
       width: min(360px, calc(100% - 24px));
       max-width: none;
     }
     #node-popover.docked #node-popover-card {
-      height: 100%;
+      height: auto;
+      max-height: min(520px, calc(100vh - 88px));
       overflow: auto;
     }
-    #node-popover.docked #node-popover-handle { display: none; }
+    #node-popover.docked #node-popover-handle { display: block; }
+    /* Edit transforms the same contextual card instead of spawning a second
+       surface in a remote corner. */
+    #node-popover.docked.editor { width:min(380px, calc(100% - 24px)); }
+    #node-popover.docked.editor #node-popover-card {
+      height: auto;
+      max-height: calc(100vh - 92px);
+      overflow: auto;
+    }
     #node-popover.docked .dossier-resize {
       position: absolute;
       right: -4px;
@@ -1441,7 +1459,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     .graph-toast button:hover { background: var(--surface); }
   </style>
 </head>
-<body>
+<body class="phren-vscode-webview">
   <div id="graph-filter"></div>
   <div id="graph-project-filter"></div>
   <div id="graph-limit-row"></div>
@@ -1555,12 +1573,14 @@ ${graphScript}
       topicSlug: n.topicSlug || '',
       topicLabel: n.topicLabel || '',
       tagged: n.kind === 'finding',
-      store: n.store || ''
+      store: n.store || '',
+      findingCount: typeof n.findingCount === 'number' ? n.findingCount : undefined,
+      taskCount: typeof n.taskCount === 'number' ? n.taskCount : undefined
     });
   }
 
-  // Project totals for tooltips/labels — counted from the payload itself
-  // (the extension's node shape has no findingCount/taskCount fields).
+  // Project totals for tooltips/labels. Prefer API totals carried by project
+  // nodes; fall back to counting rendered nodes for older payloads.
   var projectTotals = {};
   for (var totalsIdx = 0; totalsIdx < graphNodes.length; totalsIdx++) {
     var totalsNode = graphNodes[totalsIdx];
@@ -1573,8 +1593,8 @@ ${graphScript}
     var projNode = graphNodes[projIdx];
     if (projNode.group !== 'project') continue;
     var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0, tasks: 0 };
-    projNode.findingCount = projTotals.findings;
-    projNode.taskCount = projTotals.tasks;
+    if (typeof projNode.findingCount !== 'number') projNode.findingCount = projTotals.findings;
+    if (typeof projNode.taskCount !== 'number') projNode.taskCount = projTotals.tasks;
   }
 
   var topics = [];
@@ -1644,6 +1664,8 @@ ${graphScript}
   var ctxMenu = document.getElementById('node-ctx-menu');
   var currentNode = null;
   var editMode = null;
+  var lastAnchorPoint = { x: 0, y: 0 };
+  var cardWasDragged = false;
 
   // --- Draggable popover ---
   var isDraggingPopover = false;
@@ -1653,6 +1675,7 @@ ${graphScript}
     popoverHandle.addEventListener('mousedown', function(e) {
       if (!popover) return;
       isDraggingPopover = true;
+      cardWasDragged = true;
       var container = document.querySelector('.graph-container');
       var containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 };
       var popRect = popover.getBoundingClientRect();
@@ -1761,12 +1784,37 @@ ${graphScript}
   function positionPopover(x, y) {
     if (!popover || !popoverCard) return;
     popover.classList.add('docked');
-    popover.style.left = '';
-    popover.style.top = '';
+    popover.classList.toggle('editor', Boolean(editMode));
     popover.setAttribute('aria-hidden', 'false');
-    popover.style.visibility = 'visible';
+    popover.style.visibility = 'hidden';
     popover.style.display = 'block';
     ensureDossierResize();
+    if (cardWasDragged && popover.style.left && popover.style.top) {
+      popover.style.visibility = 'visible';
+      return;
+    }
+    var container = document.querySelector('.graph-container');
+    var bounds = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    var panel = document.querySelector('.phren-project-panel:not([hidden])');
+    var panelRect = panel ? panel.getBoundingClientRect() : null;
+    var cardRect = popover.getBoundingClientRect();
+    var width = cardRect.width || 360;
+    var height = cardRect.height || 260;
+    var paneRight = panelRect ? panelRect.right - bounds.left : 16;
+    var anchorX = x > 0 ? x : paneRight + width + 44;
+    var anchorY = y > 0 ? y : (panelRect ? panelRect.top - bounds.top + 180 : 240);
+    var gap = 26;
+    var leftOfNode = anchorX - width - gap;
+    var rightOfNode = anchorX + gap;
+    var left;
+    if (leftOfNode >= paneRight + 14) left = leftOfNode;
+    else if (rightOfNode + width <= bounds.width - 16) left = rightOfNode;
+    else left = Math.max(16, Math.min(bounds.width - width - 16, paneRight + 14));
+    var top = Math.max(64, Math.min(bounds.height - height - 16, anchorY - height / 2));
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+    popover.style.right = 'auto';
+    popover.style.visibility = 'visible';
   }
 
   function renderDocs(node) {
@@ -1777,12 +1825,11 @@ ${graphScript}
 
   function renderView(node) {
     var title = node.label || node.text || node.id;
-    var chips = [chip(nodeKindLabel(node))];
+    var chips = [];
     if (node.projectName) chips.push(chip(node.projectName));
     if (node.store) chips.push(chip(node.store));
     if (node.kind === 'task' && node.section) chips.push(chip(node.section));
     if (node.kind === 'task' && node.priority) chips.push(chip('Priority ' + node.priority));
-    if (node.kind === 'finding' && node.topicLabel) chips.push(chip(node.topicLabel));
 
     var body = '';
     var actions = [];
@@ -1827,17 +1874,19 @@ ${graphScript}
 
     return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(nodeKindLabel(node)) + '</div>'
       + '<div style="font-size:15px;font-weight:600;line-height:1.2">' + esc(title) + '</div>'
-      + '<div class="node-chips">' + chips.join('') + '</div>'
+      + (chips.length ? '<div class="node-chips">' + chips.join('') + '</div>' : '')
       + body
       + (actions.length ? '<div class="node-actions">' + actions.join('') + '</div>' : '');
   }
 
   function renderEdit(node) {
     var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var itemTitle = node.label || node.text || node.id;
     var section = node.section || 'Queue';
     var priority = node.priority || '';
     return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
-      + '<div style="font-size:14px;font-weight:600;line-height:1.2">' + esc(node.projectName || nodeKindLabel(node)) + '</div>'
+      + '<div style="font-size:14px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(itemTitle) + '">' + esc(itemTitle) + '</div>'
+      + (node.projectName ? '<div class="node-date">' + esc(node.projectName) + '</div>' : '')
       + '<textarea id="node-editor" class="node-editor">' + esc(node.text || node.label || '') + '</textarea>'
       + (node.kind === 'task'
         ? '<div class="node-select-grid">'
@@ -1859,14 +1908,12 @@ ${graphScript}
         var action = button.getAttribute('data-node-action');
         if (action === 'edit') {
           editMode = currentNode.kind === 'task' ? 'task' : 'finding';
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           return;
         }
         if (action === 'cancel') {
           editMode = null;
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           return;
         }
         if (action === 'save') {
@@ -1928,6 +1975,7 @@ ${graphScript}
       return;
     }
     currentNode = node;
+    if (!editMode && x > 0 && y > 0) lastAnchorPoint = { x: x, y: y };
     popoverContent.innerHTML = editMode ? renderEdit(node) : renderView(node);
     bindActions();
     positionPopover(x, y);
@@ -2004,7 +2052,11 @@ ${graphScript}
       }
       currentNode = Object.assign({}, nodeLookup[node.id] || {}, node);
       editMode = null;
-      renderPopover(currentNode, x, y);
+      cardWasDragged = false;
+      // Ordinary selection expands the matching row inside the project pane;
+      // never stack a second reading card over the graph. Explicit Edit still
+      // uses the movable editor surface.
+      hidePopover(true);
     });
   }
 
@@ -2059,8 +2111,7 @@ ${graphScript}
         if (refreshedNode) {
           Object.assign(currentNode, refreshedNode);
           if (!editMode) {
-            var refreshedPoint = currentPoint();
-            renderPopover(currentNode, refreshedPoint.x, refreshedPoint.y);
+            renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           }
         } else {
           hidePopover(true);
@@ -2086,8 +2137,7 @@ ${graphScript}
       if (currentNode && currentNode.id === data.id) {
         Object.assign(currentNode, cached || {});
         if (!editMode) {
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
         }
       }
       return;
@@ -2145,25 +2195,32 @@ ${graphScript}
       vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
     }
   }
-  function editNodeFromPane(node) {
-    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
-    if (window.phrenGraph && window.phrenGraph.selectNode) window.phrenGraph.selectNode(node.id);
-    setTimeout(function() {
-      if (currentNode && currentNode.id === node.id) {
-        editMode = currentNode.kind === 'task' ? 'task' : 'finding';
-        var point = currentPoint();
-        renderPopover(currentNode, point.x, point.y);
-        var editor = document.getElementById('node-editor');
-        if (editor) editor.focus();
-      }
-    }, 220);
-  }
   if (window.phrenGraph && window.phrenGraph.onItemAction) {
     window.phrenGraph.onItemAction(function(payload, action) {
       if (action === 'delete') {
         deleteNodeMsg(payload);
-      } else if (action === 'edit') {
-        editNodeFromPane(payload);
+      } else if (action === 'save-inline' && payload && !Array.isArray(payload)) {
+        var nextText = (payload.editedText || '').trim();
+        if (!nextText) return;
+        if (payload.kind === 'task') {
+          vscode.postMessage({
+            command: 'saveTaskEdit',
+            projectName: payload.projectName,
+            item: payload.taskItemId || payload.text || payload.fullLabel || '',
+            nodeId: payload.id,
+            text: nextText,
+            section: payload.editedSection || payload.section || 'Queue',
+            priority: typeof payload.editedPriority === 'string' ? payload.editedPriority : (payload.priority || '')
+          });
+        } else if (payload.kind === 'finding') {
+          vscode.postMessage({
+            command: 'saveFindingEdit',
+            projectName: payload.projectName,
+            nodeId: payload.id,
+            oldText: payload.text || payload.fullLabel || '',
+            newText: nextText
+          });
+        }
       } else if (action === 'merge' && Array.isArray(payload) && payload.length === 2) {
         vscode.postMessage({
           command: 'mergeFindings',

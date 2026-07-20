@@ -44,6 +44,15 @@ const HUD_CSS = `
   background:rgba(8,10,22,0.94);box-shadow:0 12px 40px rgba(0,0,0,0.6),0 0 24px rgba(103,232,249,0.06);
   color:#dbe4ff;
 }
+.phren-hud-panel,.phren-hud-results,.phren-project-nav{
+  scrollbar-width:thin;scrollbar-color:rgba(139,150,201,0.16) transparent;
+}
+.phren-hud-panel::-webkit-scrollbar,.phren-hud-results::-webkit-scrollbar,.phren-project-nav::-webkit-scrollbar{width:4px;height:4px}
+.phren-hud-panel::-webkit-scrollbar-track,.phren-hud-results::-webkit-scrollbar-track,.phren-project-nav::-webkit-scrollbar-track{background:transparent}
+.phren-hud-panel::-webkit-scrollbar-thumb,.phren-hud-results::-webkit-scrollbar-thumb,.phren-project-nav::-webkit-scrollbar-thumb{
+  background:rgba(139,150,201,0.14);border-radius:999px;
+}
+.phren-hud-panel:hover::-webkit-scrollbar-thumb,.phren-hud-results:hover::-webkit-scrollbar-thumb,.phren-project-nav:hover::-webkit-scrollbar-thumb{background:rgba(139,150,201,0.28)}
 .phren-hud-heading{
   font:700 9.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   color:#67e8f9;text-transform:uppercase;letter-spacing:0.14em;margin:10px 0 6px;
@@ -54,7 +63,9 @@ const HUD_CSS = `
   background:rgba(12,15,30,0.9);color:#dbe4ff;font-size:12px;margin-bottom:6px;
 }
 .phren-hud-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;margin-bottom:6px}
-.phren-hud-checklabel{display:flex;align-items:center;gap:8px;font-size:12px;color:#dbe4ff;cursor:pointer}
+.phren-hud-checklabel{display:flex;align-items:center;gap:8px;font-size:12px;color:#aeb7dd;cursor:pointer;padding:5px 7px;border:1px solid transparent;border-radius:6px}
+.phren-hud-checklabel:has(input:checked){color:#eafcff;background:rgba(103,232,249,0.1);border-color:rgba(103,232,249,0.32)}
+.phren-hud-checklabel input{accent-color:#67e8f9}
 .phren-hud-dot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto}
 .phren-hud-limit{
   width:120px;padding:8px 10px;border-radius:6px;background:rgba(12,15,30,0.9);
