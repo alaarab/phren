@@ -1,8 +1,9 @@
 /* eslint-disable */
-// Local visual-iteration harness (NOT for CI). Mounts a rich synthetic graph
-// payload, drives the UI into several states, and writes screenshots to
-// SHOT_DIR so they can be eyeballed and iterated on. Run with the sandbox
-// chromium via the temp playwright config.
+// Local visual-iteration harness (CI-ignored via the `_` prefix). Mounts a rich
+// synthetic graph payload, drives the UI into several states, and writes
+// screenshots to SHOT_DIR so they can be eyeballed and iterated on.
+//
+// Run: SHOT_DIR=/tmp/shots npx playwright test --config playwright.local.config.ts _shots.spec.ts
 import { test, type Page } from "@playwright/test";
 import { createWebUiHarness, type WebUiHarness } from "./web-ui-harness";
 import * as fs from "node:fs";
