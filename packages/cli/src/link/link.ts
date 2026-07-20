@@ -28,6 +28,8 @@ import {
 } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
+import { ROOT_MANIFEST_FILENAME } from "../phren-paths.js";
+import { STORES_FILENAME } from "../store-registry.js";
 import { log } from "../init/shared.js";
 import {
   listMachines as listMachinesShared,
@@ -188,7 +190,21 @@ function setupSparseCheckout(phrenPath: string, projects: string[]) {
     return;
   }
 
-  const alwaysInclude = ["profiles", "machines.yaml", "global", "scripts", "link.sh", "README.md", ".gitignore"];
+  // Root-level config the CLI needs on disk regardless of profile. Omitting these
+  // leaves them tracked-but-unmaterialized: the MCP entrypoint can't find the root
+  // manifest (so MCP never starts) and a missing stores.yaml silently degrades to a
+  // single implicit store, hiding every team store.
+  const alwaysInclude = [
+    "profiles",
+    "machines.yaml",
+    "global",
+    "scripts",
+    "link.sh",
+    "README.md",
+    ".gitignore",
+    ROOT_MANIFEST_FILENAME,
+    STORES_FILENAME,
+  ];
   const paths = [...alwaysInclude, ...projects];
   try {
     execFileSync("git", ["sparse-checkout", "set", ...paths], { cwd: phrenPath, stdio: "ignore", timeout: EXEC_TIMEOUT_MS });
