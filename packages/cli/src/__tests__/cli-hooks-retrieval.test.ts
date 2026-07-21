@@ -8,7 +8,7 @@ import { makeTempDir, grantAdmin } from "../test-helpers.js";
 const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"));
 process.env.PHREN_PATH = tmpPhren;
 
-import { rankResults, searchDocuments } from "../cli/hooks.js";
+import { rankResults, searchDocuments, applyRelevanceFloor, DEFAULT_MIN_QUERY_RELEVANCE } from "../cli/hooks.js";
 import type { DocRow } from "../shared/index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
@@ -171,5 +171,68 @@ describe("searchDocuments", () => {
     expect(result?.[0]?.path).toBe("/tmpphren/FINDINGS.md");
     expect(seenQueries).toHaveLength(2);
     expect(seenQueries[1]).toContain(" OR ");
+  });
+});
+
+describe("applyRelevanceFloor", () => {
+  function makeDocRow(project: string, filename: string, type: string, content: string): DocRow {
+    return { project, filename, type, content, path: `/tmp/${project}/${filename}` };
+  }
+
+  const KEYWORDS = "webhook discord alerts monitor";
+
+  it("drops a doc with zero query overlap (priors-only ranking noise)", () => {
+    const rows = [makeDocRow("zeta", "notes.md", "findings", "The quick brown fox jumps over the lazy dog")];
+    const kept = applyRelevanceFloor(rows, KEYWORDS, null, null);
+    expect(kept).toHaveLength(0); // inject nothing rather than noise
+  });
+
+  it("keeps a doc whose text actually matches the prompt", () => {
+    const rows = [
+      makeDocRow("zeta", "notes.md", "findings", "Route alerts to an external webhook instead of discord for monitors"),
+    ];
+    const kept = applyRelevanceFloor(rows, KEYWORDS, null, null);
+    expect(kept).toHaveLength(1);
+  });
+
+  it("keeps a structurally-relevant doc (changed file) even with no textual overlap", () => {
+    const rows = [makeDocRow("myapp", "auth-config.md", "findings", "nothing lexically relevant here at all")];
+    const gitCtx = { branch: "main", changedFiles: new Set(["auth-config.md"]) };
+    const kept = applyRelevanceFloor(rows, KEYWORDS, gitCtx, "myapp");
+    expect(kept).toHaveLength(1);
+  });
+
+  it("keeps a canonical doc for the detected project even with no overlap", () => {
+    const rows = [makeDocRow("myapp", "CLAUDE.md", "canonical", "unrelated project overview text")];
+    const kept = applyRelevanceFloor(rows, KEYWORDS, null, "myapp");
+    expect(kept).toHaveLength(1);
+  });
+
+  it("holds cross-project docs to a higher bar than local docs", () => {
+    // 5-token query → denom 5; one shared token ("latency") scores 0.2:
+    // clears the local floor (0.12) but not the cross-project floor (0.25).
+    const fiveTokenQuery = "webhook discord alerts monitor latency";
+    const local = makeDocRow("myapp", "perf.md", "findings", "improving latency on the dashboard");
+    const cross = makeDocRow("other", "perf.md", "findings", "latency tuning notes");
+    const kept = applyRelevanceFloor([local, cross], fiveTokenQuery, null, "myapp");
+    expect(kept.some((r) => r.project === "myapp")).toBe(true);
+    expect(kept.some((r) => r.project === "other")).toBe(false);
+  });
+
+  it("is a no-op when the floor is 0 (disabled)", () => {
+    const rows = [makeDocRow("zeta", "notes.md", "findings", "totally unrelated content")];
+    const kept = applyRelevanceFloor(rows, KEYWORDS, null, null, 0);
+    expect(kept).toHaveLength(1);
+  });
+
+  it("is a no-op when there is no usable query signal", () => {
+    const rows = [makeDocRow("zeta", "notes.md", "findings", "totally unrelated content")];
+    const kept = applyRelevanceFloor(rows, "", null, null);
+    expect(kept).toHaveLength(1);
+  });
+
+  it("exposes a sane default floor in (0, 1)", () => {
+    expect(DEFAULT_MIN_QUERY_RELEVANCE).toBeGreaterThan(0);
+    expect(DEFAULT_MIN_QUERY_RELEVANCE).toBeLessThan(1);
   });
 });

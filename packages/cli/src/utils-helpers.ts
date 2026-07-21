@@ -93,6 +93,12 @@ export function clampInt(raw: string | undefined, fallback: number, min: number,
   return Math.min(max, Math.max(min, parsed));
 }
 
+export function clampFloat(raw: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseFloat(raw || "");
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 // ── Argv parsing helpers ────────────────────────────────────────────────────
 
 export function getOptionValue(args: string[], name: string): string | undefined {
