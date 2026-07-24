@@ -11,6 +11,7 @@ import {
   atomicWriteText,
   debugLog,
   expandHomePath,
+  homePath,
   writeRootManifest,
   type InstallMode,
 } from "../shared.js";
@@ -114,7 +115,7 @@ import {
   type InferredInitScaffold,
 } from "./setup.js";
 
-import { DEFAULT_PHREN_PATH, STARTER_DIR, VERSION, log, type McpMode } from "./shared.js";
+import { STARTER_DIR, VERSION, log, type McpMode } from "./shared.js";
 import {
   PROJECT_OWNERSHIP_MODES,
   type ProjectOwnershipMode,
@@ -252,7 +253,12 @@ function hasInstallMarkers(phrenPath: string): boolean {
 }
 
 function resolveInitPhrenPath(opts: InitOptions): string {
-  const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH) || DEFAULT_PHREN_PATH;
+  // Resolve the default store path live (homePath reads HOME at call time) rather
+  // than via the import-frozen DEFAULT_PHREN_PATH const. The const is captured at
+  // module load, so any caller that changes HOME afterward — notably test suites
+  // that point HOME at a temp dir in beforeEach — would otherwise resolve to the
+  // real ~/.phren and mutate the developer's live install.
+  const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH) || homePath(".phren");
   return path.resolve(expandHomePath(raw));
 }
 
