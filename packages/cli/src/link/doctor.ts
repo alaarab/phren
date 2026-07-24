@@ -28,6 +28,7 @@ import { inspectTaskHygiene } from "../task/hygiene.js";
 import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { repairPreexistingInstall } from "../init/setup.js";
+import { getManagementPreset, resolveManagementCapabilities } from "../init/management-preset.js";
 import {
   getMachineName,
   lookupProfile,
@@ -217,6 +218,8 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: nodeVersion || "node not found in PATH",
   });
   const prefs = readInstallPreferences(phrenPath);
+  const managementPreset = getManagementPreset(phrenPath);
+  const caps = resolveManagementCapabilities(phrenPath);
   const gitRemote = gitRemoteStatus(phrenPath, prefs.syncIntent);
   checks.push({
     name: "git-remote",
@@ -333,32 +336,54 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: fs.existsSync(memoryFile) ? memoryFile : "missing generated MEMORY.md",
   });
 
-  const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
-  const globalClaudeDest = homePath(".claude", "CLAUDE.md");
-  let globalLinkOk = false;
-  try {
-    globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
-  } catch (err: unknown) {
-    debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
-    globalLinkOk = false;
+  // Under presets that don't symlink into ~/.claude, the "missing" links are
+  // expected — report them as ok with a preset note instead of failures.
+  if (caps.linkGlobalClaudeMd) {
+    const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
+    const globalClaudeDest = homePath(".claude", "CLAUDE.md");
+    let globalLinkOk = false;
+    try {
+      globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
+    } catch (err: unknown) {
+      debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
+      globalLinkOk = false;
+    }
+    checks.push({
+      name: "global-link",
+      ok: globalLinkOk,
+      detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
+    });
+  } else {
+    checks.push({
+      name: "global-link",
+      ok: true,
+      detail: `not managed under ${managementPreset} preset (phren does not write ~/.claude/CLAUDE.md)`,
+    });
   }
-  checks.push({
-    name: "global-link",
-    ok: globalLinkOk,
-    detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
-  });
-  pushSkillMirrorChecks(
-    checks,
-    "global",
-    buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
-    homePath(".claude", "skills"),
-  );
+  if (caps.installSkillLinks) {
+    pushSkillMirrorChecks(
+      checks,
+      "global",
+      buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
+      homePath(".claude", "skills"),
+    );
+  } else {
+    checks.push({ name: "skills-mirror:global", ok: true, detail: `skills not mirrored under ${managementPreset} preset` });
+  }
 
   for (const project of projects) {
     if (project === "global") continue;
     const config = readProjectConfig(phrenPath, project);
     const ownership = getProjectOwnershipMode(phrenPath, project, config);
     const target = findProjectDir(project);
+    if (!caps.repoMirroring) {
+      checks.push({
+        name: `ownership:${project}`,
+        ok: true,
+        detail: `repo mirrors disabled (${managementPreset} preset)`,
+      });
+      continue;
+    }
     if (ownership !== "phren-managed") {
       checks.push({
         name: `ownership:${project}`,

@@ -14,6 +14,7 @@ import {
 import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared/index.js";
 import { mergeConfig, getWorkflowPolicy } from "./shared/governance.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
+import { getManagementPreset, resolveManagementCapabilities } from "./init/management-preset.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
@@ -119,11 +120,22 @@ export async function runStatus() {
     console.log(`  ${DIM}profile${RESET}  ${profile}`);
   }
 
-  // MCP + hooks status
+  // Management preset + MCP + hooks status
+  const preset = getManagementPreset(phrenPath);
+  const caps = resolveManagementCapabilities(phrenPath);
   const mcpEnabled = getMcpEnabledPreference(phrenPath);
   const hooksEnabled = getHooksEnabledPreference(phrenPath);
+  console.log(`  ${DIM}preset${RESET}   ${preset}`);
   console.log(`  ${DIM}mcp${RESET}      ${mcpEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
   console.log(`  ${DIM}hooks${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+  // What phren touches on this machine under the current preset.
+  const touches = [
+    caps.linkGlobalClaudeMd ? "~/.claude/CLAUDE.md" : null,
+    caps.installSkillLinks ? "~/.claude/skills" : null,
+    caps.installWrappers ? "~/.local/bin wrappers" : null,
+    caps.repoMirroring ? "repo mirrors" : null,
+  ].filter(Boolean) as string[];
+  console.log(`  ${DIM}touches${RESET}  ${touches.length ? touches.join(", ") : `${DIM}store only${RESET}`}`);
 
   // Hook health: check ~/.claude/settings.json
   let hooksInstalled = false;

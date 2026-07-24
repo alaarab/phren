@@ -14,6 +14,22 @@ export interface InstallPreferences {
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
   projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";
+  /**
+   * Management preset controlling how much of the machine phren wires up.
+   * Absent → treated as "managed" (the historical, fully-managed behavior).
+   * See init/management-preset.ts for the capability expansion.
+   */
+  managementPreset?: "managed" | "assisted" | "manual";
+  /**
+   * Per-capability overrides. When set they win over the preset bundle
+   * (power-user escape hatch); when absent the preset default applies.
+   */
+  linkGlobalClaudeMd?: boolean;
+  installSkillLinks?: boolean;
+  installWrappers?: boolean;
+  selfHeal?: boolean;
+  repoMirroring?: boolean;
+  lifecycleAutomations?: boolean;
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
   proactivityTask?: "high" | "medium" | "low";
@@ -119,4 +135,11 @@ export function getHooksEnabledPreference(phrenPath: string): boolean {
 
 export function setHooksEnabledPreference(phrenPath: string, enabled: boolean): void {
   writeInstallPreferences(phrenPath, { hooksEnabled: enabled });
+}
+
+export function setManagementPresetPreference(
+  phrenPath: string,
+  preset: "managed" | "assisted" | "manual"
+): void {
+  writeInstallPreferences(phrenPath, { managementPreset: preset });
 }

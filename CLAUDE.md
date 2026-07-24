@@ -68,6 +68,7 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 - `architecture.md` -- system architecture and design patterns
 - `architecture-team-stores.md` -- multi-store / team-store design
 - `environment.md` -- environment variables, directory structure, finding quality rules
+- `footprint.md` -- management presets (managed/assisted/manual) and every path phren writes
 - `governance.md` -- policies, access control, retention, audit
 - `feature-flags.md` -- optional features and their env flags
 - `performance.md` -- indexing and search performance notes
