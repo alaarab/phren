@@ -13,6 +13,35 @@ const distRoot = path.join(cliRoot, "dist");
 const browserRoot = path.join(cliRoot, "browser");
 const tempRoot = path.join(cliRoot, `.dist-build-${process.pid}-${Date.now()}`);
 
+// Windows CI intermittently throws EBUSY/EPERM/ENOTEMPTY on rm/cp of the dist
+// tree when an antivirus scanner or a lingering file handle briefly locks a
+// freshly written file. These operations are idempotent, so a short retry with
+// backoff absorbs the transient lock instead of failing the whole build.
+const TRANSIENT_FS_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY", "EACCES", "EEXIST"]);
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withFsRetry(fn, attempts = 5) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      if (attempt >= attempts || !TRANSIENT_FS_CODES.has(err?.code)) throw err;
+      sleepSync(attempt * 100);
+    }
+  }
+}
+
+function rmDir(target) {
+  withFsRetry(() => fs.rmSync(target, { recursive: true, force: true }));
+}
+
+function cpAny(source, target) {
+  withFsRetry(() => fs.cpSync(source, target, { recursive: true, force: true }));
+}
+
 function tscExec() {
   return process.platform === "win32" ? "tsc.cmd" : "tsc";
 }
@@ -45,7 +74,7 @@ async function bundleBrowserAssets(targetDir) {
 
 function syncTree(sourceDir, targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
-  fs.cpSync(sourceDir, targetDir, { recursive: true, force: true });
+  cpAny(sourceDir, targetDir);
   pruneMissing(sourceDir, targetDir);
 }
 
@@ -55,7 +84,7 @@ function pruneMissing(sourceDir, targetDir) {
     const sourcePath = path.join(sourceDir, entry.name);
     const targetPath = path.join(targetDir, entry.name);
     if (!fs.existsSync(sourcePath)) {
-      fs.rmSync(targetPath, { recursive: true, force: true });
+      rmDir(targetPath);
       continue;
     }
 
@@ -66,14 +95,14 @@ function pruneMissing(sourceDir, targetDir) {
       continue;
     }
     if (sourceStat.isDirectory() !== targetStat.isDirectory()) {
-      fs.rmSync(targetPath, { recursive: true, force: true });
-      fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+      rmDir(targetPath);
+      cpAny(sourcePath, targetPath);
     }
   }
 }
 
 try {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  rmDir(tempRoot);
   fs.mkdirSync(tempRoot, { recursive: true });
   await bundleBrowserAssets(tempRoot);
   execFileSync(tscExec(), ["-p", path.join(cliRoot, "tsconfig.json"), "--outDir", tempRoot], {
@@ -88,5 +117,5 @@ try {
   }
   syncTree(tempRoot, distRoot);
 } finally {
-  fs.rmSync(tempRoot, { recursive: true, force: true });
+  rmDir(tempRoot);
 }
