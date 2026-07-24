@@ -95,6 +95,7 @@ export async function runAddCommand(args: string[]): Promise<number> {
 
 export async function runInitCommand(args: string[]): Promise<number> {
   const { parseMcpMode, runInit } = await import("./init/init.js");
+  const { parseManagementPreset, MANAGEMENT_PRESETS } = await import("./init/management-preset.js");
   const machineIdx = args.indexOf("--machine");
   const profileIdx = args.indexOf("--profile");
   const mcpIdx = args.indexOf("--mcp");
@@ -134,6 +135,18 @@ export async function runInitCommand(args: string[]): Promise<number> {
     console.error(`Invalid --task-proactivity value "${taskArg}". Use one of: high, medium, low.`);
     return 1;
   }
+  const presetArg = getOptionValue(args, "--preset") ?? getOptionValue(args, "--management");
+  const managementPreset = parseManagementPreset(presetArg);
+  if (presetArg && !managementPreset) {
+    console.error(`Invalid --preset value "${presetArg}". Use one of: ${MANAGEMENT_PRESETS.join(", ")}`);
+    return 1;
+  }
+  const hooksMode = parseMcpMode(getOptionValue(args, "--hooks") ?? "");
+  const hooksArg = getOptionValue(args, "--hooks");
+  if (hooksArg && !hooksMode) {
+    console.error(`Invalid --hooks value "${hooksArg}". Use "on" or "off".`);
+    return 1;
+  }
   const cloneUrl = getOptionValue(args, "--clone-url");
   try {
     await runInit({
@@ -141,7 +154,9 @@ export async function runInitCommand(args: string[]): Promise<number> {
       machine: machineIdx !== -1 ? args[machineIdx + 1] : undefined,
       profile: profileIdx !== -1 ? args[profileIdx + 1] : undefined,
       mcp: mcpMode,
+      hooks: hooksMode,
       projectOwnershipDefault: ownershipMode,
+      managementPreset,
       taskMode,
       findingsProactivity,
       taskProactivity,
@@ -209,6 +224,31 @@ export async function runHooksModeCommand(args: string[]): Promise<number> {
   const { runHooksMode } = await import("./init/init.js");
   try {
     await runHooksMode(args[0]);
+    return 0;
+  } catch (err: unknown) {
+    console.error(errorMessage(err));
+    return 1;
+  }
+}
+
+export async function runPresetCommand(args: string[]): Promise<number> {
+  const { runPreset } = await import("./init/init.js");
+  const positional = args.filter((a) => !a.startsWith("-"));
+  const yes = args.includes("--yes") || args.includes("-y");
+  try {
+    await runPreset(positional[0], { yes });
+    return 0;
+  } catch (err: unknown) {
+    console.error(errorMessage(err));
+    return 1;
+  }
+}
+
+export async function runSnippetCommand(_args: string[]): Promise<number> {
+  const { printSelfWiringSnippet } = await import("./init/init.js");
+  const phrenPath = findPhrenPath() || defaultPhrenPath();
+  try {
+    printSelfWiringSnippet(phrenPath);
     return 0;
   } catch (err: unknown) {
     console.error(errorMessage(err));

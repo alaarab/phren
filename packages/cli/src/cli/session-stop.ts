@@ -42,6 +42,7 @@ import {
   scheduleBackgroundSync,
 } from "./session-background.js";
 import { spawnDetachedChild } from "../shared/process.js";
+import { resolveManagementCapabilities } from "../init/management-preset.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,22 @@ export async function handleHookStop() {
       },
     });
     appendAuditLog(phrenPath, "hook_stop", "status=skipped-local");
+    return;
+  }
+
+  // Under the manual preset lifecycle automations are off: never auto commit or
+  // push the store, even if a stale Stop hook fires. Files on disk are the record.
+  if (!resolveManagementCapabilities(phrenPath).lifecycleAutomations) {
+    updateRuntimeHealth(phrenPath, {
+      lastStopAt: now,
+      lastAutoSave: { at: now, status: "saved-local", detail: "manual preset: auto-commit disabled" },
+      lastSync: {
+        lastPushAt: now,
+        lastPushStatus: "saved-local",
+        lastPushDetail: "manual preset does not auto-commit or push",
+      },
+    });
+    appendAuditLog(phrenPath, "hook_stop", "status=skipped-manual-preset");
     return;
   }
 

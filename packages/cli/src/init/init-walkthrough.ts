@@ -4,6 +4,7 @@
  */
 import * as path from "path";
 import type { ProjectOwnershipMode } from "../project-config.js";
+import { MANAGEMENT_PRESETS, presetSummaryLines, type ManagementPreset } from "./management-preset.js";
 import { PROJECT_OWNERSHIP_MODES } from "../project-config.js";
 import type { ProactivityLevel } from "../proactivity.js";
 import { getMachineName } from "../machine-identity.js";
@@ -187,6 +188,7 @@ export interface WalkthroughResult {
   mcp: McpMode;
   hooks: McpMode;
   projectOwnershipDefault: ProjectOwnershipMode;
+  managementPreset: ManagementPreset;
   findingsProactivity: ProactivityLevel;
   taskProactivity: ProactivityLevel;
   lowConfidenceThreshold: number;
@@ -254,6 +256,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
       mcp: "on" as McpMode,
       hooks: "on" as McpMode,
       projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
+      managementPreset: "managed" as ManagementPreset,
       findingsProactivity: "high" as ProactivityLevel,
       taskProactivity: "high" as ProactivityLevel,
       lowConfidenceThreshold: 0.7,
@@ -328,6 +331,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
       mcp: "on" as McpMode,
       hooks: "on" as McpMode,
       projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
+      managementPreset: "managed" as ManagementPreset,
       findingsProactivity: "high" as ProactivityLevel,
       taskProactivity: "high" as ProactivityLevel,
       lowConfidenceThreshold: 0.7,
@@ -393,21 +397,37 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
     log(`Domain: ${inferredDomain} (inferred from project content)`);
   }
 
-  printSection("Project Ownership");
-  log("Choose who owns repo-facing instruction files for projects you add.");
-  log("  phren-managed: Phren may mirror CLAUDE.md / AGENTS.md into the repo");
-  log("  detached: Phren keeps its own docs but does not write into the repo");
-  log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
-  log("  Change later: phren config project-ownership <mode>");
-  const projectOwnershipDefault = await prompts.select<ProjectOwnershipMode>(
-    "Default project ownership",
-    [
-      { value: "detached", name: "detached (default)" },
-      { value: "phren-managed", name: "phren-managed" },
-      { value: "repo-managed", name: "repo-managed" },
-    ],
-    "detached"
+  printSection("Management Level");
+  log("How much of your machine should phren wire up?");
+  for (const p of MANAGEMENT_PRESETS) log(`  ${p}: ${presetSummaryLines(p)}`);
+  log("  Change later: phren preset <managed|assisted|manual>");
+  const managementPreset = await prompts.select<ManagementPreset>(
+    "Management level",
+    MANAGEMENT_PRESETS.map((p) => ({ value: p, name: p === "managed" ? "managed (recommended)" : p })),
+    "managed"
   );
+
+  printSection("Project Ownership");
+  let projectOwnershipDefault: ProjectOwnershipMode;
+  if (managementPreset !== "managed") {
+    projectOwnershipDefault = "detached";
+    log(`Using detached ownership — the ${managementPreset} preset never writes into your repos.`);
+  } else {
+    log("Choose who owns repo-facing instruction files for projects you add.");
+    log("  phren-managed: Phren may mirror CLAUDE.md / AGENTS.md into the repo");
+    log("  detached: Phren keeps its own docs but does not write into the repo");
+    log("  repo-managed: keep the repo's existing CLAUDE/AGENTS files as canonical");
+    log("  Change later: phren config project-ownership <mode>");
+    projectOwnershipDefault = await prompts.select<ProjectOwnershipMode>(
+      "Default project ownership",
+      [
+        { value: "detached", name: "detached (default)" },
+        { value: "phren-managed", name: "phren-managed" },
+        { value: "repo-managed", name: "repo-managed" },
+      ],
+      "detached"
+    );
+  }
 
   printSection("MCP");
   log("MCP mode registers phren as a tool server so your AI agent can call it");
@@ -418,13 +438,20 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
   const mcp: McpMode = (await prompts.confirm("Enable MCP?", true)) ? "on" : "off";
 
   printSection("Hooks");
-  log("Hooks run shell commands at session start, prompt submit, and session end.");
-  log("  - SessionStart: git pull (keeps memory in sync across machines)");
-  log("  - UserPromptSubmit: searches phren and injects relevant context");
-  log("  - Stop: commits and pushes any new findings after each response");
-  log("  What they touch: ~/.claude/settings.json (hooks section only)");
-  log("  Change later: phren hooks-mode on|off");
-  const hooks: McpMode = (await prompts.confirm("Enable hooks?", true)) ? "on" : "off";
+  let hooks: McpMode;
+  if (managementPreset === "manual") {
+    hooks = "off";
+    log("Skipped — the manual preset runs phren as an MCP server only (no hooks).");
+    log("  Enable later: phren preset assisted  (or  phren hooks-mode on)");
+  } else {
+    log("Hooks run shell commands at session start, prompt submit, and session end.");
+    log("  - SessionStart: git pull (keeps memory in sync across machines)");
+    log("  - UserPromptSubmit: searches phren and injects relevant context");
+    log("  - Stop: commits and pushes any new findings after each response");
+    log("  What they touch: ~/.claude/settings.json (hooks section only)");
+    log("  Change later: phren hooks-mode on|off");
+    hooks = (await prompts.confirm("Enable hooks?", true)) ? "on" : "off";
+  }
 
   printSection("Semantic Search (Optional)");
   log("Phren can use a local embedding model for semantic (fuzzy) search via Ollama.");
@@ -669,6 +696,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
     mcp,
     hooks,
     projectOwnershipDefault,
+    managementPreset,
     findingsProactivity,
     taskProactivity,
     lowConfidenceThreshold,

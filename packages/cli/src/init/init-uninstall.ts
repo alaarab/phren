@@ -31,6 +31,7 @@ import {
 } from "./config.js";
 import type { HookEntry, HookMap } from "./config.js";
 import { DEFAULT_PHREN_PATH, log } from "./shared.js";
+import { sweepProjectMirrors } from "./teardown.js";
 
 const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
 
@@ -458,6 +459,13 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
       sweepSkillSymlinks(phrenPath);
     } catch (err: unknown) {
       debugLog(`uninstall: skill symlink sweep failed: ${errorMessage(err)}`);
+    }
+    // Remove per-project repo mirror symlinks + phren-managed .git/info/exclude
+    // lines BEFORE deleting the store (this reads project config from the store).
+    try {
+      sweepProjectMirrors(phrenPath);
+    } catch (err: unknown) {
+      debugLog(`uninstall: project mirror sweep failed: ${errorMessage(err)}`);
     }
   }
 

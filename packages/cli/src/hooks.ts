@@ -11,6 +11,7 @@ import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 import { logger } from "./logger.js";
 import { withFileLock } from "./shared/governance.js";
+import { resolveManagementCapabilities } from "./init/management-preset.js";
 
 export interface HookError {
   code: PhrenErrorCode;
@@ -1016,6 +1017,12 @@ export function runPrePromptHooks(
 export interface HookConfigOptions {
   tools?: Set<string>;
   allTools?: boolean;
+  /**
+   * Whether to install ~/.local/bin session wrappers. Defaults to the current
+   * management preset's `installWrappers` capability. Assisted/manual presets
+   * skip wrappers (hooks fall back to node/npx invocation).
+   */
+  installWrappers?: boolean;
 }
 
 export function configureAllHooks(phrenPath: string, options: HookConfigOptions = {}): string[] {
@@ -1025,6 +1032,9 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     : options.allTools
       ? new Set(["copilot", "cursor", "codex"])
       : detectInstalledTools();
+
+  const installWrappers = options.installWrappers
+    ?? resolveManagementCapabilities(phrenPath).installWrappers;
 
   const lifecycle = buildLifecycleCommands(phrenPath);
 
@@ -1054,7 +1064,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: copilot hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
@@ -1081,7 +1091,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: cursor hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
   }
 
   // ── Codex (codex.json in phren path) ─────────────────────────────────────
@@ -1107,7 +1117,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: codex hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
   }
 
   return configured;
