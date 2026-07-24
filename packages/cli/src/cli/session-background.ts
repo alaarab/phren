@@ -13,6 +13,7 @@ import {
 } from "./hooks-context.js";
 import { qualityMarkers } from "../shared.js";
 import { spawnDetachedChild } from "../shared/process.js";
+import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { logger } from "../logger.js";
 
 const SYNC_LOCK_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -65,6 +66,8 @@ export function scheduleBackgroundSync(phrenPathLocal: string): boolean {
 
 export function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string): boolean {
   if (!isFeatureEnabled("PHREN_FEATURE_DAILY_MAINTENANCE", true)) return false;
+  // Lifecycle automations (daily maintenance) are off under the manual preset.
+  if (!resolveManagementCapabilities(phrenPathLocal).lifecycleAutomations) return false;
   const markers = qualityMarkers(phrenPathLocal);
   if (fs.existsSync(markers.done)) return false;
   if (fs.existsSync(markers.lock)) {

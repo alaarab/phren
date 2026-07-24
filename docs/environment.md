@@ -2,6 +2,17 @@
 
 All environment variables are optional. phren uses sensible defaults when they are not set.
 
+## Management presets
+
+How much of your machine phren wires up is controlled by a **management preset**
+(`managed` | `assisted` | `manual`), set with `phren init --preset <name>` and
+switchable anytime with `phren preset <name>`. The preset lives in
+`install-preferences.json` (absent → `managed`). `managed` is the default and
+symlinks into `~/.claude`, installs wrappers, and self-heals every session;
+`assisted` keeps hooks + MCP but writes nothing outside the store; `manual` is an
+MCP server only. See [footprint.md](footprint.md) for a full path-by-path table
+and precedence rules. `phren status` shows the active preset and what it touches.
+
 ## Core
 
 | Variable | Type | Default | Description |

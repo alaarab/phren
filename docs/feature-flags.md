@@ -2,6 +2,17 @@
 
 phren uses environment variables as feature flags to control optional behaviors. All flags are enabled by default. Set to `0`, `false`, `off`, or `no` to disable.
 
+## Precedence with management presets
+
+The [management preset](footprint.md) is the coarse control; these flags are the fine control. When they disagree, precedence (strongest first) is:
+
+1. `PHREN_FEATURE_*` env vars and `~/.phren/.env` lines — always win at runtime for the automations they gate.
+2. Explicit per-capability booleans in `install-preferences.json`.
+3. The preset bundle (`managed` / `assisted` / `manual`).
+4. Built-in `managed` defaults (when no preset is set).
+
+The `manual` preset writes `PHREN_FEATURE_AUTO_CAPTURE=0`, `PHREN_FEATURE_AUTO_EXTRACT=0`, and `PHREN_FEATURE_DAILY_MAINTENANCE=0` into `~/.phren/.env` at install so its automations stay off; you can flip any of them back on individually there.
+
 ## PHREN_FEATURE_AUTO_EXTRACT
 
 **Default:** enabled

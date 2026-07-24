@@ -37,6 +37,7 @@ import {
   setMachineProfile,
 } from "../profile-store.js";
 import { writeSkillMd, isManagedSymlink } from "./skills.js";
+import { resolveManagementCapabilities, type ManagementCapabilities } from "../init/management-preset.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
 import { renderSkillInstructionsSection } from "../skill/registry.js";
 import { findProjectDir } from "../project-locator.js";
@@ -330,40 +331,61 @@ function writeManagedAgentsFile(src: string, dest: string, content: string, mana
 
 // ── Linking operations ──────────────────────────────────────────────────────
 
-function linkGlobal(phrenPath: string, tools: Set<string>) {
-  log("  global skills -> ~/.claude/skills/");
-  const skillsDir = homePath(".claude", "skills");
-  syncScopeSkillsToDir(phrenPath, "global", skillsDir);
+function linkGlobal(phrenPath: string, tools: Set<string>, caps: ManagementCapabilities) {
+  if (caps.installSkillLinks) {
+    log("  global skills -> ~/.claude/skills/");
+    const skillsDir = homePath(".claude", "skills");
+    syncScopeSkillsToDir(phrenPath, "global", skillsDir);
 
-  if (tools.has("copilot")) {
-    const copilotSkillsDir = homePath(".copilot", "skills");
-    log("  global skills -> ~/.copilot/skills/");
-    try {
-      syncScopeSkillsToDir(phrenPath, "global", copilotSkillsDir);
-    } catch (err: unknown) {
-      logger.debug("link", `linkGlobal copilotSkills: ${errorMessage(err)}`);
-    }
-  }
-
-  const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
-  if (fs.existsSync(globalClaude)) {
-    symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), phrenPath);
     if (tools.has("copilot")) {
+      const copilotSkillsDir = homePath(".copilot", "skills");
+      log("  global skills -> ~/.copilot/skills/");
       try {
-        const copilotInstrDir = homePath(".github");
-        fs.mkdirSync(copilotInstrDir, { recursive: true });
-        symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
+        syncScopeSkillsToDir(phrenPath, "global", copilotSkillsDir);
       } catch (err: unknown) {
-        logger.debug("link", `linkGlobal copilotInstructions: ${errorMessage(err)}`);
+        logger.debug("link", `linkGlobal copilotSkills: ${errorMessage(err)}`);
       }
     }
   }
+
+  if (caps.linkGlobalClaudeMd) {
+    const globalClaude = path.join(phrenPath, "global", "CLAUDE.md");
+    if (fs.existsSync(globalClaude)) {
+      symlinkFile(globalClaude, homePath(".claude", "CLAUDE.md"), phrenPath);
+      if (tools.has("copilot")) {
+        try {
+          const copilotInstrDir = homePath(".github");
+          fs.mkdirSync(copilotInstrDir, { recursive: true });
+          symlinkFile(globalClaude, path.join(copilotInstrDir, "copilot-instructions.md"), phrenPath);
+        } catch (err: unknown) {
+          logger.debug("link", `linkGlobal copilotInstructions: ${errorMessage(err)}`);
+        }
+      }
+    }
+  }
+
+  if (!caps.installSkillLinks && !caps.linkGlobalClaudeMd) {
+    log("  global symlinks skipped (management preset does not write into ~/.claude)");
+  }
 }
 
-function linkProject(phrenPath: string, project: string, tools: Set<string>) {
+function linkProject(phrenPath: string, project: string, tools: Set<string>, caps: ManagementCapabilities) {
   const config = readProjectConfig(phrenPath, project);
   const ownership = getProjectOwnershipMode(phrenPath, project, config);
   const target = findProjectDir(project);
+  // Presets that opt out of repo mirroring still register per-project MCP
+  // servers, but never write into the repo itself.
+  if (!caps.repoMirroring) {
+    if (target) {
+      log(`  ${project} -> ${target} (repo mirrors disabled by preset)`);
+    } else {
+      log(`  ${project} (repo mirrors disabled by preset)`);
+    }
+    if (isRecord(config.mcpServers)) {
+      linkProjectMcpServers(project, config.mcpServers as Record<string, ProjectMcpServerEntry>);
+    }
+    return;
+  }
   if (!target && ownership === "phren-managed") {
     log(`  skip ${project} (not found on disk)`);
     if (isRecord(config.mcpServers)) {
@@ -551,11 +573,13 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
     ? new Set(["copilot", "cursor", "codex"])
     : detectInstalledTools();
 
+  const caps = resolveManagementCapabilities(phrenPath);
+
   // Step 5: Symlink
   log("Linking...");
-  linkGlobal(phrenPath, detectedTools);
+  linkGlobal(phrenPath, detectedTools, caps);
   for (const p of projects) {
-    if (p !== "global") linkProject(phrenPath, p, detectedTools);
+    if (p !== "global") linkProject(phrenPath, p, detectedTools, caps);
   }
   // Remove stale phren__<project>__* MCP entries for removed projects
   pruneStaleProjectMcpServers(projects.filter(p => p !== "global"));
@@ -569,11 +593,11 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   log(`  MCP mode: ${mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)"}`);
   log(`  Hooks mode: ${hooksEnabled ? "ON (active)" : "OFF (disabled)"}`);
   maybeOfferStarterTemplateUpdate(phrenPath);
-  const mcpStatusForContext = configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled });
+  const mcpStatusForContext = configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps });
 
   // Register hooks for Copilot CLI, Cursor, Codex
   if (hooksEnabled) {
-    const hookedTools = configureAllHooks(phrenPath, { tools: detectedTools });
+    const hookedTools = configureAllHooks(phrenPath, { tools: detectedTools, installWrappers: caps.installWrappers });
     if (hookedTools.length) log(`  Hooks registered: ${hookedTools.join(", ")}`);
   } else {
     log(`  Hooks registration skipped (hooks-mode is off)`);

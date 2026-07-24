@@ -70,6 +70,8 @@ export {
 export { configureMcpTargets, warmSemanticSearch, runProjectLocalInit } from "./init-configure.js";
 export { runMcpMode } from "./init-mcp-mode.js";
 export { runHooksMode } from "./init-hooks-mode.js";
+export { runPreset } from "./init-preset.js";
+export { printSelfWiringSnippet } from "./self-wiring.js";
 export { runUninstall } from "./init-uninstall.js";
 
 // Internal imports from extracted modules (used by runInit)
@@ -92,6 +94,7 @@ import {
   getHooksEnabledPreference,
   writeInstallPreferences,
   readInstallPreferences,
+  setManagementPresetPreference,
 } from "./preferences.js";
 
 import {
@@ -120,6 +123,15 @@ import {
 import { type ProactivityLevel } from "../proactivity.js";
 import { getWorkflowPolicy } from "../shared/governance.js";
 import { addProjectToProfile } from "../profile-store.js";
+import {
+  DEFAULT_MANAGEMENT_PRESET,
+  capabilitiesForPreset,
+  getManagementPreset,
+  parseManagementPreset,
+  presetSummaryLines,
+  type ManagementPreset,
+} from "./management-preset.js";
+import { printSelfWiringSnippet } from "./self-wiring.js";
 
 export { type McpMode, parseMcpMode } from "./shared.js";
 type StorageLocationChoice = "global" | "project" | "custom";
@@ -161,6 +173,8 @@ export interface InitOptions {
   mcp?: McpMode;
   hooks?: McpMode;
   projectOwnershipDefault?: ProjectOwnershipMode;
+  /** Management preset controlling phren's machine footprint (managed | assisted | manual). */
+  managementPreset?: ManagementPreset;
   findingsProactivity?: ProactivityLevel;
   taskProactivity?: ProactivityLevel;
   lowConfidenceThreshold?: number;
@@ -249,6 +263,10 @@ export async function runInit(opts: InitOptions = {}) {
   }
   let phrenPath = resolveInitPhrenPath(opts);
   const dryRun = Boolean(opts.dryRun);
+  // Capture whether ownership/preset came from an explicit CLI flag BEFORE the
+  // walkthrough merges its own answers into opts — needed to decide whether an
+  // assisted/manual preset may override a fast-path (express/clone) ownership.
+  const cliOwnershipExplicit = opts.projectOwnershipDefault !== undefined;
 
   if (!dryRun) {
     assertNoGlobalWiringConflict(phrenPath, Boolean(opts.force));
@@ -308,6 +326,7 @@ export async function runInit(opts: InitOptions = {}) {
     opts.mcp = opts.mcp || answers.mcp;
     opts.hooks = opts.hooks || answers.hooks;
     opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
+    opts.managementPreset = opts.managementPreset || answers.managementPreset;
     opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
     opts.taskProactivity = opts.taskProactivity || answers.taskProactivity;
     if (typeof opts.lowConfidenceThreshold !== "number") opts.lowConfidenceThreshold = answers.lowConfidenceThreshold;
@@ -376,13 +395,31 @@ export async function runInit(opts: InitOptions = {}) {
   const existingSyncIntent = hasExistingInstall ? readInstallPreferences(phrenPath).syncIntent : undefined;
   const syncIntent: "sync" | "local" = opts._walkthroughCloneUrl ? "sync" : (existingSyncIntent ?? "local");
 
+  // Resolve the management preset for this run: explicit flag/walkthrough answer,
+  // else the stored preset on existing installs, else the default (managed).
+  const managementPreset: ManagementPreset =
+    parseManagementPreset(opts.managementPreset)
+    ?? (hasExistingInstall ? getManagementPreset(phrenPath) : DEFAULT_MANAGEMENT_PRESET);
+  const managementCaps = capabilitiesForPreset(phrenPath, managementPreset);
+
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(phrenPath);
-  const hooksEnabled = opts.hooks ? opts.hooks === "on" : getHooksEnabledPreference(phrenPath);
+  // Under presets whose hooksDefault is false (manual), hooks stay off unless the
+  // user explicitly passed --hooks on. Otherwise fall back to the stored preference.
+  const hooksEnabled = opts.hooks
+    ? opts.hooks === "on"
+    : managementCaps.hooksDefault && getHooksEnabledPreference(phrenPath);
   const skillsScope: SkillsScope = opts.skillsScope ?? "global";
   const storageChoice = opts._walkthroughStorageChoice;
   const storageRepoRoot = opts._walkthroughStorageRepoRoot;
-  const ownershipDefault = opts.projectOwnershipDefault
+  let ownershipDefault = opts.projectOwnershipDefault
     ?? (hasExistingInstall ? getProjectOwnershipDefault(phrenPath) : "detached");
+  // Assisted/manual presets never write into project repos, so fresh installs
+  // default to detached ownership — overriding even the express/clone fast-paths,
+  // unless the user explicitly set --project-ownership.
+  if (managementCaps.ownershipForcedDetached && !cliOwnershipExplicit && ownershipDefault !== "detached") {
+    ownershipDefault = "detached";
+    opts.projectOwnershipDefault = "detached";
+  }
   if (!hasExistingInstall && !opts.projectOwnershipDefault) {
     opts.projectOwnershipDefault = ownershipDefault;
   }
@@ -494,11 +531,15 @@ export async function runInit(opts: InitOptions = {}) {
         syncMode: "managed-git",
       });
       ensureGovernanceFiles(phrenPath);
-      const repaired = repairPreexistingInstall(phrenPath);
+      // Persist the preset before repair so the every-session self-heal and any
+      // caps resolution see the intended value.
+      setManagementPresetPreference(phrenPath, managementPreset);
+      const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
       applyOnboardingPreferences(phrenPath, opts);
       const existingGitRepo = ensureLocalGitRepo(phrenPath);
       log(`\nphren already exists at ${phrenPath}`);
       log(`Updating configuration...\n`);
+      log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Default project ownership: ${ownershipDefault}`);
@@ -506,8 +547,8 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
-      configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Updated");
-      configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated");
+      configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Updated");
+      configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated", managementCaps);
 
       const prefs = readInstallPreferences(phrenPath);
       const previousVersion = prefs.installedVersion;
@@ -551,8 +592,15 @@ export async function runInit(opts: InitOptions = {}) {
         }
       }
 
-      for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts)) {
+      for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts, {
+        preset: managementPreset,
+        explicit: Boolean(opts.managementPreset),
+      })) {
         log(`  ${envLabel}`);
+      }
+
+      if (managementPreset !== "managed") {
+        printSelfWiringSnippet(phrenPath, managementPreset);
       }
 
       log(`\n\x1b[95m◆\x1b[0m phren updated successfully`);
@@ -686,10 +734,12 @@ export async function runInit(opts: InitOptions = {}) {
   persistMachineName(effectiveMachine);
   updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(phrenPath);
-  const repaired = repairPreexistingInstall(phrenPath);
+  setManagementPresetPreference(phrenPath, managementPreset);
+  const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
   applyOnboardingPreferences(phrenPath, opts);
   const localGitRepo = ensureLocalGitRepo(phrenPath);
   log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
+  log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Default project ownership: ${ownershipDefault}`);
@@ -704,8 +754,8 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   // Configure MCP for all detected AI coding tools and hooks
-  configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled }, "Configured");
-  configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured");
+  configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Configured");
+  configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured", managementCaps);
 
   writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
 
@@ -743,8 +793,15 @@ export async function runInit(opts: InitOptions = {}) {
     }
   }
 
-  for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts)) {
+  for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts, {
+    preset: managementPreset,
+    explicit: Boolean(opts.managementPreset),
+  })) {
     log(`  ${envLabel}`);
+  }
+
+  if (managementPreset !== "managed") {
+    printSelfWiringSnippet(phrenPath, managementPreset);
   }
 
   if (opts._walkthroughSemanticSearch) {

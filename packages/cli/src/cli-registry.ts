@@ -68,6 +68,8 @@ type NativeHandlerName =
   | "runVerifyCommand"
   | "runMcpModeCommand"
   | "runHooksModeCommand"
+  | "runPresetCommand"
+  | "runSnippetCommand"
   | "runLinkRemovedNotice";
 
 function native(fn: NativeHandlerName): RunFn {
@@ -181,7 +183,7 @@ export const REGISTRY: Command[] = [
   {
     name: "init",
     topic: "setup",
-    usage: "phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
+    usage: "phren init [--preset managed|assisted|manual] [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
     cheatUsage: "phren init",
     summary: "Set up phren",
     featured: true,
@@ -526,6 +528,20 @@ export const REGISTRY: Command[] = [
     usage: "phren hooks-mode [on|off|status]",
     summary: "Toggle hook execution",
     run: native("runHooksModeCommand"),
+  },
+  {
+    name: "preset",
+    topic: "setup",
+    usage: "phren preset [status|managed|assisted|manual] [-y]",
+    summary: "Set the management preset (how much phren wires up)",
+    run: native("runPresetCommand"),
+  },
+  {
+    name: "snippet",
+    topic: "setup",
+    usage: "phren snippet",
+    summary: "Print the self-wiring snippet for assisted/manual presets",
+    run: native("runSnippetCommand"),
   },
   {
     name: "verify",
