@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-07-23
+
+### Added
+
+- **Management presets (`managed` / `assisted` / `manual`).** Choose how much phren
+  wires into your environment. `managed` (default) is the flagship experience — phren
+  registers MCP + hooks, symlinks `~/.claude/CLAUDE.md` and skills, installs
+  `~/.local/bin` wrappers, and self-heals all of it every session. `assisted` keeps
+  MCP + hooks (ambient context injection, auto-capture, store git sync) but never
+  writes outside its own store and your agent's settings, printing a self-wiring
+  snippet instead. `manual` turns off hooks and lifecycle automation entirely. Set at
+  install with `phren init --preset <name>`, switch anytime with `phren preset <name>`,
+  and inspect the current footprint with `phren status`. See `docs/footprint.md`.
+- Assisted and manual presets default new installs to detached project ownership so
+  phren never writes into your repos.
+
+### Fixed
+
+- Fixed flaky Windows CI failures by retrying destructive filesystem operations during
+  the build.
+- Fixed a test-isolation defect where `phren init`'s store-path resolution used an
+  import-frozen default path. Test suites that repoint `HOME` at a temp directory could
+  resolve to the developer's real `~/.phren` and mutate their live install; init now
+  resolves the default store path from `HOME` at call time.
+
 ## [0.1.39] - 2026-07-20
 
 ### Changed
