@@ -16,6 +16,7 @@ Key features:
 - Interactive terminal shell with seven views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Health)
 - Team stores for shared knowledge across collaborators (`phren team init`, `phren team join`)
 - Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
+- Native iOS app (apps/ios): live GitHub sync of findings/notes/tasks/review on the phone; serverless, token stays in the device Keychain (privacy: https://alaarab.github.io/phren/ios-privacy.html)
 
 Docs: https://alaarab.github.io/phren/
 Full LLM reference: https://alaarab.github.io/phren/llms-full.txt

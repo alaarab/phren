@@ -22,6 +22,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/ide-setup.md`: IDE and editor integration setup notes.
 - `docs/performance.md`: Retrieval and indexing performance notes.
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands.
+- `docs/ios-privacy.html`: Privacy policy for the Phren iOS app (`apps/ios`) — the App Store listing points here.
 - `docs/graph-viewer.md`: The 3D memory viewer (web UI Graph tab and VS Code webview): navigation, contents pane, review mode, bulk actions.
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).
 - `docs/faq.md`: Common setup and workflow questions.
