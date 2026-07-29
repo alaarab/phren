@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Phren for iOS — Privacy Policy | phren</title>
+  <title>Phren for iOS Privacy Policy | phren</title>
   <meta name="description" content="Privacy policy for the Phren iOS app. No data collected, no analytics, no third-party SDKs. Your GitHub token never leaves the device Keychain." />
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
@@ -52,57 +52,56 @@
 </head>
 <body>
   <main class="policy">
-    <h1>Phren for iOS — Privacy Policy</h1>
+    <h1>Phren for iOS Privacy Policy</h1>
     <div class="effective">Effective 2026-07-28 · applies to the Phren iOS app (bundle id <code>com.phren.ios</code>)</div>
 
     <div class="summary-card">
-      <strong>The short version:</strong> the app collects nothing. There is no
-      analytics, no tracking, no advertising, and no third-party SDK — the app
-      has zero external dependencies. It talks to exactly one service,
-      GitHub's API, using a token that never leaves your device's Keychain.
+      <strong>Summary:</strong> this app doesn't collect any data. It has no
+      analytics, no ads, and no third-party code. It connects to GitHub's API
+      and nothing else, and your token stays in the device Keychain.
     </div>
 
     <h2>What the app is</h2>
     <p>
-      Phren for iOS is a client for your own phren store — a git repository of
-      markdown files that you host on GitHub. The app is serverless: there is
-      no Phren backend, no account with us, and no server of ours that your
-      data ever touches.
+      Phren for iOS is a client for your own phren store, which is a git
+      repository of markdown files that you host on GitHub. There is no Phren
+      backend and no account with us. Your data never touches a server of
+      ours, because we don't have one.
     </p>
 
     <h2>Data we collect</h2>
     <p>
-      <strong>None.</strong> We do not collect, transmit, sell, or share any
-      data. The app contains no analytics, crash reporting, advertising, or
-      tracking code of any kind.
+      <strong>None.</strong> The app has no analytics, crash reporting,
+      advertising, or tracking of any kind. We don't collect data, so there is
+      nothing to sell or share.
     </p>
 
     <h2>Where your data lives</h2>
     <ul>
       <li><strong>Your GitHub token</strong> is stored in the iOS Keychain on
-        your device. It is sent only to <code>api.github.com</code> to read and
-        write your own repositories, and is deleted when you sign out.</li>
+        your device. It is only ever sent to <code>api.github.com</code>, to
+        read and write your own repositories. Signing out deletes it.</li>
       <li><strong>Your store content</strong> (findings, notes, tasks) is
         cached on your device so the app works offline. Removing a store in
-        Settings, or deleting the app, deletes the local copy.</li>
-      <li><strong>Demo mode</strong> is entirely local — it seeds sample data
-        on-device and makes no network requests.</li>
+        Settings deletes the local copy, and so does deleting the app.</li>
+      <li><strong>Demo mode</strong> runs entirely on your device with sample
+        data and makes no network requests at all.</li>
     </ul>
 
     <h2>Network requests</h2>
     <p>
-      The app communicates exclusively with GitHub's REST API
+      The only network requests the app makes are to GitHub's REST API
       (<code>api.github.com</code>) over HTTPS, to sync the repositories you
-      explicitly add. Your use of GitHub is governed by
+      add. Your use of GitHub itself is covered by
       <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.
     </p>
 
     <h2>Changes</h2>
     <p>
-      If this policy ever changes, the updated version will be published at
-      this URL with a new effective date, and the change will be visible in the
-      <a href="https://github.com/alaarab/phren">repository history</a> — this
-      page is version-controlled like everything else in phren.
+      If this policy changes, the new version will be published at this URL
+      with a new effective date. This page lives in the
+      <a href="https://github.com/alaarab/phren">phren repository</a>, so any
+      change to it shows up in the git history.
     </p>
 
     <h2>Contact</h2>
