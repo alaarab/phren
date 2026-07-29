@@ -3,8 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+    # apps/ios is outside the pnpm workspace and is covered by ios.yml. A
+    # change confined to it would otherwise run the full 3-OS x 2-Node matrix
+    # plus lint and validate-docs for nothing. A mixed change still runs both.
+    paths-ignore:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "apps/ios/**"
+      - ".github/workflows/ios.yml"
 
 jobs:
   build-and-test:
