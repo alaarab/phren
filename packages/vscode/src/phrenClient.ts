@@ -580,11 +580,18 @@ export class PhrenClient {
       return result;
     }
 
+    // JSON.parse failing (non-JSON tool text) is the only thing this should
+    // fall back for. unwrapToolResponse's ok:false throw must propagate to
+    // the caller — it used to be inside this try, so a legitimate
+    // {ok:false, error:"..."} response was mistaken for "wasn't JSON" and
+    // silently downgraded to the raw response text as if it had succeeded.
+    let parsed: unknown;
     try {
-      return this.unwrapToolResponse(JSON.parse(textBlock.text) as unknown);
+      parsed = JSON.parse(textBlock.text);
     } catch {
       return textBlock.text;
     }
+    return this.unwrapToolResponse(parsed);
   }
 
   private unwrapToolResponse(value: unknown): unknown {
