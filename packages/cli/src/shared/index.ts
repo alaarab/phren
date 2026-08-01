@@ -310,16 +310,10 @@ export function resolveImports(
   return _resolveImportsRecursive(content, phrenPath, new Set<string>(), 0);
 }
 
-function touchSentinel(phrenPath: string): void {
-  const dir = path.join(phrenPath, ".runtime");
-  const sentinelPath = path.join(dir, "phren-sentinel");
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sentinelPath, Date.now().toString());
-  } catch (err: unknown) {
-    logger.debug("touchSentinel", errorMessage(err));
-  }
-}
+// `touchSentinel()` used to write `.runtime/phren-sentinel` here. Nothing ever
+// read that file — index freshness is decided by index-sentinel.json (directory
+// mtimes + a re-hash of the recorded file list), and a content write already
+// changes the file's own mtime, so the stat-hash invalidates on its own.
 
 function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: string[]): string {
   const policy = getIndexPolicy(phrenPath);
@@ -804,56 +798,249 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       }
     })();
   }
-
-  touchSentinel(phrenPath);
   invalidateDfCache();
 }
 
-/** Read/write a sentinel that caches the phren hash to skip full recomputation. */
-function readHashSentinel(phrenPath: string): { hash: string; computedAt: number } | null {
+// ── Index freshness sentinel ────────────────────────────────────────────────
+//
+// The sentinel exists to skip `globAllFiles()` — the single most expensive part
+// of a warm `buildIndex` (≈14ms on a 400-file store, ≈46ms on a 1900-file one,
+// versus ≈0.7ms/4.3ms to re-stat the same files).
+//
+// It works in two steps, and BOTH are required for correctness:
+//
+//   1. Directory-mtime scan. POSIX bumps a directory's mtime whenever an entry
+//      inside it is created, removed or renamed, so if every directory in the
+//      indexed tree still has the exact mtime it had at build time, the *set*
+//      of indexed files provably has not changed and the glob can be skipped.
+//   2. Re-hash the recorded file list. A directory's mtime does NOT change when
+//      a file inside it is edited in place, so step 1 alone would happily serve
+//      a stale index. `computePhrenHash()` over the recorded paths re-stats
+//      every file and catches edits — the same hash the slow path computes.
+//
+// `.runtime` is deliberately excluded from step 1 (see SENTINEL_SKIP_DIRS).
+
+/**
+ * Directories that never hold indexed content and must stay out of the mtime
+ * scan.
+ *
+ * `.runtime` is the load-bearing entry. It is phren's own scratch dir, and
+ * `_buildIndexGuarded()` creates `.runtime/index-rebuild.lock` on entry and
+ * unlinks it on exit — i.e. *after* the sentinel is written. Any scan that
+ * includes `.runtime` therefore sees a directory that is unconditionally newer
+ * than the sentinel it is being compared against, on every single call. That is
+ * why the fast path had never once fired. `updateRuntimeHealth()` and the debug
+ * log dirty it too, but the rebuild lock alone is enough to guarantee a miss.
+ */
+const SENTINEL_SKIP_DIRS: ReadonlySet<string> = new Set([
+  ".runtime",
+  ".sessions",
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+]);
+
+const INDEX_SENTINEL_VERSION = 3;
+
+interface IndexSentinel {
+  version: number;
+  hash: string;
+  computedAt: number;
+  /** Sentinel is per-profile: profiles index different project sets. */
+  profile: string;
+  /** [mtimeMs, size] of .config/index-policy.json; it decides what gets globbed. */
+  policy: [number, number];
+  /** Resolved store project dirs, so a stores.yaml/profile change invalidates. */
+  projectDirs: string[];
+  /** The glob result this hash was computed from. */
+  files: string[];
+  /** dir -> mtimeMs, sampled immediately *before* the glob ran. */
+  dirs: Record<string, number>;
+}
+
+function indexSentinelPath(phrenPath: string): string {
+  return runtimeFile(phrenPath, "index-sentinel.json");
+}
+
+function statIndexPolicy(phrenPath: string): [number, number] {
   try {
-    const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
+    const stat = fs.statSync(path.join(phrenPath, ".config", "index-policy.json"));
+    return [stat.mtimeMs, stat.size];
+  } catch {
+    return [-1, -1];
+  }
+}
+
+/**
+ * Every directory whose entry list can change which files end up in the index:
+ * the phren root, its config/profiles dirs, each store root, the full tree
+ * under every project dir, the global skills tree, and the native agent memory
+ * dirs. A dir-only walk — no per-file stats, no glob pattern matching.
+ */
+function collectContentDirs(phrenPath: string, projectDirs: string[]): string[] {
+  const out = new Set<string>([
+    phrenPath,
+    path.join(phrenPath, ".config"),
+    path.join(phrenPath, "profiles"),
+  ]);
+  const walk = (dir: string): void => {
+    out.add(dir);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || SENTINEL_SKIP_DIRS.has(entry.name)) continue;
+      walk(path.join(dir, entry.name));
+    }
+  };
+  for (const dir of projectDirs) {
+    out.add(path.dirname(dir)); // store root
+    walk(dir);
+  }
+  walk(path.join(phrenPath, "global", "skills"));
+  // Native agent memory (~/.claude/projects/*/memory) is indexed too, but the
+  // surrounding project dirs are huge — watch only the two levels that matter.
+  const nativeRoot = path.join(homeDir(), ".claude", "projects");
+  out.add(nativeRoot);
+  try {
+    for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+    }
+  } catch {
+    // no native memory dirs — the nativeRoot entry above still catches creation
+  }
+  return [...out];
+}
+
+function snapshotContentDirs(phrenPath: string, projectDirs: string[]): Record<string, number> {
+  const snapshot: Record<string, number> = {};
+  for (const dir of collectContentDirs(phrenPath, projectDirs)) {
+    try {
+      snapshot[dir] = fs.statSync(dir).mtimeMs;
+    } catch {
+      snapshot[dir] = -1; // absent now; reappearing is itself a change
+    }
+  }
+  return snapshot;
+}
+
+function readIndexSentinel(phrenPath: string): IndexSentinel | null {
+  try {
+    const sentinelPath = indexSentinelPath(phrenPath);
     if (!fs.existsSync(sentinelPath)) return null;
-    const data = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as { hash?: string; computedAt?: number };
-    if (typeof data.hash === "string" && typeof data.computedAt === "number") {
-      return { hash: data.hash, computedAt: data.computedAt };
+    const data = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as Partial<IndexSentinel>;
+    if (
+      data.version === INDEX_SENTINEL_VERSION &&
+      typeof data.hash === "string" &&
+      typeof data.computedAt === "number" &&
+      typeof data.profile === "string" &&
+      Array.isArray(data.policy) &&
+      Array.isArray(data.projectDirs) &&
+      Array.isArray(data.files) &&
+      data.dirs && typeof data.dirs === "object"
+    ) {
+      return data as IndexSentinel;
     }
   } catch (err: unknown) {
-    logger.debug("readHashSentinel", errorMessage(err));
+    logger.debug("readIndexSentinel", errorMessage(err));
   }
   return null;
 }
 
-function writeHashSentinel(phrenPath: string, hash: string): void {
+function writeIndexSentinel(
+  phrenPath: string,
+  entry: { hash: string; profile?: string; projectDirs: string[]; files: string[]; dirs: Record<string, number> },
+): void {
   try {
-    const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
-    fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
+    const sentinel: IndexSentinel = {
+      version: INDEX_SENTINEL_VERSION,
+      hash: entry.hash,
+      computedAt: Date.now(),
+      profile: entry.profile ?? "",
+      policy: statIndexPolicy(phrenPath),
+      projectDirs: entry.projectDirs,
+      files: entry.files,
+      dirs: entry.dirs,
+    };
+    fs.writeFileSync(indexSentinelPath(phrenPath), JSON.stringify(sentinel));
   } catch (err: unknown) {
-    logger.debug("writeHashSentinel", errorMessage(err));
+    logger.debug("writeIndexSentinel", errorMessage(err));
   }
 }
 
-function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): boolean {
-  // Check mtime of key directories — if any are newer than the sentinel, it's stale
-  const dirsToCheck = [
-    phrenPath,
-    path.join(phrenPath, ".config"),
-    path.join(phrenPath, ".runtime"),
-  ];
-  // Also check team store root directories so changes there invalidate the cache
-  if (_cachedStoreProjectDirs && _cachedStorePhrenPath === phrenPath) {
-    const storeRoots = new Set(_cachedStoreProjectDirs.map(d => path.dirname(d)));
-    for (const root of storeRoots) dirsToCheck.push(root);
+/**
+ * True when nothing that feeds the index hash can have changed since the
+ * sentinel was written. Deliberately conservative: any unreadable directory,
+ * any mtime that differs *at all* (not just "newer"), a profile or project-set
+ * change, or an index-policy edit all report stale.
+ */
+function isSentinelFresh(
+  phrenPath: string,
+  sentinel: IndexSentinel,
+  profile: string | undefined,
+  projectDirs: string[],
+): boolean {
+  if (sentinel.profile !== (profile ?? "")) return false;
+
+  const [policyMtime, policySize] = statIndexPolicy(phrenPath);
+  if (sentinel.policy[0] !== policyMtime || sentinel.policy[1] !== policySize) return false;
+
+  if (sentinel.projectDirs.length !== projectDirs.length) return false;
+  const currentDirs = new Set(projectDirs);
+  for (const dir of sentinel.projectDirs) {
+    if (!currentDirs.has(dir)) return false;
   }
-  for (const dir of dirsToCheck) {
+
+  for (const [dir, mtimeMs] of Object.entries(sentinel.dirs)) {
+    let current: number;
     try {
-      const stat = fs.statSync(dir);
-      if (stat.mtimeMs > sentinel.computedAt) return false;
-    } catch (err: unknown) {
-      logger.debug("isSentinelFresh statDir", errorMessage(err));
+      current = fs.statSync(dir).mtimeMs;
+    } catch {
+      current = -1;
     }
+    if (current !== mtimeMs) return false;
   }
   return true;
+}
+
+/**
+ * The slow path: snapshot directory mtimes, glob, hash, and seal a new sentinel.
+ *
+ * The snapshot is taken *before* the glob on purpose. Anything written during or
+ * after the glob leaves the recorded mtime behind the real one, so the next
+ * freshness check reports stale — the conservative direction.
+ */
+function globAndSealSentinel(
+  phrenPath: string,
+  profile: string | undefined,
+  projectDirs: string[],
+): { globResult: { filePaths: string[]; entries: FileEntry[] }; hash: string } {
+  const dirs = snapshotContentDirs(phrenPath, projectDirs);
+  const globResult = globAllFiles(phrenPath, profile);
+  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  writeIndexSentinel(phrenPath, { hash, profile, projectDirs, files: globResult.filePaths, dirs });
+  return { globResult, hash };
+}
+
+/**
+ * Resolve the current index hash without globbing when the sentinel proves the
+ * file set is unchanged. Returns null when the caller must fall back to a glob.
+ */
+function hashFromFreshSentinel(
+  phrenPath: string,
+  profile: string | undefined,
+  projectDirs: string[],
+): string | null {
+  const sentinel = readIndexSentinel(phrenPath);
+  if (!sentinel || !isSentinelFresh(phrenPath, sentinel, profile, projectDirs)) return null;
+  // File set is proven unchanged; re-stat those files so an in-place edit
+  // (which leaves every directory mtime untouched) still busts the cache.
+  const hash = computePhrenHash(phrenPath, profile, sentinel.files);
+  return hash === sentinel.hash ? hash : null;
 }
 
 /**
@@ -1038,26 +1225,18 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   }
   const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
 
-  // Fast path: if the sentinel is fresh, skip the expensive glob + hash computation
-  const sentinel = readHashSentinel(phrenPath);
+  // Fast path: if the sentinel is fresh, skip the expensive glob computation.
   let hash: string;
   let globResult: { filePaths: string[]; entries: FileEntry[] } | null = null;
-  if (sentinel && isSentinelFresh(phrenPath, sentinel)) {
-    hash = sentinel.hash;
-    const cacheFile = path.join(cacheDir, `${hash}.db`);
-    if (fs.existsSync(cacheFile)) {
-      // Sentinel cache hit — defer glob; only load it if incremental path needs it
-      globResult = null;
-    } else {
-      // Cache file was cleaned up, fall through to full computation
-      globResult = globAllFiles(phrenPath, profile);
-      hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-      writeHashSentinel(phrenPath, hash);
-    }
+  const sentinelHash = hashFromFreshSentinel(phrenPath, profile, projectDirs);
+  if (sentinelHash && fs.existsSync(path.join(cacheDir, `${sentinelHash}.db`))) {
+    // Sentinel cache hit — defer glob; only load it if incremental path needs it
+    hash = sentinelHash;
   } else {
-    globResult = globAllFiles(phrenPath, profile);
-    hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-    writeHashSentinel(phrenPath, hash);
+    // Sentinel stale, content changed, or the cache file was cleaned up.
+    const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+    globResult = sealed.globResult;
+    hash = sealed.hash;
   }
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
@@ -1087,6 +1266,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           appendIndexEvent(phrenPath, {
             event: "build_index",
             cache: "hit",
+            // The glob was skipped entirely. Recorded so "is the fast path
+            // firing?" is answerable from the event log instead of by reasoning.
+            sentinel: true,
             hash: hash.slice(0, 12),
             elapsedMs: Date.now() - t0,
             profile: profile || "",
@@ -1099,9 +1281,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
         debugLog(`sentinel-hit DB load failed, falling back to full rebuild: ${errorMessage(err)}`);
       }
       // Need glob for rebuild
-      globResult = globAllFiles(phrenPath, profile);
-      hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-      writeHashSentinel(phrenPath, hash);
+      const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+      globResult = sealed.globResult;
+      hash = sealed.hash;
     }
     try {
       const cached = fs.readFileSync(cacheFile);
@@ -1174,6 +1356,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           appendIndexEvent(phrenPath, {
             event: "build_index",
             cache: "hit",
+            sentinel: false,
             hash: hash.slice(0, 12),
             elapsedMs: Date.now() - t0,
             profile: profile || "",
@@ -1236,7 +1419,6 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           }
 
           saveHashMap(phrenPath, currentHashes, new Set(Object.keys(currentHashes)), currentMeta);
-          touchSentinel(phrenPath);
           invalidateDfCache();
 
           // Save updated cache
@@ -1274,9 +1456,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   // ── Full rebuild ──────────────────────────────────────────────────────────
   // Ensure glob data is available for full rebuild (may be null from sentinel fast-path fallback)
   if (!globResult) {
-    globResult = globAllFiles(phrenPath, profile);
-    hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-    writeHashSentinel(phrenPath, hash);
+    const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+    globResult = sealed.globResult;
+    hash = sealed.hash;
   }
   const db = new SQL.Database();
   db.run(`
@@ -1340,7 +1522,6 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
 
   // ── Finalize: persist hashes, save cache, log ─────────────────────────────
   saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)), newMeta);
-  touchSentinel(phrenPath);
   invalidateDfCache();
 
   const buildMs = Date.now() - t0;
@@ -1403,18 +1584,16 @@ function isRebuildLockHeld(phrenPath: string): boolean {
   }
 }
 
-async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+async function loadIndexSnapshotOrEmpty(
+  phrenPath: string,
+  profile?: string,
+  knownHash?: string,
+): Promise<SqlJsDatabase> {
   const SQL = await bootstrapSqlJs() as SqlJsStatic;
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("loadIndexSnapshotOrEmpty userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
-  const globResult = globAllFiles(phrenPath, profile);
-  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  const cacheDir = ftsCacheDir();
+  // `knownHash` lets loadIndexForHook skip a second glob for a hash it just
+  // computed (and already knows misses).
+  const hash = knownHash ?? computePhrenHash(phrenPath, profile, globAllFiles(phrenPath, profile).filePaths);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
   if (fs.existsSync(cacheFile)) {
@@ -1527,8 +1706,16 @@ function ftsCacheDir(): string {
  */
 export async function loadIndexForHook(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
   const cacheDir = ftsCacheDir();
-  const globResult = globAllFiles(phrenPath, profile);
-  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  // Resolve team stores the same way buildIndex does. Without this the hook's
+  // file set (and therefore its hash) can never match the one buildIndex sealed,
+  // so every prompt would miss the cache and spawn a redundant reindex.
+  await refreshStoreProjectDirs(phrenPath, profile);
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
+  // Skip the glob when the sentinel proves nothing changed (see the sentinel
+  // block above): ~20x cheaper than re-globbing, and yields the same hash.
+  const sentinelHash = hashFromFreshSentinel(phrenPath, profile, projectDirs);
+  const hash = sentinelHash
+    ?? computePhrenHash(phrenPath, profile, globAllFiles(phrenPath, profile).filePaths);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
   const SQL = await bootstrapSqlJs() as SqlJsStatic;
 
@@ -1538,7 +1725,7 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
       const db = new SQL.Database(fs.readFileSync(cacheFile));
       const docCount = db.exec("SELECT COUNT(*) FROM docs")?.[0]?.values?.[0]?.[0] as number ?? 0;
       if (docCount > 0) {
-        appendIndexEvent(phrenPath, { event: "build_index", cache: "hit", hash: hash.slice(0, 12), elapsedMs: 0, profile: profile || "" });
+        appendIndexEvent(phrenPath, { event: "build_index", cache: "hit", sentinel: sentinelHash !== null, hash: hash.slice(0, 12), elapsedMs: 0, profile: profile || "" });
         return db;
       }
       db.close();
@@ -1570,7 +1757,7 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
       }
     }
   }
-  return loadIndexSnapshotOrEmpty(phrenPath, profile);
+  return loadIndexSnapshotOrEmpty(phrenPath, profile, hash);
 }
 
 async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
