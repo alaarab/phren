@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "echo 'Run tests from repo root: pnpm -w test'"
+    "test": "vitest run"
   },
   "dependencies": {
     "@phren/cli": "workspace:*",
