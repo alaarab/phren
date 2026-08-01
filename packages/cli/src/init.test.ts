@@ -125,6 +125,15 @@ describe.sequential("mcp mode configuration", () => {
     expect(starterGitignore).toContain(".sessions/");
   });
 
+  it("ignores the legacy auth-profiles.json credential path", () => {
+    // auth/profiles.ts stores API keys and OAuth tokens in .runtime/ (already
+    // covered by the blanket ignore above); this entry protects the old
+    // .config/ location for stores created before that move, or where the
+    // one-time migration hasn't run yet.
+    const starterGitignore = fs.readFileSync(path.join("packages", "cli", "starter", ".gitignore"), "utf8");
+    expect(starterGitignore).toContain(".config/auth-profiles.json");
+  });
+
   it("defaults to mcp enabled and persists preference updates", () => {
     expect(getMcpEnabledPreference(phrenPath)).toBe(true);
     setMcpEnabledPreference(phrenPath, false);

@@ -613,6 +613,14 @@ async function handlePushChanges(
       runCustomHooks(phrenPath, "pre-save");
       // Stage all files including untracked (new project dirs, first FINDINGS.md, etc.)
       runGit(["add", "--sparse", "-A"]);
+      // Belt-and-suspenders: unstage sensitive files that .gitignore should
+      // already block (mirrors the same defensive reset in cli/session-stop.ts's
+      // auto-save). .config/auth-profiles.json is the legacy path for
+      // auth/profiles.ts's credential store (API keys, OpenAI Codex OAuth
+      // tokens) — this catches a store where the file was already tracked
+      // before it was gitignored, so a later token refresh doesn't get
+      // re-staged and pushed. Failures here are non-fatal (files may not exist).
+      try { runGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"]); } catch { /* best effort */ }
       runGit(["commit", "-m", commitMsg]);
 
       let hasRemote = false;
