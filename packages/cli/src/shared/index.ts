@@ -1216,7 +1216,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
-  cleanLegacyFtsCache();
+  pruneFtsCacheRoot(storeCacheKey(phrenPath, profile));
   const cacheDir = ftsCacheDir(phrenPath, profile);
 
   // Fast path: if the sentinel is fresh, skip the expensive glob computation.
@@ -1717,23 +1717,56 @@ function ftsCacheDir(phrenPath: string, profile?: string): string {
   return path.join(ftsCacheRoot(), storeCacheKey(phrenPath, profile));
 }
 
+/** Store cache dirs older than this are dropped; a cold rebuild recreates them. */
+const FTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Hard cap on retained store dirs, so a burst of transient stores cannot pile up. */
+const FTS_CACHE_MAX_STORES = 64;
+
 /**
- * Delete pre-0.1.41 snapshots that sit flat in the cache root. They are not
+ * Keep the cache root bounded, once per process.
+ *
+ * The old flat layout self-limited to a single snapshot because every full
+ * rebuild unlinked all the others — cross-store eviction was the (accidental)
+ * garbage collector. Per-store directories fix the contamination that caused,
+ * but nothing would ever reclaim a directory again: one test-suite run alone
+ * left 524 store dirs / 36MB behind. So prune explicitly.
+ *
+ * Also removes pre-0.1.41 snapshots sitting flat in the root: they are not
  * attributable to any store, so they can only ever be mis-served.
  */
-let _legacyFtsCleaned = false;
-function cleanLegacyFtsCache(): void {
-  if (_legacyFtsCleaned) return;
-  _legacyFtsCleaned = true;
+let _ftsCachePruned = false;
+function pruneFtsCacheRoot(keepKey: string): void {
+  if (_ftsCachePruned) return;
+  _ftsCachePruned = true;
   try {
     const root = ftsCacheRoot();
     if (!fs.existsSync(root)) return;
+    const now = Date.now();
+    const stores: { name: string; mtimeMs: number }[] = [];
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".db")) continue;
-      try { fs.unlinkSync(path.join(root, entry.name)); } catch { /* best effort */ }
+      const full = path.join(root, entry.name);
+      if (entry.isFile()) {
+        if (entry.name.endsWith(".db")) {
+          try { fs.unlinkSync(full); } catch { /* best effort */ }
+        }
+        continue;
+      }
+      if (!entry.isDirectory() || entry.name === keepKey) continue;
+      let mtimeMs = 0;
+      try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* treat as ancient */ }
+      if (now - mtimeMs > FTS_CACHE_TTL_MS) {
+        try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* best effort */ }
+        continue;
+      }
+      stores.push({ name: entry.name, mtimeMs });
+    }
+    if (stores.length <= FTS_CACHE_MAX_STORES) return;
+    stores.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const store of stores.slice(FTS_CACHE_MAX_STORES)) {
+      try { fs.rmSync(path.join(root, store.name), { recursive: true, force: true }); } catch { /* best effort */ }
     }
   } catch (err: unknown) {
-    logger.debug("cleanLegacyFtsCache", errorMessage(err));
+    logger.debug("pruneFtsCacheRoot", errorMessage(err));
   }
 }
 
@@ -1751,7 +1784,7 @@ function cleanLegacyFtsCache(): void {
  * misses → a rebuild is scheduled → the following prompt hits the new cache.
  */
 export async function loadIndexForHook(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
-  cleanLegacyFtsCache();
+  pruneFtsCacheRoot(storeCacheKey(phrenPath, profile));
   const cacheDir = ftsCacheDir(phrenPath, profile);
   // Resolve team stores the same way buildIndex does. Without this the hook's
   // file set (and therefore its hash) can never match the one buildIndex sealed,
