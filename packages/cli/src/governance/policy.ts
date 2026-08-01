@@ -47,6 +47,49 @@ export interface IndexPolicy {
   includeHidden: boolean;
 }
 
+/**
+ * Outcome of the push leg of a sync.
+ *
+ * `saved-local` means "committed, nothing to push or no remote" — a success.
+ * It used to double as the report for a *failed* push, which is how a store
+ * could go two months without syncing while every Stop hook looked healthy.
+ * Failures now get their own values:
+ *
+ * - `pull-failed`          — the pull/rebase leg failed, so push never ran
+ * - `push-failed`          — push was attempted and rejected
+ * - `unrelated-histories`  — local and remote share no merge base; no amount of
+ *                            retrying will fix it, so it is called out by name
+ */
+export type PushStatus =
+  | "saved-local"
+  | "saved-pushed"
+  | "no-upstream"
+  | "pull-failed"
+  | "push-failed"
+  | "unrelated-histories"
+  | "error";
+
+export const PUSH_STATUSES: readonly PushStatus[] = [
+  "saved-local", "saved-pushed", "no-upstream", "pull-failed", "push-failed", "unrelated-histories", "error",
+];
+
+/** Push statuses that mean the store is NOT in sync with its remote. */
+export const FAILED_PUSH_STATUSES: ReadonlySet<PushStatus> = new Set<PushStatus>([
+  "pull-failed", "push-failed", "unrelated-histories", "error",
+]);
+
+export type AutoSaveStatus =
+  | "clean"
+  | "saved-local"
+  | "saved-pushed"
+  | "no-upstream"
+  | "sync-failed"
+  | "error";
+
+export const AUTO_SAVE_STATUSES: readonly AutoSaveStatus[] = [
+  "clean", "saved-local", "saved-pushed", "no-upstream", "sync-failed", "error",
+];
+
 export interface RuntimeHealth {
   schemaVersion?: number;
   lastSessionStartAt?: string;
@@ -54,7 +97,7 @@ export interface RuntimeHealth {
   lastStopAt?: string;
   lastAutoSave?: {
     at: string;
-    status: "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    status: AutoSaveStatus;
     detail?: string;
   };
   lastGovernance?: {
@@ -68,9 +111,17 @@ export interface RuntimeHealth {
     lastPullDetail?: string;
     lastSuccessfulPullAt?: string;
     lastPushAt?: string;
-    lastPushStatus?: "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    lastPushStatus?: PushStatus;
     lastPushDetail?: string;
     unsyncedCommits?: number;
+    /**
+     * Consecutive sync attempts that failed to reach the remote. Reset to 0 on
+     * any successful push. This is what turns "one flaky push" into "this store
+     * has been broken for weeks" without needing to keep a history.
+     */
+    consecutiveFailures?: number;
+    /** Last time a push actually reached the remote. */
+    lastSuccessfulPushAt?: string;
   };
 }
 
@@ -85,6 +136,8 @@ export interface BuildSyncStatusOpts {
   pullDetail?: string;
   successfulPullAt?: string;
   unsyncedCommits?: number;
+  consecutiveFailures?: number;
+  successfulPushAt?: string;
 }
 
 export function buildSyncStatus(opts: BuildSyncStatusOpts): SyncStatus {
@@ -97,6 +150,59 @@ export function buildSyncStatus(opts: BuildSyncStatusOpts): SyncStatus {
     lastPushStatus: opts.pushStatus,
     ...(opts.pushDetail !== undefined ? { lastPushDetail: opts.pushDetail } : {}),
     ...(opts.unsyncedCommits !== undefined ? { unsyncedCommits: opts.unsyncedCommits } : {}),
+    ...(opts.consecutiveFailures !== undefined ? { consecutiveFailures: opts.consecutiveFailures } : {}),
+    ...(opts.successfulPushAt !== undefined ? { lastSuccessfulPushAt: opts.successfulPushAt } : {}),
+  };
+}
+
+/** Warn after this many consecutive failed syncs. */
+export const SYNC_FAILURE_WARN_RUNS = 3;
+/** ...or after this many days without a successful push, whichever comes first. */
+export const SYNC_FAILURE_WARN_DAYS = 3;
+
+export interface SyncOutageAssessment {
+  /** True when the store has been failing long enough to tell the user. */
+  degraded: boolean;
+  consecutiveFailures: number;
+  daysSinceSuccess: number | null;
+  /** One-line, user-facing explanation. Empty when not degraded. */
+  summary: string;
+}
+
+/**
+ * Decide whether a store's sync failures have gone on long enough to warrant a
+ * visible warning. Pure so both the Stop hook and `phren status` can ask the
+ * same question and get the same answer.
+ */
+export function assessSyncOutage(sync: SyncStatus | undefined, nowMs: number = Date.now()): SyncOutageAssessment {
+  const consecutiveFailures = sync?.consecutiveFailures ?? 0;
+  const failingNow = sync?.lastPushStatus !== undefined && FAILED_PUSH_STATUSES.has(sync.lastPushStatus);
+
+  let daysSinceSuccess: number | null = null;
+  const successAt = sync?.lastSuccessfulPushAt;
+  if (successAt) {
+    const parsed = Date.parse(successAt);
+    if (!Number.isNaN(parsed)) daysSinceSuccess = (nowMs - parsed) / 86_400_000;
+  }
+
+  const staleTooLong = failingNow && daysSinceSuccess !== null && daysSinceSuccess >= SYNC_FAILURE_WARN_DAYS;
+  const degraded = (failingNow && consecutiveFailures >= SYNC_FAILURE_WARN_RUNS) || staleTooLong;
+  if (!degraded) return { degraded: false, consecutiveFailures, daysSinceSuccess, summary: "" };
+
+  const parts: string[] = [];
+  if (consecutiveFailures > 0) parts.push(`${consecutiveFailures} consecutive failed sync${consecutiveFailures === 1 ? "" : "s"}`);
+  if (daysSinceSuccess !== null) parts.push(`last successful push ${Math.floor(daysSinceSuccess)}d ago`);
+  if (sync?.unsyncedCommits) parts.push(`${sync.unsyncedCommits} unpushed commit(s)`);
+
+  const cause = sync?.lastPushStatus === "unrelated-histories"
+    ? "local and remote histories are unrelated — the remote was most likely re-initialized"
+    : (sync?.lastPushDetail || sync?.lastPullDetail || "see `phren status` for details");
+
+  return {
+    degraded: true,
+    consecutiveFailures,
+    daysSinceSuccess,
+    summary: `phren has not synced (${parts.join(", ")}): ${cause}`,
   };
 }
 
@@ -256,10 +362,10 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
   if (typeof data.lastSessionStartAt === "string") normalized.lastSessionStartAt = data.lastSessionStartAt;
   if (typeof data.lastPromptAt === "string") normalized.lastPromptAt = data.lastPromptAt;
   if (typeof data.lastStopAt === "string") normalized.lastStopAt = data.lastStopAt;
-  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && ["clean", "saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastAutoSave.status))) {
+  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && (AUTO_SAVE_STATUSES as readonly string[]).includes(String(data.lastAutoSave.status))) {
     normalized.lastAutoSave = {
       at: data.lastAutoSave.at,
-      status: data.lastAutoSave.status as "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error",
+      status: data.lastAutoSave.status as AutoSaveStatus,
       detail: typeof data.lastAutoSave.detail === "string" ? data.lastAutoSave.detail : undefined,
     };
   }
@@ -277,9 +383,11 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (typeof data.lastSync.lastPullDetail === "string") normalized.lastSync.lastPullDetail = data.lastSync.lastPullDetail;
     if (typeof data.lastSync.lastSuccessfulPullAt === "string") normalized.lastSync.lastSuccessfulPullAt = data.lastSync.lastSuccessfulPullAt;
     if (typeof data.lastSync.lastPushAt === "string") normalized.lastSync.lastPushAt = data.lastSync.lastPushAt;
-    if (["saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    if ((PUSH_STATUSES as readonly string[]).includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as PushStatus;
     if (typeof data.lastSync.lastPushDetail === "string") normalized.lastSync.lastPushDetail = data.lastSync.lastPushDetail;
     if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
+    if (isFiniteNumber(data.lastSync.consecutiveFailures)) normalized.lastSync.consecutiveFailures = data.lastSync.consecutiveFailures;
+    if (typeof data.lastSync.lastSuccessfulPushAt === "string") normalized.lastSync.lastSuccessfulPushAt = data.lastSync.lastSuccessfulPushAt;
   }
   return normalized;
 }

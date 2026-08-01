@@ -36,7 +36,15 @@ import {
   runBestEffortGit,
   countUnsyncedCommits,
   recoverPushConflict,
+  hasUnrelatedHistories,
 } from "./session-git.js";
+import {
+  assessSyncOutage,
+  getRuntimeHealth,
+  type AutoSaveStatus,
+  type PushStatus,
+  type SyncStatus,
+} from "../shared/governance.js";
 import {
   resolveSubprocessArgs,
   scheduleBackgroundSync,
@@ -126,6 +134,80 @@ export function filterConversationInsightsForProactivity(
 ): string[] {
   if (level === "high") return insights;
   return insights.filter((insight) => shouldAutoCaptureFindingsForLevel(level, insight));
+}
+
+// ── Sync failure accounting ─────────────────────────────────────────────────
+
+const SYNC_WARN_MARKER = "sync-outage-warned-v1";
+/** Re-warn at most once a day, so a broken store nags without spamming. */
+const SYNC_WARN_INTERVAL_MS = 86_400_000;
+
+/**
+ * Build the `lastSync` patch for a sync attempt, carrying the failure streak
+ * forward. Success resets the counter and stamps `lastSuccessfulPushAt`;
+ * failure increments it. Without this the runtime health file only ever showed
+ * the most recent attempt, so "failed once" and "failed for two months" looked
+ * identical.
+ */
+export function nextSyncStatus(
+  previous: SyncStatus | undefined,
+  patch: Omit<SyncStatus, "consecutiveFailures" | "lastSuccessfulPushAt"> & { lastPushStatus: PushStatus },
+  now: string,
+): SyncStatus {
+  const failed = ["pull-failed", "push-failed", "unrelated-histories", "error"].includes(patch.lastPushStatus);
+  if (failed) {
+    return {
+      ...patch,
+      consecutiveFailures: (previous?.consecutiveFailures ?? 0) + 1,
+      ...(previous?.lastSuccessfulPushAt ? { lastSuccessfulPushAt: previous.lastSuccessfulPushAt } : {}),
+    };
+  }
+  const reachedRemote = patch.lastPushStatus === "saved-pushed";
+  return {
+    ...patch,
+    consecutiveFailures: 0,
+    ...(reachedRemote
+      ? { lastSuccessfulPushAt: now }
+      : previous?.lastSuccessfulPushAt
+        ? { lastSuccessfulPushAt: previous.lastSuccessfulPushAt }
+        : {}),
+  };
+}
+
+/**
+ * Tell the user, on stdout, that their store has stopped syncing. The Stop hook
+ * is the only place that runs on every turn, so silence here is what let a
+ * two-month outage go unnoticed. Rate-limited via a marker file.
+ */
+function warnIfSyncDegraded(phrenPath: string): void {
+  try {
+    const assessment = assessSyncOutage(getRuntimeHealth(phrenPath).lastSync);
+    if (!assessment.degraded) return;
+
+    const markerPath = sessionMarker(phrenPath, SYNC_WARN_MARKER);
+    try {
+      const lastWarned = Date.parse(fs.readFileSync(markerPath, "utf8").trim());
+      if (!Number.isNaN(lastWarned) && Date.now() - lastWarned < SYNC_WARN_INTERVAL_MS) return;
+    } catch {
+      // No marker yet (or unreadable) — warn.
+    }
+
+    process.stdout.write([
+      "<phren-notice>",
+      assessment.summary,
+      `Your findings and tasks are safe on disk in ${phrenPath}, but they are not reaching the remote.`,
+      `Diagnose with: phren status  (then: cd ${phrenPath} && git pull --rebase)`,
+      "<phren-notice>",
+      "",
+    ].join("\n"));
+    try {
+      fs.writeFileSync(markerPath, `${new Date().toISOString()}\n`);
+    } catch (err: unknown) {
+      debugLog(`sync-outage marker write failed: ${errorMessage(err)}`);
+    }
+  } catch (err: unknown) {
+    debugLog(`sync-outage check failed: ${errorMessage(err)}`);
+  }
 }
 
 // ── Session cap helper ──────────────────────────────────────────────────────
@@ -328,17 +410,23 @@ export async function handleHookStop() {
   }
 
   if (!status.output) {
+    // A clean working tree says nothing about whether the store is in sync.
+    // Reporting "saved-pushed / no changes" here was the core lie: it
+    // overwrote a real `pull-failed` from the previous run every single turn,
+    // so the failure never accumulated and the user never saw it.
+    const previousSync = getRuntimeHealth(phrenPath).lastSync;
+    const pending = await countUnsyncedCommits(phrenPath);
+    const inSync = pending === 0;
+    const detail = inSync ? "no changes" : `no changes; ${pending} commit(s) still unpushed`;
     updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
-      lastAutoSave: { at: now, status: "clean", detail: "no changes" },
-      lastSync: {
-        lastPushAt: now,
-        lastPushStatus: "saved-pushed",
-        lastPushDetail: "no changes",
-        unsyncedCommits: 0,
-      },
+      lastAutoSave: { at: now, status: inSync ? "clean" : "sync-failed", detail },
+      lastSync: inSync
+        ? { ...previousSync, lastPushAt: now, lastPushDetail: detail, unsyncedCommits: 0 }
+        : { ...previousSync, lastPushAt: now, lastPushDetail: detail, unsyncedCommits: pending },
     });
-    appendAuditLog(phrenPath, "hook_stop", "status=clean");
+    appendAuditLog(phrenPath, "hook_stop", `status=${inSync ? "clean" : "clean-unsynced"} pending=${pending}`);
+    if (!inSync) warnIfSyncDegraded(phrenPath);
     return;
   }
 
@@ -436,17 +524,22 @@ export async function handleHookStop() {
     status: "saved-local",
     detail: syncDetail,
   });
+  // The push has been handed to the background sync and has not happened yet,
+  // so only the push *detail* is updated here — the status, failure streak and
+  // last-success timestamp are left for whoever actually talks to the remote.
+  const priorSync = getRuntimeHealth(phrenPath).lastSync;
   updateRuntimeHealth(phrenPath, {
     lastStopAt: now,
     lastAutoSave: { at: now, status: "saved-local", detail: syncDetail },
     lastSync: {
+      ...priorSync,
       lastPushAt: now,
-      lastPushStatus: "saved-local",
       lastPushDetail: syncDetail,
       unsyncedCommits,
     },
   });
   appendAuditLog(phrenPath, "hook_stop", `status=saved-local detail=${JSON.stringify(syncDetail)}`);
+  warnIfSyncDegraded(phrenPath);
 
   }); // end withFileLock(gitOpLockPath)
 
@@ -462,44 +555,71 @@ export async function handleBackgroundSync() {
   const lockPath = runtimeFile(phrenPathLocal, "background-sync.lock");
 
   try {
+    const previousSync = getRuntimeHealth(phrenPathLocal).lastSync;
+    const record = (
+      autoSaveStatus: AutoSaveStatus,
+      patch: Omit<SyncStatus, "consecutiveFailures" | "lastSuccessfulPushAt"> & { lastPushStatus: PushStatus },
+      detail: string,
+    ) => {
+      updateRuntimeHealth(phrenPathLocal, {
+        lastAutoSave: { at: now, status: autoSaveStatus, detail },
+        lastSync: nextSyncStatus(previousSync, patch, now),
+      });
+      appendAuditLog(phrenPathLocal, "background_sync", `status=${patch.lastPushStatus} detail=${JSON.stringify(detail)}`);
+    };
+
     const remotes = await runBestEffortGit(["remote"], phrenPathLocal);
     if (!remotes.ok || !remotes.output) {
       const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
-      updateRuntimeHealth(phrenPathLocal, {
-        lastAutoSave: { at: now, status: "saved-local", detail: "background sync skipped; no remote configured" },
-        lastSync: buildSyncStatus({ now, pushStatus: "saved-local", pushDetail: "background sync skipped; no remote configured", unsyncedCommits }),
-      });
-      appendAuditLog(phrenPathLocal, "background_sync", "status=saved-local detail=no_remote");
+      const detail = "background sync skipped; no remote configured";
+      record("saved-local", { lastPushAt: now, lastPushStatus: "saved-local", lastPushDetail: detail, unsyncedCommits }, detail);
       return;
     }
 
     const push = await runBestEffortGit(["push"], phrenPathLocal);
     if (push.ok) {
-      updateRuntimeHealth(phrenPathLocal, {
-        lastAutoSave: { at: now, status: "saved-pushed", detail: "commit pushed by background sync" },
-        lastSync: buildSyncStatus({ now, pushStatus: "saved-pushed", pushDetail: "commit pushed by background sync", unsyncedCommits: 0 }),
-      });
-      appendAuditLog(phrenPathLocal, "background_sync", "status=saved-pushed");
+      const detail = "commit pushed by background sync";
+      record("saved-pushed", { lastPushAt: now, lastPushStatus: "saved-pushed", lastPushDetail: detail, unsyncedCommits: 0 }, detail);
       return;
     }
 
     const recovered = await recoverPushConflict(phrenPathLocal);
     if (recovered.ok) {
-      updateRuntimeHealth(phrenPathLocal, {
-        lastAutoSave: { at: now, status: "saved-pushed", detail: recovered.detail },
-        lastSync: buildSyncStatus({ now, pushStatus: "saved-pushed", pushDetail: recovered.detail, pullAt: now, pullStatus: recovered.pullStatus, pullDetail: recovered.pullDetail, successfulPullAt: now, unsyncedCommits: 0 }),
-      });
-      appendAuditLog(phrenPathLocal, "background_sync", `status=saved-pushed detail=${JSON.stringify(recovered.detail)}`);
+      record("saved-pushed", {
+        lastPushAt: now,
+        lastPushStatus: "saved-pushed",
+        lastPushDetail: recovered.detail,
+        lastPullAt: now,
+        lastPullStatus: recovered.pullStatus,
+        lastPullDetail: recovered.pullDetail,
+        lastSuccessfulPullAt: now,
+        unsyncedCommits: 0,
+      }, recovered.detail);
       return;
     }
 
+    // The push leg genuinely failed. Report *which* leg failed instead of the
+    // old success-shaped "saved-local", and name the unrelated-histories case
+    // specifically — no retry will ever clear it, so a generic "pull failed"
+    // would send the user chasing the wrong problem.
     const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
-    const failDetail = recovered.detail || push.error || "background sync push failed";
-    updateRuntimeHealth(phrenPathLocal, {
-      lastAutoSave: { at: now, status: "saved-local", detail: failDetail },
-      lastSync: buildSyncStatus({ now, pushStatus: "saved-local", pushDetail: failDetail, pullAt: now, pullStatus: recovered.pullStatus, pullDetail: recovered.pullDetail, unsyncedCommits }),
-    });
-    appendAuditLog(phrenPathLocal, "background_sync", `status=saved-local detail=${JSON.stringify(failDetail)}`);
+    const unrelated = recovered.pullStatus === "error" && await hasUnrelatedHistories(phrenPathLocal);
+    const pushStatus: PushStatus = unrelated
+      ? "unrelated-histories"
+      : recovered.pullStatus === "error" ? "pull-failed" : "push-failed";
+    const failDetail = unrelated
+      ? `local and remote histories are unrelated (no merge base) — the remote was most likely re-initialized. ` +
+        `Reconcile manually: cd ${phrenPathLocal} && git fetch && git log --oneline origin/HEAD`
+      : (recovered.detail || push.error || "background sync push failed");
+    record("sync-failed", {
+      lastPushAt: now,
+      lastPushStatus: pushStatus,
+      lastPushDetail: failDetail,
+      lastPullAt: now,
+      lastPullStatus: recovered.pullStatus,
+      lastPullDetail: recovered.pullDetail,
+      unsyncedCommits,
+    }, failDetail);
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }

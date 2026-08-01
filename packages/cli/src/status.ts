@@ -19,6 +19,7 @@ import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
+import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
@@ -361,8 +362,15 @@ export async function runStatus() {
     console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
     console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
     console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    if (runtime.lastSync?.lastSuccessfulPushAt) {
+      console.log(`           last successful push ${runtime.lastSync.lastSuccessfulPushAt}`);
+    }
     if (runtime.lastSync?.lastPushDetail) {
       console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
+    }
+    const outage = assessSyncOutage(runtime.lastSync);
+    if (outage.degraded) {
+      console.log(`           ${RED}! ${outage.summary}${RESET}`);
     }
   }
 
