@@ -32,7 +32,7 @@ Outside the pnpm workspace:
 
 | File | Purpose |
 |------|---------|
-| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server with 54 tools |
+| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server with 59 tools |
 | `packages/cli/src/entrypoint.ts` | Top-level dispatcher: resolves `--help`/`--version`/`--health`/MCP/manage invocations and routes via the command registry |
 | `packages/cli/src/cli-registry.ts` | Command catalog. Single source of truth for help generation and dispatch (Command type, REGISTRY, lookupCommand, DOC_TOPICS). |
 | `packages/cli/src/cli-help.ts` | Help formatters over the registry: formatCheatSheet, formatTopic, formatCommand, formatFullHelp |
@@ -70,7 +70,7 @@ pnpm lint          # lint all packages
 ## Reference Documentation
 
 Developer docs live in `docs/` (also published to the GitHub Pages site):
-- `api-reference.md` -- all 54 MCP tools, parameters, and usage
+- `api-reference.md` -- all 59 MCP tools, parameters, and usage
 - `architecture.md` -- system architecture and design patterns
 - `architecture-team-stores.md` -- multi-store / team-store design
 - `environment.md` -- environment variables, directory structure, finding quality rules
