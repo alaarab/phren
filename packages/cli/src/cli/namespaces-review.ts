@@ -45,7 +45,20 @@ export async function handleReviewNamespace(args: string[]) {
       process.exit(1);
     }
 
-    console.log(`${action === "approve" ? "✓ Approved" : "✗ Rejected"}: ${lineText.slice(0, 100)}${lineText.length > 100 ? "..." : ""}`);
+    // Print the data layer's own message rather than a generic one. approve
+    // and reject each have several distinct outcomes — promoted, already
+    // present, already archived, removed from the archive, discarded — and
+    // collapsing them into "Approved" hides the difference that matters most:
+    // on a store whose findings have aged into reference/topics/, most
+    // approvals dequeue without promoting anything.
+    const summary = lineText.slice(0, 100) + (lineText.length > 100 ? "..." : "");
+    const mark = action === "approve" ? "✓" : "✗";
+    const payload: unknown = result.data;
+    const detail = typeof payload === "string"
+      ? payload
+      : (payload as { message?: string } | undefined)?.message;
+    console.log(`${mark} ${detail ?? (action === "approve" ? "Approved" : "Rejected")}`);
+    console.log(`  ${summary}`);
     return;
   }
 
