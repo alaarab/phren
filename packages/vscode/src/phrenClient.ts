@@ -116,6 +116,15 @@ export class PhrenClient {
 
     child.on("error", (error: Error) => {
       this.rejectPending(error);
+      // A spawn failure (e.g. ENOENT/EACCES on mcpServerPath or nodePath) can
+      // fire "error" without ever firing "exit", since the process never
+      // actually started. Without arming a reconnect here too, that case
+      // left the client permanently wedged — every future call would just
+      // write into a dead pipe and eventually time out, with no retry ever
+      // attempted. scheduleReconnect() already guards against double-firing
+      // (its `this.reconnecting` check), so it's safe to call from both
+      // handlers when both do fire for the same failure.
+      this.scheduleReconnect();
     });
 
     return child;
