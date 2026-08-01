@@ -4,6 +4,7 @@
 
 import { vi } from "vitest";
 import type { PhrenClient } from "../src/phrenClient";
+import type { ExtensionContext } from "../src/extensionContext";
 
 /** Wraps a payload in the {ok:true, data} envelope every MCP tool call returns. */
 export function ok(data: unknown): { ok: true; data: unknown } {
@@ -63,4 +64,31 @@ export function deviceContext(overrides: Partial<{ profile: string; activeProjec
     lastSync: "",
     ...overrides,
   };
+}
+
+/**
+ * A minimal ExtensionContext for command-module tests (registerFindingCommands,
+ * registerNoteCommands, etc). Only the fields those modules actually touch at
+ * runtime are meaningfully implemented — everything else is a harmless stub,
+ * since esbuild erases the interface's type-only usages anyway.
+ */
+export function fakeExtensionContext(options: { phrenClient?: PhrenClient; activeProjectName?: string } = {}): ExtensionContext {
+  const treeDataProvider = {
+    refresh: vi.fn(),
+    setDateFilter: vi.fn(),
+    getDateFilter: vi.fn(() => undefined as unknown),
+  };
+  const statusBar = {
+    getActiveProjectName: vi.fn(() => options.activeProjectName),
+  };
+  return {
+    phrenClient: options.phrenClient ?? fakeClient(),
+    outputChannel: { appendLine: vi.fn() },
+    hooksOutputChannel: { appendLine: vi.fn() },
+    statusBar,
+    treeDataProvider,
+    context: {},
+    storePath: "/store",
+    runtimeConfig: { mcpServerPath: "mcp.js", storePath: "/store", nodePath: "node" },
+  } as unknown as ExtensionContext;
 }
