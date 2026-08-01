@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type McpContext, mcpResponse } from "./types.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { runtimeFile, getProjectDirs } from "../shared.js";
+import { runtimeFile, getProjectDirs, projectSlugFromPath } from "../shared.js";
 import { findFtsCacheForPath } from "../shared/index.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { readReviewQueue, readReviewQueueAcrossProjects, approveQueueItem, rejectQueueItem, editQueueItem } from "../data/access.js";
@@ -11,7 +11,7 @@ import { addProjectFromPath } from "../core/project.js";
 import { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode } from "../project-config.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getMachineName } from "../machine-identity.js";
-import { resolveAllStores } from "../store-registry.js";
+import { resolveAllStores, describeUnavailableStore } from "../store-registry.js";
 
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { logger } from "../logger.js";
@@ -35,6 +35,7 @@ async function handleAddProject(
       // Resolve the target store path: explicit store > auto-route by project claim > primary
       let targetPhrenPath = phrenPath;
       let storeRole = "primary";
+      const projectName = targetPath ? projectSlugFromPath(targetPath) : undefined;
       if (storeName) {
         const stores = resolveAllStores(phrenPath);
         const store = stores.find((s) => s.name === storeName);
@@ -44,22 +45,21 @@ async function handleAddProject(
         if (store.role === "readonly") {
           return mcpResponse({ ok: false, error: `Store "${storeName}" is read-only` });
         }
+        if (store.available === false) {
+          return mcpResponse({ ok: false, error: describeUnavailableStore(store) });
+        }
         targetPhrenPath = store.path;
         storeRole = store.role;
-      } else {
-        // Check if any non-primary writable store claims this project
-        const projectName = targetPath
-          ? path.basename(path.resolve(targetPath)).toLowerCase().replace(/[^a-z0-9_-]/g, "-")
-          : undefined;
-        if (projectName) {
-          const stores = resolveAllStores(phrenPath);
-          for (const store of stores) {
-            if (store.role !== "readonly" && store.role !== "primary" && store.projects?.includes(projectName)) {
-              targetPhrenPath = store.path;
-              storeRole = store.role;
-              break;
-            }
-          }
+      } else if (projectName) {
+        // Same rule as every other write: a store that claims this project but
+        // is not attached here must fail, never fall through to the primary
+        // store — that is what copied work projects into the personal store.
+        try {
+          const resolved = resolveStoreForProject(ctx, projectName);
+          targetPhrenPath = resolved.phrenPath;
+          storeRole = resolved.storeRole;
+        } catch (err: unknown) {
+          return mcpResponse({ ok: false, error: errorMessage(err) });
         }
       }
 

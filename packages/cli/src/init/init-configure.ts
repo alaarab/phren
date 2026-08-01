@@ -10,6 +10,7 @@ import { getProjectOwnershipDefault } from "../project-config.js";
 import {
   atomicWriteText,
   debugLog,
+  projectSlugFromPath,
   readRootManifest,
   writeRootManifest,
 } from "../shared.js";
@@ -357,7 +358,7 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
     opts.projectOwnershipDefault = ownershipDefault;
   }
   const mcpEnabled = opts.mcp ? opts.mcp === "on" : true;
-  const projectName = path.basename(workspaceRoot).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const projectName = projectSlugFromPath(workspaceRoot);
 
   if (opts.dryRun) {
     log("\nInit dry run. No files will be written.\n");

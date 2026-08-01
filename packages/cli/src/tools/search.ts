@@ -711,7 +711,7 @@ async function handleGetFindings(
   },
 ) {
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-  const resolved = resolveStoreForProject(ctx, project);
+  const resolved = resolveStoreForProject(ctx, project, "read");
   const { phrenPath } = resolved;
   const includeHistory = include_history ?? include_superseded ?? false;
   // Always read with archive so we can compute historyCount without a second read

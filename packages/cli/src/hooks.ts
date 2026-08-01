@@ -87,6 +87,93 @@ export function isEphemeralNpxPath(p: string): boolean {
   return /(^|[/\\])_npx[/\\]/.test(p);
 }
 
+/** Split a hook command into tokens, honouring single and double quotes. */
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let started = false;
+
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (started || current) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (started || current) tokens.push(current);
+  return tokens;
+}
+
+function isPathLike(token: string): boolean {
+  return token.startsWith("/")
+    || token.startsWith("~/")
+    || token.startsWith("\\\\")
+    || /^[A-Za-z]:[\\/]/.test(token);
+}
+
+/**
+ * The local file a hook command depends on — the `~/.local/bin/phren` wrapper,
+ * or the script passed to `node`.
+ *
+ * Returns `null` for commands that re-resolve themselves on every run
+ * (`npx -y @phren/cli …`), which cannot go stale, and for commands with no
+ * recognisable path.
+ *
+ * Why this matters: `npm install -g @phren/cli` can move the package entry
+ * between versions (0.1.40 moved it from `mcp/dist/index.js` to
+ * `dist/index.js`). Hook commands in settings.json keep the old absolute path
+ * and every hook then dies with MODULE_NOT_FOUND on every prompt and every
+ * Stop — silently, because hook failures are not surfaced.
+ */
+export function extractHookScriptPath(command: string): string | null {
+  if (!command) return null;
+  // `npx` re-resolves the package each run, so it is never stale.
+  if (/(^|\s)npx(\.cmd)?(\s|$)/.test(command)) return null;
+
+  const tokens = tokenizeCommand(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    // Skip shell scaffolding: `set`, `&&`, and `VAR=value` assignments.
+    if (token === "&&" || token === "set" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
+    if (/^node(\.exe)?$/i.test(token)) {
+      const next = tokens[i + 1];
+      return next && isPathLike(next) ? next : null;
+    }
+    if (isPathLike(token)) return token;
+  }
+  return null;
+}
+
+/**
+ * Hook commands whose entrypoint no longer exists on disk. Deduplicated, so an
+ * upgrade that breaks all four lifecycle hooks reports one path, not four.
+ */
+export function findStaleHookEntrypoints(commands: readonly string[]): string[] {
+  const stale = new Set<string>();
+  for (const command of commands) {
+    const scriptPath = extractHookScriptPath(command);
+    if (!scriptPath) continue;
+    const expanded = scriptPath.startsWith("~/") ? homePath(scriptPath.slice(2)) : scriptPath;
+    if (!fs.existsSync(expanded)) stale.add(scriptPath);
+  }
+  return [...stale];
+}
+
 function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }

@@ -85,6 +85,7 @@ import {
 import { bootstrapSqlJs } from "./sqljs.js";
 import { spawnDetachedChild } from "./process.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "../project-config.js";
+import { resolveRepoRootForPath } from "../git-worktree.js";
 import {
   buildSourceDocKey,
   decodeStringRow,
@@ -1627,7 +1628,9 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
     return manifest.primaryProject || null;
   }
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
-  const resolvedCwd = path.resolve(cwd);
+  // A session running inside a git worktree belongs to the repository the
+  // worktree came from — its own path never matches any registered sourcePath.
+  const resolvedCwd = resolveRepoRootForPath(cwd);
   let bestMatch: { project: string; length: number } | null = null;
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);

@@ -15,6 +15,8 @@ import {
   generateStoreId,
   readTeamBootstrap,
   storesFilePath,
+  getUnavailableStores,
+  describeUnavailableStore,
   type StoreRegistry,
   type StoreEntry,
 } from "./store-registry.js";
@@ -246,6 +248,86 @@ stores:
       process.env.PHREN_FEDERATION_PATHS = "/nonexistent/path/that/does/not/exist";
       const stores = resolveAllStores(phrenDir);
       expect(stores).toHaveLength(1); // just implicit primary
+    });
+
+    it("marks each store with whether its path exists on this machine", () => {
+      const presentDir = path.join(tmp.path, "present");
+      fs.mkdirSync(presentDir, { recursive: true });
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "bbb22222", name: "present", path: presentDir, role: "team", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git" },
+        ],
+      });
+
+      const stores = resolveAllStores(phrenDir);
+      expect(stores.find((s) => s.name === "present")!.available).toBe(true);
+      expect(stores.find((s) => s.name === "absent")!.available).toBe(false);
+    });
+
+    it("still returns declared stores that are absent locally", () => {
+      // Filtering them out would be worse than useless: write routing could no
+      // longer tell "no store claims this" from "the claiming store is missing".
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git", projects: ["arc"] },
+        ],
+      });
+
+      const stores = resolveAllStores(phrenDir);
+      expect(stores).toHaveLength(2);
+      expect(stores.find((s) => s.name === "absent")!.projects).toEqual(["arc"]);
+    });
+  });
+
+  // ── availability helpers ─────────────────────────────────────────────────
+
+  describe("getUnavailableStores / describeUnavailableStore", () => {
+    it("lists only the stores that are missing locally", () => {
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git" },
+        ],
+      });
+
+      const missing = getUnavailableStores(phrenDir);
+      expect(missing).toHaveLength(1);
+      expect(missing[0].name).toBe("absent");
+    });
+
+    it("describes the store, its expected path, and the remedy", () => {
+      const store: StoreEntry = {
+        id: "ccc33333",
+        name: "work-shared",
+        path: "/nope/.phren-work-shared",
+        role: "team",
+        sync: "managed-git",
+        remote: "git@github.com:acme/shared.git",
+        available: false,
+      };
+      const detail = describeUnavailableStore(store);
+      expect(detail).toContain("work-shared");
+      expect(detail).toContain("/nope/.phren-work-shared");
+      expect(detail).toContain("git@github.com:acme/shared.git");
+    });
+  });
+
+  // ── availability must not leak into the shared file ───────────────────────
+
+  describe("writeStoreRegistry", () => {
+    it("never persists the computed `available` flag to stores.yaml", () => {
+      // stores.yaml is shared across machines via git; availability is local.
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [{ id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git", available: true }],
+      });
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).not.toContain("available");
     });
   });
 

@@ -62,7 +62,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       let phrenPath: string;
       let project: string;
       try {
-        const resolved = resolveStoreForProject(ctx, projectInput);
+        const resolved = resolveStoreForProject(ctx, projectInput, "read");
         phrenPath = resolved.phrenPath;
         project = resolved.project;
       } catch (err: unknown) {

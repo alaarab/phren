@@ -6,11 +6,11 @@ import { FINDINGS_FILENAME } from "../data/access.js";
 import { addNote, editNote, listNotes, removeNote, type NoteItem } from "../data/notes.js";
 import { promoteNote } from "../core/note.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { mcpResponse, resolveStoreForProject, type McpContext } from "./types.js";
+import { mcpResponse, resolveStoreForProject, type McpContext, type StoreAccessMode } from "./types.js";
 
-function resolve(ctx: McpContext, projectInput: string) {
+function resolve(ctx: McpContext, projectInput: string, mode: StoreAccessMode = "write") {
   try {
-    return { ok: true as const, value: resolveStoreForProject(ctx, projectInput) };
+    return { ok: true as const, value: resolveStoreForProject(ctx, projectInput, mode) };
   } catch (err: unknown) {
     return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
   }
@@ -44,7 +44,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, date, limit }) => {
-      const target = resolve(ctx, projectInput);
+      const target = resolve(ctx, projectInput, "read");
       if (!target.ok) return mcpResponse({ ok: false, error: target.error });
       const { phrenPath, project } = target.value;
       const result = listNotes(phrenPath, project, { date, limit: limit ?? 100 });

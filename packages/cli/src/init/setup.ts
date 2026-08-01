@@ -9,6 +9,8 @@ import {
   atomicWriteText,
   debugLog,
   findProjectNameCaseInsensitive,
+  findProjectNamesByCanonicalKey,
+  projectSlugFromPath,
   hookConfigPath,
   EXEC_TIMEOUT_QUICK_MS,
   readRootManifest,
@@ -17,6 +19,7 @@ import {
   isRecord,
 } from "../shared.js";
 import { homePath } from "../phren-paths.js";
+import { resolveWorktreeParent } from "../git-worktree.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "../profile-store.js";
 import { getMachineName } from "../machine-identity.js";
 import { execFileSync } from "child_process";
@@ -1204,6 +1207,59 @@ export function ensureLocalGitRepo(phrenPath: string): LocalGitRepoStatus {
 /** Bootstrap a phren project from an existing project directory with CLAUDE.md.
  * @param profile - if provided, only this profile YAML is updated (avoids leaking project to unrelated profiles).
  */
+/**
+ * Find an already-registered project that `sourceRoot` should reuse rather than
+ * getting a near-duplicate directory of its own. Two signals, strongest first:
+ *
+ * 1. **Same source path.** Another project already points at this exact
+ *    directory — unambiguous, reuse it whatever it is called.
+ * 2. **Same canonical slug.** `max4liveplugins` vs `max4live-plugins`: the same
+ *    repo spelled two ways. Only reused when the existing project has no source
+ *    path recorded, or records this one — if it points somewhere else it is a
+ *    genuinely different project that merely slugs alike, and both are kept.
+ *
+ * Returns `null` when nothing matches, i.e. create the project normally.
+ */
+function findExistingProjectForSource(
+  phrenPath: string,
+  sourceRoot: string,
+  derivedName: string,
+): string | null {
+  let candidates: string[];
+  try {
+    candidates = fs.readdirSync(phrenPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => entry.name);
+  } catch (err: unknown) {
+    debugLog(`findExistingProjectForSource readdir: ${errorMessage(err)}`);
+    return null;
+  }
+
+  const sourceOf = (project: string): string | null => {
+    try {
+      return readProjectConfig(phrenPath, project).sourcePath
+        ? path.resolve(String(readProjectConfig(phrenPath, project).sourcePath))
+        : null;
+    } catch (err: unknown) {
+      debugLog(`findExistingProjectForSource config ${project}: ${errorMessage(err)}`);
+      return null;
+    }
+  };
+
+  const resolvedSource = path.resolve(sourceRoot);
+  for (const project of candidates) {
+    if (sourceOf(project) === resolvedSource) return project;
+  }
+
+  for (const project of findProjectNamesByCanonicalKey(phrenPath, derivedName)) {
+    if (project === derivedName) return project; // exact match; nothing to reconcile
+    const existingSource = sourceOf(project);
+    if (existingSource === null || existingSource === resolvedSource) return project;
+  }
+
+  return null;
+}
+
 export function bootstrapFromExisting(
   phrenPath: string,
   projectPath: string,
@@ -1217,7 +1273,18 @@ export function bootstrapFromExisting(
   }
   const manifest = readRootManifest(phrenPath);
   const isProjectLocal = manifest?.installMode === "project-local";
-  const sourceRoot = isProjectLocal ? path.resolve(manifest.workspaceRoot || resolvedPath) : resolvedPath;
+  // A git worktree — notably the agent-managed ones under `.claude/worktrees/`
+  // — is a checkout of a repository we may already track. Attribute it to that
+  // repository instead of registering the worktree's throwaway codename as a
+  // brand-new top-level project.
+  const worktree = isProjectLocal ? null : resolveWorktreeParent(resolvedPath);
+  const worktreeRepoRoot = worktree && fs.existsSync(worktree.repoRoot) ? worktree.repoRoot : null;
+  if (worktreeRepoRoot) {
+    debugLog(`bootstrapFromExisting: ${resolvedPath} is a ${worktree!.reason}; attributing to ${worktreeRepoRoot}`);
+  }
+  const sourceRoot = isProjectLocal
+    ? path.resolve(manifest.workspaceRoot || resolvedPath)
+    : (worktreeRepoRoot ?? resolvedPath);
   if (isProjectLocal) {
     const matchesWorkspace = resolvedPath === sourceRoot || resolvedPath.startsWith(sourceRoot + path.sep);
     if (!matchesWorkspace) {
@@ -1238,9 +1305,15 @@ export function bootstrapFromExisting(
   }
 
   const claudeContent = claudeMdPath ? fs.readFileSync(claudeMdPath, "utf8") : null;
-  const projectName = isProjectLocal
+  const derivedName = isProjectLocal
     ? String(manifest?.primaryProject)
-    : path.basename(sourceRoot).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    : projectSlugFromPath(sourceRoot);
+  const projectName = isProjectLocal
+    ? derivedName
+    : (findExistingProjectForSource(phrenPath, sourceRoot, derivedName) ?? derivedName);
+  if (projectName !== derivedName) {
+    debugLog(`bootstrapFromExisting: reusing existing project "${projectName}" for ${sourceRoot} (derived "${derivedName}")`);
+  }
   const existingProject = findProjectNameCaseInsensitive(phrenPath, projectName);
   if (existingProject && existingProject !== projectName) {
     throw new Error(
@@ -1375,12 +1448,19 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
  * A directory qualifies if it:
  * - Is not the home directory or phren directory
  * - Has a CLAUDE.md, AGENTS.md, .claude/CLAUDE.md, or .git directory
+ *
+ * A git worktree resolves to the repository it belongs to. Without this a
+ * throwaway agent worktree under `.claude/worktrees/<codename>` looks like its
+ * own repo (it has a `.git` entry) and gets offered as a new project.
  */
 export function detectProjectDir(dir: string, phrenPath: string): string | null {
   const home = os.homedir();
   const tmpRoot = path.resolve(os.tmpdir());
   const resolvedPhrenPath = path.resolve(phrenPath);
-  let current = path.resolve(dir);
+  const worktree = resolveWorktreeParent(dir);
+  let current = worktree && fs.existsSync(worktree.repoRoot)
+    ? worktree.repoRoot
+    : path.resolve(dir);
   while (true) {
     // Never treat the shared OS temp root itself as a project. Tools may drop
     // global instruction files there, which would otherwise hijack detection
