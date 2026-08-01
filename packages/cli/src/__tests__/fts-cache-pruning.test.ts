@@ -18,7 +18,7 @@ import * as os from "os";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { makeTempDir, writeFile } from "../test-helpers.js";
-import { loadIndexForHook, type SqlJsDatabase } from "../shared/index.js";
+import { buildIndex, loadIndexForHook, type SqlJsDatabase } from "../shared/index.js";
 
 describe("FTS cache root pruning", () => {
   let tmp: { path: string; cleanup: () => void };

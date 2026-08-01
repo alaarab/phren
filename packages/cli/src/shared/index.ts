@@ -1735,6 +1735,16 @@ const FTS_CACHE_MAX_STORES = 64;
  * attributable to any store, so they can only ever be mis-served.
  */
 let _ftsCachePruned = false;
+
+/**
+ * @internal Exported for tests. The prune is a one-shot per process, so a test
+ * that needs to set up state *after* a build (which consumes it) has no other
+ * way to exercise the pruning logic a second time.
+ */
+export function __resetFtsCachePruneGuardForTests(): void {
+  _ftsCachePruned = false;
+}
+
 function pruneFtsCacheRoot(keepKey: string): void {
   if (_ftsCachePruned) return;
   _ftsCachePruned = true;
