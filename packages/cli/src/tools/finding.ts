@@ -460,7 +460,7 @@ async function handleGetContradictions(
   // Build project list from all stores (primary + team)
   let projectsWithPaths: Array<{ project: string; storePath: string }>;
   if (project) {
-    const resolved = resolveStoreForProject(ctx, project);
+    const resolved = resolveStoreForProject(ctx, project, "read");
     projectsWithPaths = [{ project: resolved.project, storePath: resolved.phrenPath }];
   } else {
     const { listAllProjects } = await import("../store-routing.js");

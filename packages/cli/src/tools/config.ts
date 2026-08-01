@@ -28,7 +28,7 @@ import {
   type ProjectConfigOverrides,
   updateProjectConfigOverrides,
 } from "../project-config.js";
-import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
 import { ACCESS_ROLE_KEYS, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import {
   readProjectTopics,
@@ -144,7 +144,7 @@ async function handleGetConfig(
     let resolvedPhrenPath = phrenPath;
     let resolvedProject = project;
     try {
-      const resolved = resolveStoreForProject(ctx, project);
+      const resolved = resolveStoreForProject(ctx, project, "read");
       resolvedPhrenPath = resolved.phrenPath;
       resolvedProject = resolved.project;
     } catch { /* fall back to primary */ }
@@ -592,14 +592,18 @@ async function handleSetConfig(
       const err = validateProject(project);
       if (err) return mcpResponse({ ok: false, error: err });
 
-      // Resolve store-qualified project names for team stores
-      let topicPhrenPath = phrenPath;
-      let topicProject = project;
+      // Resolve store-qualified project names for team stores. This branch
+      // writes topic-config.json, so a failed resolution must surface instead
+      // of quietly writing into the primary store.
+      let topicPhrenPath: string;
+      let topicProject: string;
       try {
         const resolved = resolveStoreForProject(ctx, project);
         topicPhrenPath = resolved.phrenPath;
         topicProject = resolved.project;
-      } catch { /* fall back to primary */ }
+      } catch (err: unknown) {
+        return mcpResponse({ ok: false, error: errorMessage(err) });
+      }
 
       const projectDir = safeProjectPath(topicPhrenPath, topicProject);
       if (!projectDir || !fs.existsSync(projectDir)) {

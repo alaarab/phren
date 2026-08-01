@@ -27,6 +27,12 @@ export interface StoreEntry {
   sync: StoreSyncMode;
   /** Projects claimed by this store (for write routing in phase 2). */
   projects?: string[];
+  /**
+   * Whether {@link path} exists on this machine. Computed by
+   * {@link resolveAllStores}; never persisted to stores.yaml. `undefined` on
+   * hand-built entries that never went through resolution.
+   */
+  available?: boolean;
 }
 
 export interface StoreRegistry {
@@ -101,10 +107,12 @@ export function writeStoreRegistry(phrenPath: string, registry: StoreRegistry): 
   const err = validateRegistry(registry);
   if (err) throw new Error(`${PhrenError.VALIDATION_ERROR}: ${err}`);
 
-  // Collapse paths to ~ prefix for portability
+  // Collapse paths to ~ prefix for portability. `available` is machine-local
+  // state computed at resolve time — it must never be written to stores.yaml,
+  // which is shared across machines via git.
   const portable: StoreRegistry = {
     version: 1,
-    stores: registry.stores.map((s) => ({
+    stores: registry.stores.map(({ available: _available, ...s }) => ({
       ...s,
       path: collapsePath(s.path),
     })),
@@ -115,11 +123,26 @@ export function writeStoreRegistry(phrenPath: string, registry: StoreRegistry): 
 
 // ── Resolution ───────────────────────────────────────────────────────────────
 
+/** True when a store's directory exists on this machine. */
+export function storePathExists(storePath: string): boolean {
+  try {
+    return fs.statSync(storePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the full list of stores. This is the **key backward-compat function**:
  * - If stores.yaml exists → parse and return entries
  * - If stores.yaml is missing → return a single implicit primary entry for phrenPath
  * - In both cases, append PHREN_FEDERATION_PATHS entries as readonly stores
+ *
+ * Every returned entry carries `available`, recording whether its path exists
+ * here. Declared-but-absent stores are deliberately **still returned**: callers
+ * must be able to see that a store claims a project before deciding what to do,
+ * otherwise a team store that simply isn't cloned yet would look like "no store
+ * claims this project" and its writes would land in the primary store.
  */
 export function resolveAllStores(phrenPath: string): StoreEntry[] {
   const registry = readStoreRegistry(phrenPath);
@@ -140,7 +163,27 @@ export function resolveAllStores(phrenPath: string): StoreEntry[] {
     }
   }
 
-  return stores;
+  return stores.map((s) => ({ ...s, available: storePathExists(s.path) }));
+}
+
+/** Stores declared in stores.yaml whose directory is missing on this machine. */
+export function getUnavailableStores(phrenPath: string): StoreEntry[] {
+  return resolveAllStores(phrenPath).filter((s) => s.available === false);
+}
+
+/**
+ * One actionable sentence about a store that is declared but not attached here.
+ * Shared by write routing, `phren status`, and `phren doctor` so all three name
+ * the same store, the same expected path, and the same remedy.
+ */
+export function describeUnavailableStore(store: StoreEntry): string {
+  const attach = store.remote
+    ? `git clone ${store.remote} "${store.path}"  (or: phren team join ${store.remote})`
+    : `phren team join <git-url> --name ${store.name}`;
+  return (
+    `Store "${store.name}" (role=${store.role}) is declared in ${STORES_FILENAME} but is not attached on this machine — ` +
+    `expected path: ${store.path}. Attach it with: ${attach}`
+  );
 }
 
 /** The primary store (role=primary). Falls back to implicit entry. */

@@ -423,7 +423,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
 
   // Store registry health
   try {
-    const { resolveAllStores, storesFilePath } = await import("../store-registry.js");
+    const { resolveAllStores, storesFilePath, describeUnavailableStore } = await import("../store-registry.js");
     const storesFile = storesFilePath(phrenPath);
     if (fs.existsSync(storesFile)) {
       const stores = resolveAllStores(phrenPath);
@@ -434,14 +434,26 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
           ? `${stores.length} stores configured`
           : "stores.yaml exists but no stores parsed",
       });
+      // Projects claimed by a store that is not attached here cannot be written
+      // at all — phren refuses rather than diverting them to the primary store.
+      const orphanedClaims = stores
+        .filter((store) => store.available === false && store.projects?.length)
+        .map((store) => `${store.name} → ${store.projects!.join(", ")}`);
+      checks.push({
+        name: "store-claims-attached",
+        ok: orphanedClaims.length === 0,
+        detail: orphanedClaims.length === 0
+          ? "every claimed project resolves to an attached store"
+          : `projects claimed by unattached stores (writes to them will fail): ${orphanedClaims.join("; ")}`,
+      });
       for (const store of stores) {
-        const pathExists = fs.existsSync(store.path);
+        const pathExists = store.available !== false;
         const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
         if (!pathExists) {
           checks.push({
             name: `store:${store.name}`,
             ok: false,
-            detail: `store '${store.name}' path missing: ${store.path}`,
+            detail: describeUnavailableStore(store),
           });
         } else if (!gitExists) {
           checks.push({

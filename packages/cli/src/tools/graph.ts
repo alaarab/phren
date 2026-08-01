@@ -112,7 +112,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const docProject = doc.split("/")[0];
         let docPhrenPath = ctx.phrenPath;
         try {
-          docPhrenPath = resolveStoreForProject(ctx, docProject).phrenPath;
+          docPhrenPath = resolveStoreForProject(ctx, docProject, "read").phrenPath;
         } catch { /* fall back to primary */ }
         const docRow = queryDocBySourceKey(db, docPhrenPath, doc);
         const snippet = docRow?.content ? docRow.content.slice(0, 200) : "";

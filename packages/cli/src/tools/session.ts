@@ -507,7 +507,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     const activeScope = normalizedAgentScope;
     if (activeProject && isValidProjectName(activeProject)) {
       const projectStorePath = (() => {
-        try { return resolveStoreForProject(ctx, activeProject).phrenPath; } catch { return phrenPath; }
+        try { return resolveStoreForProject(ctx, activeProject, "read").phrenPath; } catch { return phrenPath; }
       })();
       try {
         const findings = readFindings(projectStorePath, activeProject);
@@ -661,7 +661,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     if (endedState.project && isValidProjectName(endedState.project)) {
       const projectStorePath = (() => {
         if (!endedState.project) return phrenPath;
-        try { return resolveStoreForProject(ctx, endedState.project).phrenPath; } catch { return phrenPath; }
+        try { return resolveStoreForProject(ctx, endedState.project, "read").phrenPath; } catch { return phrenPath; }
       })();
       try {
         const trackedActiveTask = getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project);
