@@ -646,13 +646,17 @@ export async function runInit(opts: InitOptions = {}) {
   const firstProjectName = walkthroughProject || "my-first-project";
   const firstProjectDomain: InitProjectDomain = opts._walkthroughDomain ?? "software";
 
-  // Copy bundled starter to ~/.phren
+  // Copy bundled starter to ~/.phren.
+  //
+  // Note: packages/cli/starter/ no longer ships my-api/my-frontend/
+  // my-first-project sample-project directories — they were bundled but
+  // never copied (this loop used to skip them by name) and ensureProjectScaffold()
+  // below generates the real first-project content instead. Those three names
+  // still appear in LEGACY_SAMPLE_PROJECTS (init/setup.ts) purely to prune them
+  // out of profiles left behind by installs that predate this cleanup.
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-      if (src === STARTER_DIR && entry.isDirectory() && ["my-api", "my-frontend", "my-first-project"].includes(entry.name)) {
-        continue;
-      }
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
       if (entry.isDirectory()) {
