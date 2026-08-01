@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as vscode from "vscode";
 
 // loadGraphData() also folds in ~/.phren/.runtime/memory-scores.json (via the
 // module-private loadMemoryScores(), called fresh on every loadGraphData()
@@ -39,7 +40,9 @@ import {
   isValidProjectName,
   loadGraphData,
   qualityMultiplierFromEntry,
+  showGraphWebview,
 } from "../src/graphWebview";
+import type { PhrenClient } from "../src/phrenClient";
 import { fakeClient, ok } from "./test-helpers";
 
 describe("isValidProjectName", () => {
@@ -379,5 +382,190 @@ describe("loadGraphData: orchestration", () => {
         (e.source === "project:other" && e.target === "project:app"),
     );
     expect(crossEdges).toHaveLength(1);
+  });
+});
+
+describe("showGraphWebview: webview <-> extension message protocol", () => {
+  // A hand-rolled fake WebviewPanel: captures the single onDidReceiveMessage
+  // handler showGraphWebview registers so tests can drive it directly with
+  // synthetic messages, and records every postMessage call it makes back.
+  function fakePanel() {
+    let receive: ((msg: unknown) => unknown) | undefined;
+    const panel = {
+      iconPath: undefined as unknown,
+      webview: {
+        html: "",
+        cspSource: "",
+        onDidReceiveMessage: vi.fn((cb: (msg: unknown) => unknown) => {
+          receive = cb;
+          return { dispose: vi.fn() };
+        }),
+        postMessage: vi.fn(async () => true),
+      },
+      onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+      dispose: vi.fn(),
+      reveal: vi.fn(),
+    };
+    return {
+      panel,
+      async send(msg: unknown): Promise<void> {
+        if (!receive) throw new Error("onDidReceiveMessage was never registered — did showGraphWebview's initial load fail?");
+        await receive(msg);
+      },
+    };
+  }
+
+  function extensionContextStub() {
+    return { extensionUri: {}, extensionPath: "/ext" } as unknown as vscode.ExtensionContext;
+  }
+
+  async function setup(client: PhrenClient) {
+    const { panel, send } = fakePanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    await showGraphWebview(client, extensionContextStub());
+    return { panel, send };
+  }
+
+  function postedTypes(panel: ReturnType<typeof fakePanel>["panel"]): unknown[] {
+    return vi.mocked(panel.webview.postMessage).mock.calls.map(([m]) => (m as { type?: string }).type);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects a mutating command carrying an invalid (path-traversal-shaped) project name before ever confirming or calling the client", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+
+    await send({ command: "deleteFinding", projectName: "../etc", text: "x" });
+
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(client.removeFinding).not.toHaveBeenCalled();
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores messages with no recognized command, and non-object messages, without throwing or touching the client", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+
+    await send({ command: "notARealCommand" });
+    await send("just a string");
+    await send(null);
+    await send(42);
+
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("saveFindingEdit with a nodeId patches that node in place instead of doing a full refresh", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+
+    await send({ command: "saveFindingEdit", projectName: "app", oldText: "old", newText: "new", nodeId: "finding:app:f1" });
+
+    expect(client.editFinding).toHaveBeenCalledWith("app", "old", "new");
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: "nodeUpdated", id: "finding:app:f1", changes: { text: "new" } });
+    expect(postedTypes(panel)).not.toContain("graphData");
+  });
+
+  it("saveFindingEdit without a nodeId falls back to a full graph refresh", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+
+    await send({ command: "saveFindingEdit", projectName: "app", oldText: "old", newText: "new" });
+
+    expect(postedTypes(panel)).toContain("graphData");
+    expect(postedTypes(panel)).not.toContain("nodeUpdated");
+  });
+
+  it("saveFindingEdit shows an error and posts nothing when the client call fails", async () => {
+    const client = fakeClient({ editFinding: vi.fn(async () => { throw new Error("locked"); }) });
+    const { send, panel } = await setup(client);
+
+    await send({ command: "saveFindingEdit", projectName: "app", oldText: "old", newText: "new", nodeId: "n1" });
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to update finding: locked");
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("deleteFinding requires the modal confirmation to be exactly Delete", async () => {
+    const client = fakeClient();
+    const { send } = await setup(client);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValue(undefined);
+
+    await send({ command: "deleteFinding", projectName: "app", text: "x", nodeId: "n1" });
+
+    expect(client.removeFinding).not.toHaveBeenCalled();
+  });
+
+  it("deleteFinding on confirmation removes the finding and posts a nodeRemoved message with an undo payload", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Delete");
+
+    await send({ command: "deleteFinding", projectName: "app", text: "the finding", nodeId: "finding:app:f1" });
+
+    expect(client.removeFinding).toHaveBeenCalledWith("app", "the finding");
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "nodeRemoved", id: "finding:app:f1",
+      undo: { kind: "finding", projectName: "app", text: "the finding", label: "Finding deleted" },
+    });
+  });
+
+  it("deleteBatch skips items with an invalid project name, still processes the rest, and reports a partial count", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Delete");
+
+    await send({
+      command: "deleteBatch",
+      items: [
+        { kind: "finding", projectName: "app", text: "keep me" },
+        { kind: "finding", projectName: "../bad", text: "should be skipped" },
+      ],
+    });
+
+    expect(client.removeFinding).toHaveBeenCalledTimes(1);
+    expect(client.removeFinding).toHaveBeenCalledWith("app", "keep me");
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "batchRemoved",
+      undo: { items: [{ kind: "finding", projectName: "app", text: "keep me", item: "" }], label: "Deleted 1 item" },
+    });
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith("Deleted 1 of 2 items.");
+  });
+
+  it("mergeFindings removes both originals, adds the merged text, and offers an undo naming the exact originals", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Merge");
+
+    await send({ command: "mergeFindings", projectName: "app", text1: "first", text2: "second" });
+
+    expect(client.removeFinding).toHaveBeenNthCalledWith(1, "app", "first");
+    expect(client.removeFinding).toHaveBeenNthCalledWith(2, "app", "second");
+    expect(client.addFinding).toHaveBeenCalledWith("app", "first\nsecond");
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "mergeDone", undo: { projectName: "app", merged: "first\nsecond", originals: ["first", "second"] },
+    });
+  });
+
+  it("undoMerge requires exactly 2 originals — a malformed undo payload is a silent no-op", async () => {
+    const client = fakeClient();
+    const { send } = await setup(client);
+
+    await send({ command: "undoMerge", projectName: "app", merged: "first\nsecond", originals: ["only one"] });
+
+    expect(client.removeFinding).not.toHaveBeenCalled();
+    expect(client.addFinding).not.toHaveBeenCalled();
+  });
+
+  it("requestRefresh posts a fresh graphData payload", async () => {
+    const client = fakeClient();
+    const { send, panel } = await setup(client);
+
+    await send({ command: "requestRefresh" });
+
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: "graphData", payload: expect.any(Object) });
   });
 });
