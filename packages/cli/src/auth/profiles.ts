@@ -68,12 +68,27 @@ function defaultLabel(provider: AuthProvider): string {
   }
 }
 
+// auth-profiles.json holds OpenAI/OpenRouter/Anthropic API keys and OpenAI
+// Codex OAuth access+refresh tokens in plaintext. It used to live under
+// `.config/`, which the store's .gitignore template does NOT ignore (that
+// directory is meant for shared, non-secret policy JSON) — so any store
+// synced to a git remote pushed every user's credentials there. `.runtime/`
+// is gitignored by the store template, so credentials now live there
+// instead. See migrateLegacyAuthProfilesFile() below for the one-time move.
 function authProfileDir(): string {
-  return homePath(".phren", ".config");
+  return homePath(".phren", ".runtime");
 }
 
 function authProfilesFilePath(): string {
   return path.join(authProfileDir(), "auth-profiles.json");
+}
+
+function legacyAuthProfileDir(): string {
+  return homePath(".phren", ".config");
+}
+
+function legacyAuthProfilesFilePath(): string {
+  return path.join(legacyAuthProfileDir(), "auth-profiles.json");
 }
 
 function codexCliAuthPath(): string {
@@ -82,6 +97,28 @@ function codexCliAuthPath(): string {
 
 function ensureAuthProfileDir(): void {
   fs.mkdirSync(authProfileDir(), { recursive: true, mode: 0o700 });
+}
+
+/**
+ * One-time migration off the old `.config/auth-profiles.json` location.
+ * Runs at the top of loadStore(), the common entry point for every read and
+ * write in this module, so it fires on the next `phren auth`/MCP call after
+ * upgrading — no separate migration command needed. Idempotent: once the
+ * file is moved, the legacy path no longer exists, so every later call is a
+ * single fs.existsSync() no-op. Best-effort: if the move fails (e.g. a
+ * cross-device home directory, or a permissions issue), the legacy file is
+ * left in place — it stays covered by the `.config/auth-profiles.json`
+ * .gitignore entry added alongside this migration, and every call retries.
+ */
+function migrateLegacyAuthProfilesFile(): void {
+  const legacyPath = legacyAuthProfilesFilePath();
+  const currentPath = authProfilesFilePath();
+  if (fs.existsSync(currentPath) || !fs.existsSync(legacyPath)) return;
+  try {
+    ensureAuthProfileDir();
+    fs.renameSync(legacyPath, currentPath);
+    try { fs.chmodSync(currentPath, 0o600); } catch { /* best effort */ }
+  } catch { /* best effort — retried on the next call */ }
 }
 
 function persistProfiles(data: AuthProfilesFile): void {
@@ -110,6 +147,7 @@ function normalizeStore(raw: unknown): AuthProfilesFile {
 }
 
 function loadStore(): AuthProfilesFile {
+  migrateLegacyAuthProfilesFile();
   try {
     return normalizeStore(JSON.parse(fs.readFileSync(authProfilesFilePath(), "utf8")));
   } catch {

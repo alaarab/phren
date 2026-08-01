@@ -39,7 +39,7 @@ import {
   resolveFindingContradiction,
 } from "../finding/lifecycle.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { TEAM_STORE_PATHSPECS } from "../cli-hooks-git.js";
+import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
 
 
 
@@ -613,6 +613,14 @@ async function handlePushChanges(
       runCustomHooks(phrenPath, "pre-save");
       // Stage all files including untracked (new project dirs, first FINDINGS.md, etc.)
       runGit(["add", "--sparse", "-A"]);
+      // Belt-and-suspenders: unstage sensitive files that .gitignore should
+      // already block (mirrors the same defensive reset in cli/session-stop.ts's
+      // auto-save). .config/auth-profiles.json is the legacy path for
+      // auth/profiles.ts's credential store (API keys, OpenAI Codex OAuth
+      // tokens) — this catches a store where the file was already tracked
+      // before it was gitignored, so a later token refresh doesn't get
+      // re-staged and pushed. Failures here are non-fatal (files may not exist).
+      try { runGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"]); } catch { /* best effort */ }
       runGit(["commit", "-m", commitMsg]);
 
       let hasRemote = false;
@@ -773,7 +781,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
-          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
+          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'bug' (confirmed defect or failure)."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },

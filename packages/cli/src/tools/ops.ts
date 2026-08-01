@@ -16,7 +16,7 @@ import { resolveAllStores, describeUnavailableStore } from "../store-registry.js
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { logger } from "../logger.js";
 import { getRuntimeHealth } from "../governance/policy.js";
-import { countUnsyncedCommits } from "../cli-hooks-git.js";
+import { countUnsyncedCommits } from "../cli/session-git.js";
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 

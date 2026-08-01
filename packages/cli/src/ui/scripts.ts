@@ -323,10 +323,10 @@ export function renderNotesEnhancementScript(): string {
       if (!confirm('Remove this note?')) return;
       request(project, 'DELETE', { note: note }, function() { loadNotes(false); });
     } else if (action === 'promote') {
-      var findingType = prompt('Finding type (optional): decision, pitfall, pattern, tradeoff, architecture, bug', '');
+      var findingType = prompt('Finding type (optional): decision, pitfall, pattern, bug', '');
       if (findingType === null) return;
       findingType = findingType.trim().toLowerCase();
-      var valid = ['', 'decision', 'pitfall', 'pattern', 'tradeoff', 'architecture', 'bug'];
+      var valid = ['', 'decision', 'pitfall', 'pattern', 'bug'];
       if (valid.indexOf(findingType) === -1) { alert('Unknown finding type.'); return; }
       request(project, 'POST', { action: 'promote', note: note, finding_type: findingType }, function() { loadNotes(false); });
     }
