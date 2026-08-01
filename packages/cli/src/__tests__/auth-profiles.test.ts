@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import {
   authProfilesPath,
+  getAuthProfiles,
   getCodexAuthProfile,
   hasCodexAuthProfile,
   resolveApiKey,
@@ -74,5 +75,46 @@ describe("auth profiles", () => {
     expect(imported?.accountId).toBe("acct_123");
     expect(fs.existsSync(authProfilesPath())).toBe(true);
     expect(hasCodexAuthProfile({ allowCliImport: false })).toBe(true);
+  });
+
+  it("stores new credentials outside the committed .config/ directory", () => {
+    upsertApiKeyProfile("openai", "sk-profile-key");
+    expect(authProfilesPath()).not.toContain(`${path.sep}.config${path.sep}`);
+    expect(authProfilesPath()).toContain(`${path.sep}.runtime${path.sep}`);
+  });
+
+  it("migrates an existing .config/auth-profiles.json to .runtime/ on first access", () => {
+    // Simulate a store from before the credential-storage move: the file at
+    // the legacy .config/ path a previous phren version would have written.
+    const legacyDir = path.join(tmp.path, ".phren", ".config");
+    fs.mkdirSync(legacyDir, { recursive: true });
+    const legacyPath = path.join(legacyDir, "auth-profiles.json");
+    const legacyContent = {
+      schemaVersion: 1,
+      profiles: [{
+        id: "openai-default",
+        kind: "api-key",
+        provider: "openai",
+        label: "OpenAI API",
+        apiKey: "sk-legacy-key",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }],
+    };
+    fs.writeFileSync(legacyPath, JSON.stringify(legacyContent, null, 2));
+
+    // Any read triggers the migration.
+    const profiles = getAuthProfiles();
+
+    expect(fs.existsSync(legacyPath)).toBe(false);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({ provider: "openai", apiKey: "sk-legacy-key" });
+    expect(authProfilesPath()).toBe(path.join(tmp.path, ".phren", ".runtime", "auth-profiles.json"));
+    expect(fs.existsSync(authProfilesPath())).toBe(true);
+
+    // Idempotent: calling again with the legacy file already gone must not
+    // throw or change the migrated data.
+    expect(() => getAuthProfiles()).not.toThrow();
+    expect(getAuthProfiles()).toHaveLength(1);
   });
 });

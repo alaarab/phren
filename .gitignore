@@ -6,7 +6,7 @@ node_modules/
 
 # Build output
 packages/cli/dist/
-packages/agent/dist/
+experimental/agent/dist/
 packages/vscode/out/
 *.vsix
 

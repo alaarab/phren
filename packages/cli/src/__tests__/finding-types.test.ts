@@ -8,7 +8,7 @@ import {
   extractFindingType,
 } from "../finding/lifecycle.js";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { addFindingToFile } from "../content/learning.js";
+import { addFindingToFile, autoDetectFindingType } from "../content/learning.js";
 
 // ── Taxonomy consistency ────────────────────────────────────────────────────
 
@@ -25,14 +25,46 @@ describe("taxonomy consistency", () => {
     expect(DOC_TYPES).toContain("notes");
   });
 
-  it("FINDING_TYPES has all 6 unified tags", () => {
-    expect(FINDING_TYPES).toHaveLength(6);
+  it("FINDING_TYPES has the 4 offered tags (the intersection of what used to be 3 disjoint lists)", () => {
+    expect(FINDING_TYPES).toHaveLength(4);
     expect(FINDING_TYPES).toContain("decision");
     expect(FINDING_TYPES).toContain("pitfall");
     expect(FINDING_TYPES).toContain("pattern");
-    expect(FINDING_TYPES).toContain("tradeoff");
-    expect(FINDING_TYPES).toContain("architecture");
     expect(FINDING_TYPES).toContain("bug");
+    // tradeoff/architecture used to be offered here with no decay rule and no
+    // max-age (see "decisions never decay" below) — dropped from the offered
+    // set. Existing [tradeoff]/[architecture] bullets still read/search fine
+    // as plain text; they just aren't offered or decay-tracked anymore.
+    expect(FINDING_TYPES).not.toContain("tradeoff");
+    expect(FINDING_TYPES).not.toContain("architecture");
+  });
+
+  it("FINDING_TAGS adds phren's auto-write-only tags on top of FINDING_TYPES", () => {
+    expect(FINDING_TAGS).toHaveLength(6);
+    expect(FINDING_TAGS).toContain("workaround");
+    expect(FINDING_TAGS).toContain("context");
+  });
+
+  it("FINDING_TYPE_DECAY has exactly one row per FINDING_TAGS entry — no more, no less", () => {
+    const decayKeys = Object.keys(FINDING_TYPE_DECAY).sort();
+    const tagKeys = [...FINDING_TAGS].sort();
+    expect(decayKeys).toEqual(tagKeys);
+  });
+
+  it("autoDetectFindingType can only produce tags that are in FINDING_TAGS", () => {
+    const samples = [
+      "we decided to use postgres",
+      "found a bug in the retry loop",
+      "applied a temporary fix for the daemon crash",
+      "always clear dist before a tsconfig change",
+      "watch out for the stale cache pitfall",
+      "currently deployed v2.3.1 to staging",
+    ];
+    for (const text of samples) {
+      const detected = autoDetectFindingType(text);
+      expect(detected).not.toBeNull();
+      expect(FINDING_TAGS).toContain(detected);
+    }
   });
 });
 
@@ -64,22 +96,27 @@ describe("entryScoreKey stability", () => {
 // ── Finding type decay ──────────────────────────────────────────────────────
 
 describe("finding type decay", () => {
-  it("observations decay faster than patterns", () => {
-    const observation = '- [observation] Login page shows error <!-- phren:created "2025-01-01" -->';
+  it("context decays faster than patterns", () => {
+    // "observation" used to have a decay row here (maxAgeDays: 14) but was
+    // never an offered or auto-detected tag — nothing could ever produce it,
+    // so it was dead weight. "context" is the tag phren's own auto-detector
+    // actually writes for this kind of fast-decaying, short-lived note.
+    const context = '- [context] Deployed v2.3.1 to staging <!-- phren:created "2025-01-01" -->';
     const pattern = '- [pattern] Always clear dist before tsconfig change <!-- phren:created "2025-01-01" -->';
 
-    const obsType = extractFindingType(observation);
+    const ctxType = extractFindingType(context);
     const patType = extractFindingType(pattern);
 
-    expect(obsType).toBe("observation");
+    expect(ctxType).toBe("context");
     expect(patType).toBe("pattern");
-    expect(FINDING_TYPE_DECAY["observation"].maxAgeDays).toBe(14);
-    expect(FINDING_TYPE_DECAY["pattern"].maxAgeDays).toBe(365);
+    expect(FINDING_TYPE_DECAY["context"].maxAgeDays).toBeLessThan(FINDING_TYPE_DECAY["pattern"].maxAgeDays);
   });
 
   it("decisions never decay", () => {
+    // "anti-pattern" used to have a row here (also Infinity) but, like
+    // "observation" above, nothing could ever produce it — dropped as dead
+    // weight along with the rest of the unproducible rows.
     expect(FINDING_TYPE_DECAY["decision"].maxAgeDays).toBe(Infinity);
-    expect(FINDING_TYPE_DECAY["anti-pattern"].maxAgeDays).toBe(Infinity);
   });
 
   it("extractFindingType returns null for untagged findings", () => {

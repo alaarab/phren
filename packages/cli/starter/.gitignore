@@ -3,3 +3,9 @@
 .runtime/
 .sessions/
 .cache/
+
+# Legacy location for auth/profiles.ts's credential store (API keys, OpenAI
+# Codex OAuth tokens). It now lives in .runtime/ (already ignored above) —
+# this stays here so a store created before that move, or one where the
+# migration hasn't run yet, never has its credentials committed.
+.config/auth-profiles.json

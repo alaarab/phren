@@ -25,8 +25,8 @@ export type FindingQualityReason =
 /** Minimum useful length once bullet/date/confidence decoration is stripped. */
 const MIN_FINDING_LENGTH = 16;
 
-/** Finding type tags phren renders in front of a finding body. */
-const FINDING_TYPE_TAG_RE = /^\[(?:decision|pitfall|pattern|tradeoff|architecture|bug)\]\s*/i;
+/** Finding type tags phren renders in front of a finding body (FINDING_TAGS in phren-core.ts). */
+const FINDING_TYPE_TAG_RE = /^\[(?:decision|pitfall|pattern|bug|workaround|context)\]\s*/i;
 
 /**
  * Placeholder wording that carries no information (the original cli/govern.ts filter).
@@ -69,14 +69,14 @@ const PHREN_TEMPLATE_FRAGMENTS = [
   "do not extract obvious facts or things any developer would know",
   "do not extract credentials, api keys, or personal information",
   "each finding must be self-contained",
-  "prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [tradeoff], [bug], or [architecture]",
+  "prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [bug], or [workaround]",
   "if nothing is worth extracting, return []",
   "return only the json array, no explanation, no markdown",
 ].map((fragment) => fragment.toLowerCase());
 
 /** A body that is nothing but phren's type vocabulary, e.g. ", [pitfall], [pattern], or [bug]". */
 const TAG_VOCABULARY_ECHO_RE =
-  /^[\s,]*(?:(?:and|or)\s+)?(?:\[(?:decision|pitfall|pattern|tradeoff|architecture|bug)\][\s,]*(?:(?:and|or)\s+)?){2,}$/i;
+  /^[\s,]*(?:(?:and|or)\s+)?(?:\[(?:decision|pitfall|pattern|bug|workaround)\][\s,]*(?:(?:and|or)\s+)?){2,}$/i;
 
 /** Delimiters that come in pairs in prose. Apostrophes are excluded — "don't" is prose. */
 const DELIMITER_PAIRS: ReadonlyArray<readonly [string, string]> = [

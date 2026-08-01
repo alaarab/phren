@@ -346,16 +346,22 @@ describe("filterTrustedFindingsDetailed", () => {
     expect(result).toContain("Cited finding");
   });
 
-  it("applies type-specific decay for observations", () => {
-    // Observations have maxAgeDays: 14, so a 20-day-old observation should be filtered
+  it("applies type-specific decay for context findings", () => {
+    // "context" has maxAgeDays: 30 (contextual facts decay fast), so a
+    // 40-day-old context finding should be filtered even though the general
+    // TTL below is nowhere close to expiring it.
+    // (This used to test "observation", which had a maxAgeDays: 14 row —
+    // that tag was dropped from FINDING_TYPE_DECAY because nothing ever
+    // produced it; "context" is the tag phren's auto-detector actually
+    // writes for this kind of short-lived note.)
     const d = new Date();
-    d.setDate(d.getDate() - 20);
+    d.setDate(d.getDate() - 40);
     const date = d.toISOString().slice(0, 10);
     const content = [
       "# Findings",
       "",
       `## ${date}`,
-      "- [observation] Temp debug log was present",
+      "- [context] Temp debug log was present",
       "",
     ].join("\n");
 

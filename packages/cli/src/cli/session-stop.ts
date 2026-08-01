@@ -436,7 +436,11 @@ export async function handleHookStop() {
   if (add.ok) {
     // Belt-and-suspenders: unstage sensitive files that .gitignore should
     // already block. Failures here are non-fatal (files may not exist).
-    await runBestEffortGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key"], phrenPath);
+    // .config/auth-profiles.json is the legacy path for auth/profiles.ts's
+    // credential store (API keys, OpenAI Codex OAuth tokens) — it now lives
+    // in .runtime/ (never staged by `-A`, since that directory is
+    // gitignored), but this still protects a store from before that move.
+    await runBestEffortGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"], phrenPath);
   }
   let commitMsg = "auto-save phren";
   if (add.ok) {

@@ -10,7 +10,7 @@ export type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
 
 const DEFAULT_PROACTIVITY_LEVEL: ProactivityLevel = "high";
 const EXPLICIT_FINDING_SIGNAL_PATTERN = /\b(add finding|worth remembering)\b/i;
-const EXPLICIT_FINDING_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\]/i;
+const EXPLICIT_FINDING_TAG_PATTERN = /\[(pitfall|decision|pattern|bug|workaround|context)\]/i;
 const EXPLICIT_TASK_SIGNAL_PATTERN = /\b(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:task|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:task|todo(?:\s+list)?|task(?:\s+list)?))\b/i;
 
 export function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel | undefined {

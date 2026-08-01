@@ -123,7 +123,7 @@ Lifecycle metadata stays attached to finding entries, so history remains auditab
 
 ## What is finding impact scoring?
 
-Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost. Finding type tags (`[decision]`, `[pattern]`, `[observation]`, etc.) control decay rates — decisions never expire while observations fade after 14 days.
+Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost. Finding type tags (`[decision]`, `[pattern]`, `[context]`, etc.) control decay rates — decisions never expire while context notes fade after 30 days.
 
 ## How does cross-session resume work?
 
