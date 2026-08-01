@@ -849,11 +849,52 @@ export function normalizeQueueEntryText(
   });
 }
 
+/**
+ * A queue entry that carries structured provenance alongside its text.
+ *
+ * `meta` is a pre-rendered run of HTML comments (e.g. `<!-- source:extract -->
+ * <!-- phren:cite {...} -->`) appended verbatim to the queue line. It exists so a
+ * queued candidate stays *promotable*: `approveQueueItem` reads it back and hands
+ * the same repo/commit/source provenance to the normal add-finding path, which
+ * makes a promoted finding indistinguishable from one added directly.
+ *
+ * Producers build the comments themselves (this module deliberately does not import
+ * the citation helpers, to keep governance free of a content-layer import cycle).
+ */
+export interface ReviewQueueEntry {
+  text: string;
+  meta?: string;
+}
+
+export type ReviewQueueEntryInput = string | ReviewQueueEntry;
+
+/** Matches a string made up entirely of HTML comments (and whitespace). */
+const QUEUE_META_ONLY_RE = /^(?:\s*<!--(?:(?!-->)[\s\S])*?-->)+\s*$/;
+
+/** Strip every HTML comment from a line. */
+function stripQueueComments(line: string): string {
+  return line.replace(/<!--(?:(?!-->)[\s\S])*?-->/g, " ");
+}
+
+/**
+ * Identity key for queue dedup: the entry's visible text with the date prefix,
+ * bullet marker, and metadata comments removed. Comment-insensitive so a line
+ * that gained provenance metadata still dedups against the same text queued
+ * before metadata existed.
+ */
+function queueDedupKey(line: string): string {
+  return stripQueueComments(line.trim())
+    .replace(/^-\s*/, "")
+    .replace(/^\[\d{4}-\d{2}-\d{2}\]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function appendReviewQueue(
   phrenPath: string,
   project: string,
   section: "Review" | "Stale" | "Conflicts",
-  entries: string[],
+  entries: ReviewQueueEntryInput[],
 ): PhrenResult<number> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const resolvedDir = safeProjectPath(phrenPath, project);
@@ -861,14 +902,23 @@ export function appendReviewQueue(
   const queuePath = path.join(resolvedDir, "review.md");
   const today = new Date().toISOString().slice(0, 10);
 
-  const normalized: string[] = [];
+  const normalized: Array<{ text: string; meta: string }> = [];
   for (const entry of entries) {
-    const sanitized = normalizeQueueEntryText(normalizeBulletForQueue(entry), { truncate: true });
+    const rawText = typeof entry === "string" ? entry : entry.text;
+    const rawMeta = typeof entry === "string" ? "" : (entry.meta ?? "");
+    const sanitized = normalizeQueueEntryText(normalizeBulletForQueue(rawText), { truncate: true });
     if (!sanitized.ok) continue;
     if (sanitized.data.truncated) {
       debugLog(`appendReviewQueue: truncated oversized queue entry for ${project}`);
     }
-    normalized.push(sanitized.data.text);
+    // Metadata must be comments only and single-line — anything else would leak
+    // producer-controlled markup into a file humans read and agents may render.
+    const meta = rawMeta.replace(/[\r\n]+/g, " ").trim();
+    const safeMeta = meta && QUEUE_META_ONLY_RE.test(meta) ? meta : "";
+    if (meta && !safeMeta) {
+      debugLog(`appendReviewQueue: dropped non-comment queue metadata for ${project}`);
+    }
+    normalized.push({ text: sanitized.data.text, meta: safeMeta });
   }
   if (normalized.length === 0) return phrenOk(0);
 
@@ -891,15 +941,15 @@ export function appendReviewQueue(
     let insertAt = secIdx + 1;
     while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
 
-    const existing = new Set(lines.map((line) => line.trim()));
-    // Dedup by entry text only (strip leading date prefix) so the same finding isn't added every day.
-    const existingTexts = new Set(
-      lines.map((line) => line.trim().replace(/^-\s*\[\d{4}-\d{2}-\d{2}\]\s*/, "").trim())
-    );
+    // Dedup by entry text only (date prefix and metadata comments stripped) so the
+    // same finding isn't queued again every day.
+    const existingKeys = new Set(lines.filter((line) => line.trim().startsWith("- ")).map(queueDedupKey));
     const toInsert: string[] = [];
     for (const entry of normalized) {
-      const line = `- [${today}] ${entry}`;
-      if (!existing.has(line) && !existingTexts.has(entry.trim())) toInsert.push(line);
+      const key = queueDedupKey(entry.text);
+      if (!key || existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      toInsert.push(`- [${today}] ${entry.text}${entry.meta ? ` ${entry.meta}` : ""}`);
     }
     if (!toInsert.length) return phrenOk(0);
 

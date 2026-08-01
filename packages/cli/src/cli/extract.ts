@@ -27,7 +27,12 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { execFileSync } from "child_process";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import type { FindingProvenanceSource } from "../content/citation.js";
+import {
+  buildCitationComment,
+  buildSourceComment,
+  type FindingCitation,
+  type FindingProvenanceSource,
+} from "../content/citation.js";
 
 function runGit(cwd: string, args: string[]): string | null {
   return runGitShared(cwd, args, EXEC_TIMEOUT_MS, debugLog);
@@ -423,6 +428,43 @@ function writeProcessedMemory(phrenPath: string, project: string, memory: Proces
   }
 }
 
+/**
+ * Render the provenance a queued candidate needs to stay promotable.
+ *
+ * A candidate below `autoAcceptThreshold` never reaches FINDINGS.md — approving it
+ * is what writes it. For the promoted finding to be indistinguishable from an
+ * auto-accepted one, the queue line has to carry the same provenance the journal
+ * path passes to `addFindingToFile`: source/session plus repo/commit/file. Both are
+ * emitted as HTML comments, invisible in rendered markdown and stripped from the
+ * queue item's display text.
+ */
+export function buildQueueProvenanceMeta(opts: {
+  source?: FindingProvenanceSource;
+  sessionId?: string;
+  repo?: string;
+  commit?: string;
+  file?: string;
+  capturedAt?: string;
+}): string {
+  const parts: string[] = [];
+  const sourceComment = buildSourceComment({
+    ...(opts.source ? { source: opts.source } : {}),
+    ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+  });
+  if (sourceComment) parts.push(sourceComment);
+
+  if (opts.repo || opts.commit || opts.file) {
+    const citation: FindingCitation = {
+      created_at: opts.capturedAt ?? new Date().toISOString(),
+      ...(opts.repo ? { repo: opts.repo } : {}),
+      ...(opts.commit ? { commit: opts.commit } : {}),
+      ...(opts.file ? { file: opts.file } : {}),
+    };
+    parts.push(buildCitationComment(citation));
+  }
+  return parts.join(" ");
+}
+
 // ── handleExtractMemories ────────────────────────────────────────────────────
 
 export async function handleExtractMemories(
@@ -507,7 +549,12 @@ export async function handleExtractMemories(
       });
       accepted++;
     } else {
-      const qr1 = appendReviewQueue(getPhrenPath(), project, "Review", [`[confidence ${candidate.score.toFixed(2)}] ${line}`]);
+      // Queued candidates are NOT written to FINDINGS.md — approving one is what
+      // creates the finding, so the line must carry everything promotion needs.
+      const qr1 = appendReviewQueue(getPhrenPath(), project, "Review", [{
+        text: `[confidence ${candidate.score.toFixed(2)}] ${line}`,
+        meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: rec.hash }),
+      }]);
       if (qr1.ok) queued += qr1.data;
     }
   }
@@ -542,7 +589,10 @@ export async function handleExtractMemories(
       });
       accepted++;
     } else {
-      const qr2 = appendReviewQueue(getPhrenPath(), project, "Review", [`[confidence ${c.score.toFixed(2)}] ${line}`]);
+      const qr2 = appendReviewQueue(getPhrenPath(), project, "Review", [{
+        text: `[confidence ${c.score.toFixed(2)}] ${line}`,
+        meta: buildQueueProvenanceMeta({ source, sessionId, repo: repoRoot, commit: c.commit, file: c.file }),
+      }]);
       if (qr2.ok) queued += qr2.data;
     }
   }
