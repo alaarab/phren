@@ -14,6 +14,7 @@ import {
 import {
   filterTrustedFindingsDetailed,
 } from "../shared/content.js";
+import { isLowValueFinding } from "../content/quality.js";
 import * as fs from "fs";
 import * as path from "path";
 import { handleExtractMemories } from "./extract.js";
@@ -122,7 +123,7 @@ export async function handleGovernMemories(projectArg?: string, silent: boolean 
 
     const lowValue = content.split("\n")
       .filter((l) => l.startsWith("- "))
-      .filter((l) => /(fixed stuff|updated things|misc|temp|wip|quick note)/i.test(l) || l.length < 16);
+      .filter((l) => isLowValueFinding(l));
     reviewCount += lowValue.length;
 
     if (!dryRun) {
@@ -164,88 +165,9 @@ export async function handlePruneMemories(args: string[] = []) {
     console.log(result.error);
     return;
   }
-  console.log(result.data);
-
-  // TTL enforcement: move entries older than ttlDays that haven't been retrieved recently
-  const policy = getRetentionPolicy(getPhrenPath());
-  const ttlDays = policy.ttlDays;
-  const retrievalGraceDays = Math.floor(ttlDays / 2);
-  const now = Date.now();
-
-  // Load retrieval log once for all projects
-  const retrievalLogPath = path.join(getPhrenPath(), ".runtime", "retrieval-log.jsonl");
-  let retrievalEntries: Array<{ file: string; section: string; retrievedAt: string }> = [];
-  if (fs.existsSync(retrievalLogPath)) {
-    try {
-      retrievalEntries = fs.readFileSync(retrievalLogPath, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map(line => { try { return JSON.parse(line); } catch { return null; } }) // null filtered below
-        .filter((e): e is { file: string; section: string; retrievedAt: string } => e !== null);
-    } catch (err: unknown) {
-      if ((process.env.PHREN_DEBUG)) logger.debug("cli-govern", `retrievalLog readParse: ${errorMessage(err)}`);
-    }
-  }
-
-  // Build map of last retrieval date by file+bullet key
-  const lastRetrievalByKey = new Map<string, number>();
-  for (const entry of retrievalEntries) {
-    const key = `${entry.file}:${entry.section}`;
-    const ts = Date.parse(entry.retrievedAt);
-    if (!Number.isNaN(ts)) {
-      const existing = lastRetrievalByKey.get(key) || 0;
-      if (ts > existing) lastRetrievalByKey.set(key, ts);
-    }
-  }
-
-  let ttlExpired = 0;
-  for (const project of projects) {
-    const learningsPath = path.join(getPhrenPath(), project, FINDINGS_FILENAME);
-    if (!fs.existsSync(learningsPath)) continue;
-    const content = fs.readFileSync(learningsPath, "utf8");
-    const lines = content.split("\n");
-    const expiredEntries: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // Look for entries with <!-- created: YYYY-MM-DD --> timestamps
-      if (!line.startsWith("- ")) continue;
-      const createdMatch = line.match(/<!--\s*created:\s*(\d{4}-\d{2}-\d{2})\s*-->/);
-      if (!createdMatch) continue; // No timestamp, skip defensively
-
-      const createdDate = createdMatch[1];
-      const createdMs = Date.parse(`${createdDate}T00:00:00Z`);
-      if (Number.isNaN(createdMs)) continue;
-
-      const ageDays = Math.floor((now - createdMs) / 86400000);
-      if (ageDays <= ttlDays) continue;
-
-      // Check if retrieved within the grace period.
-      // Retrieval is logged at document level (project/FINDINGS.md + doc.type), so look up
-      // by the document-level key to match the format written by cli-hooks-output recordRetrieval.
-      const retrievalKey = `${project}/FINDINGS.md:findings`;
-      const lastRetrieval = lastRetrievalByKey.get(retrievalKey) || 0;
-      const daysSinceRetrieval = lastRetrieval ? Math.floor((now - lastRetrieval) / 86400000) : Infinity;
-      if (daysSinceRetrieval <= retrievalGraceDays) continue;
-
-      expiredEntries.push(`[ttl-expired: ${createdDate}] ${line.slice(2).trim()}`);
-      ttlExpired++;
-    }
-
-    if (expiredEntries.length > 0 && !dryRun) {
-      appendReviewQueue(getPhrenPath(), project, "Stale", expiredEntries);
-    }
-    if (expiredEntries.length > 0 && dryRun) {
-      for (const entry of expiredEntries) {
-        console.log(`[dry-run] [${project}] Would move to review queue: ${entry.slice(0, 120)}`);
-      }
-    }
-  }
-
-  if (ttlExpired > 0) {
-    const verb = dryRun ? "Would move" : "Moved";
-    console.log(`${verb} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to review.md`);
-  }
+  // pruneDeadMemories owns TTL -> Stale promotion so nightly maintenance gets it too;
+  // its message already reports how many entries moved.
+  console.log(result.data.message);
 
   if (dryRun) return;
   const backups = summarizeBackupChanges(beforeBackups, projects);
@@ -543,7 +465,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     const compacted = compactFindingJournals(getPhrenPath(), projectArg);
     const governance = await handleGovernMemories(projectArg, true);
     const pruneResult = pruneDeadMemories(getPhrenPath(), projectArg);
-    const pruneMsg = pruneResult.ok ? pruneResult.data : pruneResult.error;
+    const pruneMsg = pruneResult.ok ? pruneResult.data.message.replace(/\n+/g, " ") : pruneResult.error;
     if (!pruneResult.ok) {
       updateRuntimeHealth(getPhrenPath(), {
         lastGovernance: {

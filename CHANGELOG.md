@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`maintain extract` is now idempotent per source commit.** Every sync run re-queued the
+  same commits because the review queue only deduped on rendered text, which drifts. One
+  store had 224 review items from 84 distinct commits, twenty of them appended eight times.
+  Extraction now keys on the `(source commit <hash>)` marker — reading review.md,
+  FINDINGS.md, the finding journal, and a per-project processed set — and additionally
+  dedups on normalized subject text so rebased history can't smuggle the same commit
+  message back in under a new hash.
+- **Capture-quality gate for findings.** Transient shell/tool failure logs
+  (`[bug] command '…' failed: EACCES …`), machine-generated diff-scrape templates
+  (`… error handling added near "…"`), non-prose fragments, and phren's own prompt text
+  are now rejected before they reach the review queue. The `maintain govern` low-value
+  filter and the PostToolUse hook share one predicate (`content/quality.ts`).
+- **Task auto-capture no longer echoes raw prompts.** Pasted web pages and terminal
+  banners ("Skip to content … Repository navigation", "Windows PowerShell Copyright (C)
+  Microsoft Corporation") and chat filler no longer become tasks.
+- **TTL → Stale promotion runs during nightly maintenance.** The promotion lived in the
+  `phren maintain prune` CLI handler, so background maintenance — which calls
+  `pruneDeadMemories` directly — never performed it and `## Stale` stayed empty while
+  `## Review` filled up. It now lives in `pruneDeadMemories`, so both callers get it.
+
 ## [0.1.40] - 2026-07-23
 
 ### Added

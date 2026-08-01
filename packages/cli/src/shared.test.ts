@@ -1381,8 +1381,9 @@ describe("pruneDeadMemories", () => {
     const result = pruneDeadMemories(phren, "pruneproj", true);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data).toContain("[dry-run]");
-      expect(result.data).toContain("1");
+      expect(result.data.message).toContain("[dry-run]");
+      expect(result.data.message).toContain("1");
+      expect(result.data.pruned).toBe(1);
     }
     // File should be unchanged in dry-run
     const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
@@ -1404,7 +1405,7 @@ describe("pruneDeadMemories", () => {
 
     const result = pruneDeadMemories(phren, "pruneproj");
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Pruned 1");
+    if (result.ok) expect(result.data.message).toContain("Pruned 1");
     const content = fs.readFileSync(path.join(phren, "pruneproj", "FINDINGS.md"), "utf8");
     expect(content).not.toContain("Very old entry");
     expect(content).toContain("Future entry");

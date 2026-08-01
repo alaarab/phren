@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
+import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeDir, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
 import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "../project-config.js";
@@ -801,7 +801,94 @@ export function appendReviewQueue(
   });
 }
 
-export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<string> {
+export interface PruneMemoriesResult {
+  /** Human-readable summary (plus dry-run detail lines), ready to print. */
+  message: string;
+  /** Entries deleted for exceeding the retention window. */
+  pruned: number;
+  /** TTL-expired entries promoted into review.md's `## Stale` section. */
+  ttlExpired: number;
+}
+
+/**
+ * Read the retrieval log once and index the most recent retrieval per document key.
+ * Keys match what cli-hooks-output's recordRetrieval writes: `<project>/FINDINGS.md:<type>`.
+ */
+function lastRetrievalByDocument(phrenPath: string): Map<string, number> {
+  const byKey = new Map<string, number>();
+  const logPath = path.join(runtimeDir(phrenPath), "retrieval-log.jsonl");
+  if (!fs.existsSync(logPath)) return byKey;
+  try {
+    for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+      if (!line) continue;
+      let entry: { file?: unknown; section?: unknown; retrievedAt?: unknown };
+      try {
+        entry = JSON.parse(line) as { file?: unknown; section?: unknown; retrievedAt?: unknown };
+      } catch {
+        continue;
+      }
+      if (typeof entry.file !== "string" || typeof entry.retrievedAt !== "string") continue;
+      const ts = Date.parse(entry.retrievedAt);
+      if (Number.isNaN(ts)) continue;
+      const key = `${entry.file}:${entry.section}`;
+      if (ts > (byKey.get(key) || 0)) byKey.set(key, ts);
+    }
+  } catch (err: unknown) {
+    debugLog(`pruneDeadMemories: retrieval log unreadable: ${errorMessage(err)}`);
+  }
+  return byKey;
+}
+
+/**
+ * Findings past their TTL that haven't been retrieved recently, rendered for the queue.
+ * Entries without a `<!-- created: -->` stamp are skipped defensively.
+ */
+function collectTtlExpiredEntries(
+  file: string,
+  project: string,
+  ttlDays: number,
+  lastRetrieval: Map<string, number>,
+): string[] {
+  const retrievalGraceDays = Math.floor(ttlDays / 2);
+  const now = Date.now();
+  const expired: string[] = [];
+  let content: string;
+  try {
+    content = fs.readFileSync(file, "utf8");
+  } catch (err: unknown) {
+    debugLog(`pruneDeadMemories: ${file} unreadable for TTL scan: ${errorMessage(err)}`);
+    return expired;
+  }
+
+  for (const line of content.split("\n")) {
+    if (!line.startsWith("- ")) continue;
+    const createdMatch = line.match(/<!--\s*created:\s*(\d{4}-\d{2}-\d{2})\s*-->/);
+    if (!createdMatch) continue;
+    const createdDate = createdMatch[1];
+    const createdMs = Date.parse(`${createdDate}T00:00:00Z`);
+    if (Number.isNaN(createdMs)) continue;
+    if (Math.floor((now - createdMs) / 86_400_000) <= ttlDays) continue;
+
+    // Retrieval is logged at document level, so look up the document key rather than
+    // the bullet.
+    const retrievedAt = lastRetrieval.get(`${project}/${path.basename(file)}:findings`) || 0;
+    const daysSinceRetrieval = retrievedAt ? Math.floor((now - retrievedAt) / 86_400_000) : Infinity;
+    if (daysSinceRetrieval <= retrievalGraceDays) continue;
+
+    expired.push(`[ttl-expired: ${createdDate}] ${line.slice(2).trim()}`);
+  }
+  return expired;
+}
+
+/**
+ * Delete entries past the retention window and promote TTL-expired entries into review.md.
+ *
+ * TTL promotion lives here rather than in the CLI handler so that nightly maintenance
+ * (`handleBackgroundMaintenance`, which calls this directly) gets it too — previously it
+ * only ran on a manual `phren maintain prune`, leaving `## Stale` empty while `## Review`
+ * filled up.
+ */
+export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<PruneMemoriesResult> {
   const policy = getRetentionPolicy(phrenPath);
   if (project && !isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const dirs = project
@@ -870,13 +957,41 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
     });
   }
 
-  if (dryRun) {
-    const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
-    return phrenOk(dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary);
+  // TTL enforcement: promote entries older than ttlDays that haven't been retrieved recently.
+  const lastRetrieval = lastRetrievalByDocument(phrenPath);
+  let ttlExpired = 0;
+  for (const dir of dirs) {
+    const file = resolveFindingsPath(dir);
+    if (!file) continue;
+    const projectName = path.basename(dir);
+    const expiredEntries = collectTtlExpiredEntries(file, projectName, policy.ttlDays, lastRetrieval);
+    if (!expiredEntries.length) continue;
+    ttlExpired += expiredEntries.length;
+    if (dryRun) {
+      for (const entry of expiredEntries) {
+        dryRunDetails.push(`[dry-run] [${projectName}] Would move to review queue: ${entry.slice(0, 120)}`);
+      }
+      continue;
+    }
+    appendReviewQueue(phrenPath, projectName, "Stale", expiredEntries);
   }
 
-  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
-  return phrenOk(`Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`);
+  const ttlLine = ttlExpired > 0
+    ? `\n${dryRun ? "Would move" : "Moved"} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to review.md`
+    : "";
+
+  if (dryRun) {
+    const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
+    const detail = dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary;
+    return phrenOk({ message: `${detail}${ttlLine}`, pruned, ttlExpired });
+  }
+
+  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned} ttl_expired=${ttlExpired}`);
+  return phrenOk({
+    message: `Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.${ttlLine}`,
+    pruned,
+    ttlExpired,
+  });
 }
 
 function mergeLifecycleAndIdComments(primary: string, fallback: string): string {

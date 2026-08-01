@@ -20,6 +20,7 @@ import {
   detectProject,
 } from "./hooks-context.js";
 import { logger } from "../logger.js";
+import { findingQualityReason } from "../content/quality.js";
 import { rotateJsonlIfLarge } from "../phren-paths.js";
 import {
   buildIndex,
@@ -359,7 +360,15 @@ export function extractToolFindings(
     }
   }
 
-  return candidates;
+  // Single quality gate for everything this hook scrapes. Explicit [tag] matches are not
+  // exempt: the tag scraper happily matched phren's own prompt text and code fragments
+  // like `[pattern] ");` and queued them for review.
+  return candidates.filter((candidate) => {
+    const reason = findingQualityReason(candidate.text);
+    if (!reason) return true;
+    debugLog(`extractToolFindings: rejected (${reason}): ${candidate.text.slice(0, 80)}`);
+    return false;
+  });
 }
 
 // ── Context hook handler ────────────────────────────────────────────────────

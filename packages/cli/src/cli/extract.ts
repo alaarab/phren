@@ -1,8 +1,11 @@
 import {
   debugLog,
   appendAuditLog,
+  atomicWriteText,
   EXEC_TIMEOUT_MS,
   getPhrenPath,
+  runtimeDir,
+  runtimeFile,
 } from "../shared.js";
 import {
   appendReviewQueue,
@@ -13,8 +16,9 @@ import {
 } from "../shared/governance.js";
 import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
-import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, resolveExecCommand } from "../utils.js";
+import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand, safeProjectPath } from "../utils.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
+import { findingQualityReason } from "../content/quality.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { getProactivityLevelForTask, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as fs from "fs";
@@ -261,6 +265,164 @@ export function scoreFindingCandidate(subject: string, body: string): { score: n
   return { score: Math.min(score, 0.99), text };
 }
 
+// ── Extraction idempotency ───────────────────────────────────────────────────
+
+// Every extracted candidate is rendered with a `(source commit <hash>)` marker. Without a
+// dedup key on that hash, each sync run re-queued the same commits: one real store had 224
+// review items from only 84 distinct hashes (twenty of them appended eight times each).
+// appendReviewQueue's text dedup does not catch this because the rendered line drifts.
+const SOURCE_COMMIT_MARKER = /\(source commit ([0-9a-f]{7,40})\)/i;
+
+/** Cap on remembered commits per project so the state file cannot grow without bound. */
+const PROCESSED_MEMORY_LIMIT = 5000;
+
+const EXTRACT_STATE_SCHEMA_VERSION = 1;
+
+interface ProcessedMemory {
+  commits: Set<string>;
+  subjects: Set<string>;
+}
+
+interface ExtractStateFile {
+  schemaVersion?: number;
+  commits?: unknown;
+  subjects?: unknown;
+}
+
+function shortHash(hash: string): string {
+  return hash.slice(0, 8).toLowerCase();
+}
+
+/**
+ * Dedup key for the human-readable part of a candidate.
+ *
+ * Hash dedup alone is necessary but not sufficient: rebased history re-scrapes an identical
+ * commit message under a new hash (observed pairs 0a918619/c55f38fa and 6b9a2ab9/9479d2ad),
+ * so the same finding still arrives twice.
+ */
+export function extractSubjectKey(text: string): string {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(new RegExp(SOURCE_COMMIT_MARKER.source, "gi"), " ")
+    .replace(/^\s*\[confidence\s+[\d.]+\]\s*/i, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractStateFile(phrenPath: string, project: string): string | null {
+  if (!isValidProjectName(project)) return null;
+  try {
+    return runtimeFile(phrenPath, `extract-state-${project}.json`);
+  } catch (err: unknown) {
+    debugLog(`extract-memories: no extract state file for ${project}: ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+function addMarkersFromContent(content: string, into: ProcessedMemory): void {
+  const pattern = new RegExp(SOURCE_COMMIT_MARKER.source, "gi");
+  for (const line of content.split("\n")) {
+    const matches = [...line.matchAll(pattern)];
+    if (!matches.length) continue;
+    for (const match of matches) into.commits.add(shortHash(match[1]));
+    // Only lines carrying a marker are extraction output; hand-written findings must not
+    // suppress future extraction.
+    const key = extractSubjectKey(line.replace(/^\s*-\s*(\[\d{4}-\d{2}-\d{2}\]\s*)?/, ""));
+    if (key) into.subjects.add(key);
+  }
+}
+
+function addMarkersFromFile(file: string, into: ProcessedMemory): void {
+  try {
+    if (!fs.existsSync(file)) return;
+    addMarkersFromContent(fs.readFileSync(file, "utf8"), into);
+  } catch (err: unknown) {
+    debugLog(`extract-memories: unreadable ${file}: ${errorMessage(err)}`);
+  }
+}
+
+function addMarkersFromJournal(file: string, into: ProcessedMemory): void {
+  try {
+    if (!fs.existsSync(file)) return;
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      let entry: { text?: unknown; commit?: unknown };
+      try {
+        entry = JSON.parse(line) as { text?: unknown; commit?: unknown };
+      } catch {
+        continue; // A partially-written journal line is not worth failing extraction over.
+      }
+      if (typeof entry.commit === "string" && entry.commit) into.commits.add(shortHash(entry.commit));
+      if (typeof entry.text !== "string") continue;
+      addMarkersFromContent(entry.text, into);
+    }
+  } catch (err: unknown) {
+    debugLog(`extract-memories: unreadable journal ${file}: ${errorMessage(err)}`);
+  }
+}
+
+/**
+ * Everything this project has already extracted: queued in review.md, promoted into
+ * FINDINGS.md, still sitting in the finding journal, or recorded in the state file (which
+ * also covers items a human has since approved or rejected out of review.md).
+ */
+function readProcessedMemory(phrenPath: string, project: string): ProcessedMemory {
+  const memory: ProcessedMemory = { commits: new Set<string>(), subjects: new Set<string>() };
+  const projectDir = safeProjectPath(phrenPath, project);
+  if (!projectDir) return memory;
+  addMarkersFromFile(path.join(projectDir, "review.md"), memory);
+  addMarkersFromFile(path.join(projectDir, FINDINGS_FILENAME), memory);
+
+  // Accepted candidates land in the journal first and only reach FINDINGS.md on the next
+  // compaction, so the journal has to be read too or they come back on the very next run.
+  const journalDir = path.join(runtimeDir(phrenPath), "finding-journal", project);
+  try {
+    if (fs.existsSync(journalDir)) {
+      for (const entry of fs.readdirSync(journalDir)) {
+        if (entry.endsWith(".jsonl")) addMarkersFromJournal(path.join(journalDir, entry), memory);
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`extract-memories: unreadable journal dir ${journalDir}: ${errorMessage(err)}`);
+  }
+
+  const stateFile = extractStateFile(phrenPath, project);
+  if (stateFile) {
+    try {
+      if (fs.existsSync(stateFile)) {
+        const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8")) as ExtractStateFile;
+        if (Array.isArray(parsed.commits)) {
+          for (const c of parsed.commits) if (typeof c === "string") memory.commits.add(shortHash(c));
+        }
+        if (Array.isArray(parsed.subjects)) {
+          for (const s of parsed.subjects) if (typeof s === "string" && s) memory.subjects.add(s);
+        }
+      }
+    } catch (err: unknown) {
+      debugLog(`extract-memories: unreadable extract state ${stateFile}: ${errorMessage(err)}`);
+    }
+  }
+  return memory;
+}
+
+function writeProcessedMemory(phrenPath: string, project: string, memory: ProcessedMemory): void {
+  const stateFile = extractStateFile(phrenPath, project);
+  if (!stateFile) return;
+  // Sets keep insertion order, so the tail holds the most recently seen entries.
+  const trim = (values: Set<string>): string[] => [...values].slice(-PROCESSED_MEMORY_LIMIT);
+  try {
+    atomicWriteText(stateFile, JSON.stringify({
+      schemaVersion: EXTRACT_STATE_SCHEMA_VERSION,
+      updatedAt: new Date().toISOString(),
+      commits: trim(memory.commits),
+      subjects: trim(memory.subjects),
+    }) + "\n");
+  } catch (err: unknown) {
+    debugLog(`extract-memories: could not persist extract state for ${project}: ${errorMessage(err)}`);
+  }
+}
+
 // ── handleExtractMemories ────────────────────────────────────────────────────
 
 export async function handleExtractMemories(
@@ -303,13 +465,39 @@ export async function handleExtractMemories(
     ? await mineGithubCandidates(repoRoot)
     : [];
 
+  const processed = readProcessedMemory(getPhrenPath(), project);
   let accepted = 0;
   let queued = 0;
+  let duplicates = 0;
+  let rejected = 0;
+
+  /** True when this commit/subject pair has already been extracted in an earlier run. */
+  const alreadyExtracted = (commitKey: string, subjectKey: string): boolean =>
+    (commitKey !== "" && processed.commits.has(commitKey)) || (subjectKey !== "" && processed.subjects.has(subjectKey));
+
+  const remember = (commitKey: string, subjectKey: string): void => {
+    if (commitKey) processed.commits.add(commitKey);
+    if (subjectKey) processed.subjects.add(subjectKey);
+  };
+
   for (const rec of records) {
     if (!shouldAutoCaptureFindingsForLevel(findingsLevel, rec.subject, rec.body)) continue;
     const candidate = scoreFindingCandidate(rec.subject, rec.body);
     if (!candidate) continue;
-    const line = `${candidate.text} (source commit ${rec.hash.slice(0, 8)})`;
+    const quality = findingQualityReason(candidate.text);
+    if (quality) {
+      debugLog(`extract-memories: rejected commit ${rec.hash.slice(0, 8)} (${quality}): ${candidate.text.slice(0, 80)}`);
+      rejected++;
+      continue;
+    }
+    const commitKey = shortHash(rec.hash);
+    const subjectKey = extractSubjectKey(candidate.text);
+    if (alreadyExtracted(commitKey, subjectKey)) {
+      duplicates++;
+      continue;
+    }
+    remember(commitKey, subjectKey);
+    const line = `${candidate.text} (source commit ${commitKey})`;
     if (candidate.score >= threshold) {
       appendFindingJournal(getPhrenPath(), project, line, {
         source,
@@ -326,7 +514,20 @@ export async function handleExtractMemories(
 
   for (const c of ghCandidates) {
     if (!shouldAutoCaptureFindingsForLevel(findingsLevel, c.sourceText ?? c.text)) continue;
-    const line = `${c.text}${c.commit ? ` (source commit ${c.commit.slice(0, 8)})` : ""}`;
+    const quality = findingQualityReason(c.text);
+    if (quality) {
+      debugLog(`extract-memories: rejected github candidate (${quality}): ${c.text.slice(0, 80)}`);
+      rejected++;
+      continue;
+    }
+    const commitKey = c.commit ? shortHash(c.commit) : "";
+    const subjectKey = extractSubjectKey(c.text);
+    if (alreadyExtracted(commitKey, subjectKey)) {
+      duplicates++;
+      continue;
+    }
+    remember(commitKey, subjectKey);
+    const line = `${c.text}${commitKey ? ` (source commit ${commitKey})` : ""}`;
     if (c.text.startsWith("CI failure pattern:")) {
       const key = entryScoreKey(project, FINDINGS_FILENAME, line);
       recordFeedback(getPhrenPath(), key, "regression");
@@ -351,7 +552,16 @@ export async function handleExtractMemories(
     debugLog(`extract-memories compacted journals for ${project}: added=${compacted.added} skipped=${compacted.skipped} failed=${compacted.failed}`);
   }
 
+  writeProcessedMemory(getPhrenPath(), project, processed);
   flushEntryScores(getPhrenPath());
-  appendAuditLog(getPhrenPath(), "extract_memories", `project=${project} accepted=${accepted} queued=${queued} window_days=${days}`);
-  if (!silent) console.log(`Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, window=${days}d`);
+  appendAuditLog(
+    getPhrenPath(),
+    "extract_memories",
+    `project=${project} accepted=${accepted} queued=${queued} duplicates=${duplicates} rejected=${rejected} window_days=${days}`
+  );
+  if (!silent) {
+    console.log(
+      `Extracted memory candidates for ${project}: accepted=${accepted}, queued=${queued}, duplicates=${duplicates}, rejected=${rejected}, window=${days}d`
+    );
+  }
 }

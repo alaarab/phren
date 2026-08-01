@@ -13,6 +13,7 @@ import {
   updateRuntimeHealth,
   validateGovernanceJson,
   appendReviewQueue,
+  pruneDeadMemories,
   normalizeQueueEntryText,
   MAX_QUEUE_ENTRY_LENGTH,
   GOVERNANCE_SCHEMA_VERSION,
@@ -496,6 +497,77 @@ describe("appendReviewQueue", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data).toBe(1);
+  });
+});
+
+// ── TTL promotion ──────────────────────────────────────────────────────────
+
+// TTL -> Stale promotion used to live in the CLI handler, so nightly maintenance (which
+// calls pruneDeadMemories directly) never ran it: one real store had 74 Review items and
+// only 8 Stale ones.
+describe("pruneDeadMemories TTL promotion", () => {
+  const PROJECT = "ttl-test";
+
+  function seedExpiredFinding(): void {
+    fs.mkdirSync(path.join(phrenPath, PROJECT), { recursive: true });
+    fs.writeFileSync(
+      path.join(phrenPath, PROJECT, "FINDINGS.md"),
+      [
+        `# ${PROJECT} Findings`,
+        "",
+        // Recent date heading, so the retention sweep leaves it alone; the created stamp
+        // is what makes it TTL-expired.
+        `## ${new Date().toISOString().slice(0, 10)}`,
+        "",
+        "- Long-forgotten deploy ordering rule <!-- created: 2020-01-01 -->",
+        "- Still current retry budget note",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  it("promotes TTL-expired findings into review.md's Stale section", () => {
+    seedExpiredFinding();
+    const result = pruneDeadMemories(phrenPath, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.ttlExpired).toBe(1);
+    expect(result.data.message).toContain("Moved 1 TTL-expired entry");
+
+    const queue = fs.readFileSync(path.join(phrenPath, PROJECT, "review.md"), "utf8");
+    const staleSection = queue.split("## Stale")[1] ?? "";
+    expect(staleSection).toContain("[ttl-expired: 2020-01-01]");
+    expect(staleSection).toContain("Long-forgotten deploy ordering rule");
+    expect(queue).not.toContain("Still current retry budget note");
+  });
+
+  it("reports but does not write in dry-run", () => {
+    seedExpiredFinding();
+    const result = pruneDeadMemories(phrenPath, PROJECT, true);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.ttlExpired).toBe(1);
+    expect(result.data.message).toContain("Would move 1 TTL-expired entry");
+    expect(fs.existsSync(path.join(phrenPath, PROJECT, "review.md"))).toBe(false);
+  });
+
+  it("leaves recently retrieved findings alone during the grace period", () => {
+    seedExpiredFinding();
+    const runtime = path.join(phrenPath, ".runtime");
+    fs.mkdirSync(runtime, { recursive: true });
+    fs.writeFileSync(
+      path.join(runtime, "retrieval-log.jsonl"),
+      JSON.stringify({
+        file: `${PROJECT}/FINDINGS.md`,
+        section: "findings",
+        retrievedAt: new Date().toISOString(),
+      }) + "\n",
+    );
+
+    const result = pruneDeadMemories(phrenPath, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.ttlExpired).toBe(0);
   });
 });
 
