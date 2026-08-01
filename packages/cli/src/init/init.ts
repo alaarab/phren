@@ -12,6 +12,7 @@ import {
   debugLog,
   expandHomePath,
   homePath,
+  projectSlugFromPath,
   writeRootManifest,
   type InstallMode,
 } from "../shared.js";
@@ -230,7 +231,7 @@ export interface InitOptions {
 }
 
 function normalizedBootstrapProjectName(projectPath: string): string {
-  return path.basename(projectPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  return projectSlugFromPath(projectPath);
 }
 
 export function getPendingBootstrapTarget(phrenPath: string, _opts: InitOptions): { path: string; mode: "explicit" | "detected" } | null {

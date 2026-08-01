@@ -29,7 +29,6 @@ import {
   bootstrapPhrenDotEnv,
   finalizeTaskSession,
   appendFindingJournal,
-  buildSyncStatus,
 } from "./hooks-context.js";
 import { logger } from "../logger.js";
 import {

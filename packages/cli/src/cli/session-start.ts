@@ -14,6 +14,7 @@ import {
   sessionMarker,
   getProjectDirs,
   findProjectNameCaseInsensitive,
+  projectSlugFromPath,
   updateRuntimeHealth,
   withFileLock,
   detectProject,
@@ -70,7 +71,7 @@ export function getUntrackedProjectNotice(phrenPath: string, cwd: string): strin
   // This avoids prompting when cwd is already inside a tracked sourcePath.
   if (detectProject(phrenPath, cwd, activeProfile)) return null;
   if (detectProject(phrenPath, projectDir, activeProfile)) return null;
-  const projectName = path.basename(projectDir).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const projectName = projectSlugFromPath(projectDir);
   if (isProjectTracked(phrenPath, projectName, activeProfile)) {
     const trackedName = getProjectDirs(phrenPath, activeProfile)
       .map((dir) => path.basename(dir))

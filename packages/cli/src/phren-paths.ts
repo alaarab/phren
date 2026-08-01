@@ -405,6 +405,32 @@ export function normalizeProjectNameForCreate(name: string): string {
   return name.trim().toLowerCase();
 }
 
+/**
+ * The single source of truth for turning a source directory into a project
+ * slug. Previously copy-pasted at five call sites, which is how the same repo
+ * could end up registered twice under near-identical names.
+ *
+ * Runs of non-slug characters collapse to one hyphen and leading/trailing
+ * hyphens are trimmed, so `My.App`, `My..App` and `My App` all yield `my-app`
+ * instead of the old `my-app` / `my--app` / `my-app` split.
+ */
+export function projectSlugFromPath(sourcePath: string): string {
+  return path.basename(path.resolve(sourcePath))
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Collapse a project name to the key used for duplicate detection: lowercase
+ * with every separator removed. `Max4LivePlugins`, `max4liveplugins` and
+ * `max4live-plugins` all map to `max4liveplugins`, so the second spelling of a
+ * repo can be recognized as the project that already exists.
+ */
+export function canonicalProjectKey(name: string): string {
+  return name.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
 export function findProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
   const needle = name.toLowerCase();
   try {
@@ -416,6 +442,26 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
     if ((process.env.PHREN_DEBUG)) stderrLog(`findProjectNameCaseInsensitive: ${errorMessage(err)}`);
   }
   return null;
+}
+
+/**
+ * Existing project directories whose name canonicalizes to the same key as
+ * `name` (see {@link canonicalProjectKey}). Exact matches are returned first so
+ * callers can prefer them.
+ */
+export function findProjectNamesByCanonicalKey(phrenPath: string, name: string): string[] {
+  const needle = canonicalProjectKey(name);
+  if (!needle) return [];
+  const matches: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+      if (!isProjectDirEntry(entry)) continue;
+      if (canonicalProjectKey(entry.name) === needle) matches.push(entry.name);
+    }
+  } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG)) stderrLog(`findProjectNamesByCanonicalKey: ${errorMessage(err)}`);
+  }
+  return matches.sort((a, b) => (a === name ? -1 : b === name ? 1 : a.localeCompare(b)));
 }
 
 export function findArchivedProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
