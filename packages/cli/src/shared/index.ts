@@ -1216,14 +1216,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("buildIndexImpl userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+  cleanLegacyFtsCache();
+  const cacheDir = ftsCacheDir(phrenPath, profile);
 
   // Fast path: if the sentinel is fresh, skip the expensive glob computation.
   let hash: string;
@@ -1590,7 +1584,7 @@ async function loadIndexSnapshotOrEmpty(
   knownHash?: string,
 ): Promise<SqlJsDatabase> {
   const SQL = await bootstrapSqlJs() as SqlJsStatic;
-  const cacheDir = ftsCacheDir();
+  const cacheDir = ftsCacheDir(phrenPath, profile);
   // `knownHash` lets loadIndexForHook skip a second glob for a hash it just
   // computed (and already knows misses).
   const hash = knownHash ?? computePhrenHash(phrenPath, profile, globAllFiles(phrenPath, profile).filePaths);
@@ -1604,7 +1598,10 @@ async function loadIndexSnapshotOrEmpty(
     }
   }
 
-  // Before returning empty, try to load any stale-but-usable cache file
+  // Before returning empty, fall back to an older snapshot *of this store*.
+  // cacheDir is store+profile scoped, so nothing here can belong to another
+  // store — serving a neighbour's index would inject its knowledge into this
+  // store's prompts.
   try {
     if (fs.existsSync(cacheDir)) {
       const cacheFiles = fs.readdirSync(cacheDir)
@@ -1679,16 +1676,65 @@ export async function buildIndex(phrenPath: string, profile?: string): Promise<S
   return db;
 }
 
-/** Resolve the per-user FTS cache directory (os.tmpdir()/phren-fts-<uid>). */
-function ftsCacheDir(): string {
+/** Per-user FTS cache root (os.tmpdir()/phren-fts-<uid>). */
+function ftsCacheRoot(): string {
   let userSuffix: string;
   try {
     userSuffix = String(os.userInfo().uid);
   } catch (err: unknown) {
-    logger.debug("ftsCacheDir userInfo", errorMessage(err));
+    logger.debug("ftsCacheRoot userInfo", errorMessage(err));
     userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
   }
   return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+
+/**
+ * Store identity, independent of content. A snapshot's filename is a *content*
+ * hash, so an older snapshot of this store has a different name than the
+ * current one — there is no way to recognise your own stale caches by hash.
+ * Identity therefore has to live in the path.
+ */
+function storeCacheKey(phrenPath: string, profile?: string): string {
+  return crypto.createHash("sha1")
+    .update(`${path.resolve(phrenPath)}|${profile ?? ""}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * FTS cache directory for one store+profile: os.tmpdir()/phren-fts-<uid>/<storeKey>/.
+ *
+ * The per-user root used to hold every store's `<contentHash>.db` side by side,
+ * and the "serve a stale snapshot" fallback picked the newest .db in it without
+ * checking whose it was. With two stores configured — phren's own documented
+ * personal + team setup — one store's knowledge could be injected into the
+ * other's agent prompt whenever the second store's hash missed. Scoping the
+ * directory makes every scan trivially store-local. It also keeps the
+ * "prune older snapshots" sweep from evicting a sibling store's cache and
+ * forcing it into a full rebuild on its next build.
+ */
+function ftsCacheDir(phrenPath: string, profile?: string): string {
+  return path.join(ftsCacheRoot(), storeCacheKey(phrenPath, profile));
+}
+
+/**
+ * Delete pre-0.1.41 snapshots that sit flat in the cache root. They are not
+ * attributable to any store, so they can only ever be mis-served.
+ */
+let _legacyFtsCleaned = false;
+function cleanLegacyFtsCache(): void {
+  if (_legacyFtsCleaned) return;
+  _legacyFtsCleaned = true;
+  try {
+    const root = ftsCacheRoot();
+    if (!fs.existsSync(root)) return;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".db")) continue;
+      try { fs.unlinkSync(path.join(root, entry.name)); } catch { /* best effort */ }
+    }
+  } catch (err: unknown) {
+    logger.debug("cleanLegacyFtsCache", errorMessage(err));
+  }
 }
 
 /**
@@ -1705,7 +1751,8 @@ function ftsCacheDir(): string {
  * misses → a rebuild is scheduled → the following prompt hits the new cache.
  */
 export async function loadIndexForHook(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
-  const cacheDir = ftsCacheDir();
+  cleanLegacyFtsCache();
+  const cacheDir = ftsCacheDir(phrenPath, profile);
   // Resolve team stores the same way buildIndex does. Without this the hook's
   // file set (and therefore its hash) can never match the one buildIndex sealed,
   // so every prompt would miss the cache and spawn a redundant reindex.
@@ -1734,7 +1781,9 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
     }
   }
 
-  // Miss. Serve stale immediately if any cache exists; else cold-build once.
+  // Miss. Serve stale immediately if *this store* has a snapshot; else
+  // cold-build once. cacheDir is store+profile scoped, so another store's
+  // snapshot can never satisfy this check.
   let hasStale = false;
   try {
     hasStale = fs.existsSync(cacheDir) && fs.readdirSync(cacheDir).some(f => f.endsWith(".db"));
@@ -1742,21 +1791,36 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
     logger.debug("loadIndexForHook staleScan", errorMessage(err));
   }
   if (!hasStale) {
+    // Cold start: no snapshot exists at all. Block once rather than inject an
+    // empty context — "instant but empty" is worse than "slow but right".
     return buildIndex(phrenPath, profile);
   }
 
   // Schedule a detached rebuild for next time (rebuild lock dedups concurrent hooks).
+  let scheduled = false;
   if (!isRebuildLockHeld(phrenPath)) {
     const entry = process.argv[1];
     if (entry && /index\.(c?js|mjs|ts)$/.test(entry) && fs.existsSync(entry)) {
       try {
         spawnDetachedChild([entry, "background-reindex"], { phrenPath }).unref();
+        scheduled = true;
         debugLog(`loadIndexForHook: scheduled detached background-reindex (stat-hash miss ${hash.slice(0, 8)})`);
       } catch (err: unknown) {
         debugLog(`loadIndexForHook: detached reindex spawn failed: ${errorMessage(err)}`);
       }
     }
   }
+  // The prompt is about to be answered from a snapshot that predates the latest
+  // write. That trade is deliberate, but it must not be invisible: record it so
+  // "why did phren miss the finding I just wrote?" is answerable from the log.
+  appendIndexEvent(phrenPath, {
+    event: "build_index",
+    cache: "stale",
+    hash: hash.slice(0, 12),
+    rebuildScheduled: scheduled,
+    elapsedMs: 0,
+    profile: profile || "",
+  });
   return loadIndexSnapshotOrEmpty(phrenPath, profile, hash);
 }
 
@@ -1790,14 +1854,7 @@ async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<
 
 /** Find the FTS cache file for a specific phrenPath+profile. Returns exists + size. */
 export function findFtsCacheForPath(phrenPath: string, profile?: string): { exists: boolean; sizeBytes?: number } {
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("findFtsCacheForPath userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+  const cacheDir = ftsCacheDir(phrenPath, profile);
   try {
     const globResult = globAllFiles(phrenPath, profile);
     const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
