@@ -15,7 +15,7 @@ export const UNIVERSAL_TECH_TERMS_RE =
  * Additional fragment patterns beyond CamelCase and acronyms.
  * Each pattern has a named group so callers can identify the fragment type.
  */
-export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
+export const EXTRA_FRAGMENT_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // Semantic version numbers: v1.2.3, 2.0.0-beta.1
   { re: /\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b/g, label: "version" },
   // Environment variable keys: PHREN_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
