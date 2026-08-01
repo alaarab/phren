@@ -76,6 +76,53 @@ Configure with `phren config access`.
 
 High-risk operations (bulk delete, policy changes, imports from untrusted sources) can require human approval before executing. Configure thresholds via `phren config workflow`.
 
+### The review queue: what approve and reject actually do
+
+`review.md` is a quarantine, not a notification list. Two producers write to it:
+
+- **Extraction.** Candidates mined from git history that score below `autoAcceptThreshold` (default 0.75, `PHREN_MEMORY_AUTO_ACCEPT`) are queued **instead of** being written to `FINDINGS.md`. The queue line is the only copy.
+- **Governance.** `phren maintain govern` and TTL enforcement queue findings that already live in `FINDINGS.md` under `## Stale` and `## Conflicts`, asking you to confirm they are still true.
+
+So a queue line can point at three different realities, and the verbs behave accordingly.
+
+#### Approve
+
+`approve` means "this belongs in memory". It makes that true, then removes the line:
+
+| The item's content is… | What approve does | Reported outcome |
+|---|---|---|
+| not in `FINDINGS.md` | **writes it as a finding**, then dequeues | `promoted` |
+| already a live finding | keeps it as-is, dequeues | `already_present` |
+| only in `reference/topics/` (auto-archived) | leaves the archive untouched, dequeues | `already_archived` |
+
+Promotion goes through the same code path as `add_finding`, so a promoted finding is indistinguishable from one you added by hand: it gets a `fid`, a `created` stamp, citation metadata, it participates in duplicate detection, and it counts against the findings cap (triggering auto-archive if the project is over it). The entry's type tag is preserved, its capture provenance (source commit, repo, session) is carried over from the queue line, and the date it was originally queued is recorded as `<!-- phren:queued "YYYY-MM-DD" -->` — the finding is written today, but you can still see when the observation was captured.
+
+If the write fails — a secret detected in the text, a locked file — the queue line **stays**. Approve never destroys an item it could not promote.
+
+#### Reject
+
+`reject` means "this is wrong, get rid of it". It destroys the content wherever it actually lives, then removes the line:
+
+| The item's content is… | What reject does | Reported outcome |
+|---|---|---|
+| a live finding | removes it from `FINDINGS.md` | `removed` |
+| in `reference/topics/` (auto-archived) | removes it there too | `removed_from_archive` |
+| nowhere — an extraction candidate that was never written | nothing to remove; dequeuing *is* the rejection | `discarded` |
+
+Reject reaches into the archive tier on purpose. `autoArchiveToReference` moves findings out of `FINDINGS.md` into `reference/topics/*.md` once a project exceeds the findings cap, without reconciling the queue lines that point at them — and archived content is still retrieved and injected. A reject that left it in place would be a lie.
+
+Three situations make reject **fail** rather than report success, leaving the queue line in place so you can act:
+
+- the content sits in a `FINDINGS.md` archive block (`<!-- phren:archive:start -->` / `<details>`), which is read-only history everywhere else in phren;
+- several *different* bullets match, so removing one would be a guess;
+- the match is in a `reference/` file phren does not auto-manage (anything outside `reference/topics/`), which is yours to edit.
+
+#### The queue is never injected
+
+`review.md` is indexed — `search_knowledge` can find it, which is how you answer "why is this in my queue?" — but doc type `review-queue` is excluded from the automatic injection path. Unreviewed content does not reach an agent's prompt, and it is not subject to trust filtering there because it never gets there. `notes` is excluded the same way.
+
+Both verbs write to the audit log (`review_approve` / `review_reject`, with the outcome), so the queue's history is inspectable like every other memory write.
+
 ### TTL and retention policy
 
 - `ttlDays=120`: findings older than 120 days are flagged for review
@@ -131,4 +178,12 @@ phren doctor          # shows semantic search status, index health, Ollama statu
 phren maintain govern # queue stale memories for review
 phren maintain prune  # delete expired entries
 phren shell           # interactive review interface
+```
+
+Working the review queue:
+
+```bash
+phren review                          # show the queue
+phren review approve <project> <text> # promote (or keep) the item, then dequeue
+phren review reject  <project> <text> # delete the content wherever it lives, then dequeue
 ```
