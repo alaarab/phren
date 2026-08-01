@@ -10,7 +10,7 @@ import { PhrenClient } from "./phrenClient";
  * Rejects path traversal characters, dots, slashes, and other unsafe patterns.
  * Mirrors the server-side isValidProjectName() from mcp/src/utils.ts.
  */
-function isValidProjectName(name: string): boolean {
+export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
   if (name.length > 100) return false;
   if (name.includes("\0") || name.includes("/") || name.includes("\\") || name.includes("..")) return false;
@@ -174,7 +174,7 @@ function resolveStorePath(): string {
   return path.join(os.homedir(), ".phren");
 }
 
-function computeMtimeKey(storePath: string): string {
+export function computeMtimeKey(storePath: string): string {
   try {
     const entries = fs.readdirSync(storePath, { withFileTypes: true });
     const parts: string[] = [];
@@ -604,7 +604,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
 
 /* ── Data loading ────────────────────────────────────────── */
 
-async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
+export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const projects = await fetchProjects(client);
 
   // Parallel per-project fetches (including topic configs)
@@ -807,7 +807,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
 
 /* ── Fetch helpers ───────────────────────────────────────── */
 
-async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string; store?: string }[]> {
+export async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string; store?: string }[]> {
   const raw = await client.listProjects();
   const data = responseData(raw);
   const seen = new Set<string>();
@@ -829,7 +829,7 @@ async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief
   return parsed;
 }
 
-async function fetchProjectSummary(client: PhrenClient, project: string): Promise<ProjectSummaryData> {
+export async function fetchProjectSummary(client: PhrenClient, project: string): Promise<ProjectSummaryData> {
   const raw = await client.getProjectSummary(project);
   const data = responseData(raw);
   const files: ProjectSummaryFile[] = [];
@@ -850,7 +850,7 @@ async function fetchProjectSummary(client: PhrenClient, project: string): Promis
   };
 }
 
-async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingPage> {
+export async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingPage> {
   const raw = await client.getFindings(project);
   const data = responseData(raw);
   const parsed: FindingData[] = [];
@@ -873,7 +873,7 @@ async function fetchFindings(client: PhrenClient, project: string, projectTopics
   return { findings: parsed, total: total === undefined ? parsed.length : total };
 }
 
-async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
+export async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
   try {
     const raw = await client.getTopicConfig(project);
     const data = responseData(raw);
@@ -896,7 +896,7 @@ async function fetchTopicConfig(client: PhrenClient, project: string): Promise<T
   }
 }
 
-async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
+export async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
   const raw = await client.getTasks(project, { status: "all", done_limit: 10 });
   const data = responseData(raw);
   const items = asRecord(data?.items);
@@ -933,7 +933,7 @@ async function fetchTasks(client: PhrenClient, project: string): Promise<TaskDat
   return parsed;
 }
 
-async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
+export async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
   try {
     const raw = await client.readGraph();
     const data = responseData(raw);
@@ -970,13 +970,13 @@ function buildScoreLookup(scores: MemoryScores): Map<string, MemoryScoreEntry> {
   return new Map(Object.entries(scores.entries ?? {}));
 }
 
-function buildScoreKey(project: string, filename: string, snippet: string): string {
+export function buildScoreKey(project: string, filename: string, snippet: string): string {
   const short = (snippet || "").slice(0, 160);
   const digest = crypto.createHash("sha1").update(`${project}:${filename}:${short}`).digest("hex").slice(0, 12);
   return `${project}/${filename}:${digest}`;
 }
 
-function qualityMultiplierFromEntry(entry?: MemoryScoreEntry): number | undefined {
+export function qualityMultiplierFromEntry(entry?: MemoryScoreEntry): number | undefined {
   if (!entry) return undefined;
   const now = Date.now();
   const lastUsed = entry.lastUsedAt ? new Date(entry.lastUsedAt).getTime() : 0;
@@ -1015,7 +1015,7 @@ const BUILTIN_TOPIC_KEYWORDS: Array<{ slug: string; label: string; keywords: str
   { slug: "ai_ml", label: "AI / ML", keywords: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"] },
 ];
 
-function classifyFindingTopic(text: string, projectTopics?: TopicMeta[]): { slug: string; label: string } {
+export function classifyFindingTopic(text: string, projectTopics?: TopicMeta[]): { slug: string; label: string } {
   const lower = text.toLowerCase();
   let bestSlug = "general";
   let bestLabel = "General";

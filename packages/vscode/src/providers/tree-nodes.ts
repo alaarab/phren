@@ -40,12 +40,15 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const reviewBadge: string[] = [];
       if (element.conflictCount && element.conflictCount > 0) reviewBadge.push(`⚠ ${element.conflictCount}`);
       else if (element.reviewCount && element.reviewCount > 0) reviewBadge.push(`${element.reviewCount} review`);
-      const badgeSuffix = reviewBadge.length > 0 ? `  ${reviewBadge.join(" · ")}` : "";
+      const reviewBadgeText = reviewBadge.join(" · ");
       if (element.active) {
-        item.description = `★${badgeSuffix}${element.brief ? ` ${truncate(element.brief, 50)}` : ""}`;
+        // Two-space gap sets the badge off from the star; only meaningful when
+        // there's a star preceding it, so it lives here rather than in the
+        // shared badge text (see the non-active branch below).
+        item.description = `★${reviewBadgeText ? `  ${reviewBadgeText}` : ""}${element.brief ? ` ${truncate(element.brief, 50)}` : ""}`;
         item.iconPath = themeIcon("star-full", "list.highlightForeground");
       } else {
-        item.description = badgeSuffix || (element.brief ? truncate(element.brief, 72) : undefined);
+        item.description = reviewBadgeText || (element.brief ? truncate(element.brief, 72) : undefined);
         item.iconPath = element.conflictCount ? themeIcon("warning") : themeIcon("folder");
       }
       item.id = `phren.project.${element.projectName}`;
