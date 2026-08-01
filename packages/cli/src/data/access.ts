@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import {
+  appendAuditLog,
   phrenErr,
   PhrenError,
   phrenOk,
@@ -23,6 +24,7 @@ import {
 import { isValidProjectName, queueFilePath, safeProjectPath } from "../utils.js";
 import {
   type FindingCitation,
+  type FindingProvenance,
   parseCitationComment,
   parseScopeComment,
   parseSourceComment,
@@ -41,7 +43,7 @@ import {
   stripComments,
   normalizeFindingText,
 } from "../content/metadata.js";
-import { withSafeLock, ensureProject } from "../shared/data-utils.js";
+import { withSafeLock, ensureProject, walkDirectory } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 export type { TaskSection, TaskItem, TaskDoc } from "./tasks.js";
 export {
@@ -606,13 +608,24 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
 // Use shared queueFilePath from utils.ts; alias for local brevity.
 const queuePath = queueFilePath;
 
-function parseQueueLine(line: string): { date?: string; text: string; confidence?: number; machine?: string; model?: string } {
+interface ParsedQueueLine {
+  date?: string;
+  text: string;
+  confidence?: number;
+  machine?: string;
+  model?: string;
+  /** Structured provenance from a `<!-- source:... -->` comment, when the producer wrote one. */
+  provenance?: FindingProvenance;
+  /** Repo/commit/file provenance from a `<!-- phren:cite {...} -->` comment. */
+  citation?: FindingCitation;
+}
+
+function parseQueueLine(line: string): ParsedQueueLine {
   const parsed = line.match(/^- \[(\d{4}-\d{2}-\d{2})\]\s*(.+)$/);
   const rawText = parsed ? parsed[2] : line.replace(/^-\s+/, "").trim();
   const confidence = rawText.match(/\[confidence\s+([01](?:\.\d+)?)\]/i);
   const source = parseSourceComment(line);
-  let machine = source?.machine;
-  let model = source?.model;
+  const citation = parseCitationComment(line);
   // Strip the confidence marker from the canonical text so it doesn't pollute FINDINGS.md
   const sanitized = normalizeQueueEntryText(
     rawText.replace(/\s*\[confidence\s+[01](?:\.\d+)?\]/gi, "").trim(),
@@ -623,8 +636,10 @@ function parseQueueLine(line: string): { date?: string; text: string; confidence
     date: parsed?.[1],
     text,
     confidence: confidence ? Number.parseFloat(confidence[1]) : undefined,
-    machine,
-    model,
+    machine: source?.machine,
+    model: source?.model,
+    provenance: source ?? undefined,
+    citation: citation ?? undefined,
   };
 }
 
@@ -696,32 +711,314 @@ function writeQueueLines(file: string, lines: string[]): void {
   fs.renameSync(tmp, file);
 }
 
-/** Remove a queue item's line from review.md (finding stays in FINDINGS.md). */
-export function approveQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+/**
+ * Read-only lookup of a queue line. Returns the *stored* line (not the caller's
+ * approximation of it) so callers can read metadata comments the caller never had.
+ *
+ * Approve and reject both resolve the line first, act on FINDINGS.md second, and
+ * dequeue last. Dequeuing first — the old order — meant a failed content operation
+ * still destroyed the queue entry, which is how "approve" became a silent discard.
+ */
+function locateQueueLine(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  const ensured = ensureProject(phrenPath, project);
+  if (!ensured.ok) return forwardErr(ensured);
+
+  const file = queuePath(phrenPath, project);
+  if (!fs.existsSync(file)) return phrenErr(`No review queue found for "${project}".`, PhrenError.FILE_NOT_FOUND);
+
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  const idx = lines.findIndex((l) => l.trim() === lineText.trim());
+  if (idx === -1) return phrenErr(`Queue item not found in "${project}".`, PhrenError.NOT_FOUND);
+  return phrenOk(lines[idx]);
+}
+
+/** Drop a queue line from review.md. */
+function dequeueLine(phrenPath: string, project: string, lineText: string): PhrenResult<void> {
   return withQueueLineOp(phrenPath, project, lineText, (lines, idx, file) => {
     lines.splice(idx, 1);
     writeQueueLines(file, lines);
-    return phrenOk(`Approved queue item in ${project}`);
+    return phrenOk(undefined);
   });
 }
 
-/** Remove a queue item from review.md AND remove the corresponding finding from FINDINGS.md. */
-export function rejectQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
-  const lockResult = withQueueLineOp(phrenPath, project, lineText, (lines, idx, file) => {
-    lines.splice(idx, 1);
-    writeQueueLines(file, lines);
-    return phrenOk("ok");
-  });
-  if (!lockResult.ok) return lockResult;
+/** Does this text already exist as a live (non-archived) bullet in FINDINGS.md? */
+function existsAsLiveFinding(phrenPath: string, project: string, text: string): boolean {
+  const dir = safeProjectPath(phrenPath, project);
+  if (!dir) return false;
+  const findingsPath = path.join(dir, FINDINGS_FILENAME);
+  if (!fs.existsSync(findingsPath)) return false;
 
-  const parsed = parseQueueLine(lineText);
-  if (parsed.text) {
-    const removeResult = removeFinding(phrenPath, project, parsed.text);
-    if (!removeResult.ok) {
-      return phrenOk(`Rejected queue item from ${project} (note: finding not found in FINDINGS.md — may have already been removed)`);
+  const lines = fs.readFileSync(findingsPath, "utf8").split("\n");
+  const active = collectFindingBulletLines(lines).filter(({ archived }) => !archived);
+  const match = findMatchingFindingBullet(active, normalizeFindingText(text), text);
+  // "ambiguous" means several bullets matched — it is still present, just not uniquely
+  // addressable, so approve must not write yet another copy.
+  return match.kind === "found" || match.kind === "ambiguous";
+}
+
+interface ArchivedReferenceMatch {
+  file: string;
+  /** True when the file lives under reference/topics/ — the tier auto-archive writes. */
+  autoArchived: boolean;
+  idx: number;
+  line: string;
+}
+
+/**
+ * Find a queue item's content in the project's `reference/` tier.
+ *
+ * `autoArchiveToReference` moves findings out of FINDINGS.md into
+ * `reference/topics/*.md` once a project exceeds the findings cap, without touching
+ * the review queue lines that point at them. Those queue items are the reason
+ * approve and reject used to be no-ops, so both verbs have to look here.
+ */
+function findArchivedReferenceMatches(phrenPath: string, project: string, text: string): ArchivedReferenceMatch[] {
+  const referenceDir = safeProjectPath(phrenPath, project, "reference");
+  if (!referenceDir || !fs.existsSync(referenceDir)) return [];
+
+  const needle = normalizeFindingText(text);
+  if (!needle) return [];
+  const topicsDir = path.join(referenceDir, "topics") + path.sep;
+
+  const exact: ArchivedReferenceMatch[] = [];
+  const partial: ArchivedReferenceMatch[] = [];
+  for (const filePath of walkDirectory(referenceDir)) {
+    const lines = fs.readFileSync(filePath, "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].startsWith("- ")) continue;
+      const normalized = normalizeFindingText(lines[i]);
+      if (!normalized) continue;
+      const hit: ArchivedReferenceMatch = {
+        file: filePath,
+        autoArchived: filePath.startsWith(topicsDir),
+        idx: i,
+        line: lines[i],
+      };
+      if (normalized === needle) exact.push(hit);
+      else if (normalized.includes(needle)) partial.push(hit);
     }
   }
-  return phrenOk(`Rejected and removed queue item from ${project}`);
+  return exact.length > 0 ? exact : partial;
+}
+
+/** Bullet content of archived matches, ignoring metadata — used to detect true ambiguity. */
+function archivedMatchesAreIdentical(matches: ArchivedReferenceMatch[]): boolean {
+  const first = bulletContentKey(matches[0].line);
+  return matches.every(({ line }) => bulletContentKey(line) === first);
+}
+
+export type QueueApproveOutcome = "promoted" | "already_present" | "already_archived";
+
+export interface QueueApproveResult {
+  outcome: QueueApproveOutcome;
+  message: string;
+  /** Canonical finding text the verb acted on (confidence marker stripped, type tag kept). */
+  text: string;
+}
+
+export type QueueRejectOutcome =
+  /** Removed from the live FINDINGS.md tier. */
+  | "removed"
+  /** Removed from reference/topics/*.md, where auto-archive had moved it. */
+  | "removed_from_archive"
+  /** Nothing to remove: the candidate was never written anywhere. Dequeuing *is* the rejection. */
+  | "discarded";
+
+export interface QueueRejectResult {
+  outcome: QueueRejectOutcome;
+  message: string;
+  text: string;
+}
+
+/**
+ * Approve a queue item: make it real, then dequeue.
+ *
+ * Three outcomes, because a queue line can point at three different realities:
+ *
+ * - `promoted` — the text is not in FINDINGS.md, so approving *writes* it. This is the
+ *   case for every extraction candidate that scored below `autoAcceptThreshold`:
+ *   extraction queues those without ever adding them, so the old "just splice the line
+ *   out" behaviour silently discarded them. Promotion goes through `addFindingToFile`,
+ *   the same path a direct add uses, so dedup, fid assignment, citation metadata, and
+ *   the findings-cap auto-archive all behave identically.
+ * - `already_present` — the text is already a live finding (govern queues existing
+ *   findings for Stale/Conflicts review). Approving means "keep it"; just dequeue.
+ * - `already_archived` — the content only exists in `reference/topics/`, because
+ *   auto-archive moved it after it was queued. It is still live for retrieval, so the
+ *   archive is left untouched and the item is dequeued.
+ */
+export function approveQueueItemDetailed(
+  phrenPath: string,
+  project: string,
+  lineText: string,
+): PhrenResult<QueueApproveResult> {
+  const located = locateQueueLine(phrenPath, project, lineText);
+  if (!located.ok) return forwardErr(located);
+
+  const parsed = parseQueueLine(located.data);
+  const text = parsed.text;
+  if (!text) {
+    // Nothing usable to promote — dequeue so the malformed line stops blocking the queue.
+    const dequeued = dequeueLine(phrenPath, project, lineText);
+    if (!dequeued.ok) return forwardErr(dequeued);
+    appendAuditLog(phrenPath, "review_approve", `project=${project} outcome=empty`);
+    return phrenOk({
+      outcome: "already_present",
+      message: `Approved queue item in ${project} (empty entry, nothing to promote)`,
+      text: "",
+    });
+  }
+
+  const finish = (outcome: QueueApproveOutcome, message: string): PhrenResult<QueueApproveResult> => {
+    const dequeued = dequeueLine(phrenPath, project, lineText);
+    if (!dequeued.ok) return forwardErr(dequeued);
+    appendAuditLog(phrenPath, "review_approve", `project=${project} outcome=${outcome}`);
+    return phrenOk({ outcome, message, text });
+  };
+
+  if (existsAsLiveFinding(phrenPath, project, text)) {
+    return finish("already_present", `Approved queue item in ${project} (already in ${FINDINGS_FILENAME}; kept as-is)`);
+  }
+
+  const archived = findArchivedReferenceMatches(phrenPath, project, text);
+  if (archived.length > 0) {
+    return finish(
+      "already_archived",
+      `Approved queue item in ${project} (already archived to ${path.basename(archived[0].file)}; still available for retrieval, archive left untouched)`,
+    );
+  }
+
+  // Not anywhere: this queue line IS the only copy. Write it as a finding, preserving
+  // the entry's type tag (carried in the text) and its capture provenance.
+  const citationInput: Partial<FindingCitation> | undefined = parsed.citation
+    ? {
+      ...(parsed.citation.repo ? { repo: parsed.citation.repo } : {}),
+      ...(parsed.citation.file ? { file: parsed.citation.file } : {}),
+      ...(parsed.citation.line !== undefined ? { line: parsed.citation.line } : {}),
+      ...(parsed.citation.commit ? { commit: parsed.citation.commit } : {}),
+    }
+    : undefined;
+  // The queue entry's own date is the day the observation was captured; the finding is
+  // written today, so keep the original date as an explicit annotation rather than
+  // losing it.
+  const extraAnnotations = parsed.date ? [`<!-- phren:queued "${parsed.date}" -->`] : undefined;
+
+  const added = addFindingToFile(phrenPath, project, text, citationInput, {
+    ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
+    ...(parsed.provenance?.session_id ? { sessionId: parsed.provenance.session_id } : {}),
+    ...(extraAnnotations ? { extraAnnotations } : {}),
+  });
+  if (!added.ok) return forwardErr(added);
+
+  // A fuzzy-dedup skip means an equivalent finding already exists — the item is
+  // effectively already present, not newly promoted.
+  if (added.data.status === "skipped") {
+    return finish("already_present", `Approved queue item in ${project} (equivalent finding already in ${FINDINGS_FILENAME}; not duplicated)`);
+  }
+  return finish("promoted", `Approved and promoted queue item to ${FINDINGS_FILENAME} in ${project}`);
+}
+
+/** Remove a queue item's line from review.md, promoting it to a finding when needed. */
+export function approveQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  const result = approveQueueItemDetailed(phrenPath, project, lineText);
+  return result.ok ? phrenOk(result.data.message) : result;
+}
+
+/**
+ * Reject a queue item: destroy the content wherever it actually lives, then dequeue.
+ *
+ * Rejection removes from the live FINDINGS.md tier *and* from `reference/topics/*.md`,
+ * because auto-archive moves findings there without reconciling their queue lines and
+ * archived content is still injected into agent prompts. Leaving it would make reject a
+ * lie — the hosts tell users rejection removes the finding permanently.
+ *
+ * Two situations deliberately do NOT succeed quietly:
+ * - the content sits in a FINDINGS.md archive block (`<details>` / `phren:archive`),
+ *   which the rest of the codebase treats as read-only history; and
+ * - several *different* bullets match, so deleting one would be a guess.
+ *
+ * Both return an error and leave the queue line in place, so the user sees the problem
+ * instead of a success message over undeleted content.
+ */
+export function rejectQueueItemDetailed(
+  phrenPath: string,
+  project: string,
+  lineText: string,
+): PhrenResult<QueueRejectResult> {
+  const located = locateQueueLine(phrenPath, project, lineText);
+  if (!located.ok) return forwardErr(located);
+
+  const parsed = parseQueueLine(located.data);
+  const text = parsed.text;
+
+  const finish = (outcome: QueueRejectOutcome, message: string): PhrenResult<QueueRejectResult> => {
+    const dequeued = dequeueLine(phrenPath, project, lineText);
+    if (!dequeued.ok) return forwardErr(dequeued);
+    appendAuditLog(phrenPath, "review_reject", `project=${project} outcome=${outcome}`);
+    return phrenOk({ outcome, message, text });
+  };
+
+  if (!text) return finish("discarded", `Rejected queue item from ${project} (empty entry)`);
+
+  const removed = removeFinding(phrenPath, project, text);
+  if (removed.ok) {
+    return finish("removed", `Rejected and removed finding from ${FINDINGS_FILENAME} in ${project}`);
+  }
+  // Anything other than "it isn't there" is a real problem — an ambiguous match, a
+  // read-only FINDINGS.md archive block, a lock timeout. Surface it and keep the queue
+  // line so the user can act on it, rather than reporting success over live content.
+  if (removed.code !== PhrenError.NOT_FOUND && removed.code !== PhrenError.FILE_NOT_FOUND) {
+    return forwardErr(removed);
+  }
+
+  const matches = findArchivedReferenceMatches(phrenPath, project, text);
+  if (matches.length === 0) {
+    return finish(
+      "discarded",
+      `Rejected and discarded queue item from ${project} (candidate was never added to ${FINDINGS_FILENAME}; nothing to remove)`,
+    );
+  }
+
+  const external = matches.filter((match) => !match.autoArchived);
+  if (external.length > 0) {
+    return phrenErr(
+      `Cannot reject: "${text.slice(0, 60)}" lives in ${path.relative(phrenPath, external[0].file)}, which phren does not auto-manage. Remove it there, then reject again.`,
+      PhrenError.VALIDATION_ERROR,
+    );
+  }
+  if (matches.length > 1 && !archivedMatchesAreIdentical(matches)) {
+    return phrenErr(
+      `Cannot reject: "${text.slice(0, 60)}" matches ${matches.length} different archived entries. Remove the right one manually, then reject again.`,
+      PhrenError.AMBIGUOUS_MATCH,
+    );
+  }
+
+  const target = matches[0];
+  const purge = withSafeLock(target.file, () => {
+    const lines = fs.readFileSync(target.file, "utf8").split("\n");
+    // Re-resolve under the lock — the file may have moved since the scan.
+    const idx = lines[target.idx] === target.line ? target.idx : lines.indexOf(target.line);
+    if (idx === -1) return phrenErr(`Archived entry vanished from ${path.basename(target.file)} before it could be removed.`, PhrenError.NOT_FOUND);
+    const removeCount = isCitationLine(lines[idx + 1] || "") ? 2 : 1;
+    lines.splice(idx, removeCount);
+    const normalized = lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    const tmp = `${target.file}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, normalized);
+    fs.renameSync(tmp, target.file);
+    return phrenOk(undefined);
+  });
+  if (!purge.ok) return forwardErr(purge);
+
+  return finish(
+    "removed_from_archive",
+    `Rejected and removed archived finding from reference/topics/${path.basename(target.file)} in ${project}`,
+  );
+}
+
+/** Remove a queue item from review.md AND the corresponding finding wherever it lives. */
+export function rejectQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  const result = rejectQueueItemDetailed(phrenPath, project, lineText);
+  return result.ok ? phrenOk(result.data.message) : result;
 }
 
 /** Edit a queue item's text in review.md and the corresponding finding in FINDINGS.md. */
