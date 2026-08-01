@@ -30,7 +30,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
 | `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `notes`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
-| `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
+| `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `bug`, `workaround`, `context`. |
 | `since` | string | no | Filter findings by creation date. Formats: `7d`, `30d`, `YYYY-MM`, `YYYY-MM-DD`. |
 | `status` | enum | no | Filter findings by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). Defaults to `false`. |
@@ -114,7 +114,7 @@ Copy a note into `FINDINGS.md` and mark the original as promoted without deletin
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
-| `findingType` | enum | no | `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, or `bug`. |
+| `findingType` | enum | no | `decision`, `pitfall`, `pattern`, or `bug`. |
 
 ---
 
@@ -227,7 +227,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
 | `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, task_item? }`. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
-| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `tradeoff`, `architecture`, `bug`. |
+| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
 The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)

@@ -338,16 +338,19 @@ describe("extractToolFindings", () => {
     expect(bug!.confidence).toBe(0.85);
   });
 
-  it("does NOT capture markdown TOC anchors as [architecture] (#architecture) entries", () => {
-    // Regression: a README with `- [Architecture](#architecture)` used to match
-    // EXPLICIT_TAG_PATTERN and emit "[architecture] (#architecture)" candidates.
+  it("does NOT capture markdown TOC anchors as [pattern] (#pattern) entries", () => {
+    // Regression: a README with `- [Pattern](#pattern)` used to match
+    // EXPLICIT_TAG_PATTERN and emit "[pattern] (#pattern)" candidates.
+    // (Originally reproduced with "[Architecture](#architecture)" — that tag
+    // was dropped from the vocabulary, so the example now uses "pattern",
+    // which is still offered/produced and still needs the same guard.)
     const candidates = extractToolFindings(
       "Read",
       { file_path: "/repo/README.md" },
-      "## Table of Contents\n- [Architecture](#architecture)\n- [Releases](#releases)\n"
+      "## Table of Contents\n- [Pattern](#pattern)\n- [Releases](#releases)\n"
     );
-    const arch = candidates.find((c) => c.text.includes("(#architecture)"));
-    expect(arch).toBeUndefined();
+    const tocAnchor = candidates.find((c) => c.text.includes("(#pattern)"));
+    expect(tocAnchor).toBeUndefined();
   });
 
   it("does NOT capture markdown reference links as tagged findings", () => {

@@ -39,7 +39,7 @@ describe("findingQualityReason", () => {
 
   it("rejects phren's own prompt text captured as a finding", () => {
     // tools/extract.ts EXTRACT_PROMPT line, matched by the hook's [tag] scraper.
-    expect(findingQualityReason("[decision] , [pitfall], [pattern], [tradeoff], [bug], or [architecture]"))
+    expect(findingQualityReason("[decision] , [pitfall], [pattern], [bug], or [workaround]"))
       .toBe("prompt_template_echo");
     expect(findingQualityReason("[pattern] Each finding must be self-contained"))
       .toBe("prompt_template_echo");
@@ -81,7 +81,7 @@ describe("extractToolFindings quality gate", () => {
   it("drops explicit [tag] matches that are phren's own prompt text", () => {
     const candidates = extractToolFindings(
       "Write",
-      { file_path: "src/tools/extract.ts", content: "- Prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [tradeoff], [bug], or [architecture]\n" },
+      { file_path: "src/tools/extract.ts", content: "- Prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [bug], or [workaround]\n" },
       "",
     );
     expect(candidates).toEqual([]);

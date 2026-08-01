@@ -17,7 +17,7 @@ Rules:
 - Do NOT extract obvious facts or things any developer would know
 - Do NOT extract credentials, API keys, or personal information
 - Each finding must be self-contained (understandable without seeing the source text)
-- Prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [tradeoff], [bug], or [architecture]
+- Prefix each finding with its type in brackets: [decision], [pitfall], [pattern], [bug], or [workaround]
 - Maximum 10 findings
 - If nothing is worth extracting, return []
 - Return ONLY the JSON array, no explanation, no markdown
@@ -52,7 +52,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       description:
         "Use a local Ollama LLM to automatically extract non-obvious findings from text. " +
         "Pass conversation snippets, code review notes, error logs, or any engineering text. " +
-        "The model identifies patterns, pitfalls, decisions, and bugs worth remembering. " +
+        "The model identifies patterns, pitfalls, decisions, bugs, and workarounds worth remembering. " +
         "Requires Ollama running locally. Set PHREN_EXTRACT_MODEL env var to choose model (default: llama3.2). " +
         "Set PHREN_OLLAMA_URL=off to disable.",
       inputSchema: z.object({

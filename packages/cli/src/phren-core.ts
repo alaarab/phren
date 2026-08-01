@@ -105,16 +105,32 @@ export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T
   return merged as T;
 }
 
-/** All valid finding type tags — used for writes, search filters, and hook extraction */
-export const FINDING_TYPES = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
+/**
+ * Finding types offered as an explicit choice: add_finding's findingType
+ * param, promote_note --type, and the web/iOS type pickers. Deliberately the
+ * intersection of what used to be three disjoint lists (this enum, the decay
+ * table, and the auto-detector) — "tradeoff" and "architecture" were offered
+ * here but had no decay rule and no max-age, so they never actually worked.
+ * Legacy stores may still contain those two tags; reading/searching them as
+ * plain text still works, they just aren't offered or decay-tracked anymore.
+ */
+export const FINDING_TYPES = ["decision", "pitfall", "pattern", "bug"] as const;
 export type FindingType = (typeof FINDING_TYPES)[number];
 
-/** Searchable finding tags (same set as FINDING_TYPES) */
-export const FINDING_TAGS = FINDING_TYPES;
-export type FindingTag = FindingType;
+/**
+ * Every finding tag phren can actually produce or needs to search for: the
+ * offered FINDING_TYPES above, plus tags autoDetectFindingType
+ * (content/learning.ts) writes on its own initiative — "workaround" and
+ * "context" — which aren't offered as an explicit pick but still need a
+ * decay rule (finding/lifecycle.ts's FINDING_TYPE_DECAY is typed against
+ * this exact set) and need to stay filterable via search_knowledge's `tag`
+ * param.
+ */
+export const FINDING_TAGS = [...FINDING_TYPES, "workaround", "context"] as const;
+export type FindingTag = (typeof FINDING_TAGS)[number];
 
-/** Canonical set of known observation tags — derived from FINDING_TYPES */
-export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TYPES);
+/** Canonical set of known finding tags for the "unknown tag" write-time warning — derived from FINDING_TAGS (not just FINDING_TYPES) so phren never flags its own auto-written workaround/context tags as unknown. */
+export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TAGS);
 
 /** Document types in the FTS index */
 export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;

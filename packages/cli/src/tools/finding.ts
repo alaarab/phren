@@ -773,7 +773,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
-          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
+          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'bug' (confirmed defect or failure)."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },

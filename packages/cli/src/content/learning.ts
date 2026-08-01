@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult } from "../shared.js";
+import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult, type FindingTag } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
@@ -132,7 +132,16 @@ function resolveFindingCitationInput(
   return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
 
-export function autoDetectFindingType(text: string): string | null {
+/**
+ * Heuristically infer a finding's type tag from its own wording when the
+ * caller didn't supply one. Return type is FindingTag (not FindingType)
+ * because "workaround" and "context" are valid outputs here even though
+ * they aren't part of the smaller offered/pickable FINDING_TYPES set —
+ * both still have a FINDING_TYPE_DECAY row and are searchable via
+ * search_knowledge's `tag` filter (FINDING_TAGS), so this function agrees
+ * with both.
+ */
+export function autoDetectFindingType(text: string): FindingTag | null {
   const lower = text.toLowerCase();
   if (/\b(we decided|decision:|chose .+ over|went with)\b/.test(lower)) return 'decision';
   if (/\b(bug:|bug in|found a bug|broken|crashes|fails when)\b/.test(lower)) return 'bug';

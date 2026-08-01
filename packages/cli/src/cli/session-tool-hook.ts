@@ -245,10 +245,12 @@ interface LearningCandidate {
 }
 
 // Negative lookahead `(?!\(|\[)` rejects markdown link/reference patterns:
-//   [Architecture](#architecture)  ← TOC anchor, content was being captured as "(#architecture)"
-//   [bug][1]                       ← markdown reference link, content was being captured as "[1]"
-// produced garbage review-queue entries like "[architecture] (#architecture)".
-const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\](?!\(|\[)\s*(.+)/i;
+//   [Pattern](#pattern)  ← TOC anchor, content was being captured as "(#pattern)"
+//   [bug][1]             ← markdown reference link, content was being captured as "[1]"
+// produced garbage review-queue entries like "[pattern] (#pattern)".
+// Tag list mirrors FINDING_TAGS (phren-core.ts): everything phren can write,
+// offered or auto-detected, not just the smaller offered FINDING_TYPES set.
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|bug|workaround|context)\](?!\(|\[)\s*(.+)/i;
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
