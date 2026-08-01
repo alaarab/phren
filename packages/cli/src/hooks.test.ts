@@ -36,6 +36,11 @@ describe("hooks", () => {
     });
 
     it("does not detect cursor from a bare ~/.cursor config directory", () => {
+      // Skip when Cursor is genuinely installed — detection keys on the
+      // `cursor` binary, so a real install *should* be detected and the
+      // negative assertion below would be testing the wrong machine. Mirrors
+      // the copilot guard directly beneath this.
+      if (commandExists("cursor")) return;
       const cursorDir = path.join(os.homedir(), ".cursor");
       if (fs.existsSync(cursorDir)) {
         const tools = detectInstalledTools();
