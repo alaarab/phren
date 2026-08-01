@@ -201,6 +201,9 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "tasks.md": "task",
   "changelog.md": "changelog",
   "truths.md": "canonical",
+  // review.md is indexed on purpose so `search_knowledge` can answer "why is this in my
+  // queue?", but `review-queue` is in NON_INJECTABLE_TYPES (shared/retrieval.ts): it is
+  // unreviewed, quarantined content and must never be pushed into a prompt automatically.
   "review.md": "review-queue",
 };
 

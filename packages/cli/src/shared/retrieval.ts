@@ -693,12 +693,37 @@ export async function searchFederatedStores(
 
 const TRUST_FILTERED_TYPES = new Set(["findings", "reference", "knowledge"]);
 
+/**
+ * Doc types that must never be pushed into an agent's prompt automatically.
+ *
+ * - `notes` — personal scratch context; the user's, not the agent's.
+ * - `review-queue` — review.md, which is a *quarantine*. Its entries are candidates
+ *   nobody has approved yet, and the trust filter does not even look at them (they are
+ *   not in TRUST_FILTERED_TYPES), so an unreviewed line would reach a prompt with no
+ *   staleness, confidence, or citation checks at all. Injecting the queue would also
+ *   defeat the point of having a queue: approve/reject would decide nothing, because
+ *   the content is already in play.
+ *
+ * Both remain indexed and reachable through explicit `search_knowledge` — a pull the
+ * caller asked for, tagged with its doc type — which is how a user answers "why is this
+ * in my review queue?" without the content leaking into every prompt.
+ */
+export const NON_INJECTABLE_TYPES = new Set(["notes", "review-queue"]);
+
+/** True when a doc type is allowed on the automatic injection path. */
+export function isInjectableDocType(type: string): boolean {
+  return !NON_INJECTABLE_TYPES.has(type);
+}
+
 export type TrustFilterQueueItem = { project: string; section: "Stale" | "Conflicts"; items: string[] };
 
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
 /** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
- * by the caller — retrieval itself should remain side-effect-free. */
+ * by the caller — retrieval itself should remain side-effect-free.
+ *
+ * This runs only on the automatic injection path, so it is also where non-injectable
+ * doc types (notes, review-queue) are dropped. */
 export function applyTrustFilter(
   rows: DocRow[],
   ttlDays: number,
@@ -711,6 +736,7 @@ export function applyTrustFilter(
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
 
   const filtered = rows
+    .filter((doc) => isInjectableDocType(doc.type))
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
       const trust = filterTrustedFindingsDetailed(doc.content, {
@@ -1028,6 +1054,10 @@ export function selectSnippets(
   }
 
   for (const doc of rows) {
+    // Last gate before content becomes prompt text. Quarantined and personal doc types
+    // never get this far on the normal path, but this is the only place that is
+    // unconditionally true of everything injected, so it is checked here too.
+    if (!isInjectableDocType(doc.type)) continue;
     let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
     if (!snippet.trim()) continue;
     // Mark findings with stale citations before injection
