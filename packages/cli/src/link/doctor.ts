@@ -15,12 +15,12 @@ import {
 import { migrateInvalidProjectNames, formatMigrationSummary } from "../project-migrate.js";
 import { ROOT_MANIFEST_FILENAME } from "../phren-paths.js";
 import { STORES_FILENAME } from "../store-registry.js";
-import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/shared.js";
+import { commandVersion, versionAtLeast, nearestWritableTarget, resolveEntryScript } from "../init/shared.js";
 import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
-import { detectInstalledTools, isEphemeralNpxPath } from "../hooks.js";
+import { detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
@@ -484,26 +484,75 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   let hookOk = false;
   let lifecycleOk = false;
   let hooksEphemeral = false;
-  try {
+  let staleEntrypoints: string[] = [];
+
+  /** Every `command` string under a Claude settings.json hook event. */
+  const phrenHookCommands = (hooks: Record<string, unknown>): string[] => {
+    const commands: string[] = [];
+    for (const event of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"]) {
+      const entries = hooks[event];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!isRecord(entry) || !Array.isArray(entry.hooks)) continue;
+        for (const hook of entry.hooks) {
+          if (isRecord(hook) && typeof hook.command === "string") commands.push(hook.command);
+        }
+      }
+    }
+    return commands.filter((command) => /hook-(prompt|stop|session-start|tool)\b/.test(command));
+  };
+
+  const readHookState = () => {
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    const hooks = cfg?.hooks || {};
+    const hooks = isRecord(cfg?.hooks) ? cfg.hooks as Record<string, unknown> : {};
     const promptHooks = JSON.stringify(hooks.UserPromptSubmit || []);
     const stopHooks = JSON.stringify(hooks.Stop || []);
     const startHooks = JSON.stringify(hooks.SessionStart || []);
-    hookOk = promptHooks.includes("hook-prompt");
-    const stopHookOk = stopHooks.includes("hook-stop");
-    const startHookOk = startHooks.includes("hook-session-start");
-    lifecycleOk = stopHookOk && startHookOk;
-    // A hook command that points into the npx cache (~/.npm/_npx/<hash>/…)
-    // works until npx prunes that cache, then breaks silently. Flag it so a
-    // re-init (which now resolves to the stable ~/.local/bin/phren wrapper)
-    // can repair it before the user notices context has stopped flowing.
-    hooksEphemeral = [promptHooks, stopHooks, startHooks].some(isEphemeralNpxPath);
+    const commands = phrenHookCommands(hooks);
+    return {
+      hookOk: promptHooks.includes("hook-prompt"),
+      lifecycleOk: stopHooks.includes("hook-stop") && startHooks.includes("hook-session-start"),
+      // A hook command that points into the npx cache (~/.npm/_npx/<hash>/…)
+      // works until npx prunes that cache, then breaks silently.
+      ephemeral: [promptHooks, stopHooks, startHooks].some(isEphemeralNpxPath),
+      // A command whose entrypoint no longer exists is worse: it fails on every
+      // single turn with MODULE_NOT_FOUND. `npm i -g @phren/cli` moved the
+      // package entry in 0.1.40, so every upgraded install hit exactly this and
+      // doctor still reported the path as fine.
+      stale: findStaleHookEntrypoints(commands),
+    };
+  };
+
+  try {
+    const state = readHookState();
+    hookOk = state.hookOk;
+    lifecycleOk = state.lifecycleOk;
+    hooksEphemeral = state.ephemeral;
+    staleEntrypoints = state.stale;
   } catch (err: unknown) {
     debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
     hookOk = false;
     lifecycleOk = false;
   }
+
+  // Repair stale/ephemeral hook commands before reporting, so `--fix` actually
+  // fixes the thing rather than reporting it as OK and doing nothing.
+  let hookPathRepaired = false;
+  if (fix && (staleEntrypoints.length > 0 || hooksEphemeral)) {
+    try {
+      const { configureClaude } = await import("../init/config.js");
+      configureClaude(phrenPath);
+      const state = readHookState();
+      hookOk = state.hookOk;
+      lifecycleOk = state.lifecycleOk;
+      hooksEphemeral = state.ephemeral;
+      hookPathRepaired = state.stale.length === 0 && !state.ephemeral;
+      staleEntrypoints = state.stale;
+    } catch (err: unknown) {
+      debugLog(`doctor: hook path repair failed: ${errorMessage(err)}`);
+    }
+  }
+
   checks.push({
     name: "claude-hooks",
     ok: hookOk,
@@ -518,10 +567,16 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   });
   checks.push({
     name: "hook-path-stable",
-    ok: !hooksEphemeral,
-    detail: hooksEphemeral
-      ? "hook commands point into the ephemeral npx cache (~/.npm/_npx/…); re-run `npx @phren/cli init` to repoint at the stable ~/.local/bin/phren wrapper"
-      : "hook commands use a stable entrypoint",
+    ok: !hooksEphemeral && staleEntrypoints.length === 0,
+    detail: staleEntrypoints.length > 0
+      ? `hook commands point at ${staleEntrypoints.length} entrypoint(s) that no longer exist: ${staleEntrypoints.join(", ")}. `
+        + `Every hook fails with MODULE_NOT_FOUND — usually after \`npm install -g @phren/cli\` moved the package entry. `
+        + `Run \`phren doctor --fix\` to repoint them at ${resolveEntryScript()}`
+      : hooksEphemeral
+        ? "hook commands point into the ephemeral npx cache (~/.npm/_npx/…); re-run `npx @phren/cli init` to repoint at the stable ~/.local/bin/phren wrapper"
+        : hookPathRepaired
+          ? "hook commands repaired to the current entrypoint"
+          : "hook commands resolve to an entrypoint that exists",
   });
 
   const runtimeHealthPath = runtimeHealthFile(phrenPath);
