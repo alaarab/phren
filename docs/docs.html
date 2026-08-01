@@ -1272,16 +1272,21 @@ sequenceDiagram
         <table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
+            <tr><td><code>PHREN_FEATURE_TOOL_HOOK</code></td><td>enabled</td><td>Spawns a subprocess after every tool call (PostToolUse hook) — the flag most likely to affect performance; see <code>feature-flags.md</code></td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_EXTRACT</code></td><td>enabled</td><td>Auto memory extraction from project context on each prompt</td></tr>
+            <tr><td><code>PHREN_FEATURE_DAILY_MAINTENANCE</code></td><td>enabled</td><td>Daily background pruning and lock-enforcement job</td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_CAPTURE</code></td><td>disabled</td><td>Extract insights from transcripts at session end</td></tr>
             <tr><td><code>PHREN_FEATURE_GIT_CONTEXT_FILTER</code></td><td>disabled</td><td>Git-context file relevance filtering in search</td></tr>
             <tr><td><code>PHREN_FEATURE_PROGRESSIVE_DISCLOSURE</code></td><td>disabled</td><td>Compact memory index instead of full snippets</td></tr>
             <tr><td><code>PHREN_FEATURE_HYBRID_SEARCH</code></td><td>enabled</td><td>TF-IDF cosine fallback in search_knowledge</td></tr>
+            <tr><td><code>PHREN_FEATURE_QUERY_CORRELATION</code></td><td>disabled</td><td>Log query-to-finding correlations to pre-warm recurring searches</td></tr>
+            <tr><td><code>PHREN_FEATURE_FACT_EXTRACT</code></td><td>disabled</td><td>LLM call per finding to extract a structured preference/fact</td></tr>
+            <tr><td><code>PHREN_FEATURE_GH_MINING</code></td><td>disabled</td><td>Mine GitHub PRs/CI/issues in <code>phren maintain extract</code></td></tr>
           </tbody>
         </table>
 
         <h2 id="cfg-governance">Governance Files <a href="#cfg-governance" class="anchor-link">#</a></h2>
-        <p>Policy is configured via JSON files in <code>~/.phren/.governance/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
+        <p>Policy is configured via JSON files in <code>~/.phren/.config/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
         <pre><code>phren config policy get
 phren config policy set memoryTTLDays=90 decayMultiplier=0.8
 phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
@@ -2033,7 +2038,7 @@ sequenceDiagram
             <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project CLAUDE.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
             <tr><td><code>~/.phren/profiles/</code></td><td>YAML files mapping project sets to profiles</td></tr>
             <tr><td><code>~/.phren/machines.yaml</code></td><td>Machine-to-profile mapping</td></tr>
-            <tr><td><code>~/.phren/.governance/</code></td><td>Policy JSON, access control, install preferences</td></tr>
+            <tr><td><code>~/.phren/.config/</code></td><td>Retention/workflow/index policy JSON, access-control.json</td></tr>
             <tr><td><code>~/.phren/.runtime/</code></td><td>Audit log, debug log, telemetry, search history, locks</td></tr>
             <tr><td><code>~/.phren/.sessions/</code></td><td>Session markers, extraction markers</td></tr>
           </tbody>
@@ -2380,7 +2385,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
           <li><strong>Push failed:</strong> the commit stays local and phren records the error so <code>phren status</code> can show it.</li>
           <li><strong>Hooks disabled or stale:</strong> retrieval stops, but your files are still there; rerun <code>phren init</code>.</li>
           <li><strong>Stale index:</strong> search quality drops until the next rebuild; <code>phren doctor</code> will flag index trouble.</li>
-          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.governance/access-control.json</code>.</li>
+          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.config/access-control.json</code>.</li>
         </ul>
 
         <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
@@ -2498,7 +2503,7 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
             <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
           </tbody>
         </table>
-        <p>Access control is configured in <code>~/.phren/.governance/access-control.json</code>. If no file exists, all users have full access.</p>
+        <p>Access control is configured in <code>~/.phren/.config/access-control.json</code>. If no file exists, all users have full access.</p>
 
         <h3 id="audit-log">Audit Log</h3>
         <p>All mutations are recorded in <code>~/.phren/.runtime/audit.log</code>. Each entry includes the actor, action, timestamp, and relevant parameters.</p>

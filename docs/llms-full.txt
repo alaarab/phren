@@ -277,7 +277,7 @@ Key File Locations:
   ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
   ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
   ~/.phren/.sessions/                - task checkpoint files for cross-session resume
-  ~/.phren/.governance/              - governance policy JSON files
+  ~/.phren/.config/                  - governance policy JSON: retention/workflow/index policy, access-control.json
   ~/.phren/global/skills/            - personal workflow slash commands
   ~/.phren/global/CLAUDE.md          - user-level agent instructions
 
@@ -317,7 +317,7 @@ Agent Support:
 
 Security and governance notes:
   Web UI security: loopback-only bind, per-run auth token, CSRF on mutations, CSP headers
-  RBAC sources: .governance/access-control.json + .runtime/access-control.local.json
+  RBAC sources: .config/access-control.json + .runtime/access-control.local.json
   Telemetry: opt-in only (`phren config telemetry on`), local storage only, no external reporting by default
 
 Docs: https://alaarab.github.io/phren/
