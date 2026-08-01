@@ -39,7 +39,7 @@ import {
   resolveFindingContradiction,
 } from "../finding/lifecycle.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { TEAM_STORE_PATHSPECS } from "../cli-hooks-git.js";
+import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
 
 
 

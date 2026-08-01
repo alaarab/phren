@@ -108,6 +108,28 @@ export async function hasUnrelatedHistories(cwd: string): Promise<boolean> {
   return !mergeBase.ok || !mergeBase.output?.trim();
 }
 
+/**
+ * Files phren is allowed to auto-stage in a team store. Anything not in this
+ * list (notably `.runtime/`, secrets, build output) is skipped on session-stop
+ * and `push_changes`.
+ */
+export const TEAM_STORE_PATHSPECS = [
+  "*/journal/*",
+  "*/tasks.md",
+  "*/truths.md",
+  "*/FINDINGS.md",
+  "*/FINDINGS.md.bak",
+  "*/summary.md",
+  "*/review.md",
+  "*/CLAUDE.md",
+  "*/topic-config.json",
+  "*/phren.project.yaml",
+  "*/reference/**",
+  "*/skills/**",
+  "*/notes/**",
+  ".phren-team.yaml",
+] as const;
+
 export async function countUnsyncedCommits(cwd: string): Promise<number> {
   const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
   if (!upstream.ok || !upstream.output) {
