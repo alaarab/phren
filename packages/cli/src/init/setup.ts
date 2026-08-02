@@ -18,7 +18,7 @@ import {
   runtimeHealthFile,
   isRecord,
 } from "../shared.js";
-import { homePath } from "../phren-paths.js";
+import { ensurePrivateDir, homePath } from "../phren-paths.js";
 import { resolveWorktreeParent } from "../git-worktree.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "../profile-store.js";
 import { getMachineName } from "../machine-identity.js";
@@ -277,17 +277,19 @@ function copyDirRecursive(src: string, dest: string): void {
 
 function ensureRuntimeAssets(phrenPath: string): string[] {
   const created: string[] = [];
+  // Both directories hold per-user private data (credential store, debug and
+  // hook-error logs, session transcripts) and are gitignored by the store
+  // template. ensurePrivateDir creates them 0700 and tightens an existing
+  // 0755 one left behind by an older install.
   const runtimeDir = path.join(phrenPath, ".runtime");
-  if (!fs.existsSync(runtimeDir)) {
-    fs.mkdirSync(runtimeDir, { recursive: true });
-    created.push(".runtime/");
-  }
+  const runtimeExisted = fs.existsSync(runtimeDir);
+  ensurePrivateDir(runtimeDir);
+  if (!runtimeExisted) created.push(".runtime/");
 
   const sessions = sessionsDir(phrenPath);
-  if (!fs.existsSync(sessions)) {
-    fs.mkdirSync(sessions, { recursive: true });
-    created.push(".sessions/");
-  }
+  const sessionsExisted = fs.existsSync(sessions);
+  ensurePrivateDir(sessions);
+  if (!sessionsExisted) created.push(".sessions/");
 
 
 

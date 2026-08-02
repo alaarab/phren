@@ -51,16 +51,60 @@ export function rootManifestPath(phrenPath: string): string {
   return path.join(phrenPath, ROOT_MANIFEST_FILENAME);
 }
 
-export function atomicWriteText(filePath: string, content: string): void {
+export interface AtomicWriteOptions {
+  /**
+   * POSIX mode for the written file, applied to the temp file *before* the
+   * rename. Callers writing secrets must pass this rather than chmod-ing after
+   * the fact: a post-rename chmod leaves the file readable at the default
+   * umask-derived mode (0644 on a stock install) for the whole write window,
+   * which is exactly long enough for another local user to read it.
+   */
+  mode?: number;
+}
+
+export function atomicWriteText(filePath: string, content: string, opts: AtomicWriteOptions = {}): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
+  fs.writeFileSync(tmpPath, content, opts.mode !== undefined ? { mode: opts.mode } : undefined);
   try {
+    // writeFileSync's mode is masked by umask, so re-assert it explicitly. The
+    // temp name is unguessable and freshly created, so this happens before any
+    // other process can have the file open under its final name.
+    if (opts.mode !== undefined && process.platform !== "win32") fs.chmodSync(tmpPath, opts.mode);
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch {}
     throw err;
   }
+}
+
+/**
+ * Create (or tighten) a directory that holds per-user private data — runtime
+ * logs, session transcripts, credential stores.
+ *
+ * Plain `fs.mkdirSync(dir, { recursive: true })` yields 0755 under the stock
+ * 0022 umask, which makes every file inside world-listable and world-readable
+ * on a shared machine. Passing `mode` to mkdirSync is not enough on its own:
+ * mkdirSync's mode applies only to directories it actually *creates*, so a
+ * directory that some earlier code path already made at 0755 keeps that mode
+ * forever. That is not hypothetical — `runtimeFile()` created `~/.phren/.runtime`
+ * with no mode long before `auth/profiles.ts` ever asked for 0700, so the
+ * credential directory shipped world-readable in practice.
+ *
+ * Only ever narrows: if the directory is already 0700 or tighter it is left
+ * alone. Best-effort — a chmod failure (foreign filesystem, Windows) must not
+ * break the caller, since the directory itself is usable either way.
+ */
+export function ensurePrivateDir(dir: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.platform === "win32") return dir;
+  try {
+    const current = fs.statSync(dir).mode & 0o777;
+    if ((current & 0o077) !== 0) fs.chmodSync(dir, 0o700);
+  } catch {
+    // best-effort hardening; the directory is still usable
+  }
+  return dir;
 }
 
 export function isInstallMode(value: unknown): value is InstallMode {
@@ -266,11 +310,16 @@ export function sessionsDir(phrenPath: string): string {
   return path.join(phrenPath, ".sessions");
 }
 
+// `.runtime` holds debug.log, hook-errors.log, memory-usage.log,
+// lookup-events.jsonl and the auth profile store — i.e. verbatim knowledge-base
+// content plus plaintext API keys. It is per-user runtime state, never shared,
+// so it gets 0700. Because ensurePrivateDir also tightens a directory that
+// already exists, this repairs the 0755 `.runtime` that shipped installs have.
 const runtimeDirsMade = new Set<string>();
 export function runtimeFile(phrenPath: string, name: string): string {
   const dir = runtimeDir(phrenPath);
   if (!runtimeDirsMade.has(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    ensurePrivateDir(dir);
     runtimeDirsMade.add(dir);
   }
   return path.join(dir, name);
@@ -309,9 +358,10 @@ export function lookupEventsLogFile(phrenPath: string): string {
   return path.join(runtimeDir(phrenPath), "lookup-events.jsonl");
 }
 
+// `.sessions` holds session transcripts and per-session message artifacts —
+// raw conversation content. Same treatment as `.runtime`.
 export function sessionMarker(phrenPath: string, name: string): string {
-  const dir = sessionsDir(phrenPath);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = ensurePrivateDir(sessionsDir(phrenPath));
   return path.join(dir, name);
 }
 

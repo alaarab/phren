@@ -1,6 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import { atomicWriteText, homePath } from "../phren-paths.js";
+import { atomicWriteText, ensurePrivateDir, homePath } from "../phren-paths.js";
+
+/** POSIX mode for every file that holds plaintext credentials. */
+const CREDENTIAL_FILE_MODE = 0o600;
 
 export type ApiKeyProvider = "openai" | "openrouter" | "anthropic";
 export type AuthProvider = ApiKeyProvider | "openai-codex";
@@ -95,8 +98,15 @@ function codexCliAuthPath(): string {
   return homePath(".codex", "auth.json");
 }
 
+/**
+ * `mkdirSync(..., { mode: 0o700 })` only applies the mode to directories it
+ * creates. `~/.phren/.runtime` is created by `runtimeFile()` on any ordinary
+ * session long before the first `phren auth` call, so the mode argument was a
+ * no-op on every real install and the credential directory sat at 0755.
+ * ensurePrivateDir tightens an existing directory as well as creating one.
+ */
 function ensureAuthProfileDir(): void {
-  fs.mkdirSync(authProfileDir(), { recursive: true, mode: 0o700 });
+  ensurePrivateDir(authProfileDir());
 }
 
 /**
@@ -117,15 +127,20 @@ function migrateLegacyAuthProfilesFile(): void {
   try {
     ensureAuthProfileDir();
     fs.renameSync(legacyPath, currentPath);
-    try { fs.chmodSync(currentPath, 0o600); } catch { /* best effort */ }
+    try { fs.chmodSync(currentPath, CREDENTIAL_FILE_MODE); } catch { /* best effort */ }
   } catch { /* best effort — retried on the next call */ }
 }
 
 function persistProfiles(data: AuthProfilesFile): void {
   ensureAuthProfileDir();
   const filePath = authProfilesFilePath();
-  atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n");
-  try { fs.chmodSync(filePath, 0o600); } catch { /* best effort */ }
+  // Mode goes to the temp file, before the rename. Chmod-ing after the write
+  // leaves the API keys and OAuth refresh tokens at 0644 for the duration of
+  // the write — a window any local user can poll for.
+  atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n", { mode: CREDENTIAL_FILE_MODE });
+  // Belt and braces: rename over a pre-existing 0644 file keeps the *new*
+  // inode's mode, but an interrupted upgrade could leave the old one behind.
+  try { fs.chmodSync(filePath, CREDENTIAL_FILE_MODE); } catch { /* best effort */ }
 }
 
 function normalizeStore(raw: unknown): AuthProfilesFile {

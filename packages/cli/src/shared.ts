@@ -81,6 +81,7 @@ export {
   getPhrenPath,
   qualityMarkers,
   atomicWriteText,
+  ensurePrivateDir,
 } from "./phren-paths.js";
 
 export {
