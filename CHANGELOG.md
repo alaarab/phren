@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-08-02
+
 ### Security
 
 - **Provider credentials are no longer written into a committed directory.** `phren auth`
