@@ -247,7 +247,7 @@ describe("size cap in addFindingToFile", () => {
     // Should have at most cap entries (4), since we added one and had 5 (total 6, archives 2)
     expect(remaining).toBeLessThanOrEqual(4);
 
-    // Knowledge dir should exist with archived entries
+    // reference/ dir should exist with archived entries
     const referenceDir = path.join(phren, "myapp", "reference");
     expect(fs.existsSync(referenceDir)).toBe(true);
   });
