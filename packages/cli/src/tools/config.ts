@@ -29,7 +29,7 @@ import {
   updateProjectConfigOverrides,
 } from "../project-config.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
-import { ACCESS_ROLE_KEYS, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
+import { ACCESS_ROLE_KEYS, ACL_LOCKOUT_HINT, permissionDeniedError, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import {
   readProjectTopics,
   writeProjectTopics,
@@ -525,6 +525,11 @@ async function handleSetConfig(
 
     // ── access ────────────────────────────────────────────────────
     case "access": {
+      // Rewriting the ACL is admin-only. Without this an actor the ACL denies
+      // every mutating action could still add itself to `admins` here.
+      const accessDenied = permissionDeniedError(phrenPath, "manage_config", project);
+      if (accessDenied) return mcpResponse({ ok: false, error: `${accessDenied} ${ACL_LOCKOUT_HINT}` });
+
       const patch: AccessRolePatch = {};
       let touched = false;
       for (const key of ACCESS_ROLE_KEYS) {

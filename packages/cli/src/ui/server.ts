@@ -1038,6 +1038,10 @@ function handlePostSettingsAccess(req: Req, res: Res, url: string, ctx: RouteCtx
       if (Object.prototype.hasOwnProperty.call(parsed, role)) patch[role] = toList(parsed[role]);
     }
     if (!Object.keys(patch).length) return jsonErr(res, "Provide at least one of: admins, contributors, readers");
+    // Rewriting the ACL is admin-only — otherwise a denied actor could POST
+    // itself into `admins` here and undo every other check on this server.
+    const denied = permissionDeniedError(ctx.phrenPath, "manage_config", project || undefined);
+    if (denied) return jsonErr(res, denied, 403);
     try {
       const written = setAccessRoles(ctx.phrenPath, patch, project || undefined);
       jsonOk(res, { ok: true, access: written });

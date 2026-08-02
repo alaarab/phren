@@ -67,6 +67,16 @@ function normalizeStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+/**
+ * Appended to every ACL-write denial. The natural way to lock yourself out is
+ * to run the very first `phren config access set --admins=someone-else`: that
+ * turns open mode off and, because you are not in any list, every later edit
+ * is denied. Recovery is a text edit, so say so rather than leaving the user
+ * to guess.
+ */
+export const ACL_LOCKOUT_HINT =
+  "Editing access control requires the `admins` role. To recover, edit `.config/access-control.json` in the store directly.";
+
 export const ACCESS_ROLE_KEYS = ["admins", "contributors", "readers"] as const;
 export type AccessRole = (typeof ACCESS_ROLE_KEYS)[number];
 export type AccessRolePatch = Partial<Record<AccessRole, string[]>>;
@@ -85,6 +95,24 @@ export function setAccessRoles(
   patch: AccessRolePatch,
   project?: string,
 ): { admins: string[]; contributors: string[]; readers: string[] } {
+  // The ACL is the one object whose own write has to be gated by itself.
+  // Without this, `manage_config` was a role that existed in the table and was
+  // never checked anywhere, so any actor the ACL denied `add_finding` could
+  // call `set_config { action: "access", admins: ["me"] }` and promote itself
+  // to admin — the ACL was a suggestion, not a boundary.
+  //
+  // This is the choke point for all three write surfaces (MCP set_config, the
+  // web UI's POST /api/settings/access, and `phren config access set`); each
+  // also checks up front so it can return its own error shape. Belt and
+  // braces on purpose: the call-site checks give good errors, this one is what
+  // a future fourth caller cannot forget.
+  //
+  // Bootstrapping still works: with no ACL configured anywhere, checkPermission
+  // returns open mode, so the first `setAccessRoles` that creates the ACL is
+  // always allowed.
+  const denied = permissionDeniedError(phrenPath, "manage_config", project);
+  if (denied) throw new Error(`${denied} ${ACL_LOCKOUT_HINT}`);
+
   const clean: AccessControl = {};
   for (const key of ACCESS_ROLE_KEYS) {
     if (patch[key] !== undefined) clean[key] = normalizeStringArray(patch[key]);
