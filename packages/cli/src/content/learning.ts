@@ -5,6 +5,7 @@ import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResu
 import { normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { resolveProject } from "../store-routing.js";
 import {
   type FindingCitation,
   type FindingProvenance,
@@ -293,9 +294,25 @@ function insertFindingIntoContent(content: string, today: string, bullet: string
   return content.trimEnd() + `\n\n## ${today}\n\n${bullet}\n${citationComment}\n`;
 }
 
+/**
+ * Resolve a project directory in the primary store, falling back to registered
+ * secondary stores. Returns the (nonexistent) primary path when the project is
+ * in no store, so callers' existing not-found checks fire unchanged.
+ */
+function resolveProjectDirAcrossStores(phrenPath: string, project: string): string | null {
+  const primary = safeProjectPath(phrenPath, project);
+  if (!primary) return null;
+  if (fs.existsSync(primary)) return primary;
+  try {
+    return resolveProject(phrenPath, project).projectDir;
+  } catch {
+    return primary;
+  }
+}
+
 export function upsertCanonical(phrenPath: string, project: string, memory: string): PhrenResult<string> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = resolveProjectDirAcrossStores(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const canonicalPath = path.join(resolvedDir, "truths.md");
   const today = new Date().toISOString().slice(0, 10);
@@ -332,7 +349,7 @@ export function addFindingToFile(
   const findingError = validateFinding(learning);
   if (findingError) return phrenErr(findingError, PhrenError.EMPTY_INPUT);
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = resolveProjectDirAcrossStores(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 
@@ -498,7 +515,7 @@ export function addFindingsToFile(
   opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string; provenance?: FindingProvenance }
 ): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = resolveProjectDirAcrossStores(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 

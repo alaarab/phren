@@ -3,10 +3,10 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 
 export function resolveProjectStorePath(phrenPath: string, project: string): string {
   try {
-    const { getNonPrimaryStores } = require("../store-registry.js");
     if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
     for (const store of getNonPrimaryStores(phrenPath)) {
       if (fs.existsSync(path.join(store.path, project))) return store.path;

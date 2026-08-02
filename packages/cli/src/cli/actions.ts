@@ -19,17 +19,7 @@ import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, 
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { listAllSessions } from "../tools/session.js";
-
-function resolveProjectStorePath(phrenPath: string, project: string): string {
-  try {
-    const { getNonPrimaryStores } = require("../store-registry.js");
-    if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
-    for (const store of getNonPrimaryStores(phrenPath)) {
-      if (fs.existsSync(path.join(store.path, project))) return store.path;
-    }
-  } catch { /* fall through */ }
-  return phrenPath;
-}
+import { resolveProjectStorePath } from "./namespaces-utils.js";
 
 async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
   const result = await fn();

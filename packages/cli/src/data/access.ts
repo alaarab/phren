@@ -21,7 +21,7 @@ import {
   addFindingToFile,
   type AddFindingResult,
 } from "../shared/content.js";
-import { isValidProjectName, queueFilePath, safeProjectPath } from "../utils.js";
+import { isValidProjectName, QUEUE_FILENAME, safeProjectPath } from "../utils.js";
 import {
   type FindingCitation,
   type FindingProvenance,
@@ -466,7 +466,7 @@ export function removeFinding(phrenPath: string, project: string, match: string)
   if (!ensured.ok) return forwardErr(ensured);
 
   const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
-  if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+  if (!findingsPath.startsWith(path.resolve(ensured.data) + path.sep)) {
     return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
   const filePath = findingsPath;
@@ -505,7 +505,7 @@ export function removeFindings(phrenPath: string, project: string, matches: stri
   if (!ensured.ok) return forwardErr(ensured);
 
   const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
-  if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+  if (!findingsPath.startsWith(path.resolve(ensured.data) + path.sep)) {
     return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
   if (!fs.existsSync(findingsPath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}". Add a finding first with add_finding or :find add.`, PhrenError.FILE_NOT_FOUND);
@@ -565,7 +565,7 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
   if (!newTextTrimmed) return phrenErr("New finding text cannot be empty.", PhrenError.EMPTY_INPUT);
 
   const findingsPath = path.resolve(path.join(ensured.data, FINDINGS_FILENAME));
-  if (!findingsPath.startsWith(phrenPath + path.sep) && findingsPath !== phrenPath) {
+  if (!findingsPath.startsWith(path.resolve(ensured.data) + path.sep)) {
     return phrenErr(`${FINDINGS_FILENAME} path escapes phren store`, PhrenError.VALIDATION_ERROR);
   }
   if (!fs.existsSync(findingsPath)) return phrenErr(`No ${FINDINGS_FILENAME} file found for "${project}".`, PhrenError.FILE_NOT_FOUND);
@@ -605,8 +605,9 @@ export function editFinding(phrenPath: string, project: string, oldText: string,
   });
 }
 
-// Use shared queueFilePath from utils.ts; alias for local brevity.
-const queuePath = queueFilePath;
+// Queue paths derive from the store-resolved project dir (ensureProject),
+// so secondary-store projects hit their own store's review.md.
+const queuePath = (projectDir: string): string => path.join(projectDir, QUEUE_FILENAME);
 
 interface ParsedQueueLine {
   date?: string;
@@ -647,7 +648,7 @@ export function readReviewQueue(phrenPath: string, project: string): PhrenResult
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const file = queuePath(phrenPath, project);
+  const file = queuePath(ensured.data);
   if (!fs.existsSync(file)) return phrenOk([]);
 
   const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -693,7 +694,7 @@ function withQueueLineOp<T>(
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const file = queuePath(phrenPath, project);
+  const file = queuePath(ensured.data);
   if (!fs.existsSync(file)) return phrenErr(`No review queue found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
   return withSafeLock(file, () => {
@@ -723,7 +724,7 @@ function locateQueueLine(phrenPath: string, project: string, lineText: string): 
   const ensured = ensureProject(phrenPath, project);
   if (!ensured.ok) return forwardErr(ensured);
 
-  const file = queuePath(phrenPath, project);
+  const file = queuePath(ensured.data);
   if (!fs.existsSync(file)) return phrenErr(`No review queue found for "${project}".`, PhrenError.FILE_NOT_FOUND);
 
   const lines = fs.readFileSync(file, "utf8").split("\n");

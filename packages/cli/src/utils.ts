@@ -18,6 +18,7 @@ export {
   isValidProjectName,
   safeProjectPath,
   queueFilePath,
+  QUEUE_FILENAME,
 } from "./utils-paths.js";
 
 export {
