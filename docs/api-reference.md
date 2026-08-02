@@ -607,7 +607,7 @@ Read review queue items for one project or all active-profile projects. The revi
 
 ### `manage_review_item`
 
-Manage a review queue item: approve (removes from queue, finding stays in FINDINGS.md), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
+Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses — dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

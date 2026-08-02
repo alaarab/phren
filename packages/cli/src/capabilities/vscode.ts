@@ -2,7 +2,7 @@ import type { CapabilityManifest } from "./types.js";
 
 export const vscodeManifest: CapabilityManifest = {
   surface: "vscode",
-  version: "0.1.17",
+  version: "0.1.42",
   actions: {
     // Finding management
     "finding.add": { implemented: true, handler: "extension.ts:phren.addFinding" },
@@ -29,8 +29,8 @@ export const vscodeManifest: CapabilityManifest = {
 
     // Search
     "search.fts": { implemented: true, handler: "searchQuickPick.ts:showSearchQuickPick" },
-    "search.fragment": { implemented: true, handler: "phrenClient.ts:searchFragments" },
-    "search.related_docs": { implemented: true, handler: "phrenClient.ts:getRelatedDocs" },
+    "search.fragment": { implemented: false, reason: "search_fragments is never called from the extension (no client method exists)" },
+    "search.related_docs": { implemented: false, reason: "get_related_docs is never called from the extension (no client method exists)" },
     "search.history": { implemented: true, handler: "searchQuickPick.ts:searchHistory (in-memory)" },
 
     // Graph

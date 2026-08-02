@@ -1,6 +1,15 @@
-# phren agent
+# phren agent (experimental)
 
-A coding agent with persistent memory. The primary entrypoint is now `phren`; `phren-agent` remains an explicit alias for the standalone runtime. It reads, writes, and edits your code with tool calling, and starts each session knowing your project's gotchas, active tasks, and past decisions.
+> **Status: experimental and unpublished.** `@phren/agent` is **not on npm**
+> and is **not** wired into the `phren` CLI — it lives in `experimental/agent/`
+> in the monorepo, excluded from the default build and test runs, and is
+> maintained at a lower bar than `packages/cli`. Everything below assumes a
+> repo checkout.
+
+A coding agent with persistent memory. Its entrypoint is the standalone
+`phren-agent` binary built from the workspace — **not** the `phren` CLI. It
+reads, writes, and edits your code with tool calling, and starts each session
+knowing your project's gotchas, active tasks, and past decisions.
 
 ---
 
@@ -9,8 +18,11 @@ A coding agent with persistent memory. The primary entrypoint is now `phren`; `p
 ### Install
 
 ```bash
-npm i -g @phren/cli @phren/agent
-phren init                          # set up memory store + MCP config
+git clone https://github.com/alaarab/phren && cd phren
+pnpm install
+pnpm --filter @phren/agent build     # builds experimental/agent/dist
+npm i -g @phren/cli && phren init    # memory store + MCP config (this part IS published)
+alias phren-agent="node $(pwd)/experimental/agent/dist/bin.js"
 ```
 
 ### Authentication
@@ -26,7 +38,7 @@ export OPENAI_API_KEY=sk-...            # OpenAI
 For Codex (ChatGPT subscription), authenticate via browser:
 
 ```bash
-phren auth login
+phren-agent auth login
 ```
 
 Ollama requires no key — just a running local server.
@@ -34,15 +46,13 @@ Ollama requires no key — just a running local server.
 ### First task
 
 ```bash
-phren "fix the login bug"                              # one-shot
-phren -i                                               # interactive TUI
-phren --plan "refactor the database layer"             # review plan first
-phren --provider openai-codex --budget 2.00 "add tests" # pick provider, set cost cap
-phren --reasoning high "trace the auth race"            # override default medium reasoning
-phren --yolo "add input validation"                    # full-auto, no confirmations
+phren-agent "fix the login bug"                              # one-shot
+phren-agent -i                                               # interactive TUI
+phren-agent --plan "refactor the database layer"             # review plan first
+phren-agent --provider openai-codex --budget 2.00 "add tests" # pick provider, set cost cap
+phren-agent --reasoning high "trace the auth race"            # override default medium reasoning
+phren-agent --yolo "add input validation"                    # full-auto, no confirmations
 ```
-
-`phren-agent ...` still works if you prefer the explicit binary.
 
 ---
 
@@ -55,7 +65,7 @@ Auto-detected from env vars, or forced with `--provider <name>`.
 | OpenRouter | claude-sonnet-4-20250514 | `OPENROUTER_API_KEY` |
 | Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
 | OpenAI | gpt-5.4 | `OPENAI_API_KEY` |
-| Codex | gpt-5.4 | `phren auth login` (ChatGPT subscription) |
+| Codex | gpt-5.4 | `phren-agent auth login` (ChatGPT subscription) |
 | Ollama | llama3.3 | Local, no API key needed |
 
 Switch models mid-session with the `/model` command (interactive reasoning level slider).
@@ -188,8 +198,8 @@ The agent has access to these built-in tools:
 Spawn and coordinate multiple agents from a single TUI.
 
 ```bash
-phren --multi                             # start multi-agent TUI
-phren --team myproject "build X"          # team mode with shared tasks
+phren-agent --multi                             # start multi-agent TUI
+phren-agent --team myproject "build X"          # team mode with shared tasks
 ```
 
 In the multi-agent TUI:

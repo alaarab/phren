@@ -5,6 +5,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A malformed `stores.yaml` can no longer be silently discarded — or destroyed.**
+  One invalid entry (a typo'd role, a missing field) used to null out the *entire*
+  registry with nothing logged: every team store vanished from search, injection, and
+  sync, and auto-capture fell back to the personal store. Worse, `phren store add`
+  treated that null as "first install" and overwrote the user's file with a fresh
+  single-store registry. Now invalid entries are skipped individually with a loud
+  stderr warning naming the entry and the reason; `role: secondary` is read as `team`
+  (with a note) instead of rejected; and every registry mutation refuses to write back
+  over a file that could not be fully parsed — fix the file by hand, keep your entries.
+  `readStoreRegistryDetailed` exposes the problems for doctor/status surfaces.
+- **`memory_feedback` is reachable at last.** The feedback loop (score journal →
+  quality multiplier → injection ranking) has been wired end-to-end for months, but the
+  key it scores was never printed anywhere an agent could see. Injected snippet headers
+  now carry it as `fb:<project>/<file>:<digest>`, and the tool description says to pass
+  it verbatim.
+- **iOS: a batch approve is now one commit per file, and never an empty one.** The
+  flush grouped only *consecutive* ops on the same file, so a store-wide triage session
+  interleaving several projects' `review.md` files shattered into one commit per run —
+  41 commits in one observed session, 21 of them empty, because later groups re-PUT
+  byte-identical content the first push already carried (GitHub records those as empty
+  commits). The whole pending queue now flushes as a single plan (one Contents PUT per
+  distinct file, cross-project commit message: `phren: proja(update x3) projb(task) via
+  ios`), and the engine skips any PUT whose bytes already match the remote blob sha.
+- **Docs and capability manifests stopped lying about shipped behavior.**
+  `manage_review_item`'s description and the API reference still described pre-0.1.41
+  approve semantics (approve *promotes* into FINDINGS.md now); the web-UI capability
+  manifest was four releases stale, denying finding/task CRUD and profile switching the
+  UI has had for months, with handler paths into a file that no longer exists; the VS
+  Code manifest claimed fragment-search and related-docs client methods that were never
+  written; `docs/agent.md` told users to `npm i -g @phren/agent`, a package that was
+  never published — it now says experimental/unpublished and documents the checkout
+  workflow; and `docs/store-format.md` §7 under-reported its own conformance coverage
+  (the five fixture gaps are covered, testing is bidirectional, the generator is
+  deterministic — the remaining honest gap, regeneration not being a CI gate, is now
+  called out as such). `TRUST_FILTERED_TYPES` also dropped `"knowledge"`, a doc type
+  nothing can produce anymore.
+
 ## [0.1.42] - 2026-08-02
 
 ### Fixed
