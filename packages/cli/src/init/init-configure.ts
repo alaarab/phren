@@ -10,10 +10,12 @@ import { getProjectOwnershipDefault } from "../project-config.js";
 import {
   atomicWriteText,
   debugLog,
+  ensurePrivateDir,
   projectSlugFromPath,
   readRootManifest,
   writeRootManifest,
 } from "../shared.js";
+import { STORE_SECRET_GITIGNORE_LINES } from "./store-gitignore.js";
 import { errorMessage } from "../utils.js";
 import { configureAllHooks, installPhrenCliWrapper, ensureLocalBinOnWindowsPath } from "../hooks.js";
 import { updateWorkflowPolicy } from "../shared/governance.js";
@@ -383,14 +385,13 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
   ensureGovernanceFiles(phrenPath);
   repairPreexistingInstall(phrenPath);
   fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
-  fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
-  fs.mkdirSync(path.join(phrenPath, ".sessions"), { recursive: true });
+  ensurePrivateDir(path.join(phrenPath, ".runtime"));
+  ensurePrivateDir(path.join(phrenPath, ".sessions"));
   if (!fs.existsSync(path.join(phrenPath, ".gitignore"))) {
     atomicWriteText(
       path.join(phrenPath, ".gitignore"),
       [
-        ".runtime/",
-        ".sessions/",
+        ...STORE_SECRET_GITIGNORE_LINES,
         "*.lock",
         "*.tmp-*",
         "",

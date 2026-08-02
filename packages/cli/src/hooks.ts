@@ -12,6 +12,9 @@ import { PACKAGE_SPEC } from "./package-metadata.js";
 import { logger } from "./logger.js";
 import { withFileLock } from "./shared/governance.js";
 import { resolveManagementCapabilities } from "./init/management-preset.js";
+// Dependency-free leaf module — hooks.ts runs in a per-PostToolUse subprocess
+// and must not pull in content/dedup.ts's import graph.
+import { redactSecretsForLog } from "./content/secrets.js";
 
 export interface HookError {
   code: PhrenErrorCode;
@@ -876,9 +879,25 @@ export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
   }
 }
 
+/**
+ * Every path that reports a custom-hook failure funnels through here and
+ * through buildHookErrorMessage below, so redaction happens in one place.
+ *
+ * The composed message is the hook's own command plus the child's stderr.
+ * Hook commands legitimately carry inline credentials — `curl -H
+ * "Authorization: Bearer …"` contains none of the shell metacharacters
+ * validateCustomHookCommand rejects — and a failing child prints whatever it
+ * wants to stderr, which execFileSync appends to the thrown error's message.
+ * That string was going verbatim into .runtime/hook-errors.log *and* back to
+ * the MCP caller, i.e. into the agent's context and transcript.
+ */
+function buildHookErrorMessage(event: string, command: string, detail: string): string {
+  return redactSecretsForLog(`${event}: ${command}: ${detail}`);
+}
+
 function appendHookErrorLog(phrenPath: string, event: string, message: string): void {
   const logPath = runtimeFile(phrenPath, "hook-errors.log");
-  const line = `[${new Date().toISOString()}] [${event}] ${message}\n`;
+  const line = `[${new Date().toISOString()}] [${event}] ${redactSecretsForLog(message)}\n`;
   try {
     withFileLock(logPath, () => {
       fs.appendFileSync(logPath, line);
@@ -980,7 +999,7 @@ export function runCustomHooks(
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {
-      const message = `${event}: ${hook.command}: ${errorMessage(err)}`;
+      const message = buildHookErrorMessage(event, hook.command, errorMessage(err));
       debugLog(`runCustomHooks: ${message}`);
       errors.push({ code: PhrenError.VALIDATION_ERROR, message });
       try {
@@ -1088,7 +1107,7 @@ export function runPrePromptHooks(
       const trimmed = (result ?? "").trim();
       if (trimmed) outputs.push(trimmed);
     } catch (err: unknown) {
-      const message = `pre-prompt: ${hook.command}: ${errorMessage(err)}`;
+      const message = buildHookErrorMessage("pre-prompt", hook.command, errorMessage(err));
       debugLog(`runPrePromptHooks: ${message}`);
       try {
         appendHookErrorLog(phrenPath, "pre-prompt", errorMessage(err));

@@ -18,7 +18,8 @@ import {
   runtimeHealthFile,
   isRecord,
 } from "../shared.js";
-import { homePath } from "../phren-paths.js";
+import { ensurePrivateDir, homePath } from "../phren-paths.js";
+import { isLiveForeignPhrenRoot, phrenRootFromGlobalClaudeLink } from "./guard-globals.js";
 import { resolveWorktreeParent } from "../git-worktree.js";
 import { addProjectToProfile, listProfiles, resolveActiveProfile, setMachineProfile } from "../profile-store.js";
 import { getMachineName } from "../machine-identity.js";
@@ -277,17 +278,19 @@ function copyDirRecursive(src: string, dest: string): void {
 
 function ensureRuntimeAssets(phrenPath: string): string[] {
   const created: string[] = [];
+  // Both directories hold per-user private data (credential store, debug and
+  // hook-error logs, session transcripts) and are gitignored by the store
+  // template. ensurePrivateDir creates them 0700 and tightens an existing
+  // 0755 one left behind by an older install.
   const runtimeDir = path.join(phrenPath, ".runtime");
-  if (!fs.existsSync(runtimeDir)) {
-    fs.mkdirSync(runtimeDir, { recursive: true });
-    created.push(".runtime/");
-  }
+  const runtimeExisted = fs.existsSync(runtimeDir);
+  ensurePrivateDir(runtimeDir);
+  if (!runtimeExisted) created.push(".runtime/");
 
   const sessions = sessionsDir(phrenPath);
-  if (!fs.existsSync(sessions)) {
-    fs.mkdirSync(sessions, { recursive: true });
-    created.push(".sessions/");
-  }
+  const sessionsExisted = fs.existsSync(sessions);
+  ensurePrivateDir(sessions);
+  if (!sessionsExisted) created.push(".sessions/");
 
 
 
@@ -427,7 +430,27 @@ export function repairPreexistingInstall(
   };
 }
 
-/** Re-create ~/.claude/CLAUDE.md symlink if the source exists but the link is missing/broken. */
+/**
+ * Re-create the ~/.claude/CLAUDE.md symlink if the source exists but the link
+ * is missing or broken.
+ *
+ * The ownership test used to be `target.includes(".phren") ||
+ * target.endsWith("global/CLAUDE.md")`, which treats *any* live phren root's
+ * global file as fair game to unlink. That is how a run with
+ * `PHREN_PATH=/tmp/…` — a smoke test, or phren's own web UI — leaves the
+ * user's real `~/.claude/CLAUDE.md` pointing into a temp directory that then
+ * disappears, and every later Claude session starts with no global context.
+ *
+ * assertNoGlobalWiringConflict does not save us here: it guards `phren init`,
+ * and this function is reached from repairPreexistingInstall(), which runs on
+ * every SessionStart hook (cli/session-start.ts), from the web UI
+ * (ui/server.ts) and from `phren doctor` (link/doctor.ts) — none of which
+ * consult the guard. So the check has to live at the write site.
+ *
+ * New rule: a symlink into a *different* root that still looks live is left
+ * alone. Stale wiring (the root is gone, or was never a root) is still
+ * repaired, which is the case this function exists for.
+ */
 function repairGlobalClaudeSymlink(phrenPath: string): boolean {
   const src = path.join(phrenPath, "global", "CLAUDE.md");
   if (!fs.existsSync(src)) return false;
@@ -437,9 +460,14 @@ function repairGlobalClaudeSymlink(phrenPath: string): boolean {
     if (stat.isSymbolicLink()) {
       const target = path.resolve(path.dirname(dest), fs.readlinkSync(dest));
       if (target === path.resolve(src)) return false; // already correct
-      // Stale symlink pointing elsewhere — managed by phren, safe to replace.
-      // Match .phren dirs and phren-created links (test runs use /tmp/phren-*/global/CLAUDE.md)
-      if (target.includes(".phren") || target.endsWith("global/CLAUDE.md")) fs.unlinkSync(dest);
+      const owningRoot = phrenRootFromGlobalClaudeLink(target);
+      if (owningRoot && isLiveForeignPhrenRoot(owningRoot, phrenPath)) {
+        debugLog(`refusing to repoint ~/.claude/CLAUDE.md: still owned by live phren root ${owningRoot}`);
+        return false;
+      }
+      // Stale phren wiring — safe to replace. `.includes(".phren")` stays for
+      // links that are not shaped like <root>/global/CLAUDE.md.
+      if (owningRoot || target.includes(".phren")) fs.unlinkSync(dest);
       else return false; // not ours, don't touch
     } else {
       return false; // regular file exists, don't clobber

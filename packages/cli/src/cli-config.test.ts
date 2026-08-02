@@ -433,9 +433,11 @@ describe("CLI config: access", () => {
       ["config", "access", "set", "--admins=alice"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
+    // Once the ACL names an admin, further edits require that admin — the
+    // same rule every other RBAC action already followed.
     runCli(
       ["config", "access", "--project", "demo", "set", "--contributors=carol"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "alice" }
     );
     const { stdout } = runCli(
       ["config", "access", "--project", "demo", "get"],
@@ -444,5 +446,24 @@ describe("CLI config: access", () => {
     const payload = JSON.parse(stdout);
     expect(payload.admins).toEqual(["alice"]);
     expect(payload.contributors).toEqual(["carol"]);
+  });
+
+  it("refuses to let a non-admin rewrite the ACL", () => {
+    runCli(
+      ["config", "access", "set", "--admins=alice", "--contributors=bob"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
+    );
+    const escalate = runCli(
+      ["config", "access", "set", "--admins=bob"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "bob" }
+    );
+    expect(escalate.exitCode).not.toBe(0);
+    expect(escalate.stderr).toMatch(/manage_config|admins/);
+
+    const { stdout } = runCli(
+      ["config", "access", "get"],
+      { PHREN_PATH: phrenDir, PHREN_ACTOR: "alice" }
+    );
+    expect(JSON.parse(stdout).admins).toEqual(["alice"]);
   });
 });

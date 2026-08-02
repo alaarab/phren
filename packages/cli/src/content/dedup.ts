@@ -473,49 +473,11 @@ export function normalizeObservationTags(text: string): { text: string; warning?
   return { text: normalized, warning };
 }
 
-/**
- * Scan text for secrets and PII patterns. Returns the type of secret found, or null if clean.
- */
-export function scanForSecrets(text: string): string | null {
-  // AWS Access Key
-  if (/AKIA[0-9A-Z]{16}/.test(text)) return 'AWS access key';
-  // AWS Secret Access Key (variable assignment pattern)
-  if (/(?:aws[_-]?secret|AWS_SECRET)[_-]?(?:access[_-]?)?key[_-]?(?:id)?['":\s]+[A-Za-z0-9/+=]{40}/i.test(text)) return 'AWS secret access key';
-  // JWT token
-  if (/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text)) return 'JWT token';
-  // Long base64-encoded secret-like blob (requires base64 chars including +/= and must not be
-  // a plain hex digest like a git commit SHA — 40-char lowercase hex is explicitly exempt).
-  if (!/^[0-9a-f]{40}$/.test(text) && /(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}/.test(text.replace(/[0-9a-f]{40}/g, ""))) return 'long base64 secret';
-  // Connection string with credentials
-  if (/(mongodb|postgres|mysql|redis):\/\/[^@\s]+:[^@\s]+@/i.test(text)) return 'connection string with credentials';
-  // SSH private key
-  if (/-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/.test(text)) return 'SSH private key';
-  // Anthropic API key
-  if (/sk-ant-api\d{2}-[A-Za-z0-9_\-]{10,}/.test(text)) return 'Anthropic API key';
-  // OpenAI API key
-  if (/sk-proj-[A-Za-z0-9_\-]{30,}/.test(text)) return 'OpenAI API key';
-  // GitHub PAT classic
-  if (/ghp_[A-Za-z0-9]{36}/.test(text)) return 'GitHub personal access token';
-  // GitHub OAuth token
-  if (/gho_[A-Za-z0-9]{36}/.test(text)) return 'GitHub OAuth token';
-  // GitHub tokens (classic, OAuth, user, org, server)
-  if (/gh[pousr]_[A-Za-z0-9]{36}/.test(text)) return 'GitHub token';
-  // Slack bot token
-  if (/xoxb-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack bot token';
-  // Slack user token
-  if (/xoxp-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack user token';
-  // Stripe secret key
-  if (/sk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe secret key';
-  // Stripe publishable key
-  if (/pk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe publishable key';
-  // npm access token
-  if (/npm_[A-Za-z0-9]{36}/.test(text)) return 'npm access token';
-  // GCP service account
-  if (/"private_key_id"\s*:\s*"[^"]{20,}"/.test(text)) return 'GCP service account key';
-  // Generic API key (only when variable name suggests it)
-  if (/['"]?(api_?key|secret|token|password)['"]?\s*[=:]\s*['"]?[a-zA-Z0-9_\-\.]{20,}/i.test(text)) return 'API key or secret';
-  return null;
-}
+// Credential detection lives in a dependency-free leaf module so hooks.ts can
+// use it without dragging in this file's import graph. Re-exported here
+// because content/learning.ts, data/notes.ts and shared/content.ts all import
+// scanForSecrets from dedup.
+export { looksLikePlaceholderSecret, scanForSecrets, redactSecretsForLog } from "./secrets.js";
 
 /**
  * Resolve coreferences in learning text by replacing vague pronouns with concrete names.

@@ -81,6 +81,9 @@ export {
   getPhrenPath,
   qualityMarkers,
   atomicWriteText,
+  ensurePrivateDir,
+  ftsCacheRoot,
+  ensureFtsCacheRootPrivate,
 } from "./phren-paths.js";
 
 export {
