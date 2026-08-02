@@ -5,8 +5,77 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **Provider credentials are no longer written into a committed directory.** `phren auth`
+  stored API keys and OAuth refresh tokens at `.config/auth-profiles.json`, and `.config/`
+  is tracked and pushed — so every user of `phren auth` published their credentials to
+  their store remote. Storage moved to the gitignored `.runtime/`, with a one-time
+  migration. A `.gitignore` entry alone would not have been enough: once a file is
+  tracked, ignoring it neither untracks it nor stops `git add -A` from staging future
+  writes. Both `git add -A` paths (`session-stop`'s auto-save and the `push_changes` tool)
+  now carry unstage guards.
+- **Writes to a team-claimed project no longer fall back to the personal store.**
+  When `stores.yaml` claimed a project for a store that was not present on this machine,
+  the write silently landed in the primary store — which is how employer content reached
+  a personal repository. Writes now fail loudly, naming the store, its expected path, and
+  how to attach it. Reads still degrade gracefully. `add_project` carried a second copy of
+  the same fall-through and was fixed with it.
+- **The FTS snapshot cache was world-readable.** Cache directories and the SQLite
+  snapshots inside them — the full text of every indexed finding, note, and reference doc —
+  were created `0755`/`0644`. On macOS the per-user `$TMPDIR` parent hid this; on Linux
+  `os.tmpdir()` is `/tmp`, so any local account could read a user's whole knowledge base.
+  Now `0700`/`0600`, set at creation.
+- **One store's index could be served into another store's prompts.** The stale-cache
+  fallback picked the most recently modified `.db` in a per-*user* cache directory with no
+  check that it belonged to the requesting store. Snapshots are now namespaced per
+  `(store, profile)`.
+- **`review.md` is no longer injectable.** The review queue was FTS-indexed and absent from
+  the trust-filtered types, so unreviewed, quarantined content could be injected into an
+  agent's prompt. It remains searchable on explicit request.
+- **Store `.gitignore` templates never covered `.env`.**
+- Five dependency advisories closed (three high). Two existing `pnpm.overrides` entries had
+  gone stale against newer advisories and were permitting the vulnerable versions they were
+  meant to exclude.
+
 ### Fixed
 
+- **Approving a review item now promotes it.** `approveQueueItem` only spliced a line out of
+  `review.md`; it never wrote a finding. Extraction queues candidates that were never in
+  `FINDINGS.md`, so approving one silently discarded it — and `rejectQueueItem` could not
+  reach content that consolidation had moved to `reference/topics/`, so it reported success
+  while deleting nothing. For one real store, 153 of 163 queue items were unreachable by
+  both verbs, making approve and reject the same no-op. Approve now promotes through the
+  normal add path (fid, dedup, cap-triggered archive all identical), reject reaches archived
+  content or fails loudly, and each reports which of its outcomes actually occurred. Both
+  verbs now locate and act *before* dequeuing, so a failed operation leaves the item queued.
+- **The index freshness sentinel never fired.** `_buildIndexGuarded` created and removed its
+  own lock file inside `.runtime` *after* writing the sentinel, so the directory's mtime was
+  always newer than the stamp — the fast path was structurally unreachable and had zero hits.
+  Excluding `.runtime` alone would have been a bug, since writing a file does not change its
+  parent directory's mtime and the fast path would then serve stale results after every edit;
+  freshness is now proven by a directory-mtime scan plus a re-hash of the recorded file list.
+- **A stalled embedding backend killed the prompt hook entirely.** `PHREN_OLLAMA_URL`
+  defaults to `localhost:11434`, so every install has a backend "configured". Against a
+  socket that accepts and never answers, the hook sat on a 10-second abort while
+  UserPromptSubmit is registered with a 10-second timeout — the hook was killed and the
+  prompt received no context at all. Reachability is now probed with an 800 ms budget and
+  cached briefly.
+- **Vector search could accept a permanently incomplete index.** `ensure()` stamped a fresh
+  file-stat onto tables built from the caller's in-memory entries, so a long-lived server
+  could seal a stale entry list under a newer revision and every later process would treat
+  it as current, leaving documents unreachable by semantic search.
+- **The Stop hook reported success when the pull leg had failed**, overwriting the previous
+  run's real status each turn so failures never accumulated. Sync failures now persist,
+  unrelated histories are detected specifically, and a degraded store is surfaced.
+- **`doctor` reported `hook-path-stable` as OK without checking the entrypoint exists.**
+  Upgrading via npm moved the package entry and left every hook command pointing at a
+  missing file; `doctor --fix` repaired nothing and reported green.
+- Git worktrees were registered as separate top-level projects; the same repository could be
+  registered twice under two different slugs.
+- VS Code: a failed mutation reported success, because the `ok:false` rejection sat inside a
+  try/catch intended only for `JSON.parse`. The client also never reconnected after a spawn
+  `error` (only after `exit`), leaving it permanently wedged.
 - **`maintain extract` is now idempotent per source commit.** Every sync run re-queued the
   same commits because the review queue only deduped on rendered text, which drifts. One
   store had 224 review items from 84 distinct commits, twenty of them appended eight times.
@@ -26,6 +95,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `phren maintain prune` CLI handler, so background maintenance — which calls
   `pruneDeadMemories` directly — never performed it and `## Stale` stayed empty while
   `## Review` filled up. It now lives in `pruneDeadMemories`, so both callers get it.
+
+### Performance
+
+- **Cold index build: 9,970 ms → 806 ms** on a 1,892-file store, and 60,180 file reads →
+  3,594. Reference documents were being read 36 times each because topic detection re-read
+  and re-tokenised the project's entire corpus once per reference document.
+- **Warm index stage: 147 ms → 47 ms**; sentinel hit rate 0/4 → 4/4 (see above).
+- **Prompt hook with an unreachable embedding backend: 10,376 ms → 305 ms.**
+- **`impact.jsonl` handling: 9.4 ms → 2.7 ms per prompt.** The existing in-process cache
+  never helped, because each prompt runs in a fresh process; the aggregate is now persisted
+  and folded forward on append rather than re-derived from a 1.9 MB log.
+- `experimental/agent` no longer builds or tests by default.
+
+### Added
+
+- `docs/store-format.md` — the store markdown format specified as a contract, including its
+  known rough edges, now that a second implementation exists.
+- A `CONTRIBUTING.md` rule that a rename is not complete until the old name is retired or
+  documented as a legacy read path, plus a guard test pinning the documented MCP tool count
+  to the number actually registered.
+
+### Removed
+
+- `cli-hooks-git.ts`, of whose sixteen exports fourteen were unreachable and two were
+  byte-identical duplicates of live functions in `cli/session-git.ts`.
+- Three bundled starter sample projects (60 KB shipped in every install) that an
+  unconditional guard in `phren init` had always skipped copying.
+
+### Changed
+
+- The three disjoint finding-type vocabularies — offered, decay-table, and auto-detected —
+  reconciled. `[tradeoff]` and `[architecture]` were offered everywhere but had no decay
+  rule; `[workaround]` and `[context]` were written by phren but could not be filtered for.
+  Legacy tags still parse on read.
+
 
 ## [0.1.40] - 2026-07-23
 

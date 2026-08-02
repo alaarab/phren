@@ -21,6 +21,25 @@ export interface EmbeddingCoverage {
   state: "empty" | "cold" | "warming" | "warm";
 }
 
+/**
+ * `[mtimeMs, size]` of the embeddings.json the in-memory map was last built
+ * from. Derived caches (the LSH vector index) stamp *this*, not a fresh stat of
+ * the file, so an index can never claim to describe bytes it never saw.
+ */
+export interface EmbeddingSourceMarker {
+  mtimeMs: number;
+  size: number;
+}
+
+function statSourceMarker(filePath: string): EmbeddingSourceMarker | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+}
+
 function isEmbeddingEntry(value: unknown): value is EmbeddingEntry {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Partial<EmbeddingEntry>;
@@ -49,6 +68,7 @@ export class EmbeddingCache {
   private dirty = false;
   private dirtyUpserts = new Set<string>();
   private dirtyDeletes = new Set<string>();
+  private source: EmbeddingSourceMarker | null = null;
 
   constructor(phrenPath: string) {
     this.phrenPath = phrenPath;
@@ -57,18 +77,32 @@ export class EmbeddingCache {
   async load(): Promise<void> {
     if (this.dirty) return;
     const filePath = runtimeFile(this.phrenPath, "embeddings.json");
+    // Stat before the read: if the file is rewritten mid-read, the recorded
+    // marker is the older one, so derived caches report stale rather than fresh.
+    const marker = statSourceMarker(filePath);
     try {
       const data = readEmbeddingMapFromDisk(filePath);
       this.cache = new Map(Object.entries(data));
+      this.source = marker;
       debugLog(`EmbeddingCache loaded: ${this.cache.size} entries`);
     } catch (err: unknown) {
       const code = err instanceof Error && "code" in err ? String((err as NodeJS.ErrnoException).code ?? "") : "";
       if (code === "ENOENT") {
         this.cache.clear();
+        this.source = null;
         return;
       }
       debugLog(`EmbeddingCache load failed for ${filePath}: ${errorMessage(err)}`);
     }
+  }
+
+  /**
+   * Marker for the embeddings.json revision this in-memory map reflects, or
+   * null when it was never loaded from a file. Pass it to anything that
+   * persists a derived view of `getAllEntries()`.
+   */
+  sourceMarker(): EmbeddingSourceMarker | null {
+    return this.source;
   }
 
   get(docPath: string, model: string): number[] | null {
@@ -111,6 +145,7 @@ export class EmbeddingCache {
         fs.writeFileSync(tmp, JSON.stringify(data));
         fs.renameSync(tmp, filePath);
         this.cache = new Map(Object.entries(data));
+        this.source = statSourceMarker(filePath);
       });
       this.dirty = false;
       this.dirtyUpserts.clear();

@@ -5,7 +5,15 @@ import { STOP_WORDS, errorMessage } from "../utils.js";
 import { porterStem } from "./stemmer.js";
 import type { SqlJsDatabase, DbRow, DocRow } from "./index.js";
 import { classifyFile, normalizeIndexedContent, rowToDocWithRowid } from "./index.js";
-import { embedText, cosineSimilarity, getEmbeddingModel, getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
+import {
+  embedText,
+  cosineSimilarity,
+  getEmbeddingModel,
+  getOllamaUrl,
+  getCloudEmbeddingUrl,
+  getVectorQueryTimeoutMs,
+  isEmbeddingBackendReachable,
+} from "./ollama.js";
 import { getEmbeddingCache } from "./embedding-cache.js";
 import { getPersistentVectorIndex } from "./vector-index.js";
 import * as fs from "fs";
@@ -327,6 +335,16 @@ export async function vectorFallback(
 ): Promise<DocRow[]> {
   // Run when either Ollama or a cloud embedding endpoint is available
   if (!getOllamaUrl() && !getCloudEmbeddingUrl()) return [];
+
+  // Reachability first, and before the embedding cache load. Without a backend
+  // this function can only return [], so parsing a multi-megabyte
+  // embeddings.json ahead of that check is work whose result is already known
+  // — 42ms of a hook's budget on an 8.5MB cache, every prompt, for nothing.
+  if (!await isEmbeddingBackendReachable(phrenPath)) {
+    debugLog("vectorFallback: embedding backend unreachable, skipping vector search");
+    return [];
+  }
+
   const cache = getEmbeddingCache(phrenPath);
   // Ensure the cache is loaded from disk — in hook subprocesses the singleton
   // starts empty because load() is only called in the MCP server / CLI entry.
@@ -337,7 +355,9 @@ export async function vectorFallback(
   }
   if (cache.size() === 0) return [];
 
-  const queryVec = await embedText(query);
+  // A reachable backend can still be slow (a cold model load takes seconds).
+  // Cap the one embedding a prompt waits on so the hook always finishes.
+  const queryVec = await embedText(query, undefined, undefined, getVectorQueryTimeoutMs());
   if (!queryVec || queryVec.length === 0) return [];
 
   const model = getEmbeddingModel();
@@ -357,7 +377,9 @@ export async function vectorFallback(
 
   const eligiblePaths = new Set(entries.map((entry) => entry.path));
   const vectorIndex = getPersistentVectorIndex(phrenPath);
-  vectorIndex.ensure(cache.getAllEntries());
+  // Stamp the index with the revision these entries came from, not with a fresh
+  // stat: a long-lived process's cache can lag the file on disk.
+  vectorIndex.ensure(cache.getAllEntries(), cache.sourceMarker());
   const indexedPaths = vectorIndex.query(model, queryVec, limit, eligiblePaths);
   const candidatePaths = indexedPaths.length > 0 ? new Set(indexedPaths) : eligiblePaths;
 

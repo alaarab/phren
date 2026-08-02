@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   UNIVERSAL_TECH_TERMS_RE,
-  EXTRA_ENTITY_PATTERNS,
+  EXTRA_FRAGMENT_PATTERNS,
   phrenOk,
   phrenErr,
   forwardErr,
@@ -51,11 +51,11 @@ describe("UNIVERSAL_TECH_TERMS_RE", () => {
   });
 });
 
-// ── EXTRA_ENTITY_PATTERNS ───────────────────────────────────────────────────
+// ── EXTRA_FRAGMENT_PATTERNS ───────────────────────────────────────────────────
 
-describe("EXTRA_ENTITY_PATTERNS", () => {
+describe("EXTRA_FRAGMENT_PATTERNS", () => {
   function matchPattern(label: string, text: string): string[] {
-    const pat = EXTRA_ENTITY_PATTERNS.find((p) => p.label === label);
+    const pat = EXTRA_FRAGMENT_PATTERNS.find((p) => p.label === label);
     if (!pat) throw new Error(`No pattern with label: ${label}`);
     const re = new RegExp(pat.re.source, pat.re.flags);
     const matches: string[] = [];
@@ -153,7 +153,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
   });
 
   it("handles empty input for all patterns", () => {
-    for (const { re, label } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re, label } of EXTRA_FRAGMENT_PATTERNS) {
       const matches = "".match(new RegExp(re.source, re.flags));
       expect(matches, `${label} should return null on empty input`).toBeNull();
     }
@@ -161,7 +161,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
 
   it("handles very long strings without hanging", () => {
     const longText = "PHREN_DEBUG ".repeat(10000) + "v1.0.0";
-    for (const { re } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re } of EXTRA_FRAGMENT_PATTERNS) {
       const regex = new RegExp(re.source, re.flags);
       // Should complete without hanging
       const matches: string[] = [];
@@ -173,7 +173,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
 
   it("handles Unicode text without false positives", () => {
     const text = "使用 Python 和 日本語テスト";
-    for (const { re, label } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re, label } of EXTRA_FRAGMENT_PATTERNS) {
       const matches = text.match(new RegExp(re.source, re.flags));
       // None of the extra patterns should match CJK characters
       if (matches) {
