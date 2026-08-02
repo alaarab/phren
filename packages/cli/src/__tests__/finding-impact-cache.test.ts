@@ -144,14 +144,19 @@ describe("impact aggregate", () => {
     const file = logFile();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const filler: string[] = [];
-    for (let i = 0; filler.length === 0 || filler.join("\n").length < 2_050_000; i++) {
-      filler.push(JSON.stringify({
+    // Track the joined length incrementally — join() in the loop condition is
+    // O(n²) and put this test at the CI timeout cliff.
+    let joinedLength = 0;
+    for (let i = 0; joinedLength < 2_050_000; i++) {
+      const line = JSON.stringify({
         findingId: `fid:${(i % 500).toString(16).padStart(8, "0")}`,
         project: "demo",
         timestamp: new Date(1_750_000_000_000 + i * 1000).toISOString(),
         sessionId: `s-${i % 40}`,
         taskCompleted: true,
-      }));
+      });
+      filler.push(line);
+      joinedLength += line.length + 1;
     }
     fs.writeFileSync(file, filler.join("\n") + "\n");
     expect(fs.statSync(file).size).toBeGreaterThan(2_000_000);
