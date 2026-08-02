@@ -48,7 +48,8 @@ Outside the pnpm workspace:
 | `packages/cli/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `packages/cli/browser/graph/` | Shared 3D memory-viewer renderer (bundled for the web UI and the VS Code webview): scene, project navigator, contents/review pane, labels |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
-| `packages/cli/skills/` | Phren slash commands: sync, init, discover, consolidate, profiles, docs |
+| `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads** — `setup.ts` copies from here. |
+| `packages/cli/skills/` | Older un-prefixed copies of the same five skills plus the maintainer-only `docs` skill. Nothing reads this at runtime: every skill lookup resolves against the *store* (`<phrenPath>/global/skills`, `<project>/skills`), never the package. Edit `starter/global/skills/` instead. |
 | `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `packages/cli/starter/templates/` | Project templates: python-project, monorepo, library, frontend |
 | `docs/index.html` | GitHub Pages site |

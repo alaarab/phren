@@ -18,6 +18,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **`phren init` promised slash-commands in a directory it created empty.** `setup.ts`
+  provisions skills from `starter/global/skills/`, which shipped containing only
+  `CLAUDE.md` — so every install created `~/.phren/global/skills`, left it empty, and then
+  printed `ln -s ~/.phren/global/skills/phren-sync ~/.claude/skills/phren-sync`, a symlink
+  to nothing. The five `phren-*` skills (sync, init, discover, consolidate, profiles) now
+  ship there. Verified end to end from a packed tarball installed to a clean prefix:
+  `phren init` populates the store and the managed preset symlinks them into
+  `~/.claude/skills`, so the advertised path resolves to a real `SKILL.md`.
 - **`memory_feedback` silently discarded feedback that used the printed key.** Snippet
   headers advertise the score key as `fb:<key>`; a caller passing that token whole wrote
   a journal entry under a key no `entryScoreKey` can produce — `ok: true`, no effect,
