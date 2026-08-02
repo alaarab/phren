@@ -3,7 +3,8 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { fileURLToPath } from "url";
 import { findPhrenPath } from "./phren-paths.js";
-import { isValidProjectName, safeProjectPath } from "./utils-paths.js";
+import { isValidProjectName } from "./utils-paths.js";
+import { storeAwareProjectPath } from "./store-routing.js";
 
 // Lazy import of logDebug to break circular dependency:
 // utils.ts -> phren-paths.ts -> logger.ts -> phren-paths.ts -> utils.ts
@@ -188,7 +189,7 @@ function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
 
 export function learnedSynonymsPath(phrenPath: string, project: string): string | null {
   if (!isValidProjectName(project)) return null;
-  return safeProjectPath(phrenPath, project, LEARNED_SYNONYMS_FILE);
+  return storeAwareProjectPath(phrenPath, project, LEARNED_SYNONYMS_FILE);
 }
 
 export function loadLearnedSynonyms(project?: string | null, phrenPath?: string | null): Record<string, string[]> {

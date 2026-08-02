@@ -2,7 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "../shared.js";
-import { isFeatureEnabled, safeProjectPath, errorMessage } from "../utils.js";
+import { isFeatureEnabled, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { UNIVERSAL_TECH_TERMS_RE, EXTRA_FRAGMENT_PATTERNS } from "../phren-core.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { logger } from "../logger.js";
@@ -523,7 +524,7 @@ export async function checkSemanticDedup(
 ): Promise<boolean> {
   if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", false)) return false;
 
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return false;
   const findingsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (!fs.existsSync(findingsPath)) return false;
@@ -579,7 +580,7 @@ export async function checkSemanticConflicts(
 ): Promise<{ annotations: string[]; checked: boolean }> {
   if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_CONFLICT", false)) return { annotations: [], checked: false };
 
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return { annotations: [], checked: false };
 
   const newEntities = extractProseEntities(newFinding);

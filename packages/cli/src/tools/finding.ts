@@ -4,7 +4,8 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { logger } from "../logger.js";
-import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
+import { isValidProjectName, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import {
   removeFinding as removeFindingCore,
   removeFindings as removeFindingsCore,
@@ -138,7 +139,7 @@ function withLifecycleMutation<T>(
   return writeQueue(async () => {
     const result = handler();
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     const mapped = mapResponse(result.data);
     return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
@@ -531,7 +532,7 @@ async function handleEditFinding(
   return withWriteQueue(async () => {
     const result = editFindingCore(phrenPath, project, old_text, new_text);
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({
       ok: true,
@@ -563,7 +564,7 @@ async function handleRemoveFinding(
     return withWriteQueue(async () => {
       const result = removeFindingsCore(phrenPath, project, finding);
       if (!result.ok) return mcpResponse({ ok: false, error: result.message });
-      const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+      const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
       if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
       return mcpResponse({ ok: true, message: result.message, data: result.data });
     });
@@ -572,7 +573,7 @@ async function handleRemoveFinding(
   return withWriteQueue(async () => {
     const result = removeFindingCore(phrenPath, project, finding);
     if (!result.ok) return mcpResponse({ ok: false, error: result.message });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({ ok: true, message: result.message, data: result.data });
   });

@@ -16,7 +16,8 @@ import {
 } from "../shared/governance.js";
 import { detectProject } from "../shared/index.js";
 import { commandExists } from "../hooks.js";
-import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand, safeProjectPath } from "../utils.js";
+import { runGit as runGitShared, isFeatureEnabled, clampInt, errorMessage, isValidProjectName, resolveExecCommand } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 import { findingQualityReason } from "../content/quality.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
@@ -374,7 +375,7 @@ function addMarkersFromJournal(file: string, into: ProcessedMemory): void {
  */
 function readProcessedMemory(phrenPath: string, project: string): ProcessedMemory {
   const memory: ProcessedMemory = { commits: new Set<string>(), subjects: new Set<string>() };
-  const projectDir = safeProjectPath(phrenPath, project);
+  const projectDir = storeAwareProjectPath(phrenPath, project);
   if (!projectDir) return memory;
   addMarkersFromFile(path.join(projectDir, "review.md"), memory);
   addMarkersFromFile(path.join(projectDir, FINDINGS_FILENAME), memory);

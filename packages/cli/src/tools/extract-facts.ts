@@ -8,7 +8,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "../shared.js";
-import { safeProjectPath, isFeatureEnabled, errorMessage } from "../utils.js";
+import { isFeatureEnabled, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { callLlm } from "../content/dedup.js";
 import { withFileLock } from "../shared/governance.js";
 import { logger } from "../logger.js";
@@ -23,7 +24,7 @@ export interface ExtractedFact {
 }
 
 function preferencesPath(phrenPath: string, project: string): string | null {
-  const dir = safeProjectPath(phrenPath, project);
+  const dir = storeAwareProjectPath(phrenPath, project);
   return dir ? path.join(dir, "preferences.json") : null;
 }
 

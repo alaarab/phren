@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
 import { writeStoreRegistry, type StoreRegistry } from "./store-registry.js";
+import { storeAwareProjectPath } from "./store-routing.js";
+import { appendReviewQueue } from "./governance/policy.js";
 import { ensureProject } from "./shared/data-utils.js";
 import { PhrenError } from "./shared.js";
 import {
@@ -201,7 +203,35 @@ describe("multi-store data layer", () => {
     });
   });
 
+  describe("storeAwareProjectPath", () => {
+    it("builds paths under the owning secondary store", () => {
+      expect(storeAwareProjectPath(phrenDir, "team-proj")).toBe(path.join(teamDir, "team-proj"));
+      expect(storeAwareProjectPath(phrenDir, "team-proj", "reference", "topics", "general.md")).toBe(
+        path.join(teamDir, "team-proj", "reference", "topics", "general.md"),
+      );
+    });
+
+    it("keeps primary-store paths for primary and unknown projects", () => {
+      expect(storeAwareProjectPath(phrenDir, "personal-proj")).toBe(path.join(phrenDir, "personal-proj"));
+      expect(storeAwareProjectPath(phrenDir, "no-such-proj")).toBe(path.join(phrenDir, "no-such-proj"));
+    });
+
+    it("rejects traversal the same as safeProjectPath", () => {
+      expect(storeAwareProjectPath(phrenDir, "team-proj", "..", "..", "escape.md")).toBeNull();
+    });
+  });
+
   describe("review queue", () => {
+    it("appends queue entries into the secondary store", () => {
+      const result = appendReviewQueue(phrenDir, "team-proj", "Review", ["Candidate from capture"]);
+      expect(result.ok).toBe(true);
+
+      const queueFile = path.join(teamDir, "team-proj", "review.md");
+      expect(fs.existsSync(queueFile)).toBe(true);
+      expect(fs.readFileSync(queueFile, "utf8")).toContain("Candidate from capture");
+      expect(fs.existsSync(path.join(phrenDir, "team-proj"))).toBe(false);
+    });
+
     it("reads the secondary store's review.md", () => {
       fs.writeFileSync(
         path.join(teamDir, "team-proj", "review.md"),

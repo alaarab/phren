@@ -25,7 +25,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `phren truths` and other per-project CLI reads) loaded the store registry with a bare
   `require()` in an ESM package; the ReferenceError was swallowed by its catch and every
   lookup silently fell back to the primary store. It now uses a static import, and the
-  duplicate copy in `cli/actions.ts` was removed in favor of the shared one.
+  duplicate copy in `cli/actions.ts` was removed in favor of the shared one. The web UI
+  had five more of the same dead `require()` calls — listing and switching profiles and
+  every retention/workflow policy update from the settings page threw and surfaced as
+  generic endpoint errors. All are static imports now.
+- **The rest of the per-project path builders are store-aware too.** Beyond the data
+  layer, a shared `storeAwareProjectPath` now backs reference-topic consolidation,
+  cap-triggered finding archiving, semantic dedup/conflict reads, finding lifecycle
+  operations (supersede/retract/link), extraction's already-processed memory, extracted
+  facts, learned synonyms, per-project config, retention pruning, and the search-index
+  refresh after finding writes — so none of them can read from or write to a phantom
+  primary-store path for a project living in a secondary store.
+- **The secret scanner no longer rejects slash-joined identifier chains.** The generic
+  base64 rule matched any 40+ run of letters and slashes, so prose naming a few functions
+  (`addFooToBar/addFoosToBar/upsertBaz`) was discarded as a "long base64 secret." The rule
+  now also requires a digit, which random base64 of that length lacks ~0.1% of the time
+  while camelCase identifier chains never contain one.
 
 ## [0.1.41] - 2026-08-02
 

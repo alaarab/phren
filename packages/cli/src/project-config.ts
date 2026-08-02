@@ -4,7 +4,8 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { readInstallPreferences } from "./init/preferences.js";
 import { debugLog } from "./shared.js";
-import { errorMessage, safeProjectPath } from "./utils.js";
+import { errorMessage } from "./utils.js";
+import { storeAwareProjectPath } from "./store-routing.js";
 import { withFileLock } from "./shared/governance.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 
@@ -73,7 +74,7 @@ export function projectConfigPath(phrenPath: string, project: string): string {
 }
 
 function resolveProjectConfigPath(phrenPath: string, project: string): string | null {
-  return safeProjectPath(phrenPath, project, "phren.project.yaml");
+  return storeAwareProjectPath(phrenPath, project, "phren.project.yaml");
 }
 
 function writeProjectConfigFile(configPath: string, next: ProjectConfig): void {

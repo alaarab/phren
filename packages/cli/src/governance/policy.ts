@@ -3,8 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeDir, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
 import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
-import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
-import { resolveProject } from "../store-routing.js";
+import { errorMessage, isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "../project-config.js";
 import { getActiveProfileDefaults, type ProfilePolicyDefaults } from "../profile-store.js";
 import { runCustomHooks } from "../hooks.js";
@@ -898,11 +898,7 @@ export function appendReviewQueue(
   entries: ReviewQueueEntryInput[],
 ): PhrenResult<number> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  let resolvedDir = safeProjectPath(phrenPath, project);
-  if (resolvedDir && !fs.existsSync(resolvedDir)) {
-    // Absent from the primary store — the project may live in a secondary store.
-    try { resolvedDir = resolveProject(phrenPath, project).projectDir; } catch { /* not-found below */ }
-  }
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const queuePath = path.join(resolvedDir, "review.md");
   const today = new Date().toISOString().slice(0, 10);
@@ -1056,7 +1052,7 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
   if (project && !isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const dirs = project
     ? (() => {
-      const resolvedProject = safeProjectPath(phrenPath, project);
+      const resolvedProject = storeAwareProjectPath(phrenPath, project);
       return resolvedProject ? [resolvedProject] : [];
     })()
     : getProjectDirs(phrenPath).filter((dir) => path.basename(dir) !== "global");

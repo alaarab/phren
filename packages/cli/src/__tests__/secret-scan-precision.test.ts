@@ -104,6 +104,21 @@ describe("scanForSecrets — precision on template markers", () => {
     expect(scanForSecrets("git commit 3f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a is the fix")).toBeNull();
   });
 
+  it("does not discard slash-joined identifier chains as base64", () => {
+    // A 40+ char run of letters and slashes with no digit is prose naming
+    // functions, not an encoded credential. This exact shape was rejected.
+    expect(
+      scanForSecrets("addFindingToFile/addFindingsToFile/upsertCanonical resolve across stores"),
+    ).toBeNull();
+    expect(scanForSecrets("packages/cli/src/content/learning and friends were updated")).toBeNull();
+  });
+
+  it("still flags a digit-bearing base64 blob", () => {
+    // Assembled at runtime; not a real credential.
+    const blob = "dGhpc0lzQV9mYWtlU2VjcmV0QmxvYjEyMzQ1Njc4" + "OTBhYmNkZWZnaA/+" + "==";
+    expect(scanForSecrets(`the dump contained ${blob}`)).toBe("long base64 secret");
+  });
+
   it("a placeholder next to a real secret still fails closed", () => {
     const real = "api_key = " + "aBcD3fGh1JkLmN0pQrStUvWxYz012345";
     expect(scanForSecrets(`token = "<placeholder>" and ${real}`)).toBe("API key or secret");

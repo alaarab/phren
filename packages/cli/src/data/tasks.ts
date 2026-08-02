@@ -11,10 +11,9 @@ import {
   getProjectDirs,
 } from "../shared.js";
 import { validateTaskFormat } from "../shared/content.js";
-import { safeProjectPath } from "../utils.js";
 import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
-import { resolveProject } from "../store-routing.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
@@ -225,16 +224,9 @@ export function applyGravity(items: TaskItem[]): TaskItem[] {
 }
 
 export function canonicalTaskFilePath(phrenPath: string, project: string): string | null {
-  const resolved = safeProjectPath(phrenPath, project);
-  if (!resolved) return null;
-  if (fs.existsSync(resolved)) return path.join(resolved, TASKS_FILENAME);
-  // Absent from this store — the project may live in a registered secondary store.
-  // Locks and writes must target that store's file, not a phantom primary path.
-  try {
-    return path.join(resolveProject(phrenPath, project).projectDir, TASKS_FILENAME);
-  } catch {
-    return path.join(resolved, TASKS_FILENAME);
-  }
+  // Store-aware: locks and writes must target the owning store's file, not a
+  // phantom primary-store path.
+  return storeAwareProjectPath(phrenPath, project, TASKS_FILENAME);
 }
 
 export function isTaskFileName(filename: string): boolean {

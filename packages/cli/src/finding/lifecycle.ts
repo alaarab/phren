@@ -5,7 +5,8 @@ import { PhrenError, phrenErr, phrenOk, type PhrenResult, type FindingTag } from
 // Phren lifecycle comment prefix. No backward compat.
 const LIFECYCLE_PREFIX = "phren";
 import { withFileLock } from "../shared/governance.js";
-import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import {
   isArchiveEnd,
   isArchiveStart,
@@ -282,7 +283,7 @@ function matchFinding(lines: string[], match: string): PhrenResult<MatchedFindin
 
 function findingsPathForProject(phrenPath: string, project: string): PhrenResult<string> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
-  const projectDir = safeProjectPath(phrenPath, project);
+  const projectDir = storeAwareProjectPath(phrenPath, project);
   if (!projectDir) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
   if (!fs.existsSync(projectDir)) return phrenErr(`Project "${project}" not found.`, PhrenError.PROJECT_NOT_FOUND);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);

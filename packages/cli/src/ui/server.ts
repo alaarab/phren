@@ -54,7 +54,8 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "../project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, updateRetentionPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
+import { listProfiles, setMachineProfile, getDefaultMachineAlias } from "../profile-store.js";
 import { setAccessRoles, ACCESS_ROLE_KEYS, permissionDeniedError, type AccessRolePatch } from "../governance/rbac.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
 import { buildConfigView } from "../config/resolve.js";
@@ -1061,7 +1062,6 @@ function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: Rout
 
 function handleGetProfiles(res: Res, ctx: RouteCtx): void {
   try {
-    const { listProfiles } = require("../profile-store.js");
     const profileResult = listProfiles(ctx.phrenPath);
     if (!profileResult.ok) {
       return jsonOk(res, { ok: false, error: profileResult.error, profiles: [] });
@@ -1078,7 +1078,6 @@ function handlePostProfile(req: Req, res: Res, url: string, ctx: RouteCtx): void
     const profileName = String(parsed.profile || "").trim();
     if (!profileName) return jsonErr(res, "Profile name required", 400);
     try {
-      const { setMachineProfile, getDefaultMachineAlias } = require("../profile-store.js");
       const machineAlias = getDefaultMachineAlias();
       const result = setMachineProfile(ctx.phrenPath, machineAlias, profileName);
       if (!result.ok) return jsonErr(res, result.error || "Failed to switch profile", 500);
@@ -1131,7 +1130,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
     if (globalUpdate) {
       try {
         if (NUMERIC_RETENTION_FIELDS.includes(field)) {
-          const { updateRetentionPolicy } = require("../governance/policy.js");
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
             const num = parseFloat(value);
@@ -1142,7 +1140,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           if (!result.ok) return jsonErr(res, result.error || "Failed to update retention policy", 500);
           return jsonOk(res, { ok: true, retentionPolicy: result.data });
         } else if (field.startsWith("decay.")) {
-          const { updateRetentionPolicy } = require("../governance/policy.js");
           const point = field.slice("decay.".length);
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
@@ -1159,7 +1156,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           if (!result.ok) return jsonErr(res, result.error || "Failed to update workflow policy", 500);
           return jsonOk(res, { ok: true, workflowPolicy: result.data });
         } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
-          const { updateWorkflowPolicy } = require("../governance/policy.js");
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
             const num = parseFloat(value);

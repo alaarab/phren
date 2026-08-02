@@ -28,7 +28,8 @@ import {
   type ProjectConfigOverrides,
   updateProjectConfigOverrides,
 } from "../project-config.js";
-import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
+import { errorMessage, isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { ACCESS_ROLE_KEYS, ACL_LOCKOUT_HINT, permissionDeniedError, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import {
   readProjectTopics,
@@ -78,7 +79,7 @@ const projectParam = z.string().optional().describe(
 // ── Topic helpers (shared by get_config topic domain and set_config topic domain) ──
 
 function getTopicConfigData(phrenPath: string, project: string) {
-  const projectDir = safeProjectPath(phrenPath, project);
+  const projectDir = storeAwareProjectPath(phrenPath, project);
   if (!projectDir || !fs.existsSync(projectDir)) {
     return { ok: false as const, error: `Project "${project}" not found in phren.` };
   }
@@ -610,7 +611,7 @@ async function handleSetConfig(
         return mcpResponse({ ok: false, error: errorMessage(err) });
       }
 
-      const projectDir = safeProjectPath(topicPhrenPath, topicProject);
+      const projectDir = storeAwareProjectPath(topicPhrenPath, topicProject);
       if (!projectDir || !fs.existsSync(projectDir)) {
         return mcpResponse({ ok: false, error: `Project "${topicProject}" not found in phren.` });
       }

@@ -91,7 +91,10 @@ export function scanForSecrets(text: string): string | null {
   if (/https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]+/.test(text)) return 'Slack webhook URL';
   // Long base64-encoded secret-like blob (requires base64 chars including +/= and must not be
   // a plain hex digest like a git commit SHA — 40-char lowercase hex is explicitly exempt).
-  if (!/^[0-9a-f]{40}$/.test(text) && /(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}/.test(text.replace(/[0-9a-f]{40}/g, ""))) return 'long base64 secret';
+  // Also requires a digit: 40 random base64 chars lack one ~0.1% of the time, while
+  // slash-joined camelCase identifier chains ("addFooToBar/addFoosToBar/upsertBaz") never
+  // have one — that prose shape was being rejected as a credential.
+  if (!/^[0-9a-f]{40}$/.test(text) && /(?=[A-Za-z0-9+/]*[+/])(?=[A-Za-z+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}/.test(text.replace(/[0-9a-f]{40}/g, ""))) return 'long base64 secret';
   // Connection string with credentials
   if (/(mongodb|postgres|mysql|redis):\/\/[^@\s]+:[^@\s]+@/i.test(text)) return 'connection string with credentials';
   // Private key PEM block. The alternation used to be RSA|EC|OPENSSH only,

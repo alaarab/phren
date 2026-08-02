@@ -2,7 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, phrenOk, phrenErr, PhrenError, appendAuditLog, tryUnlink, type PhrenResult } from "../shared.js";
-import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
+import { isValidProjectName, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { withFileLock } from "../shared/governance.js";
 import { walkDirectory } from "../shared/data-utils.js";
 import { appendArchivedEntriesToTopicDoc, classifyTopicForText, readProjectTopics, topicReferencePath } from "../project-topics.js";
@@ -111,7 +112,7 @@ export function autoArchiveToReference(
   keepCount: number,
 ): PhrenResult<number> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (!fs.existsSync(learningsPath)) return phrenOk(0);
