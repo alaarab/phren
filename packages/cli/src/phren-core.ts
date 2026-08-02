@@ -132,7 +132,18 @@ export type FindingTag = (typeof FINDING_TAGS)[number];
 /** Canonical set of known finding tags for the "unknown tag" write-time warning — derived from FINDING_TAGS (not just FINDING_TYPES) so phren never flags its own auto-written workaround/context tags as unknown. */
 export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TAGS);
 
-/** Document types in the FTS index */
+/**
+ * Document types in the FTS index.
+ *
+ * "canonical" is `truths.md`'s type (see FILE_TYPE_MAP in shared/index.ts):
+ * the file was renamed from `canonical_memories.md` to `truths.md` in the
+ * 0.0.5 rename, but the type string was not renamed with it, so it still
+ * leaks as the literal `--type canonical` / `type: "canonical"` value across
+ * the CLI and API (docs/api-reference.md documents it as-is because that is
+ * what the index actually produces). Renaming it requires touching
+ * shared/index.ts and shared/retrieval.ts together with this file, since all
+ * three must agree on the type string.
+ */
 export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
