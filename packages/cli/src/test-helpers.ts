@@ -174,6 +174,18 @@ export interface CliResult {
 }
 
 /**
+ * Env every spawned CLI inherits. PHREN_PATH and HOME sandbox a test's store
+ * and config, but `npm uninstall -g` resolves against the machine's real npm
+ * prefix and honors neither — so `phren uninstall` under test deleted the
+ * developer's actual global install. Guarding here rather than in the one
+ * uninstall test means no future test can reintroduce it. A caller that is
+ * specifically exercising global removal can override it in `env`.
+ */
+const CLI_TEST_ENV: Record<string, string> = {
+  PHREN_SKIP_GLOBAL_NPM_UNINSTALL: "1",
+};
+
+/**
  * Run the built CLI binary via execFileSync and return stdout/stderr/exitCode.
  * Callers that need spawnSync semantics (e.g. when expecting non-zero exits)
  * may use runCliSpawn instead.
@@ -183,7 +195,7 @@ export function runCliExec(args: string[], env: Record<string, string> = {}): Cl
     ensureCliBuilt();
     const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...CLI_TEST_ENV, ...env },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
     });
@@ -205,7 +217,7 @@ export function runCliSpawn(args: string[], env: Record<string, string> = {}): C
   ensureCliBuilt();
   const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...CLI_TEST_ENV, ...env },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30000,
   });

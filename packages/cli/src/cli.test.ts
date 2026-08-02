@@ -1859,6 +1859,22 @@ describe("CLI integration: uninstall", () => {
 
   afterEach(() => cleanup());
 
+  // Regression: `npm uninstall -g` resolves against the machine's real npm
+  // prefix, which PHREN_PATH and HOME cannot sandbox — so this very test
+  // deleted the developer's actual global @phren/cli install (twice, before
+  // the guard existed). The test helpers set PHREN_SKIP_GLOBAL_NPM_UNINSTALL
+  // for every spawned CLI; this asserts the uninstaller honors it, so the
+  // escape cannot come back unnoticed.
+  it("does not touch the machine's global npm package", () => {
+    const { stdout, exitCode } = runCli(
+      ["uninstall"],
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("PHREN_SKIP_GLOBAL_NPM_UNINSTALL=1");
+    expect(stdout).not.toContain("Removed global npm package");
+  });
+
   it("removes MCP server and hooks from Claude settings", () => {
     runCli(
       ["init", "-y", "--mcp", "on"],

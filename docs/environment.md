@@ -21,6 +21,7 @@ and precedence rules. `phren status` shows the active preset and what it touches
 | `PHREN_PROFILE` | string | (empty) | Active profile name. Filters which projects are indexed. When empty, all projects are indexed. |
 | `PHREN_DEBUG` | `0` or `1` | `0` | Set to `1` to enable debug logging to `~/.phren/debug.log`. |
 | `PHREN_ACTOR` | string | `$USER` or `$USERNAME` | Identifies who performed a governance action. Used in audit logs and access control checks. |
+| `PHREN_SKIP_GLOBAL_NPM_UNINSTALL` | `0` or `1` | `0` | Set to `1` to make `phren uninstall` leave the global npm package (`@phren/cli`) installed. `npm uninstall -g` targets the machine's real npm prefix, which `PHREN_PATH`/`HOME` cannot redirect — set this whenever you run `phren uninstall` against a sandboxed store you don't want affecting the machine. The test helpers set it for every spawned CLI. |
 
 ## Context Injection (hook-prompt)
 

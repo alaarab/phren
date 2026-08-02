@@ -69,8 +69,18 @@ function runSyncCommand(command: string, args: string[]): SyncCommandResult {
 }
 
 function shouldUninstallCurrentGlobalPackage(): boolean {
-  // Always attempt to remove the global package if it exists, regardless of
-  // whether the uninstaller was invoked from the global install or a local repo.
+  // `npm uninstall -g` resolves against the machine's real npm prefix, which
+  // no amount of PHREN_PATH/HOME redirection sandboxes. A test that spawns
+  // `phren uninstall` against temp directories would therefore delete the
+  // developer's actual global install — it did, repeatedly, before this
+  // guard. The test helpers set this for every spawned CLI.
+  if (process.env.PHREN_SKIP_GLOBAL_NPM_UNINSTALL === "1") {
+    log(`  Skipped global npm package removal (PHREN_SKIP_GLOBAL_NPM_UNINSTALL=1)`);
+    return false;
+  }
+  // Otherwise always attempt to remove the global package if it exists,
+  // regardless of whether the uninstaller was invoked from the global install
+  // or a local repo.
   const npmRootResult = runSyncCommand(getNpmCommand(), ["root", "-g"]);
   if (!npmRootResult.ok) return false;
   const npmRoot = npmRootResult.stdout.trim();

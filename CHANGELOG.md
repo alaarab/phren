@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Running the test suite uninstalled your phren.** `cli.test.ts` spawns the real
+  `phren uninstall` against temp directories, but `npm uninstall -g` resolves against
+  the machine's actual npm prefix and honors neither `PHREN_PATH` nor `HOME` — so every
+  full `pnpm test` run deleted the developer's globally installed `@phren/cli`, leaving
+  the `~/.local/bin/phren` wrapper to fall back to its pinned `npx` copy. A new
+  `PHREN_SKIP_GLOBAL_NPM_UNINSTALL=1` guard is honored by the uninstaller and set by the
+  shared CLI test helpers, so no test that spawns the CLI can reach the machine's global
+  install; a regression test asserts it.
 - **A malformed `stores.yaml` can no longer be silently discarded — or destroyed.**
   One invalid entry (a typo'd role, a missing field) used to null out the *entire*
   registry with nothing logged: every team store vanished from search, injection, and
