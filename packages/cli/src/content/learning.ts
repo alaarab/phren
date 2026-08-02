@@ -47,11 +47,28 @@ interface PreparedFinding {
 
 const LIFECYCLE_ANNOTATION_RE = METADATA_REGEX.lifecycleAnnotation;
 
+/** Default finding-id source: 8 lowercase hex chars from a CSPRNG. Overridable
+ *  via `AddFindingOptions.idSource` for deterministic fixture generation
+ *  (apps/ios/scripts/generate-fixtures.mjs) — production callers never set it,
+ *  so this is the only thing that ever runs outside tests. */
+function defaultFindingIdSource(): string {
+  return crypto.randomBytes(4).toString("hex");
+}
+
 interface AddFindingOptions {
   extraAnnotations?: string[];
   sessionId?: string;
   scope?: string;
   provenance?: FindingProvenance;
+  /**
+   * Clock and id-source overrides. Both default to the real clock/CSPRNG, so
+   * omitting them is byte-identical to today's behaviour; they exist solely so
+   * `generate-fixtures.mjs` can make its output reproducible the same way
+   * `notes.addNote`'s `now` option and `tasks.addTask`'s `createdAt` option
+   * already let the fixture generator fix the clock for notes and tasks.
+   */
+  now?: Date;
+  idSource?: () => string;
 }
 
 export interface AddFindingResult {
@@ -164,12 +181,13 @@ interface PrepareFindingOpts {
   inferredRepo?: string;
   headCommit?: string;
   phrenPath?: string;
+  idSource?: () => string;
 }
 
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, idSource } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -188,7 +206,7 @@ function prepareFinding(
       normalizedLearning = `[${detected}] ${normalizedLearning}`;
     }
   }
-  const fid = crypto.randomBytes(4).toString("hex");
+  const fid = (idSource ?? defaultFindingIdSource)();
   const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;
   const scopeComment = buildScopeComment(scope);
@@ -319,7 +337,7 @@ export function addFindingToFile(
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 
   // Secret/PII scan — reject before anything else (before existence check, before lock)
-  const nowIso = new Date().toISOString();
+  const nowIso = (opts?.now ?? new Date()).toISOString();
   const today = nowIso.slice(0, 10);
   const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project, citationInput);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
@@ -347,6 +365,7 @@ export function addFindingToFile(
     const preparedForNewFile = prepareFinding({
       finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
       citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+      idSource: opts?.idSource,
     });
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
@@ -381,6 +400,7 @@ export function addFindingToFile(
     const prepared = prepareFinding({
       finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
       citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+      idSource: opts?.idSource,
     });
     if (prepared.status === "rejected") {
       return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
