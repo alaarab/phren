@@ -269,12 +269,24 @@ export function recordInjection(phrenPath: string, key: string, sessionId?: stri
 }
 
 
+/**
+ * Injected snippet headers label the score key as `fb:<key>` so an agent can
+ * see it. Callers are told to pass it without that prefix, but a model that
+ * copies the token verbatim would otherwise score a key no `entryScoreKey`
+ * can ever produce — an `ok: true` no-op, which is exactly the silent failure
+ * printing the key was meant to end. Accept both spellings.
+ */
+export function normalizeFeedbackKey(key: string): string {
+  return key.startsWith("fb:") ? key.slice(3) : key;
+}
+
 export function recordFeedback(
   phrenPath: string,
-  key: string,
+  rawKey: string,
   feedback: "helpful" | "reprompt" | "regression",
   sessionId?: string,
 ): void {
+  const key = normalizeFeedbackKey(rawKey);
   const delta: ScoreJournalEntry["delta"] = {};
   if (feedback === "helpful") delta.helpful = 1;
   if (feedback === "reprompt") delta.repromptPenalty = 1;

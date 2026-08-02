@@ -101,7 +101,7 @@ import {
   getGitContext,
   trackSessionMetrics,
 } from "./hooks-session.js";
-import { approximateTokens } from "../shared/retrieval.js";
+import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
 
@@ -300,7 +300,7 @@ export async function handleHookPrompt() {
       const kept: SelectedSnippet[] = [];
       let runningTokens = 36;
       for (const s of sorted) {
-        const est = approximateTokens(s.snippet) + 14;
+        const est = approximateTokens(s.snippet) + SNIPPET_OVERHEAD_TOKENS;
         if (runningTokens + est <= maxInjectTokens) {
           kept.push(s);
           runningTokens += est;

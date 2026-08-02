@@ -18,6 +18,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **`memory_feedback` silently discarded feedback that used the printed key.** Snippet
+  headers advertise the score key as `fb:<key>`; a caller passing that token whole wrote
+  a journal entry under a key no `entryScoreKey` can produce — `ok: true`, no effect,
+  which is the exact silent failure printing the key was meant to end. Both spellings now
+  normalize to the same entry. The key also reaches the progressive-disclosure index,
+  which the tool description had always claimed unconditionally.
+- **Snippet selection and rendering disagreed about per-snippet token cost.** Selection
+  charged 14 tokens of header overhead, rendering re-checked at 24, so a snippet that
+  legitimately fit the budget could be dropped during the final layout pass. Both now
+  use one exported `SNIPPET_OVERHEAD_TOKENS`.
+- **iOS: a partial push followed by a conflict stranded work in "Needs attention".** With
+  whole-queue plans, a plan spans several files; if an earlier file's PUT landed and a
+  later one hit a sha conflict, recovery re-applied the ops that had *already* shipped.
+  Replaying a landed `approve` throws "queue item not found", so those ops parked — and
+  `retryFailed` re-parked them forever, with discard the only escape. A failed write now
+  reports which paths committed, and recovery retires them along with every op they
+  completed. (New in the unreleased whole-queue batching; never shipped.)
+- **iOS: the secondary-before-primary write order broke when one file was both.** `reject`
+  mirrors into `FINDINGS.md` while `addFinding` owns it; classifying by "is a primary for
+  some op" pushed `review.md` first, inverting the property that lets refetch-and-replay
+  still find the queue lines it addresses. Paths are now classified by whether they are a
+  secondary for *any* op.
 - **Running the test suite uninstalled your phren.** `cli.test.ts` spawns the real
   `phren uninstall` against temp directories, but `npm uninstall -g` resolves against
   the machine's actual npm prefix and honors neither `PHREN_PATH` nor `HOME` — so every

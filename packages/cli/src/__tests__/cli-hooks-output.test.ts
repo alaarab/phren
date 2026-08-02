@@ -24,6 +24,45 @@ function makeSnippet(overrides: Partial<SelectedSnippet> = {}): SelectedSnippet 
 }
 
 describe("cli-hooks-output", () => {
+  // The whole point of printing the key: memory_feedback scores an
+  // entryScoreKey, and until it appeared in the injected header there was no
+  // way for an agent to learn one. Nothing asserted it, so the feature could
+  // regress silently.
+  describe("feedback key in snippet headers", () => {
+    it("prints the score key as an fb: token an agent can pass back", () => {
+      const parts = buildHookOutput(
+        [makeSnippet({ key: "test-project/FINDINGS.md:a1b2c3d4e5f6" })],
+        50,
+        "test-query",
+        null,
+        "test-project",
+        { indexMs: 1, searchMs: 2, trustMs: 3, rankMs: 4, selectMs: 5 },
+        500,
+        TEST_PHREN_PATH
+      );
+
+      const header = parts.find((p) => p.startsWith("[") && p.includes("(findings)"));
+      expect(header).toBeDefined();
+      expect(header).toContain("fb:test-project/FINDINGS.md:a1b2c3d4e5f6");
+    });
+
+    it("emits one fb: token per rendered snippet", () => {
+      const selected = [
+        makeSnippet({ key: "p/FINDINGS.md:aaaaaaaaaaaa" }),
+        makeSnippet({ key: "p/FINDINGS.md:bbbbbbbbbbbb" }),
+      ];
+      const parts = buildHookOutput(
+        selected, 50, "q", null, "p",
+        { indexMs: 1, searchMs: 1, trustMs: 1, rankMs: 1, selectMs: 1 },
+        5000, TEST_PHREN_PATH
+      );
+      const keys = parts.join("\n").match(/fb:\S+/g) || [];
+      expect(keys).toHaveLength(2);
+      expect(keys).toContain("fb:p/FINDINGS.md:aaaaaaaaaaaa");
+      expect(keys).toContain("fb:p/FINDINGS.md:bbbbbbbbbbbb");
+    });
+  });
+
   describe("buildHookOutput", () => {
     it("returns array with status line, context tags, and trace", () => {
       const selected = [makeSnippet()];

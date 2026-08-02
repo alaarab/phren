@@ -50,6 +50,17 @@ const WEAK_CROSS_PROJECT_OVERLAP_MAX = 0.18;
 const WEAK_CROSS_PROJECT_OVERLAP_PENALTY = 0.75;
 const LOW_FOCUS_SNIPPET_SCORE = 0.3;
 const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
+
+/**
+ * Per-snippet overhead charged against the token budget: the header line
+ * (`[<source key>] (<type>) fb:<score key>`) plus its blank separator.
+ *
+ * Selection and rendering MUST charge the same amount. When they drifted
+ * apart, `selectSnippets` admitted a snippet on one estimate and
+ * `buildHookOutput` re-checked it against a larger one, silently dropping a
+ * middle snippet that legitimately fit.
+ */
+export const SNIPPET_OVERHEAD_TOKENS = 24;
 const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
 const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
 const TASK_RESCUE_MIN_OVERLAP = 0.3;
@@ -1082,14 +1093,14 @@ export function selectSnippets(
         ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
         : focusScore;
     }
-    let est = approximateTokens(snippet) + 14;
+    let est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
     if (selected.length > 0 && focusScore < VERY_LOW_FOCUS_SNIPPET_SCORE && usedTokens + est > Math.floor(tokenBudget * 0.8)) {
       continue;
     }
     if (selected.length > 0 && usedTokens + est > tokenBudget) break;
     if (selected.length === 0 && usedTokens + est > tokenBudget) {
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
-      est = approximateTokens(snippet) + 14;
+      est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
     }
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
     selected.push({ doc, snippet, key });
@@ -1100,7 +1111,7 @@ export function selectSnippets(
   // rounding / compaction producing more tokens than estimated during selection)
   while (selected.length > 1 && usedTokens > tokenBudget) {
     const removed = selected.pop()!;
-    usedTokens -= approximateTokens(removed.snippet) + 14;
+    usedTokens -= approximateTokens(removed.snippet) + SNIPPET_OVERHEAD_TOKENS;
   }
   return { selected, usedTokens };
 }

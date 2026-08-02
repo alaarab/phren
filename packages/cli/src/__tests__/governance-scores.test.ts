@@ -94,6 +94,30 @@ describe("recordInjection", () => {
 // ── recordFeedback ─────────────────────────────────────────────────────────
 
 describe("recordFeedback", () => {
+  // Injected headers label the key `fb:<key>`. An agent that copies that token
+  // whole must score the same entry as one that strips the prefix — otherwise
+  // the call returns ok:true and writes a key no entryScoreKey can produce,
+  // which is the silent no-op that printing the key was meant to end.
+  it("scores the same entry whether or not the fb: prefix is included", () => {
+    const key = entryScoreKey("proj", "FINDINGS.md", "prefixed snippet");
+    recordFeedback(phrenPath, `fb:${key}`, "helpful");
+
+    const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
+    const entry = JSON.parse(fs.readFileSync(journalFile, "utf8").trim().split("\n").pop()!);
+    expect(entry.key).toBe(key);
+    expect(entry.key.startsWith("fb:")).toBe(false);
+    expect(entry.delta.helpful).toBe(1);
+  });
+
+  it("leaves a bare key untouched", () => {
+    const key = entryScoreKey("proj", "FINDINGS.md", "bare snippet");
+    recordFeedback(phrenPath, key, "helpful");
+
+    const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
+    const entry = JSON.parse(fs.readFileSync(journalFile, "utf8").trim().split("\n").pop()!);
+    expect(entry.key).toBe(key);
+  });
+
   it("records helpful feedback in journal", () => {
     const key = entryScoreKey("proj", "FINDINGS.md", "helpful snippet");
     recordFeedback(phrenPath, key, "helpful");
