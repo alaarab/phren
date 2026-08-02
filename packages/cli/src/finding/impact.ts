@@ -287,13 +287,11 @@ export function getHighImpactFindings(phrenPath: string, minSurfaceCount = 3): S
   let summary = peekSummary(phrenPath, file, marker);
   if (!summary) {
     summary = readImpactSummary(phrenPath);
-    summaryCache = { file, marker, summary };
-    // Persist it so the *next* prompt's process — hooks are short-lived, so it
-    // is always a different one — starts from the aggregate instead of the log.
+    // Persist it so the *next* prompt's process — hook-prompt is a new process
+    // every prompt — starts from the aggregate instead of the log.
     writeSidecarSummary(phrenPath, marker, summary);
-  } else {
-    summaryCache = { file, marker, summary };
   }
+  summaryCache = { file, marker, summary };
 
   // Derived per call: the threshold is a caller's choice, not a property of the
   // aggregate, so it does not belong in the cache key.
