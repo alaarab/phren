@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.1.43] - 2026-08-02
 
+### Removed
+
+- **Two orphaned duplicate modules.** `src/init-uninstall.ts` and
+  `src/init-walkthrough.ts` were unreferenced copies of the live modules under
+  `src/init/` — every import resolves inside that directory — but both still compiled
+  into `dist` and shipped in the tarball. They had also diverged from the live versions,
+  which is worse than dead weight: a fix applied to the wrong copy looks correct and does
+  nothing. 1,195 lines of source and ~40 KB of published JavaScript removed.
+
 ### Fixed
 
 - **Running the test suite uninstalled your phren.** `cli.test.ts` spawns the real
