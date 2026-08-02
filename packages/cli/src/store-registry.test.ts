@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
 import {
   readStoreRegistry,
+  readStoreRegistryDetailed,
   writeStoreRegistry,
   resolveAllStores,
   getPrimaryStore,
@@ -470,6 +471,129 @@ stores:
 
     it("throws when no stores.yaml exists", () => {
       expect(() => removeStoreFromRegistry(phrenDir, "team")).toThrow(/No stores.yaml/);
+    });
+  });
+
+  // ── registry hardening ───────────────────────────────────────────────────
+
+  describe("malformed registries stay loud and are never rewritten", () => {
+    /** Two-store registry with one invalid role — the 2026-08-01 field bug. */
+    const oneBadRole = () => `version: 1
+stores:
+  - id: "aaa11111"
+    name: personal
+    path: "${phrenDir.replace(/\\/g, "/")}"
+    role: primary
+    sync: managed-git
+  - id: "bbb22222"
+    name: work
+    path: "${path.join(tmp.path, "work").replace(/\\/g, "/")}"
+    role: sidecar
+    sync: managed-git
+`;
+
+    it("skips only the invalid entry instead of discarding the whole registry", () => {
+      fs.writeFileSync(storesFilePath(phrenDir), oneBadRole());
+
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.registry).not.toBeNull();
+      expect(result.registry!.stores.map((s) => s.name)).toEqual(["personal"]);
+      expect(result.lossy).toBe(true);
+      expect(result.problems.join(" ")).toMatch(/"work".*valid role.*sidecar.*skipped/s);
+    });
+
+    it("reads role \"secondary\" as \"team\" with a warning, not as a broken entry", () => {
+      fs.writeFileSync(
+        storesFilePath(phrenDir),
+        oneBadRole().replace("role: sidecar", "role: secondary")
+      );
+
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.registry!.stores.map((s) => [s.name, s.role])).toEqual([
+        ["personal", "primary"],
+        ["work", "team"],
+      ]);
+      expect(result.lossy).toBe(false);
+      expect(result.problems.join(" ")).toMatch(/secondary.*reading it as "team"/);
+    });
+
+    it("readStoreRegistry warns on stderr instead of failing silently", () => {
+      fs.writeFileSync(storesFilePath(phrenDir), oneBadRole());
+      const warnings: string[] = [];
+      const spy = vi.spyOn(console, "warn").mockImplementation((msg: unknown) => {
+        warnings.push(String(msg));
+      });
+      try {
+        readStoreRegistry(phrenDir);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(warnings.join("\n")).toMatch(/stores\.yaml: store "work"/);
+    });
+
+    it("addStoreToRegistry refuses to bootstrap over a malformed stores.yaml", () => {
+      // The regression this guards: a lossy read used to look like "no
+      // registry", and store add would overwrite the user's file with a
+      // fresh single-store registry — destroying every other entry.
+      const original = oneBadRole();
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      expect(() =>
+        addStoreToRegistry(phrenDir, {
+          id: "ccc33333",
+          name: "another",
+          path: path.join(tmp.path, "another"),
+          role: "team",
+          sync: "managed-git",
+        })
+      ).toThrow(/could not be fully read.*refusing to rewrite/is);
+
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("addStoreToRegistry refuses when stores.yaml is unparsable YAML", () => {
+      const original = "not: valid: yaml: [";
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      expect(() =>
+        addStoreToRegistry(phrenDir, {
+          id: "ccc33333",
+          name: "another",
+          path: path.join(tmp.path, "another"),
+          role: "team",
+          sync: "managed-git",
+        })
+      ).toThrow(/refusing to rewrite/i);
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("removeStoreFromRegistry refuses to persist a lossy read", () => {
+      const original = oneBadRole();
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      // "personal" parsed fine — but writing the registry back would drop
+      // the skipped "work" entry, so the mutation must refuse.
+      expect(() => removeStoreFromRegistry(phrenDir, "personal")).toThrow(/refusing to rewrite/i);
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("a valid registry stays non-lossy and mutable", () => {
+      fs.writeFileSync(
+        storesFilePath(phrenDir),
+        oneBadRole().replace("role: sidecar", "role: team")
+      );
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.lossy).toBe(false);
+      expect(result.problems).toEqual([]);
+
+      addStoreToRegistry(phrenDir, {
+        id: "ccc33333",
+        name: "another",
+        path: path.join(tmp.path, "another"),
+        role: "readonly",
+        sync: "pull-only",
+      });
+      expect(readStoreRegistry(phrenDir)!.stores).toHaveLength(3);
     });
   });
 
