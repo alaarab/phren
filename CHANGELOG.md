@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-08-02
+
+### Fixed
+
+- **The data layer now resolves projects across all registered stores.** Every path
+  builder behind the MCP data tools — `ensureProject`, the task file/lock/archive paths,
+  findings and review-queue paths, and the finding writers — resolved against the primary
+  store only, while `list_projects` used the store-aware resolver. A project living in a
+  secondary store got `No project "X" found` from `get_tasks`, `add_task`, `add_finding`,
+  and everything routed through them; worse, once a same-named directory existed in the
+  primary store, writes landed there and reported success — leaking team content into the
+  personal store. All of these now resolve through the store registry: the primary store
+  wins a name collision, and a project claimed by multiple secondary stores fails with the
+  existing disambiguation error. Task mutators also validate the project exists *before*
+  taking the file lock, which previously mkdir'd an orphan project directory for any
+  typo'd name.
+- **The CLI's store-path fallback was dead code.** `resolveProjectStorePath` (behind
+  `phren truths` and other per-project CLI reads) loaded the store registry with a bare
+  `require()` in an ESM package; the ReferenceError was swallowed by its catch and every
+  lookup silently fell back to the primary store. It now uses a static import, and the
+  duplicate copy in `cli/actions.ts` was removed in favor of the shared one.
+
 ## [0.1.41] - 2026-08-02
 
 ### Security
