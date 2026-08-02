@@ -10,11 +10,24 @@
  * Claude session boots with a SessionStart hook that throws
  *   `NOT_FOUND: phren root not found. Run 'phren init'.`
  *
- * Behavior: before any global file is rewritten, scan the three known
- * locations. If any of them already references a *different* path that
- * resolves to a valid phren root, refuse to proceed unless `--force` is
- * passed. Stale wiring (existing path missing or not a phren root) is not a
- * conflict — init is the right tool to repair it.
+ * Behavior: before any global file is rewritten, scan the known locations. If
+ * any of them already references a *different* path that resolves to a valid
+ * phren root, refuse to proceed unless `--force` is passed. Stale wiring
+ * (existing path missing or not a phren root) is not a conflict — init is the
+ * right tool to repair it.
+ *
+ * Scope, stated precisely because the module name reads broader than it is:
+ * this guards `phren init` only, and only the four locations enumerated in
+ * findConflictingGlobalWiring — the CLI wrapper, settings.json mcpServers,
+ * settings.json hooks, and (added later) the ~/.claude/CLAUDE.md symlink.
+ *
+ * It is NOT a guard on every user-level file phren writes. In particular the
+ * home skill symlinks under ~/.claude/skills are not covered, and
+ * `repairPreexistingInstall()` — which rewrites the same global surfaces and
+ * runs on every SessionStart hook, from the web UI, and from `phren doctor` —
+ * never calls into this module at all. The CLAUDE.md symlink case is handled
+ * at its own write site in init/setup.ts (repairGlobalClaudeSymlink) using the
+ * helpers exported here, so it holds on those paths too.
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -39,12 +52,55 @@ function samePath(a: string, b: string): boolean {
  * — root manifest, machines.yaml, or the global skills tree. We deliberately
  * tolerate partial roots so a clean `phren init` repair still works.
  */
-function looksLikePhrenRoot(candidate: string): boolean {
+export function looksLikePhrenRoot(candidate: string): boolean {
   if (!fs.existsSync(candidate)) return false;
   if (fs.existsSync(path.join(candidate, "phren.root.yaml"))) return true;
   if (fs.existsSync(path.join(candidate, "machines.yaml"))) return true;
   if (fs.existsSync(path.join(candidate, "global"))) return true;
   return false;
+}
+
+/**
+ * True when `candidate` is a *different* phren root than the one being
+ * installed and still looks live. That combination is the one case where
+ * rewriting a global file destroys wiring someone is actually using; a stale
+ * root (deleted, or never a root) is exactly what init exists to repair.
+ */
+export function isLiveForeignPhrenRoot(candidate: string, newPhrenPath: string): boolean {
+  if (samePath(candidate, newPhrenPath)) return false;
+  return looksLikePhrenRoot(candidate);
+}
+
+/**
+ * Recover the phren root that owns a `~/.claude/CLAUDE.md` symlink, from the
+ * link target's shape (`<root>/global/CLAUDE.md`). Returns null when the
+ * target is not structured like a phren global file, i.e. it belongs to
+ * something that is not phren and must not be touched.
+ */
+export function phrenRootFromGlobalClaudeLink(target: string): string | null {
+  const resolved = path.resolve(target);
+  if (path.basename(resolved) !== "CLAUDE.md") return null;
+  const globalDir = path.dirname(resolved);
+  if (path.basename(globalDir) !== "global") return null;
+  const root = path.dirname(globalDir);
+  return root && root !== globalDir ? root : null;
+}
+
+/**
+ * The phren root that `~/.claude/CLAUDE.md` currently points at, or null when
+ * the file is absent, a regular file, or a symlink into something that isn't
+ * a phren store.
+ */
+function readGlobalClaudeMdRoot(): string | null {
+  const dest = homePath(".claude", "CLAUDE.md");
+  let target: string;
+  try {
+    if (!fs.lstatSync(dest).isSymbolicLink()) return null;
+    target = path.resolve(path.dirname(dest), fs.readlinkSync(dest));
+  } catch {
+    return null;
+  }
+  return phrenRootFromGlobalClaudeLink(target);
 }
 
 function readWrapperPath(): string | null {
@@ -94,6 +150,15 @@ export function findConflictingGlobalWiring(newPhrenPath: string): WiringConflic
   const wrapperPath = readWrapperPath();
   if (wrapperPath) {
     record(`~/.local/bin/${process.platform === "win32" ? "phren.cmd" : "phren"} wrapper`, wrapperPath);
+  }
+
+  // ~/.claude/CLAUDE.md is a symlink into <root>/global/CLAUDE.md, i.e. it is
+  // global wiring exactly like the wrapper is — but it was not scanned, so
+  // `phren init` with a throwaway PHREN_PATH would repoint the user's real one
+  // and the guard would report no conflict.
+  const claudeMdRoot = readGlobalClaudeMdRoot();
+  if (claudeMdRoot) {
+    record("~/.claude/CLAUDE.md symlink", claudeMdRoot);
   }
 
   const settings = readClaudeSettings();

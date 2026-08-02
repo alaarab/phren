@@ -130,6 +130,73 @@ describe.sequential("management preset init integration", () => {
     expect(fs.existsSync(homeClaude)).toBe(true);
   });
 
+  // ── ~/.claude/CLAUDE.md ownership ──────────────────────────────────────
+  //
+  // repairPreexistingInstall() runs on every SessionStart hook, from the web
+  // UI, and from `phren doctor` — none of which go through
+  // assertNoGlobalWiringConflict. So a phren process pointed at a throwaway
+  // PHREN_PATH used to silently steal the user's real ~/.claude/CLAUDE.md and
+  // repoint it into a temp directory that later disappears, leaving every
+  // Claude session with no global context. The old ownership test —
+  // `target.endsWith("global/CLAUDE.md")` — treated any live root's global
+  // file as fair game.
+
+  it("a throwaway store does not steal a CLAUDE.md symlink owned by a live store", async () => {
+    const realStore = path.join(tmpRoot, "real-store");
+    process.env.PHREN_PATH = realStore;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const homeClaude = path.join(homeDir, ".claude", "CLAUDE.md");
+    const realTarget = fs.realpathSync(homeClaude);
+    expect(realTarget).toBe(fs.realpathSync(path.join(realStore, "global", "CLAUDE.md")));
+
+    // A second, still-live store — a smoke test run, or phren's own web UI
+    // pointed at a temp path — self-heals against the same $HOME.
+    const throwaway = path.join(tmpRoot, "throwaway-store");
+    process.env.PHREN_PATH = throwaway;
+    await suppressOutput(() => runInit({ yes: true, force: true, managementPreset: "managed" }));
+    suppressOutput(() => repairPreexistingInstall(throwaway));
+
+    expect(fs.realpathSync(homeClaude)).toBe(realTarget);
+  });
+
+  it("still repairs a symlink into a store that no longer exists", async () => {
+    const ghost = path.join(tmpRoot, "ghost-store");
+    process.env.PHREN_PATH = ghost;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const homeClaude = path.join(homeDir, ".claude", "CLAUDE.md");
+    expect(fs.existsSync(homeClaude)).toBe(true);
+
+    // The store goes away — `rm -rf /tmp/foo` — leaving a dangling link. That
+    // is the case this repair exists for and it must still fire.
+    fs.rmSync(ghost, { recursive: true, force: true });
+    expect(fs.existsSync(homeClaude)).toBe(false); // dangling
+    expect(fs.lstatSync(homeClaude).isSymbolicLink()).toBe(true);
+
+    const live = path.join(tmpRoot, "live-store");
+    process.env.PHREN_PATH = live;
+    await suppressOutput(() => runInit({ yes: true, force: true, managementPreset: "managed" }));
+    suppressOutput(() => repairPreexistingInstall(live));
+
+    expect(fs.realpathSync(homeClaude)).toBe(fs.realpathSync(path.join(live, "global", "CLAUDE.md")));
+  });
+
+  it("never replaces a hand-written ~/.claude/CLAUDE.md", async () => {
+    const claudeDir = path.join(homeDir, ".claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const homeClaude = path.join(claudeDir, "CLAUDE.md");
+    fs.writeFileSync(homeClaude, "# my own global context\n");
+
+    const phrenPath = path.join(tmpRoot, "respects-file");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+    suppressOutput(() => repairPreexistingInstall(phrenPath));
+
+    expect(fs.lstatSync(homeClaude).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(homeClaude, "utf8")).toBe("# my own global context\n");
+  });
+
   it("phren preset manual disables hooks", async () => {
     const phrenPath = path.join(tmpRoot, "switch-manual");
     process.env.PHREN_PATH = phrenPath;
