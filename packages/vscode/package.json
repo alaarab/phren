@@ -792,6 +792,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
+    "build": "npm run compile",
     "compile": "tsc -p ./ && node scripts/prepare-graph-asset.mjs",
     "watch": "tsc -watch -p ./",
     "package": "vsce package --no-dependencies",

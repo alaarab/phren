@@ -303,13 +303,21 @@ export async function handleQualityFeedback(args: string[]) {
 }
 
 export async function handleMemoryUi(args: string[]) {
-  const portArg = args.find((arg) => arg.startsWith("--port="));
+  // Accept both `--port=N` and `--port N`. The registry documents the
+  // space-separated form (`phren web-ui [--port <n>]`), which silently fell
+  // through to the default before — the flag looked accepted and was ignored.
+  const eqArg = args.find((arg) => arg.startsWith("--port="));
+  const spaceIdx = args.indexOf("--port");
+  const rawPort = eqArg
+    ? eqArg.slice("--port=".length)
+    : (spaceIdx !== -1 ? args[spaceIdx + 1] : undefined);
+  const portRequested = rawPort !== undefined;
   const noOpen = args.includes("--no-open");
-  const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
+  const port = portRequested ? Number.parseInt(rawPort, 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
   await startWebUi(getPhrenPath(), safePort, resolveRuntimeProfile(getPhrenPath()), {
     autoOpen: !noOpen,
-    allowPortFallback: !portArg,
+    allowPortFallback: !portRequested,
   });
 }
 
