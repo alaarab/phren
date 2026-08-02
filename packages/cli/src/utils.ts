@@ -10,6 +10,7 @@ export {
   errorMessage,
   isFeatureEnabled,
   clampInt,
+  clampFloat,
   getOptionValue,
   getPositionalArgs,
 } from "./utils-helpers.js";
