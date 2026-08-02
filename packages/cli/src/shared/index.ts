@@ -436,9 +436,61 @@ const INDEX_SCHEMA_VERSION = 3; // bump when FTS schema changes to force full re
 // Deletion share above which an incremental update falls back to a full rebuild.
 const MAX_INCREMENTAL_DELETE_RATIO = 0.5;
 
-function hashFileContent(filePath: string): string {
-  const content = fs.readFileSync(filePath, "utf-8");
+function hashContent(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function hashFileContent(filePath: string): string {
+  return hashContent(fs.readFileSync(filePath, "utf-8"));
+}
+
+/** Read a file's text, or null when it is gone/unreadable (races with deletion are normal). */
+function readFileOrNull(filePath: string): string | null {
+  try {
+    return fs.readFileSync(filePath, "utf-8");
+  } catch (err: unknown) {
+    logger.debug("readFileOrNull", errorMessage(err));
+    return null;
+  }
+}
+
+/**
+ * Carries a file's bytes from the pass that hashes it to the pass that indexes
+ * it, so one rebuild reads each file exactly once instead of 2x (hash + insert)
+ * or 3x (hash + insert + fragment extraction on findings files).
+ *
+ * Bounded on purpose: the incremental path can, in the worst case, see every
+ * file as changed, and holding a whole store's markdown in memory to save a
+ * re-read is a bad trade. Past the budget the cache simply stops accepting
+ * entries and the consumer falls back to reading from disk — slower, never
+ * wrong.
+ */
+const BUILD_CONTENT_BUDGET_BYTES = 32 * 1024 * 1024;
+
+class BuildContentCache {
+  private entries = new Map<string, string>();
+  private bytes = 0;
+
+  put(filePath: string, content: string): void {
+    if (this.bytes + content.length > BUILD_CONTENT_BUDGET_BYTES) return;
+    if (this.entries.has(filePath)) return;
+    this.entries.set(filePath, content);
+    this.bytes += content.length;
+  }
+
+  /** Read-and-forget: content is consumed exactly once, then released. */
+  take(filePath: string): string | undefined {
+    const hit = this.entries.get(filePath);
+    if (hit === undefined) return undefined;
+    this.entries.delete(filePath);
+    this.bytes -= hit.length;
+    return hit;
+  }
+
+  clear(): void {
+    this.entries.clear();
+    this.bytes = 0;
+  }
 }
 
 /** Errors expected from idempotent schema migrations run against older cached DBs. */
@@ -642,10 +694,10 @@ function insertFileIntoIndex(
   db: SqlJsDatabase,
   entry: FileEntry,
   phrenPath: string,
-  opts?: { scheduleEmbeddings?: boolean }
+  opts?: { scheduleEmbeddings?: boolean; content?: string }
 ): boolean {
   try {
-    const raw = fs.readFileSync(entry.fullPath, "utf-8");
+    const raw = opts?.content ?? fs.readFileSync(entry.fullPath, "utf-8");
     const content = normalizeIndexedContent(raw, entry.type, phrenPath);
     const indexedContent = applyReferenceTopicHints(entry, content, phrenPath);
     db.run(
@@ -673,9 +725,48 @@ function extractLegacyTopicSlug(entry: FileEntry): string | null {
   return match[1].toLowerCase();
 }
 
+/**
+ * Build-scoped memo for `readProjectTopics()`.
+ *
+ * `readProjectTopics` derives adaptive topics by reading and tokenising the
+ * *whole* project corpus — CLAUDE.md, FINDINGS.md and every reference/*.md —
+ * on each call (see `buildTopicContentSignal` in project-topics.ts). It is
+ * called once per reference document, so a project with R reference docs read
+ * and tokenised its own corpus R times per rebuild. Measured on a 1892-file
+ * store (46 projects x 34 reference docs): 60,180 markdown reads for 1892
+ * files, ~85% of a 9.4s cold build spent in topic re-derivation.
+ *
+ * The answer is per-project, not per-document, and the corpus cannot change
+ * mid-build, so one derivation per project per build is exactly equivalent.
+ * The memo is armed only for the duration of `buildIndexImpl`; single-file
+ * callers such as `updateFileInIndex` keep reading through.
+ */
+const _buildTopicCache = new Map<string, ReturnType<typeof readProjectTopics>>();
+let _buildTopicCacheActive = false;
+
+function beginTopicBuildCache(): void {
+  _buildTopicCacheActive = true;
+  _buildTopicCache.clear();
+}
+
+function endTopicBuildCache(): void {
+  _buildTopicCacheActive = false;
+  _buildTopicCache.clear();
+}
+
+function readProjectTopicsForBuild(phrenPath: string, project: string): ReturnType<typeof readProjectTopics> {
+  if (!_buildTopicCacheActive) return readProjectTopics(phrenPath, project);
+  const key = `${phrenPath} ${project}`;
+  const hit = _buildTopicCache.get(key);
+  if (hit) return hit;
+  const resolved = readProjectTopics(phrenPath, project);
+  _buildTopicCache.set(key, resolved);
+  return resolved;
+}
+
 function detectReferenceTopics(entry: FileEntry, content: string, phrenPath: string): ProjectTopic[] {
   if (entry.type !== "reference") return [];
-  const { topics } = readProjectTopics(phrenPath, entry.project);
+  const { topics } = readProjectTopicsForBuild(phrenPath, entry.project);
   if (!topics.length) return [];
 
   const topicBySlug = new Map<string, ProjectTopic>(topics.map((topic) => [topic.slug, topic]));
@@ -764,12 +855,13 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
     const type = classifyFile(filename, relFile);
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
-    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
+    // Single read feeds the insert, fragment extraction and the content hash.
+    const raw = readFileOrNull(resolvedPath);
+    if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
       // Re-extract fragments for finding files
       if (type === "findings") {
         try {
-          const content = fs.readFileSync(resolvedPath, "utf-8");
-          extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) {
           logger.debug("updateFileInIndex entityExtraction", errorMessage(err));
         }
@@ -779,7 +871,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     // Update hash map for this file
     try {
       const hashData = loadHashMap(phrenPath);
-      hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
+      hashData.hashes[resolvedPath] = raw !== null ? hashContent(raw) : hashFileContent(resolvedPath);
       const stat = fs.statSync(resolvedPath);
       saveHashMap(phrenPath, hashData.hashes, undefined, { [resolvedPath]: { mtimeMs: stat.mtimeMs, size: stat.size } });
     } catch (err: unknown) {
@@ -1213,6 +1305,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   await refreshStoreProjectDirs(phrenPath, profile);
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   beginUserFragmentBuildCache(phrenPath, projectDirs.map(dir => path.basename(dir)));
+  beginTopicBuildCache();
+  const contentCache = new BuildContentCache();
   try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
@@ -1319,7 +1413,16 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             const prevMeta = savedMeta[entry.fullPath];
             const statUnchanged = prevHash !== undefined && prevMeta !== undefined
               && prevMeta.mtimeMs === stat.mtimeMs && prevMeta.size === stat.size;
-            const fileHash = statUnchanged ? prevHash : hashFileContent(entry.fullPath);
+            let fileHash: string;
+            if (statUnchanged) {
+              fileHash = prevHash;
+            } else {
+              // The only read of this file in this rebuild: hand the bytes to the
+              // insert pass below instead of letting it read them again.
+              const raw = fs.readFileSync(entry.fullPath, "utf-8");
+              fileHash = hashContent(raw);
+              contentCache.put(entry.fullPath, raw);
+            }
             currentHashes[entry.fullPath] = fileHash;
             currentMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
             if (!(entry.fullPath in savedHashes)) {
@@ -1393,12 +1496,15 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
-              if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
+              // Reuse the bytes read during hashing; only fall back to disk when
+              // the carry cache declined the file (budget) or never saw it.
+              const carried = contentCache.take(entry.fullPath);
+              const raw = carried ?? readFileOrNull(entry.fullPath);
+              if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
                 updatedCount++;
                 if (entry.type === "findings") {
                   try {
-                    const content = fs.readFileSync(entry.fullPath, "utf-8");
-                    extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
                   } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
                 }
               }
@@ -1477,22 +1583,38 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
   const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
-  for (const entry of allFiles) {
-    try {
-      newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
-      const stat = fs.statSync(entry.fullPath);
-      newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
-    } catch (err: unknown) {
-        logger.debug("computePhrenHash skip", errorMessage(err));
+  // One read per file: the bytes feed the content hash, the FTS insert and (for
+  // findings) fragment extraction. Every insert is batched into a single
+  // transaction so sql.js does not open and commit one per statement.
+  db.run("BEGIN");
+  let fullRebuildCommitted = false;
+  try {
+    for (const entry of allFiles) {
+      const raw = readFileOrNull(entry.fullPath);
+      if (raw === null) continue;
+      try {
+        newHashes[entry.fullPath] = hashContent(raw);
+        const stat = fs.statSync(entry.fullPath);
+        newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
+      } catch (err: unknown) {
+        logger.debug("buildIndex statFile", errorMessage(err));
       }
-    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
-      fileCount++;
-      // Extract fragments from finding files (if not loaded from cache)
-      if (!entityGraphLoaded && entry.type === "findings") {
-        try {
-          const content = fs.readFileSync(entry.fullPath, "utf-8");
-          extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
-        } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
+      if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
+        fileCount++;
+        // Extract fragments from finding files (if not loaded from cache)
+        if (!entityGraphLoaded && entry.type === "findings") {
+          try {
+            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
+        }
+      }
+    }
+    db.run("COMMIT");
+    fullRebuildCommitted = true;
+  } finally {
+    if (!fullRebuildCommitted) {
+      try { db.run("ROLLBACK"); } catch (err: unknown) {
+        logger.debug("buildIndex fullRebuildRollback", errorMessage(err));
       }
     }
   }
@@ -1548,6 +1670,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   return db;
   } finally {
     endUserFragmentBuildCache(phrenPath);
+    endTopicBuildCache();
+    contentCache.clear();
   }
 }
 
