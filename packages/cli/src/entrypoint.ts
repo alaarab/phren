@@ -4,6 +4,7 @@ import { errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import {
   defaultPhrenPath,
+  ensureFtsCacheRootPrivate,
   expandHomePath,
   getPhrenPath,
   readRootManifest,
@@ -174,6 +175,11 @@ export async function runTopLevelCommand(
 
   const cmd = lookupCommand(argvCommand);
   if (!cmd) return false;
+
+  // Any command can end up building or reading the FTS snapshot cache, which
+  // is a SQLite export of the whole store landing in os.tmpdir() — /tmp (1777)
+  // on Linux and WSL. Harden the per-user cache root before the command runs.
+  ensureFtsCacheRootPrivate();
 
   // Intercept before any handler runs - in particular before namespace
   // handlers that used to print their own per-subcommand help text.

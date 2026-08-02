@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   findPhrenPathWithArg,
   debugLog,
+  ensureFtsCacheRootPrivate,
   runtimeDir,
 } from "./shared.js";
 import { log as structuredLog, logger } from "./logger.js";
@@ -95,6 +96,10 @@ async function main() {
 
   const profile = resolveRuntimeProfile(phrenPath);
   cleanStaleLocks(phrenPath);
+  // Before buildIndex() writes the first snapshot: the FTS cache is a full
+  // SQLite export of the store, and on Linux it lands in a world-readable
+  // /tmp. A 0700 root makes it unreachable to other local accounts.
+  ensureFtsCacheRootPrivate();
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
   let indexReady = false;
   let shuttingDown = false;

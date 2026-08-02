@@ -325,6 +325,61 @@ export function runtimeFile(phrenPath: string, name: string): string {
   return path.join(dir, name);
 }
 
+/**
+ * Per-user root for the FTS snapshot cache: `os.tmpdir()/phren-fts-<uid>`.
+ *
+ * Canonical definition of the path lives here, with every other phren path
+ * helper. `shared/index.ts` currently has its own private copy — see
+ * ensureFtsCacheRootPrivate() for why that matters and what still needs to
+ * change there.
+ */
+export function ftsCacheRoot(): string {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
+  }
+  return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+
+/**
+ * Make the FTS snapshot cache root private, creating it if needed.
+ *
+ * The snapshot is a SQLite export of the *entire* indexed store — the full
+ * text of every finding, note, task and reference doc. It was being written
+ * as an 0644 file inside an 0755 directory:
+ *
+ *   drwxr-xr-x  $TMPDIR/phren-fts-501
+ *   -rw-r--r--  $TMPDIR/phren-fts-501/<storeKey>/<hash>.db
+ *
+ * On macOS `os.tmpdir()` is a per-user `/var/folders/…/T` at 0700, which is
+ * the only reason this is not already a leak there. On Linux and WSL
+ * `os.tmpdir()` is `/tmp` — mode 1777, world-readable — so any local account
+ * can read another user's whole knowledge base. phren ships cross-platform on
+ * npm, so that is a live exposure, not a theoretical one.
+ *
+ * A 0700 root closes it completely: POSIX denies traversal into the directory,
+ * so the modes of the per-store subdirectory and the .db files inside it stop
+ * being reachable at all. Called once per process from the CLI and MCP-server
+ * entrypoints, which both creates it correctly on a clean machine and repairs
+ * the 0755 root on machines that already have one.
+ *
+ * Still worth doing for defence in depth, in the file that actually writes
+ * them: `shared/index.ts` should pass `{ recursive: true, mode: 0o700 }` to
+ * the `fs.mkdirSync(cacheDir, …)` calls and `{ mode: 0o600 }` to the
+ * `fs.writeFileSync(cacheFile, db.export())` calls. That file is owned by
+ * another change in flight, so it is reported rather than edited here.
+ */
+export function ensureFtsCacheRootPrivate(): string {
+  try {
+    return ensurePrivateDir(ftsCacheRoot());
+  } catch {
+    // Never let cache hardening break startup; the cache itself is optional.
+    return ftsCacheRoot();
+  }
+}
+
 export function installPreferencesFile(phrenPath: string): string {
   return path.join(runtimeDir(phrenPath), "install-preferences.json");
 }
