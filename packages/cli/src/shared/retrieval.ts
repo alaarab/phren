@@ -691,7 +691,10 @@ export async function searchFederatedStores(
 
 // ── Trust filter ─────────────────────────────────────────────────────────────
 
-const TRUST_FILTERED_TYPES = new Set(["findings", "reference", "knowledge"]);
+// "knowledge" was a doc type until the 0.0.x renames; classifyFile can no
+// longer produce it, so listing it here was dead weight that made the set
+// read as broader than it is.
+const TRUST_FILTERED_TYPES = new Set(["findings", "reference"]);
 
 /**
  * Doc types that must never be pushed into an agent's prompt automatically.

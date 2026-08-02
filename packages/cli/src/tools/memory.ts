@@ -91,9 +91,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     "memory_feedback",
     {
       title: "◆ phren · feedback",
-      description: "Record feedback on whether an injected memory was helpful or noisy/regressive.",
+      description:
+        "Record feedback on whether an injected memory was helpful or noisy/regressive. " +
+        "The key is printed in <phren-context> snippet headers as `fb:<project>/<file>:<digest>` — pass it verbatim (without the `fb:` prefix). " +
+        "Feedback adjusts that memory's ranking weight in future injections.",
       inputSchema: z.object({
-        key: z.string().describe("Memory key to score."),
+        key: z.string().describe("Feedback key, exactly as printed after `fb:` in an injected snippet header (e.g. `myproj/FINDINGS.md:a1b2c3d4e5f6`)."),
         feedback: z.enum(["helpful", "reprompt", "regression"]).describe("Feedback type."),
       }),
     },

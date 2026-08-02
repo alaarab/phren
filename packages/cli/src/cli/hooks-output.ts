@@ -102,13 +102,14 @@ export function buildHookOutput(
       let totalTokens = 36; // base overhead
       const keep: boolean[] = ordered.map(() => true);
       for (let i = 0; i < ordered.length; i++) {
-        totalTokens += approximateTokens(ordered[i].snippet) + 14;
+        // 24 ≈ header line ([source key] (type) fb:key) + blank separator.
+        totalTokens += approximateTokens(ordered[i].snippet) + 24;
       }
       // Trim from the middle (indices 1..N-2) if over budget
       if (totalTokens > tokenBudget) {
         for (let i = ordered.length - 2; i >= 1; i--) {
           if (totalTokens <= tokenBudget) break;
-          totalTokens -= approximateTokens(ordered[i].snippet) + 14;
+          totalTokens -= approximateTokens(ordered[i].snippet) + 24;
           keep[i] = false;
         }
         ordered = ordered.filter((_, i) => keep[i]);
@@ -132,7 +133,12 @@ export function buildHookOutput(
       } catch (err: unknown) {
         logger.debug("hooks-output", `injectContext recordRetrievalOrdered: ${errorMessage(err)}`);
       }
-      parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
+      // `fb:` is the memory_feedback handle. The tool scores entryScoreKey
+      // (project/filename:digest) — NOT the mem: source key and NOT an fid —
+      // and this header was the only place the injection pipeline had the
+      // key in hand; before it was printed here, the feedback loop was
+      // built, wired into ranking, and unreachable.
+      parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type}) fb:${key}`);
       parts.push(annotateStale(snippet));
       parts.push("");
     }

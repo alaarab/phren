@@ -586,7 +586,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · manage review item",
       description:
-        "Manage a review queue item: approve (removes from queue, finding stays), reject (removes from queue AND FINDINGS.md), or edit (updates text in both).",
+        "Manage a review queue item: approve (PROMOTES the queued line into FINDINGS.md — if the finding is already present or archived it just dequeues), reject (removes from queue AND FINDINGS.md), or edit (updates text in both).",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         line: z.string().max(10000).describe("The raw queue line text (as returned by get_review_queue)."),
