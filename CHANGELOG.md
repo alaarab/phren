@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.43] - 2026-08-02
+
 ### Fixed
 
 - **A malformed `stores.yaml` can no longer be silently discarded — or destroyed.**
