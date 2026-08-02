@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "../shared.js";
 import { isFeatureEnabled, safeProjectPath, errorMessage } from "../utils.js";
-import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "../phren-core.js";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_FRAGMENT_PATTERNS } from "../phren-core.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { logger } from "../logger.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
@@ -321,7 +321,7 @@ function extractProseEntities(text: string, dynamicEntities?: Set<string>): stri
   while ((m = re.exec(text)) !== null) found.add(m[0].toLowerCase());
 
   // Match additional fragment patterns (versions, env keys, file paths, error codes, dates)
-  for (const { re: pattern } of EXTRA_ENTITY_PATTERNS) {
+  for (const { re: pattern } of EXTRA_FRAGMENT_PATTERNS) {
     const pRe = new RegExp(pattern.source, pattern.flags);
     let pm: RegExpExecArray | null;
     while ((pm = pRe.exec(text)) !== null) found.add(pm[0].toLowerCase());

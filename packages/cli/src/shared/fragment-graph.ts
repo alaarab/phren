@@ -6,6 +6,17 @@ import { logger } from "../logger.js";
 import { UNIVERSAL_TECH_TERMS_RE } from "../phren-core.js";
 import { errorMessage } from "../utils.js";
 
+// NOTE on naming: "entity" was renamed to "fragment" everywhere user-facing
+// (CHANGELOG 0.0.5) — tool names, titles, and descriptions in tools/graph.ts
+// all say "fragment" now. The underlying SQLite tables (`entities`,
+// `entity_links`, `global_entities`, created in shared/index.ts) and the
+// on-disk `.runtime/manual-links.json` format (`{entity, entityType, ...}`)
+// were never renamed to match. Both are effectively rebuilt/local-runtime
+// state rather than synced source-of-truth files, so a rename would not need
+// a store migration in the git-history sense, but it does require touching
+// shared/index.ts (which creates the tables and reads manual-links.json) —
+// out of scope for a change confined to this file.
+
 /** @internal Exported for tests. */
 export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 

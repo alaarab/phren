@@ -99,6 +99,10 @@ Read `CLAUDE.md` for the full set of conventions. The highlights:
 4. Keep commits focused. One logical change per commit.
 5. Write commit messages that explain *why*, not just *what*.
 
+## Renaming a concept
+
+Phren has renamed user-facing concepts nine times so far (`canonical_memories.md` -> `truths.md`, `MEMORY_QUEUE.md` -> `review.md`, entity -> fragment, `add_learning` -> `add_finding`, and others; see CHANGELOG.md). Each rename shipped as a single changelog line, but the old name was rarely retired: the file, tool parameter, database table, or doc page kept working under its original name, so both names stayed live at once, in code and in real users' stores, and the concept count only ever grew. The rule going forward: a rename is not done until the old name is retired or explicitly documented as a legacy read path. If nothing reads the old name, delete it. If code must keep reading an old filename or tool name so existing stores keep working, keep that path but comment it as legacy-read-only with the version the rename happened in. If you can't safely retire the old name in this PR (a live MCP tool parameter, a database table, anything that would break an existing store without a migration), don't leave it silently half-renamed: say so in the PR description and file a follow-up.
+
 ## Pull Requests
 
 - Keep PRs small and focused. One feature or fix per PR.
