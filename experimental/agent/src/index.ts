@@ -326,6 +326,7 @@ export async function runAgentCli(raw: string[]) {
           toolCalls: turnResult.toolCalls,
           totalCost: agentConfig.costTracker?.formatCost(),
           messages: session.messages,
+          session,
         };
       } else {
         process.stderr.write("No previous session to resume.\n");
@@ -349,6 +350,9 @@ export async function runAgentCli(raw: string[]) {
 
       // Save messages for resume
       saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages, phrenCtx.project ?? undefined);
+
+      // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
+      try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
 
       // Evolve project context via lightweight LLM reflection
       try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }

@@ -257,5 +257,6 @@ export async function runAgent(task: string, config: AgentConfig): Promise<Agent
     toolCalls: result.toolCalls,
     totalCost: config.costTracker?.formatCost(),
     messages: session.messages,
+    session,
   };
 }

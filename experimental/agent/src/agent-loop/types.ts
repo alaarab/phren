@@ -28,6 +28,8 @@ export interface AgentResult {
   toolCalls: number;
   totalCost?: string;
   messages: LlmMessage[];
+  /** The session the run used — lets callers flush session-scoped state at exit. */
+  session: AgentSession;
 }
 
 export interface AgentSession {

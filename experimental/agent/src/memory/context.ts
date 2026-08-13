@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { findPhrenPath, getProjectDirs } from "@phren/cli/paths";
+import { findPhrenPath } from "@phren/cli/paths";
 import { resolveRuntimeProfile } from "@phren/cli/runtime-profile";
-import { buildIndex } from "@phren/cli/shared";
+import { buildIndex, detectProject } from "@phren/cli/shared";
 import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
 import { readTasks } from "@phren/cli/data/tasks";
 import { readFindings } from "@phren/cli/data/access";
@@ -28,29 +28,10 @@ export async function buildPhrenContext(projectOverride?: string): Promise<Phren
     let project: string | null = projectOverride ?? null;
     if (!project) {
       try {
-        const projectDirs = getProjectDirs(phrenPath, profile || undefined);
-        const cwd = process.cwd();
-        for (const dir of projectDirs) {
-          const name = path.basename(dir);
-          try {
-            const configPath = path.join(dir, "project.yaml");
-            if (fs.existsSync(configPath)) {
-              const content = fs.readFileSync(configPath, "utf-8");
-              const sourceMatch = content.match(/source:\s*(.+)/);
-              if (sourceMatch?.[1]) {
-                const sourcePath = sourceMatch[1].trim().replace(/^['"]|['"]$/g, "");
-                if (cwd.startsWith(sourcePath) || cwd === sourcePath) {
-                  project = name;
-                  break;
-                }
-              }
-            }
-          } catch { /* skip */ }
-          if (path.basename(cwd) === name) {
-            project = name;
-            break;
-          }
-        }
+        // The CLI's own resolver: reads phren.project.yaml sourcePath entries,
+        // handles project-local installs, team stores, git worktrees, and picks
+        // the longest matching sourcePath so nested projects resolve correctly.
+        project = detectProject(phrenPath, process.cwd(), profile || undefined);
       } catch { /* no project detection */ }
     }
 
