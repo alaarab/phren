@@ -258,6 +258,51 @@ export async function runAgentCli(raw: string[]) {
     );
   };
 
+  /**
+   * Resume seed: newest event log preferred, legacy v1 snapshot as fallback.
+   * MUST run before makePersistedLog(): creating this run's own (empty) log
+   * first would make it the newest discovery candidate and shadow the real
+   * previous session.
+   */
+  const makeResumedLog = (): SessionLog | undefined => {
+    if (!phrenCtx || !sessionId) return undefined;
+    const latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    if (latest) {
+      try {
+        const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
+        if (parent.length > 0) {
+          if (args.verbose) {
+            process.stderr.write(
+              `Resuming session ${parent.header.sessionId.slice(0, 8)} (${parent.header.project ?? "global"}) with ${parent.getMessages().length} messages from its event log\n`,
+            );
+          }
+          // This run gets its own forked log file, seeded with the parent's
+          // full history and linked via parentSession.
+          return persistFork(phrenCtx.phrenPath, parent, sessionId);
+        }
+      } catch (err: unknown) {
+        process.stderr.write(
+          `Cannot resume from event log (${err instanceof Error ? err.message : String(err)}); trying legacy snapshot\n`,
+        );
+      }
+    }
+    const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    if (priorSnapshot && priorSnapshot.messages.length > 0) {
+      if (args.verbose) {
+        process.stderr.write(
+          `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${priorSnapshot.project ?? "global"}) with ${priorSnapshot.messages.length} messages from a v1 snapshot\n`,
+        );
+      }
+      const log = makePersistedLog();
+      if (!log) return undefined;
+      seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
+      return log;
+    }
+    return undefined;
+  };
+
+  const resumedLog = args.resume && !args.interactive && !args.multi && !args.team ? makeResumedLog() : undefined;
+
   const agentConfig = {
     provider,
     registry,
@@ -269,7 +314,7 @@ export async function runAgentCli(raw: string[]) {
     plan: args.plan,
     lintTestConfig,
     sessionId,
-    sessionLog: makePersistedLog(),
+    sessionLog: resumedLog ?? makePersistedLog(),
   };
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
@@ -341,45 +386,7 @@ export async function runAgentCli(raw: string[]) {
   try {
     const contextLimit = provider.contextWindow ?? 200_000;
 
-    /** Resume seed: newest event log preferred, legacy v1 snapshot as fallback. */
-    const makeResumedLog = (): SessionLog | undefined => {
-      if (!phrenCtx || !sessionId) return undefined;
-      const latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
-      if (latest) {
-        try {
-          const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
-          if (parent.length > 0) {
-            if (args.verbose) {
-              process.stderr.write(
-                `Resuming session ${parent.header.sessionId.slice(0, 8)} (${parent.header.project ?? "global"}) with ${parent.getMessages().length} messages from its event log\n`,
-              );
-            }
-            // This run gets its own forked log file, seeded with the parent's
-            // full history and linked via parentSession.
-            return persistFork(phrenCtx.phrenPath, parent, sessionId);
-          }
-        } catch (err: unknown) {
-          process.stderr.write(
-            `Cannot resume from event log (${err instanceof Error ? err.message : String(err)}); trying legacy snapshot\n`,
-          );
-        }
-      }
-      const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
-      if (priorSnapshot && priorSnapshot.messages.length > 0) {
-        if (args.verbose) {
-          process.stderr.write(
-            `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${priorSnapshot.project ?? "global"}) with ${priorSnapshot.messages.length} messages from a v1 snapshot\n`,
-          );
-        }
-        const log = agentConfig.sessionLog ?? createSession(contextLimit).log;
-        seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
-        return log;
-      }
-      return undefined;
-    };
-
     let result;
-    const resumedLog = args.resume ? makeResumedLog() : undefined;
     if (args.resume && !resumedLog) {
       process.stderr.write("No previous session to resume.\n");
     }
