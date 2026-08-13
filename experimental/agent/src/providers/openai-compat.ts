@@ -1,5 +1,6 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { stripForeignReasoning } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
 export function toOpenAiTools(tools: AgentToolDef[]) {
@@ -9,22 +10,38 @@ export function toOpenAiTools(tools: AgentToolDef[]) {
   }));
 }
 
-/** Convert Anthropic messages to OpenAI messages. */
-export function toOpenAiMessages(system: string, messages: LlmMessage[]) {
+/**
+ * Convert Anthropic messages to OpenAI messages.
+ *
+ * `providerName` scopes which reasoning blocks belong to this provider; when
+ * omitted, all reasoning is stripped (conservative). Own reasoning is passed
+ * back as `reasoning_content` only on tool-call turns — the field is ignored
+ * on plain turns by providers that support it (DeepSeek's documented rule),
+ * so sending it there just wastes tokens. Assistant `content` is always a
+ * string, never null/absent: some gateways 400 on a null-content assistant
+ * message, and history is durable, so one would poison every later turn.
+ */
+export function toOpenAiMessages(system: string, messages: LlmMessage[], providerName?: string) {
   const out: Record<string, unknown>[] = [{ role: "system", content: system }];
-  for (const msg of messages) {
+  for (const msg of stripForeignReasoning(messages, providerName)) {
     if (msg.role === "assistant") {
       if (typeof msg.content === "string") {
         out.push({ role: "assistant", content: msg.content });
       } else {
         const textParts = msg.content.filter((b) => b.type === "text").map((b) => b.type === "text" ? b.text : "");
+        const reasoningParts = msg.content
+          .filter((b) => b.type === "reasoning")
+          .map((b) => (b.type === "reasoning" ? b.text : ""))
+          .filter(Boolean);
         const toolCalls = msg.content.filter((b) => b.type === "tool_use").map((b) => {
           if (b.type !== "tool_use") throw new Error("unreachable");
           return { id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } };
         });
-        const entry: Record<string, unknown> = { role: "assistant" };
-        if (textParts.length > 0) entry.content = textParts.join("\n");
-        if (toolCalls.length > 0) entry.tool_calls = toolCalls;
+        const entry: Record<string, unknown> = { role: "assistant", content: textParts.join("\n") };
+        if (toolCalls.length > 0) {
+          entry.tool_calls = toolCalls;
+          if (reasoningParts.length > 0) entry.reasoning_content = reasoningParts.join("\n");
+        }
         out.push(entry);
       }
     } else if (msg.role === "user") {
@@ -45,10 +62,23 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[]) {
 }
 
 /** Parse OpenAI response into Anthropic content blocks. */
-export function parseOpenAiResponse(data: Record<string, unknown>): LlmResponse {
+export function parseOpenAiResponse(data: Record<string, unknown>, providerName?: string): LlmResponse {
   const choice = (data.choices as Record<string, unknown>[])?.[0] ?? {};
   const message = choice.message as Record<string, unknown> | undefined;
   const content: ContentBlock[] = [];
+
+  // Visible reasoning: DeepSeek/Qwen use reasoning_content, OpenRouter's
+  // unified field is reasoning. Reasoning precedes the answer.
+  const reasoningText = typeof message?.reasoning_content === "string"
+    ? message.reasoning_content
+    : typeof message?.reasoning === "string" ? message.reasoning : "";
+  if (reasoningText) {
+    content.push({
+      type: "reasoning",
+      text: reasoningText,
+      ...(providerName !== undefined ? { provider: providerName } : {}),
+    });
+  }
 
   if (message?.content && typeof message.content === "string") {
     content.push({ type: "text", text: message.content });
@@ -133,6 +163,14 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
 
       const delta = choice.delta as Record<string, unknown> | undefined;
       if (!delta) continue;
+
+      // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
+      const reasoningDelta = typeof delta.reasoning_content === "string"
+        ? delta.reasoning_content
+        : typeof delta.reasoning === "string" ? delta.reasoning : "";
+      if (reasoningDelta) {
+        yield { type: "reasoning_delta", text: reasoningDelta };
+      }
 
       // Text content
       if (delta.content && typeof delta.content === "string") {

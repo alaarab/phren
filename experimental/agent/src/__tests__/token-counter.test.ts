@@ -83,4 +83,28 @@ describe("estimateMessageTokens", () => {
     // (4 + 10) + (4 + 10) = 28
     expect(estimateMessageTokens(msgs)).toBe(28);
   });
+
+  it("counts reasoning text and its encrypted payload", () => {
+    const msgs: LlmMessage[] = [{
+      role: "assistant",
+      content: [{
+        type: "reasoning",
+        text: "a".repeat(40),
+        provider: "openai-codex",
+        encrypted_content: "b".repeat(400),
+      }],
+    }];
+    // 4 overhead + 10 (text) + 100 (payload — re-sent on every request)
+    expect(estimateMessageTokens(msgs)).toBe(114);
+  });
+
+  it("never counts an unknown block type as zero tokens", () => {
+    const msgs = [{
+      role: "assistant",
+      content: [{ type: "mystery_block", payload: "c".repeat(100) }],
+    }] as unknown as LlmMessage[];
+    const estimate = estimateMessageTokens(msgs);
+    // 4 message overhead + JSON-length-based fallback for the block
+    expect(estimate).toBeGreaterThan(4 + 20);
+  });
 });

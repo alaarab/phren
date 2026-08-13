@@ -72,6 +72,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   // Mutable render state — updated then pushed to React via rerender()
   const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
+  let reasoningText = "";
   let thinking = false;
   let thinkStartTime = 0;
   let thinkElapsed: string | null = null;
@@ -135,6 +136,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         state={getAppState()}
         completedMessages={displayMessages}
         streamingText={displayStreaming}
+        reasoningText={agentConvo ? "" : reasoningText}
         completedToolCalls={displayToolCalls}
         activeTool={displayActiveTool}
         thinking={displayThinking}
@@ -404,6 +406,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       streamingText += text;
       scheduleUpdate();
     },
+    onReasoningDelta: (text) => {
+      reasoningText += text;
+      scheduleUpdate();
+    },
     onTextDone: () => {
       // streaming complete — finalized in runAgentTurn
     },
@@ -455,6 +461,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     thinkStartTime = Date.now();
     thinkElapsed = null;
     streamingText = "";
+    reasoningText = "";
     currentToolCalls = [];
     activeTool = null;
     const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
@@ -481,6 +488,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       });
     }
     streamingText = "";
+    reasoningText = "";
     currentToolCalls = [];
     activeTool = null;
     running = false;

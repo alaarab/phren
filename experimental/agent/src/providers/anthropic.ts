@@ -1,18 +1,53 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { stripForeignReasoning } from "./history.js";
+import type { ReasoningEffort } from "../models.js";
+
+const PROVIDER_NAME = "anthropic";
+
+/** Thinking budget per effort level; always clamped below max_tokens. */
+const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  low: 2048,
+  medium: 8192,
+  high: 16384,
+  xhigh: 32768,
+};
+
+/** Anthropic rejects budget_tokens below this. */
+const MIN_THINKING_BUDGET = 1024;
 
 export class AnthropicProvider implements LlmProvider {
-  name = "anthropic";
+  name = PROVIDER_NAME;
   contextWindow = 200_000;
   maxOutputTokens: number;
   private apiKey: string;
   model: string;
   private cacheEnabled: boolean;
+  reasoningEffort?: ReasoningEffort;
 
-  constructor(apiKey: string, model?: string, maxOutputTokens?: number, cacheEnabled = true) {
+  constructor(
+    apiKey: string,
+    model?: string,
+    maxOutputTokens?: number,
+    cacheEnabled = true,
+    reasoningEffort?: ReasoningEffort,
+  ) {
     this.apiKey = apiKey;
     this.model = model ?? "claude-sonnet-4-20250514";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
     this.cacheEnabled = cacheEnabled;
+    this.reasoningEffort = reasoningEffort;
+  }
+
+  /**
+   * Resolved thinking budget, or null when thinking stays off. The budget
+   * must fit under max_tokens (thinking counts against it), so it is clamped
+   * to half the output cap and dropped entirely if that leaves less than the
+   * API minimum.
+   */
+  thinkingBudget(): number | null {
+    if (!this.reasoningEffort) return null;
+    const budget = Math.min(THINKING_BUDGETS[this.reasoningEffort], Math.floor(this.maxOutputTokens / 2));
+    return budget >= MIN_THINKING_BUDGET ? budget : null;
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
@@ -34,7 +69,7 @@ export class AnthropicProvider implements LlmProvider {
     }
 
     const data = await res.json() as Record<string, unknown>;
-    const content = (data.content as ContentBlock[]) ?? [];
+    const content = parseWireContent(data.content);
     const stop_reason = data.stop_reason === "tool_use" ? "tool_use"
       : data.stop_reason === "max_tokens" ? "max_tokens"
       : "end_turn";
@@ -71,6 +106,9 @@ export class AnthropicProvider implements LlmProvider {
     let usage: { input_tokens: number; output_tokens: number } | undefined;
     // Map block index to tool ID for consistent ID across start/delta/end
     const indexToToolId = new Map<number, string>();
+    // Thinking blocks are index-tracked too: the signature arrives as a
+    // delta and must ride the reasoning_end at content_block_stop.
+    const thinkingByIndex = new Map<number, { signature?: string }>();
 
     for await (const event of parseSSE(res)) {
       const type = event.event;
@@ -83,11 +121,25 @@ export class AnthropicProvider implements LlmProvider {
           const id = block.id as string;
           indexToToolId.set(index, id);
           yield { type: "tool_use_start", id, name: block.name as string };
+        } else if (block.type === "thinking") {
+          thinkingByIndex.set(data.index as number, {});
+        } else if (block.type === "redacted_thinking") {
+          // Arrives complete: opaque payload, no deltas, no signature.
+          yield {
+            type: "reasoning_end",
+            redacted: true,
+            ...(typeof block.data === "string" ? { data: block.data } : {}),
+          };
         }
       } else if (type === "content_block_delta") {
         const delta = data.delta as Record<string, unknown>;
         if (delta.type === "text_delta") {
           yield { type: "text_delta", text: delta.text as string };
+        } else if (delta.type === "thinking_delta") {
+          yield { type: "reasoning_delta", text: delta.thinking as string };
+        } else if (delta.type === "signature_delta") {
+          const state = thinkingByIndex.get(data.index as number);
+          if (state) state.signature = (state.signature ?? "") + (delta.signature as string);
         } else if (delta.type === "input_json_delta") {
           const index = data.index as number;
           const id = indexToToolId.get(index) ?? String(index);
@@ -95,6 +147,14 @@ export class AnthropicProvider implements LlmProvider {
         }
       } else if (type === "content_block_stop") {
         const index = data.index as number;
+        if (thinkingByIndex.has(index)) {
+          const state = thinkingByIndex.get(index)!;
+          thinkingByIndex.delete(index);
+          yield {
+            type: "reasoning_end",
+            ...(state.signature !== undefined ? { signature: state.signature } : {}),
+          };
+        }
         if (indexToToolId.has(index)) {
           yield { type: "tool_use_end", id: indexToToolId.get(index)! };
         }
@@ -135,7 +195,11 @@ export class AnthropicProvider implements LlmProvider {
       ? [{ type: "text", text: system, ...cache }]
       : system;
 
-    const mappedMessages = messages.map((m) => ({ role: m.role, content: m.content }));
+    const mappedMessages: Array<{ role: string; content: string | Record<string, unknown>[] }> =
+      stripForeignReasoning(messages, PROVIDER_NAME).map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : m.content.map(toWireBlock),
+      }));
 
     // Mark the last 2 user messages with cache_control for recent-context caching
     if (this.cacheEnabled) {
@@ -165,6 +229,11 @@ export class AnthropicProvider implements LlmProvider {
       max_tokens: this.maxOutputTokens,
     };
 
+    const budget = this.thinkingBudget();
+    if (budget !== null) {
+      body.thinking = { type: "enabled", budget_tokens: budget };
+    }
+
     if (tools.length > 0) {
       const mappedTools = tools.map((t) => ({
         name: t.name,
@@ -180,6 +249,58 @@ export class AnthropicProvider implements LlmProvider {
 
     return body;
   }
+}
+
+/**
+ * Serialize one internal block into Anthropic wire format. Reasoning blocks
+ * become thinking/redacted_thinking (the API verifies the signature when the
+ * conversation continues into tool use); other blocks already match the wire
+ * shape, minus our internal-only fields.
+ */
+export function toWireBlock(block: ContentBlock): Record<string, unknown> {
+  if (block.type === "reasoning") {
+    if (block.redacted) {
+      return { type: "redacted_thinking", data: block.data ?? "" };
+    }
+    return {
+      type: "thinking",
+      thinking: block.text,
+      ...(block.signature !== undefined ? { signature: block.signature } : {}),
+    };
+  }
+  return block as unknown as Record<string, unknown>;
+}
+
+/**
+ * Parse Anthropic wire content into internal blocks. Thinking blocks become
+ * tagged reasoning blocks; unknown wire types are dropped (they cannot be
+ * round-tripped and a blind cast previously let them pollute saved history).
+ */
+export function parseWireContent(raw: unknown): ContentBlock[] {
+  if (!Array.isArray(raw)) return [];
+  const content: ContentBlock[] = [];
+  for (const item of raw as Array<Record<string, unknown>>) {
+    if (!item || typeof item !== "object") continue;
+    if (item.type === "text" || item.type === "tool_use" || item.type === "tool_result") {
+      content.push(item as unknown as ContentBlock);
+    } else if (item.type === "thinking") {
+      content.push({
+        type: "reasoning",
+        text: typeof item.thinking === "string" ? item.thinking : "",
+        provider: PROVIDER_NAME,
+        ...(typeof item.signature === "string" ? { signature: item.signature } : {}),
+      });
+    } else if (item.type === "redacted_thinking") {
+      content.push({
+        type: "reasoning",
+        text: "",
+        provider: PROVIDER_NAME,
+        redacted: true,
+        ...(typeof item.data === "string" ? { data: item.data } : {}),
+      });
+    }
+  }
+  return content;
 }
 
 /** Log cache hit/creation stats to stderr (visible in verbose mode). */

@@ -20,6 +20,15 @@ export function estimateMessageTokens(messages: LlmMessage[]): number {
           total += estimateTokens(block.content);
         } else if (block.type === "tool_use") {
           total += estimateTokens(JSON.stringify(block.input));
+        } else if (block.type === "reasoning") {
+          // Reasoning text plus the round-trip payload (encrypted_content can
+          // dominate on Codex; it is re-sent on every request).
+          total += estimateTokens(block.text);
+          if (block.encrypted_content) total += estimateTokens(block.encrypted_content);
+        } else {
+          // Never let an unknown block count as 0 tokens: pruning decisions
+          // would silently under-count and overrun the real context window.
+          total += estimateTokens(JSON.stringify(block));
         }
       }
     }

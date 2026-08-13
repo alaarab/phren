@@ -51,6 +51,10 @@ export interface TurnResult {
 export interface TurnHooks {
   /** Streaming text token. Default: process.stdout.write(text) */
   onTextDelta?: (text: string) => void;
+  /** Streaming reasoning/thinking token. Default: dim stderr in verbose mode, hidden otherwise. */
+  onReasoningDelta?: (text: string) => void;
+  /** A reasoning segment finished (full text). Default: no-op. */
+  onReasoningDone?: (text: string) => void;
   /** Final newline after a streaming text block. Default: write "\n" if needed */
   onTextDone?: (text: string) => void;
   /** Non-streaming text block output. Default: process.stdout.write */

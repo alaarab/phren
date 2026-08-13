@@ -70,7 +70,13 @@ export function resolveProvider(
   if (explicit === "anthropic" || (!explicit && anthropicKey)) {
     if (!anthropicKey) throw new Error("Anthropic credentials are required. Set ANTHROPIC_API_KEY or run 'phren auth set-key anthropic'.");
     const model = normalizedModel ?? getDefaultModel("anthropic");
-    return new AnthropicProvider(anthropicKey, model, resolveLimit("anthropic", model));
+    return new AnthropicProvider(
+      anthropicKey,
+      model,
+      resolveLimit("anthropic", model),
+      true,
+      resolveReasoning("anthropic", model),
+    );
   }
 
   if (explicit === "ollama" || (!explicit && process.env.PHREN_OLLAMA_URL && process.env.PHREN_OLLAMA_URL !== "off")) {

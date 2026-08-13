@@ -91,7 +91,15 @@ export async function runTurn(
         undefined,
         verbose,
       );
-      const result = await consumeStream(stream, costTracker, hooks?.onTextDelta, signal);
+      const onReasoningDelta =
+        hooks?.onReasoningDelta ??
+        (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
+      const result = await consumeStream(
+        stream,
+        costTracker,
+        { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+        signal,
+      );
       assistantContent = result.content;
       stopReason = result.stop_reason;
     } else {
@@ -122,6 +130,12 @@ export async function runTurn(
             if (!block.text.endsWith("\n")) process.stdout.write("\n");
           }
         }
+      }
+    }
+
+    if (hooks?.onReasoningDone) {
+      for (const block of assistantContent) {
+        if (block.type === "reasoning" && block.text) hooks.onReasoningDone(block.text);
       }
     }
 

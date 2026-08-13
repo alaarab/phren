@@ -43,27 +43,74 @@ export async function runToolsConcurrently(
   return results;
 }
 
+export interface ConsumeStreamHooks {
+  onTextDelta?: (text: string) => void;
+  /** Streaming reasoning/thinking token. Never routed to stdout by default. */
+  onReasoningDelta?: (text: string) => void;
+  /**
+   * Active provider name, stamped onto assembled reasoning blocks. Serializers
+   * drop reasoning from other providers (and untagged blocks), so an unstamped
+   * block would silently fail to round-trip.
+   */
+  providerName?: string;
+}
+
 /** Consume a chatStream into ContentBlock[] + stop_reason, streaming text via callback. */
 export async function consumeStream(
   stream: AsyncIterable<StreamDelta>,
   costTracker?: CostTracker | null,
-  onTextDelta?: (text: string) => void,
+  hooks?: ConsumeStreamHooks | ((text: string) => void),
   signal?: AbortSignal,
 ): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens" }> {
+  const onTextDelta = typeof hooks === "function" ? hooks : hooks?.onTextDelta;
+  const onReasoningDelta = typeof hooks === "function" ? undefined : hooks?.onReasoningDelta;
+  const providerName = typeof hooks === "function" ? undefined : hooks?.providerName;
   const content: ContentBlock[] = [];
   let stop_reason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
   let currentText = "";
+  let currentReasoning = "";
 
   // Map block index -> tool state for Anthropic-style index-based IDs
   const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
+
+  // Reasoning must land BEFORE the text/tool blocks it preceded: Anthropic
+  // requires thinking blocks first in the assistant content array.
+  const flushReasoning = (end?: Extract<StreamDelta, { type: "reasoning_end" }>) => {
+    if (!currentReasoning && !end?.redacted && !end?.encrypted_content) return;
+    content.push({
+      type: "reasoning",
+      text: currentReasoning,
+      ...(providerName !== undefined ? { provider: providerName } : {}),
+      ...(end?.signature !== undefined ? { signature: end.signature } : {}),
+      ...(end?.id !== undefined ? { id: end.id } : {}),
+      ...(end?.encrypted_content !== undefined ? { encrypted_content: end.encrypted_content } : {}),
+      ...(end?.redacted ? { redacted: true } : {}),
+      ...(end?.data !== undefined ? { data: end.data } : {}),
+    });
+    currentReasoning = "";
+  };
 
   for await (const delta of stream) {
     if (signal?.aborted) break;
     if (delta.type === "text_delta") {
       (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
       currentText += delta.text;
+    } else if (delta.type === "reasoning_delta") {
+      // Preserve stream order: a reasoning segment starting after visible
+      // text closes that text block first (providers normally emit
+      // reasoning before text, so this is the uncommon direction).
+      if (currentText && !currentReasoning) {
+        content.push({ type: "text", text: currentText });
+        currentText = "";
+      }
+      onReasoningDelta?.(delta.text);
+      currentReasoning += delta.text;
+    } else if (delta.type === "reasoning_end") {
+      flushReasoning(delta);
     } else if (delta.type === "tool_use_start") {
-      // Flush accumulated text
+      // Flush accumulated reasoning (without a reasoning_end, e.g. compat
+      // providers that only emit deltas), then text.
+      flushReasoning();
       if (currentText) {
         content.push({ type: "text", text: currentText });
         currentText = "";
@@ -93,7 +140,8 @@ export async function consumeStream(
     }
   }
 
-  // Flush remaining text
+  // Flush remaining reasoning, then text
+  flushReasoning();
   if (currentText) {
     if (!currentText.endsWith("\n")) {
       (onTextDelta ?? process.stdout.write.bind(process.stdout))("\n");

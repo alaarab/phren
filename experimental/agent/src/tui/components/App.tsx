@@ -64,6 +64,8 @@ export interface AppProps {
   state: AppState;
   completedMessages: CompletedMessage[];
   streamingText: string;
+  /** Live reasoning/thinking text for the current turn (rendered dim, tail only). */
+  reasoningText?: string;
   completedToolCalls: ToolCallProps[];
   activeTool: ActiveToolInfo | null;
   thinking: boolean;
@@ -94,6 +96,7 @@ export function App({
   state,
   completedMessages,
   streamingText,
+  reasoningText,
   completedToolCalls,
   activeTool,
   thinking,
@@ -400,6 +403,16 @@ export function App({
           {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
         </Box>
       )}
+
+      {/* Live reasoning — dim tail of the model's current thinking */}
+      {reasoningText ? (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text dimColor italic wrap="wrap">
+            {"✴ "}
+            {reasoningText.length > 400 ? `…${reasoningText.slice(-400)}` : reasoningText}
+          </Text>
+        </Box>
+      ) : null}
 
       {/* Active streaming text — render markdown live during streaming */}
       {streamingText !== "" && (

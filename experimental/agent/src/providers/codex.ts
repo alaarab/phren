@@ -4,13 +4,15 @@
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
+import { stripForeignReasoning } from "./history.js";
 import type { ReasoningEffort } from "../models.js";
 import { lookupMaxOutputTokens } from "../models.js";
 
 const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
+const PROVIDER_NAME = "openai-codex";
 
-/** Convert our tool defs to Responses API tool format. */
-function toResponsesTools(tools: AgentToolDef[]) {
+/** Convert our tool defs to Responses API tool format. Exported for tests. */
+export function toResponsesTools(tools: AgentToolDef[]) {
   return tools.map((t) => ({
     type: "function" as const,
     name: t.name,
@@ -19,11 +21,11 @@ function toResponsesTools(tools: AgentToolDef[]) {
   }));
 }
 
-/** Convert our messages to Responses API input format. */
-function toResponsesInput(messages: LlmMessage[]) {
+/** Convert our messages to Responses API input format. Exported for tests. */
+export function toResponsesInput(messages: LlmMessage[]) {
   const input: Record<string, unknown>[] = [];
 
-  for (const msg of messages) {
+  for (const msg of stripForeignReasoning(messages, PROVIDER_NAME)) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         input.push({
@@ -58,7 +60,20 @@ function toResponsesInput(messages: LlmMessage[]) {
         });
       } else {
         for (const block of msg.content) {
-          if (block.type === "text") {
+          if (block.type === "reasoning") {
+            // Round-trip: with store:false the encrypted payload is the only
+            // way the model recovers its prior chain of thought. Content
+            // order already places reasoning before its sibling
+            // function_call, which the API requires.
+            if (block.id && block.encrypted_content) {
+              input.push({
+                type: "reasoning",
+                id: block.id,
+                encrypted_content: block.encrypted_content,
+                summary: [],
+              });
+            }
+          } else if (block.type === "text") {
             input.push({
               type: "message",
               role: "assistant",
@@ -86,8 +101,18 @@ function debugLog(label: string, data: unknown): void {
   process.stderr.write(`[codex:debug] ${label}: ${JSON.stringify(data, null, 2)}\n`);
 }
 
-/** Parse non-streaming Responses API output into our ContentBlock format. */
-function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
+/** Join a Responses reasoning item's summary parts into display text. */
+function reasoningSummaryText(item: Record<string, unknown>): string {
+  const summary = item.summary;
+  if (!Array.isArray(summary)) return "";
+  return (summary as Array<{ type?: string; text?: string }>)
+    .map((part) => part?.text ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Parse non-streaming Responses API output into our ContentBlock format. Exported for tests. */
+export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
   debugLog("parseResponsesOutput input", data);
 
   // The Responses API may return output at top-level or nested under a "response" key.
@@ -127,8 +152,16 @@ function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
           input,
         });
       } else if (item.type === "reasoning") {
-        // Reasoning items are informational — skip them, they don't map to content blocks
-        debugLog("skipping reasoning item", { id: item.id });
+        // Keep reasoning: the id + encrypted_content pair must be re-sent on
+        // the next request or the model loses its chain of thought mid-task.
+        const encrypted = item.encrypted_content as string | undefined;
+        content.push({
+          type: "reasoning",
+          text: reasoningSummaryText(item),
+          provider: PROVIDER_NAME,
+          ...(typeof item.id === "string" ? { id: item.id } : {}),
+          ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+        });
       }
     }
   } else {
@@ -173,6 +206,9 @@ export class CodexProvider implements LlmProvider {
       input: toResponsesInput(messages),
       store: false,
       stream: true,
+      // Without this the API omits the encrypted payload and reasoning
+      // cannot round-trip (chatStream already requested it; chat() didn't).
+      include: ["reasoning.encrypted_content"],
     };
     if (this.reasoningEffort) {
       body.reasoning = { effort: this.reasoningEffort };
@@ -211,7 +247,16 @@ export class CodexProvider implements LlmProvider {
       const response = await this.requestResponse(accessToken, body);
       const parsed = parseResponsesOutput(response);
       for (const block of parsed.content) {
-        if (block.type === "text") {
+        if (block.type === "reasoning") {
+          if (block.text) yield { type: "reasoning_delta", text: block.text };
+          yield {
+            type: "reasoning_end",
+            ...(block.id !== undefined ? { id: block.id } : {}),
+            ...(block.encrypted_content !== undefined
+              ? { encrypted_content: block.encrypted_content }
+              : {}),
+          };
+        } else if (block.type === "text") {
           yield { type: "text_delta", text: block.text };
         } else if (block.type === "tool_use") {
           yield { type: "tool_use_start", id: block.id, name: block.name };
@@ -339,6 +384,21 @@ export class CodexProvider implements LlmProvider {
       if (type === "response.output_text.delta") {
         const delta = event.delta as string;
         if (delta) push({ type: "text_delta", text: delta });
+      } else if (type === "response.reasoning_summary_text.delta") {
+        const delta = event.delta as string;
+        if (delta) push({ type: "reasoning_delta", text: delta });
+      } else if (type === "response.output_item.done") {
+        // The completed reasoning item carries the encrypted payload we must
+        // re-send on the next request.
+        const item = event.item as Record<string, unknown> | undefined;
+        if (item?.type === "reasoning") {
+          const encrypted = item.encrypted_content as string | undefined;
+          push({
+            type: "reasoning_end",
+            ...(typeof item.id === "string" ? { id: item.id } : {}),
+            ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+          });
+        }
       } else if (type === "response.output_item.added") {
         if ((event.item as Record<string, unknown>)?.type === "function_call") {
           const item = event.item as Record<string, unknown>;

@@ -286,6 +286,42 @@ describe("agent-loop", () => {
     expect(result.turns).toBe(1);
   });
 
+  it("preserves streamed reasoning in history, stamped with the provider", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+
+    const reasoningSeen: string[] = [];
+    const provider: LlmProvider = {
+      name: "mock-stream",
+      contextWindow: 200_000,
+      async chat(): Promise<LlmResponse> {
+        throw new Error("should not be called");
+      },
+      async *chatStream() {
+        yield { type: "reasoning_delta" as const, text: "let me think" };
+        yield { type: "reasoning_end" as const, signature: "SIG" };
+        yield { type: "text_delta" as const, text: "the answer" };
+        yield { type: "done" as const, stop_reason: "end_turn" as const };
+      },
+    };
+
+    const config = makeConfig({ provider });
+    config.hooks = {
+      onTextDelta: () => {},
+      onReasoningDelta: (t: string) => reasoningSeen.push(t),
+    };
+    const result = await runAgent("reasoning test", config);
+
+    expect(reasoningSeen).toEqual(["let me think"]);
+    expect(result.finalText).toBe("the answer");
+    const assistant = result.messages.find((m) => m.role === "assistant");
+    expect(assistant && Array.isArray(assistant.content) && assistant.content[0]).toEqual({
+      type: "reasoning",
+      text: "let me think",
+      provider: "mock-stream",
+      signature: "SIG",
+    });
+  });
+
   // --- 9. Tool error triggers anti-pattern recording ─────────────────────
   it("records tool errors for anti-pattern tracking", async () => {
     const { createSession, runTurn } = await import("../agent-loop.js");
