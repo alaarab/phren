@@ -20,6 +20,8 @@ export interface AgentConfig {
   hooks?: TurnHooks;
   /** Session ID for /session commands */
   sessionId?: string | null;
+  /** Durable event log for the session (in-memory when absent). */
+  sessionLog?: SessionLog;
 }
 
 export interface AgentResult {
@@ -33,7 +35,10 @@ export interface AgentResult {
 }
 
 export interface AgentSession {
-  messages: LlmMessage[];
+  /** Append-only event log — the source of truth for model-visible history. */
+  log: SessionLog;
+  /** The projected message array the model sees (derived from the log). */
+  readonly messages: LlmMessage[];
   turns: number;
   toolCalls: number;
   captureState: CaptureState;
@@ -76,10 +81,22 @@ export interface TurnHooks {
 
 // Re-import LlmMessage for the AgentResult/AgentSession interfaces
 import type { LlmMessage } from "../providers/types.js";
+import { SessionLog } from "../session/log.js";
+import { randomUUID } from "crypto";
 
-export function createSession(contextLimit?: number): AgentSession {
+export function createSession(contextLimit?: number, options?: { log?: SessionLog }): AgentSession {
+  const log =
+    options?.log ??
+    new SessionLog({
+      sessionId: `mem-${randomUUID()}`,
+      cwd: process.cwd(),
+      createdAt: new Date().toISOString(),
+    });
   return {
-    messages: [],
+    log,
+    get messages() {
+      return log.getMessages();
+    },
     turns: 0,
     toolCalls: 0,
     captureState: createCaptureState(),

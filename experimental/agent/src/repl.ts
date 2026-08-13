@@ -40,7 +40,7 @@ function saveHistory(lines: string[]): void {
 
 export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
-  const session = createSession(contextLimit);
+  const session = createSession(contextLimit, { log: config.sessionLog });
   const history = loadHistory();
   let inputMode = loadInputMode();
 

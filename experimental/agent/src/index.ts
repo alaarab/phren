@@ -23,7 +23,10 @@ import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { runAgent, createSession, runTurn } from "./agent-loop.js";
+import { createSession, runTurn } from "./agent-loop.js";
+import { SessionLog, seedFromMessages } from "./session/log.js";
+import { fileSink, findLatestEventLog, persistFork, restoreSessionLog } from "./session/persist.js";
+import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
@@ -241,6 +244,20 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
+  /** Durable event log for this run when a phren store is available. */
+  const makePersistedLog = (): SessionLog | undefined => {
+    if (!phrenCtx || !sessionId) return undefined;
+    return new SessionLog(
+      {
+        sessionId,
+        project: phrenCtx.project ?? undefined,
+        cwd: process.cwd(),
+        createdAt: new Date().toISOString(),
+      },
+      fileSink(phrenCtx.phrenPath, sessionId),
+    );
+  };
+
   const agentConfig = {
     provider,
     registry,
@@ -252,6 +269,7 @@ export async function runAgentCli(raw: string[]) {
     plan: args.plan,
     lintTestConfig,
     sessionId,
+    sessionLog: makePersistedLog(),
   };
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
@@ -308,37 +326,72 @@ export async function runAgentCli(raw: string[]) {
 
   // One-shot mode
   try {
-    let result;
-    if (args.resume && phrenCtx) {
-      // Resume: load previous messages and continue
+    const contextLimit = provider.contextWindow ?? 200_000;
+
+    /** Resume seed: newest event log preferred, legacy v1 snapshot as fallback. */
+    const makeResumedLog = (): SessionLog | undefined => {
+      if (!phrenCtx || !sessionId) return undefined;
+      const latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+      if (latest) {
+        try {
+          const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
+          if (parent.length > 0) {
+            if (args.verbose) {
+              process.stderr.write(
+                `Resuming session ${parent.header.sessionId.slice(0, 8)} (${parent.header.project ?? "global"}) with ${parent.getMessages().length} messages from its event log\n`,
+              );
+            }
+            // This run gets its own forked log file, seeded with the parent's
+            // full history and linked via parentSession.
+            return persistFork(phrenCtx.phrenPath, parent, sessionId);
+          }
+        } catch (err: unknown) {
+          process.stderr.write(
+            `Cannot resume from event log (${err instanceof Error ? err.message : String(err)}); trying legacy snapshot\n`,
+          );
+        }
+      }
       const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
       if (priorSnapshot && priorSnapshot.messages.length > 0) {
         if (args.verbose) {
-          const projectLabel = priorSnapshot.project ?? "global";
           process.stderr.write(
-            `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${projectLabel}) with ${priorSnapshot.messages.length} messages\n`,
+            `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${priorSnapshot.project ?? "global"}) with ${priorSnapshot.messages.length} messages from a v1 snapshot\n`,
           );
         }
-        const contextLimit = provider.contextWindow ?? 200_000;
-        const session = createSession(contextLimit);
-        session.messages = priorSnapshot.messages as typeof session.messages;
-        const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
-        // Save messages for future resume
-        saveSessionMessages(phrenCtx.phrenPath, sessionId!, session.messages, phrenCtx.project ?? undefined);
-        result = {
-          finalText: turnResult.text,
-          turns: turnResult.turns,
-          toolCalls: turnResult.toolCalls,
-          totalCost: agentConfig.costTracker?.formatCost(),
-          messages: session.messages,
-          session,
-        };
-      } else {
-        process.stderr.write("No previous session to resume.\n");
-        result = await runAgent(args.task, agentConfig);
+        const log = agentConfig.sessionLog ?? createSession(contextLimit).log;
+        seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
+        return log;
       }
+      return undefined;
+    };
+
+    let result;
+    const resumedLog = args.resume ? makeResumedLog() : undefined;
+    if (args.resume && !resumedLog) {
+      process.stderr.write("No previous session to resume.\n");
+    }
+    if (resumedLog) {
+      const session = createSession(contextLimit, { log: resumedLog });
+      const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
+      result = {
+        finalText: turnResult.text,
+        turns: turnResult.turns,
+        toolCalls: turnResult.toolCalls,
+        totalCost: agentConfig.costTracker?.formatCost(),
+        messages: session.messages,
+        session,
+      };
     } else {
-      result = await runAgent(args.task, agentConfig);
+      const session = createSession(contextLimit, { log: agentConfig.sessionLog });
+      const turnResult = await runTurn(args.task, session, agentConfig);
+      result = {
+        finalText: turnResult.text,
+        turns: turnResult.turns,
+        toolCalls: turnResult.toolCalls,
+        totalCost: agentConfig.costTracker?.formatCost(),
+        messages: session.messages,
+        session,
+      };
     }
 
     if (args.verbose) {

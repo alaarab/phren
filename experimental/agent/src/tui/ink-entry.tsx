@@ -27,7 +27,7 @@ const AGENT_VERSION = (_require("../../package.json") as { version: string }).ve
 
 export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
-  const session = createSession(contextLimit);
+  const session = createSession(contextLimit, { log: config.sessionLog });
   const startTime = Date.now();
 
   let inputMode: InputMode = loadInputMode();

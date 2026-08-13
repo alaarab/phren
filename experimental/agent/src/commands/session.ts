@@ -1,10 +1,12 @@
 import { toolResultText } from "../providers/types.js";
+import type { LlmMessage } from "../providers/types.js";
+import { seedFromMessages } from "../session/log.js";
 /**
  * Session commands: /session, /history, /compact, /diff, /git
  */
 import type { CommandContext } from "../commands.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
-import { pruneMessages } from "../context/pruner.js";
+import { planPrune } from "../context/pruner.js";
 import { renderMarkdown } from "../multi/markdown.js";
 import { saveSessionMessages, loadLastSessionSnapshot } from "../memory/session.js";
 import { execSync } from "node:child_process";
@@ -152,7 +154,10 @@ export function historyCommand(parts: string[], ctx: CommandContext): boolean {
 export function compactCommand(_parts: string[], ctx: CommandContext): boolean {
   const beforeCount = ctx.session.messages.length;
   const beforeTokens = estimateMessageTokens(ctx.session.messages);
-  ctx.session.messages = pruneMessages(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
+  const plan = planPrune(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
+  if (plan) {
+    ctx.session.log.replaceMessageRange(plan.startIndex, plan.endIndex, plan.summaryMessage);
+  }
   const afterCount = ctx.session.messages.length;
   const afterTokens = estimateMessageTokens(ctx.session.messages);
   const reduction = beforeTokens > 0 ? ((1 - afterTokens / beforeTokens) * 100).toFixed(0) : "0";
@@ -200,9 +205,13 @@ export function resumeCommand(_parts: string[], ctx: CommandContext): boolean | 
     return true;
   }
 
-  // Load prior messages into current session (cast from serialized format)
+  // Seed the current session's log from the serialized snapshot
   const priorCount = snapshot.messages.length;
-  ctx.session.messages = snapshot.messages as unknown as typeof ctx.session.messages;
+  if (ctx.session.messages.length > 0) {
+    process.stderr.write(`${DIM}Session already has history; /resume only works on a fresh session.${RESET}\n`);
+    return true;
+  }
+  seedFromMessages(ctx.session.log, snapshot.messages as unknown as LlmMessage[]);
 
   process.stderr.write(`${GREEN}-> Resumed ${priorCount} messages from session ${snapshot.sessionId}${RESET}\n`);
   if (snapshot.project) {

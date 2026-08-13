@@ -1,6 +1,6 @@
 import type { ContentBlock, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
-import { shouldPrune, pruneMessages } from "../context/pruner.js";
+import { shouldPrune, planPrune } from "../context/pruner.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { withRetry } from "../providers/retry.js";
 import { checkFlushNeeded } from "../memory/context-flush.js";
@@ -35,8 +35,12 @@ export async function runTurn(
     systemPrompt = injectPlanPrompt(systemPrompt);
   }
 
-  // Append user message
-  session.messages.push({ role: "user", content: userInput });
+  // Append user message to the durable log
+  session.log.append("user/message", {
+    message: { role: "user", content: userInput },
+    source: "user",
+    turn: session.turns,
+  });
 
   let turnToolCalls = 0;
   const turnStart = session.turns;
@@ -61,7 +65,11 @@ export async function runTurn(
     const contextLimit = provider.contextWindow ?? 200_000;
     const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
     if (flushPrompt) {
-      session.messages.push({ role: "user", content: flushPrompt });
+      session.log.append("user/message", {
+        message: { role: "user", content: flushPrompt },
+        source: "system",
+        turn: session.turns,
+      });
       if (verbose) status("[context flush injected]\n");
     }
 
@@ -69,7 +77,10 @@ export async function runTurn(
     if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
-      session.messages = pruneMessages(session.messages, { contextLimit, keepRecentTurns: 6 });
+      const plan = planPrune(session.messages, { contextLimit, keepRecentTurns: 6 });
+      if (plan) {
+        session.log.replaceMessageRange(plan.startIndex, plan.endIndex, plan.summaryMessage);
+      }
       const postCount = session.messages.length;
       const postTokens = estimateMessageTokens(session.messages);
       const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
@@ -80,6 +91,13 @@ export async function runTurn(
 
     // For plan mode first turn, pass empty tools so LLM can't call any
     const turnTools = planPending ? [] : toolDefs;
+
+    // Model-visible means logged: everything the provider is about to see
+    // must be reconstructable from the event log. Cheap relative to a model
+    // call; opt out with PHREN_AGENT_NO_INVARIANT=1 if it ever matters.
+    if (process.env.PHREN_AGENT_NO_INVARIANT !== "1") {
+      session.log.assertReconstructs();
+    }
 
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
@@ -139,7 +157,11 @@ export async function runTurn(
       }
     }
 
-    session.messages.push({ role: "assistant", content: assistantContent });
+    session.log.append("assistant/message", {
+      message: { role: "assistant", content: assistantContent },
+      stop_reason: stopReason,
+      turn: session.turns,
+    });
     session.turns++;
 
     // Abort check after LLM response
@@ -163,21 +185,33 @@ export async function runTurn(
           : "The user rejected the plan. Task aborted.";
         if (feedback) {
           // Let the LLM revise — add feedback as user message and continue
-          session.messages.push({ role: "user", content: msg });
+          session.log.append("user/message", {
+            message: { role: "user", content: msg },
+            source: "user",
+            turn: session.turns,
+          });
           continue;
         }
         break;
       }
       // Approved — restore original system prompt and continue with tools enabled
       systemPrompt = config.systemPrompt;
-      session.messages.push({ role: "user", content: "Plan approved. Proceed with execution." });
+      session.log.append("user/message", {
+        message: { role: "user", content: "Plan approved. Proceed with execution." },
+        source: "system",
+        turn: session.turns,
+      });
       continue;
     }
 
     // If max_tokens, warn user and inject continuation prompt
     if (stopReason === "max_tokens") {
       status("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
-      session.messages.push({ role: "user", content: "Your response was truncated due to length. Please continue where you left off." });
+      session.log.append("user/message", {
+        message: { role: "user", content: "Your response was truncated due to length. Please continue where you left off." },
+        source: "system",
+        turn: session.turns,
+      });
       continue;
     }
 
@@ -237,12 +271,19 @@ export async function runTurn(
     }
 
     // Add tool results as a user message
-    session.messages.push({ role: "user", content: toolResults });
+    session.log.append("tool/results", {
+      message: { role: "user", content: toolResults },
+      turn: session.turns,
+    });
 
     // Steering input injection (TUI mid-turn input)
     const steer = hooks?.getSteeringInput?.();
     if (steer) {
-      session.messages.push({ role: "user", content: steer });
+      session.log.append("user/message", {
+        message: { role: "user", content: steer },
+        source: "steer",
+        turn: session.turns,
+      });
     }
   }
 
