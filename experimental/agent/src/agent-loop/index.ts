@@ -7,6 +7,7 @@ import { checkFlushNeeded } from "../memory/context-flush.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { detectLintCommand, detectTestCommand, runPostEditCheck } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
+import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
 import { createSession } from "./types.js";
@@ -34,6 +35,9 @@ export async function runTurn(
   if (planPending) {
     systemPrompt = injectPlanPrompt(systemPrompt);
   }
+
+  // Direct user input resets the repeat-call chain (repetition across it is not a loop)
+  resetRepeatChain(session.repeatChain);
 
   // Append user message to the durable log
   session.log.append("user/message", {
@@ -234,6 +238,7 @@ export async function runTurn(
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
       phrenCtx: config.phrenCtx,
+      repeatChain: session.repeatChain,
     });
     if (!hooks?.onToolStart) spinner.stop();
 
@@ -279,6 +284,7 @@ export async function runTurn(
     // Steering input injection (TUI mid-turn input)
     const steer = hooks?.getSteeringInput?.();
     if (steer) {
+      resetRepeatChain(session.repeatChain);
       session.log.append("user/message", {
         message: { role: "user", content: steer },
         source: "steer",

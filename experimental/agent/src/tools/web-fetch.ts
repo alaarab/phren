@@ -12,14 +12,14 @@ export function createWebFetchTool(): AgentTool {
       },
       required: ["url"],
     },
-    async execute(input) {
+    async execute(input, signal) {
       const url = input.url as string;
       const maxLen = (input.max_length as number) || 50_000;
 
       try {
         const res = await fetch(url, {
           headers: { "User-Agent": "phren-agent/0.1" },
-          signal: AbortSignal.timeout(15_000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
         });
         if (!res.ok) return { output: `HTTP ${res.status}: ${res.statusText}`, is_error: true };
 

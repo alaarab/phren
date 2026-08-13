@@ -44,6 +44,8 @@ export interface AgentSession {
   captureState: CaptureState;
   antiPatterns: AntiPatternTracker;
   flushConfig: FlushConfig;
+  /** Repeat-call guard chain (reset on direct user input). */
+  repeatChain: RepeatChainState;
 }
 
 export interface TurnResult {
@@ -82,6 +84,7 @@ export interface TurnHooks {
 // Re-import LlmMessage for the AgentResult/AgentSession interfaces
 import type { LlmMessage } from "../providers/types.js";
 import { SessionLog } from "../session/log.js";
+import { createRepeatChain, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
 import { randomUUID } from "crypto";
 
 export function createSession(contextLimit?: number, options?: { log?: SessionLog }): AgentSession {
@@ -102,5 +105,6 @@ export function createSession(contextLimit?: number, options?: { log?: SessionLo
     captureState: createCaptureState(),
     antiPatterns: new AntiPatternTracker(),
     flushConfig: createFlushConfig(contextLimit ?? 200_000),
+    repeatChain: createRepeatChain(),
   };
 }

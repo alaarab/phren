@@ -1,9 +1,12 @@
-import { execFileSync, spawn } from "child_process";
+import { execFile, spawn } from "child_process";
+import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import type { AgentTool } from "./types.js";
 import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -15,6 +18,9 @@ let nextBgId = 1;
 
 export const shellTool: AgentTool = {
   name: "shell",
+  // Internal budget maxes at 120s; give the scheduler a little headroom so
+  // the tool's own richer timeout message wins the race.
+  timeoutMs: MAX_TIMEOUT_MS + 5_000,
   description: "Run a shell command and return stdout + stderr. Use run_in_background for long-running commands (builds, test suites, dev servers). Use description to explain what the command does.",
   input_schema: {
     type: "object",
@@ -27,7 +33,7 @@ export const shellTool: AgentTool = {
     },
     required: ["command"],
   },
-  async execute(input) {
+  async execute(input, signal) {
     const command = input.command as string;
     const cwd = (input.cwd as string) || process.cwd();
     const timeout = Math.min(MAX_TIMEOUT_MS, (input.timeout as number) || DEFAULT_TIMEOUT_MS);
@@ -71,22 +77,29 @@ export const shellTool: AgentTool = {
       return { output: `Background task ${taskId} started${desc}. PID: ${child.pid}. Use task_output to get results.` };
     }
 
-    // Foreground execution
+    // Foreground execution — async so concurrent tool batches actually run
+    // concurrently (execFileSync blocked the event loop, making batch
+    // concurrency fictional and timeouts unenforceable mid-call) and so the
+    // scheduler's abort signal can kill a hung command.
     try {
-      const output = execFileSync(shell, shellArgs, {
+      const { stdout, stderr } = await execFileAsync(shell, shellArgs, {
         cwd,
         encoding: "utf-8",
         timeout,
         maxBuffer: MAX_OUTPUT_BYTES,
-        stdio: ["ignore", "pipe", "pipe"],
         env: scrubEnv(),
+        ...(signal ? { signal } : {}),
       });
-      return { output: output.trim() || "(no output)" };
+      const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+      return { output: combined || "(no output)" };
     } catch (err: unknown) {
-      if (err && typeof err === "object" && "stdout" in err) {
-        const e = err as { stdout?: string; stderr?: string; status?: number };
+      if (err && typeof err === "object" && ("stdout" in err || "stderr" in err)) {
+        const e = err as { stdout?: string; stderr?: string; code?: number | string; killed?: boolean; signal?: string };
         const combined = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-        return { output: `Exit code ${e.status ?? 1}\n${combined}`, is_error: true };
+        if (e.killed || e.signal === "SIGTERM") {
+          return { output: `Command timed out or was cancelled after ${timeout}ms\n${combined}`, is_error: true };
+        }
+        return { output: `Exit code ${typeof e.code === "number" ? e.code : 1}\n${combined}`, is_error: true };
       }
       const msg = err instanceof Error ? err.message : String(err);
       return { output: msg, is_error: true };
