@@ -325,6 +325,19 @@ export async function runAgentCli(raw: string[]) {
   });
 
   // One-shot mode
+  // Subagent tools are available by default (disable with --no-subagents);
+  // children run headless with auto-confirm permissions and exit when the
+  // parent's IPC channel closes.
+  let oneShotSpawner: import("./multi/spawner.js").AgentSpawner | undefined;
+  if (!args.noSubagents) {
+    const { AgentSpawner } = await import("./multi/spawner.js");
+    const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
+    oneShotSpawner = new AgentSpawner();
+    registry.register(createSpawnAgentTool(oneShotSpawner));
+    registry.register(createSendMessageTool(oneShotSpawner));
+    registry.register(createListAgentsTool(oneShotSpawner));
+  }
+
   try {
     const contextLimit = provider.contextWindow ?? 200_000;
 
@@ -420,10 +433,12 @@ export async function runAgentCli(raw: string[]) {
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     }
+    try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
     mcpCleanup?.();
     process.exit(1);
   }
 
+  try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
   mcpCleanup?.();
 }
 

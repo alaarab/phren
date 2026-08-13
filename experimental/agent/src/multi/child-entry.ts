@@ -121,6 +121,16 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     allowedPaths: [],
     projectRoot: payload.worktreePath ?? cwd,
   });
+  // Headless child: an "ask" verdict has no human to answer it, and the
+  // default readline prompt would hang forever on a closed stdin. Deny with
+  // a clear message instead (children normally run auto-confirm, so this
+  // only fires for the ask-category edge cases).
+  if (!process.stdin.isTTY) {
+    registry.askUser = async (toolName, _input, reason) => {
+      process.stderr.write(`[child] denied ${toolName} (needs approval, no interactive user): ${reason}\n`);
+      return false;
+    };
+  }
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);

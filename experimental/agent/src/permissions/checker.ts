@@ -3,12 +3,10 @@ import { checkShellSafety } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 
-/** Tools that are safe in all modes — read-only or agent management, no side effects. */
+/** Tools that are safe in all modes — read-only, no side effects. */
 const ALWAYS_SAFE_TOOLS = new Set([
   "phren_search",
   "phren_get_tasks",
-  "spawn_agent",
-  "send_message_to_agent",
   "list_agents",
 ]);
 
@@ -26,6 +24,10 @@ const AUTO_CONFIRM_TOOLS = new Set([
   "edit_file",
   "phren_add_finding",
   "phren_complete_task",
+  // Spawning forks a child process running with auto-confirm permissions —
+  // suggest mode must ask first (these were unprompted in every mode before).
+  "spawn_agent",
+  "send_message_to_agent",
 ]);
 
 /** Tools that are always denied regardless of mode. */

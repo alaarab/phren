@@ -172,3 +172,22 @@ describe("checkPermission", () => {
     });
   });
 });
+
+describe("subagent tool permissions", () => {
+  const base = { projectRoot: "/tmp", allowedPaths: [] };
+
+  it("asks before spawning in suggest mode (spawning forks an auto-confirm child)", () => {
+    const rule = checkPermission({ ...base, mode: "suggest" }, "spawn_agent", { task: "x" });
+    expect(rule.verdict).toBe("ask");
+  });
+
+  it("allows spawning in auto-confirm and full-auto modes", () => {
+    expect(checkPermission({ ...base, mode: "auto-confirm" }, "spawn_agent", {}).verdict).toBe("allow");
+    expect(checkPermission({ ...base, mode: "full-auto" }, "spawn_agent", {}).verdict).toBe("allow");
+    expect(checkPermission({ ...base, mode: "auto-confirm" }, "send_message_to_agent", {}).verdict).toBe("allow");
+  });
+
+  it("list_agents stays read-only safe in all modes", () => {
+    expect(checkPermission({ ...base, mode: "suggest" }, "list_agents", {}).verdict).toBe("allow");
+  });
+});
