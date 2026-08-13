@@ -2,9 +2,9 @@
 
 > **Status: experimental and unpublished.** `@phren/agent` is **not on npm**
 > and is **not** wired into the `phren` CLI — it lives in `experimental/agent/`
-> in the monorepo, excluded from the default build and test runs, and is
-> maintained at a lower bar than `packages/cli`. Everything below assumes a
-> repo checkout.
+> in the monorepo. It is built by the root `pnpm build` and tested by the CI
+> `agent-test` job, but maintained at a lower bar than `packages/cli`.
+> Everything below assumes a repo checkout.
 
 A coding agent with persistent memory. Its entrypoint is the standalone
 `phren-agent` binary built from the workspace — **not** the `phren` CLI. It
@@ -249,3 +249,55 @@ The agent is deeply integrated with phren's memory layer:
 - Sensitive file patterns (`.env`, credentials) are protected
 - Shell commands have safety checks and timeouts
 - Environment variables are scrubbed before sending to LLM providers
+
+---
+
+## Session event log
+
+Session history is an append-only event log at
+`<phrenPath>/.runtime/sessions/session-<id>.events.jsonl` — one JSON line per
+event (`user/message`, `assistant/message`, `tool/results`, `log/replace`).
+The message array the model sees is derived from the log, and an invariant
+asserts before every request that the projection still reconstructs from it
+(disable with `PHREN_AGENT_NO_INVARIANT=1`). Context pruning appends a
+`log/replace` event instead of deleting: the model sees a summary, the log
+keeps everything for replay and resume. `--resume` prefers the newest event
+log (forking it into the new run's own file, with `parentSession` lineage)
+and falls back to legacy v1 message snapshots, which are still written once
+at session end.
+
+## Reasoning models
+
+Reasoning/thinking output round-trips per provider: Codex re-sends encrypted
+reasoning items so multi-turn tool use keeps the model's chain of thought;
+Anthropic gets a `thinking` budget derived from `--reasoning` and replays
+signed thinking blocks; OpenAI-compatible endpoints and Ollama surface
+`reasoning_content`/`thinking` for display. Reasoning from a different
+provider is stripped on send, so `--resume` under a new model never replays
+another model's private state. The TUI shows a dim live thinking tail;
+one-shot `--verbose` streams it to stderr.
+
+## Images
+
+`read_image` (registered only for vision-capable models) reads png/jpeg/webp/
+gif up to 5MB into the conversation. On a text-only model, image content in
+resumed history degrades to an explicit `[image omitted]` marker rather than
+an unsendable request.
+
+## Loop hygiene
+
+Consecutive identical tool calls (same tool, same canonicalized arguments)
+get escalating reminders at runs of 3/5/8 appended to the tool result;
+identical calls within one assistant message execute once and share the
+result. Every tool runs under a declarative per-tool timeout (default 120s)
+with a real AbortSignal — shell commands are cancellable and no longer block
+the event loop.
+
+## Subagents in one-shot mode
+
+`spawn_agent`, `send_message_to_agent`, and `list_agents` are available in
+one-shot runs (not just the TUI); disable with `--no-subagents`. In `suggest`
+permission mode, spawning asks first — a child runs with auto-confirm
+permissions. Headless children auto-deny any tool that would need an
+interactive approval.
+
