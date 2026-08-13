@@ -1,4 +1,4 @@
-import React from "react";
+
 import { Box, Text, useStdout } from "ink";
 import { PhrenInput } from "./PhrenInput.js";
 import { PERMISSION_LABELS, PERMISSION_ICONS } from "../ansi.js";
@@ -18,7 +18,7 @@ export interface InputAreaProps {
 export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme }: InputAreaProps) {
   const { stdout } = useStdout();
   const columns = stdout?.columns || 80;
-  const sep = "\u2500".repeat(columns);
+  const _sep = "\u2500".repeat(columns);
   const sepColor = theme?.input.separator ?? separatorColor ?? "gray";
   const promptColor = theme?.input.prompt ?? undefined;
   const bashPromptColor = theme?.input.bashPrompt ?? "yellow";

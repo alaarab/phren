@@ -153,7 +153,7 @@ export const grepTool: AgentTool = {
     }
 
     const output: string[] = [];
-    let totalMatches = 0;
+    let _totalMatches = 0;
     let skipped = 0;
 
     for (const file of files) {
@@ -164,7 +164,7 @@ export const grepTool: AgentTool = {
         : searchFile(file, regex, contextB, contextA);
 
       if (results.length === 0) continue;
-      totalMatches++;
+      _totalMatches++;
 
       if (skipped < offset) { skipped++; continue; }
       if (output.length >= headLimit) break;

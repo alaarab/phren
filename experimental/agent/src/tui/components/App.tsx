@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Static, Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
-import { StatusBar } from "./StatusBar.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";

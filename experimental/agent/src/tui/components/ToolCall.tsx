@@ -1,4 +1,4 @@
-import React from "react";
+
 import { Box, Text } from "ink";
 import { formatToolInput, formatDuration, fileLink, isFileToolPreview } from "../tool-render.js";
 import type { Theme } from "../themes.js";

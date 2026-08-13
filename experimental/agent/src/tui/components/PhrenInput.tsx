@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import * as fs from "fs";
 import * as nodePath from "path";
@@ -352,7 +352,7 @@ function completeFilePath(
   if (!tokenMatch) return null;
 
   const token = tokenMatch[1]!;
-  const tokenStart = cursor - token.length;
+  const _tokenStart = cursor - token.length;
 
   // Only complete tokens that look like paths
   if (!/[/.~]/.test(token)) return null;

@@ -10,7 +10,7 @@
  */
 
 import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
-import type { TurnHooks, AgentSession } from "../agent-loop.js";
+import type { TurnHooks, } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
@@ -24,11 +24,9 @@ import { createPhrenFindingTool } from "../tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
 import { createSkillTool } from "../tools/skill.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
-import { buildPhrenContext, buildContextSnippet } from "../memory/context.js";
-import { startSession, endSession, getPriorSummary } from "../memory/session.js";
-import { loadProjectContext } from "../memory/project-context.js";
-import { buildSystemPrompt } from "../system-prompt.js";
-import { runAgent, createSession } from "../agent-loop.js";
+import { buildPhrenContext, } from "../memory/context.js";
+import { startSession, endSession, } from "../memory/session.js";
+import { runAgent, } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
 import type { LlmProvider } from "../providers/types.js";

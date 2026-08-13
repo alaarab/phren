@@ -6,21 +6,22 @@ assume this is maintained at the same bar as `packages/cli`.
 
 ## Running this package
 
-`experimental/agent` is a real pnpm workspace member (so `--filter` works),
-but it is intentionally excluded from the repo's default `build` and `test`
-scripts:
+`experimental/agent` is a pnpm workspace member, built by the root
+`pnpm build` and tested in CI by its own `agent-test` job:
 
-- `pnpm build` (root) builds `packages/*` only, not this package.
-- `pnpm test` (root) runs `packages/cli` and `packages/vscode` tests only —
-  this package's 300+ tests are not part of that run.
+- `pnpm build` (root) includes this package.
+- `pnpm test` (root) still runs only `packages/cli` and `packages/vscode`
+  tests — this package's suite runs separately (its own `vitest.config.ts`,
+  no workspace-root globalSetup) and is kept off the CI OS×node matrix.
 
-To build or test this package on demand:
+To build, test, or lint this package on demand:
 
 ```bash
+pnpm exec turbo run test --filter=@phren/agent   # builds @phren/cli dist first
 pnpm --filter @phren/agent build
-pnpm --filter @phren/agent test
+pnpm --filter @phren/agent lint
 ```
 
-Tests use their own `vitest.config.ts` in this directory, scoped to
-`src/**/*.test.ts` — it does not depend on `packages/cli`'s build output or
-the workspace-root globalSetup.
+Note: the test suite imports `@phren/cli` subpath exports that resolve to
+`packages/cli/dist/`, so a bare `pnpm --filter @phren/agent test` on a clean
+checkout fails until the CLI is built — prefer the turbo invocation.
