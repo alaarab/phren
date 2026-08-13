@@ -3,10 +3,11 @@
  * Calls chatgpt.com/backend-api/codex/responses (Responses API format).
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
-import { stripForeignReasoning } from "./history.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 import type { ReasoningEffort } from "../models.js";
-import { lookupMaxOutputTokens } from "../models.js";
+import { lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
 const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
 const PROVIDER_NAME = "openai-codex";
@@ -22,7 +23,7 @@ export function toResponsesTools(tools: AgentToolDef[]) {
 }
 
 /** Convert our messages to Responses API input format. Exported for tests. */
-export function toResponsesInput(messages: LlmMessage[]) {
+export function toResponsesInput(messages: LlmMessage[], vision = false) {
   const input: Record<string, unknown>[] = [];
 
   for (const msg of stripForeignReasoning(messages, PROVIDER_NAME)) {
@@ -40,7 +41,33 @@ export function toResponsesInput(messages: LlmMessage[]) {
             input.push({
               type: "function_call_output",
               call_id: block.tool_use_id,
-              output: block.content,
+              output: toolResultText(block),
+            });
+            // Images cannot ride a function_call_output; they follow as a
+            // user message with input_image parts. Text-only models get a
+            // marker so durable history never produces an unsendable request.
+            if (Array.isArray(block.content)) {
+              const imageParts = block.content.filter((c) => c.type === "image");
+              if (imageParts.length > 0) {
+                input.push({
+                  type: "message",
+                  role: "user",
+                  content: vision
+                    ? imageParts.map((c) => (c.type === "image" ? {
+                        type: "input_image",
+                        image_url: `data:${c.source.media_type};base64,${c.source.data}`,
+                      } : { type: "input_text", text: "" }))
+                    : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
+                });
+              }
+            }
+          } else if (block.type === "image") {
+            input.push({
+              type: "message",
+              role: "user",
+              content: vision
+                ? [{ type: "input_image", image_url: `data:${block.source.media_type};base64,${block.source.data}` }]
+                : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
             });
           } else if (block.type === "text") {
             input.push({
@@ -203,7 +230,7 @@ export class CodexProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(messages),
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
       store: false,
       stream: true,
       // Without this the API omits the encrypted payload and reasoning
@@ -226,7 +253,7 @@ export class CodexProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: system,
-      input: toResponsesInput(messages),
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
       store: false,
       stream: true,
       include: ["reasoning.encrypted_content"],

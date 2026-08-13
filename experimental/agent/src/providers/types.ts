@@ -13,11 +13,31 @@ export interface ToolUseBlock {
   input: Record<string, unknown>;
 }
 
+/** Base64 image content, Anthropic-shaped like the rest of the block system. */
+export interface ImageBlock {
+  type: "image";
+  source: {
+    type: "base64";
+    media_type: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+    data: string;
+  };
+}
+
 export interface ToolResultBlock {
   type: "tool_result";
   tool_use_id: string;
-  content: string;
+  /** Plain text, or mixed text/image parts for tools that return images. */
+  content: string | Array<TextBlock | ImageBlock>;
   is_error?: boolean;
+}
+
+/** Text of a tool result, whatever its content shape (images contribute nothing). */
+export function toolResultText(block: ToolResultBlock): string {
+  if (typeof block.content === "string") return block.content;
+  return block.content
+    .filter((part): part is TextBlock => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
 }
 
 /**
@@ -42,7 +62,7 @@ export interface ReasoningBlock {
   data?: string;
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ReasoningBlock;
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ReasoningBlock | ImageBlock;
 
 export interface LlmMessage {
   role: "user" | "assistant";

@@ -8,6 +8,8 @@ import { editFileTool } from "./tools/edit-file.js";
 import { shellTool, taskOutputTool, taskStopTool } from "./tools/shell.js";
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
+import { createReadImageTool } from "./tools/read-image.js";
+import { modelSupportsVision } from "./models.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
 import { createWebSearchTool } from "./tools/web-search.js";
 import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
@@ -186,6 +188,9 @@ export async function runAgentCli(raw: string[]) {
   registry.register(taskStopTool);
   registry.register(globTool);
   registry.register(grepTool);
+  if (modelSupportsVision(provider.name, provider.model ?? "")) {
+    registry.register(createReadImageTool(provider));
+  }
 
   if (phrenCtx) {
     registry.register(createPhrenSearchTool(phrenCtx));

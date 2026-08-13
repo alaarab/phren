@@ -1,5 +1,6 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { stripForeignReasoning } from "./history.js";
+import { toolResultText } from "./types.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 const PROVIDER_NAME = "ollama";
 
@@ -23,7 +24,15 @@ function toOllamaMessages(system: string, messages: LlmMessage[]) {
         if (block.type === "text") {
           out.push({ role: msg.role, content: block.text });
         } else if (block.type === "tool_result") {
-          out.push({ role: "tool", tool_call_id: block.tool_use_id, content: block.content });
+          // Text only: local models are text-only in this integration, so
+          // image parts degrade to a marker rather than an unsendable body.
+          const text = toolResultText(block);
+          const hasImages = Array.isArray(block.content) && block.content.some((c) => c.type === "image");
+          out.push({
+            role: "tool",
+            tool_call_id: block.tool_use_id,
+            content: hasImages ? `${text}\n${IMAGE_OMITTED_MARKER}` : text,
+          });
         } else if (block.type === "tool_use") {
           out.push({
             role: "assistant",

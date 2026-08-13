@@ -35,3 +35,6 @@ export function reasoningBlocks(message: LlmMessage): ReasoningBlock[] {
   if (!Array.isArray(message.content)) return [];
   return message.content.filter((b): b is ReasoningBlock => b.type === "reasoning");
 }
+
+/** Marker substituted for image content when the active model is text-only. */
+export const IMAGE_OMITTED_MARKER = "[image omitted: the active model does not accept image input]";

@@ -1,4 +1,5 @@
 import type { ToolUseBlock, StreamDelta, ContentBlock } from "../providers/types.js";
+import type { AgentToolImage } from "../tools/types.js";
 import type { CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import type { CaptureState } from "../memory/auto-capture.js";
@@ -14,8 +15,8 @@ const MAX_TOOL_CONCURRENCY = 5;
 export async function runToolsConcurrently(
   blocks: ToolUseBlock[],
   registry: ToolRegistry,
-): Promise<Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number }>> {
-  const results: Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number }> = [];
+): Promise<Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[] }>> {
+  const results: Array<{ block: ToolUseBlock; output: string; is_error: boolean; durationMs: number; images?: AgentToolImage[] }> = [];
   for (let i = 0; i < blocks.length; i += MAX_TOOL_CONCURRENCY) {
     const batch = blocks.slice(i, i + MAX_TOOL_CONCURRENCY);
     const batchResults = await Promise.all(
@@ -31,7 +32,13 @@ export async function runToolsConcurrently(
             }),
           ]);
           clearTimeout(timer);
-          return { block, output: result.output, is_error: !!result.is_error, durationMs: Date.now() - start };
+          return {
+            block,
+            output: result.output,
+            is_error: !!result.is_error,
+            durationMs: Date.now() - start,
+            ...(result.images && result.images.length > 0 ? { images: result.images } : {}),
+          };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           return { block, output: msg, is_error: true, durationMs: Date.now() - start };
@@ -171,7 +178,7 @@ export async function executeToolBlocks(
   const results: ContentBlock[] = [];
   let toolCallCount = 0;
 
-  for (const { block, output, is_error, durationMs } of execResults) {
+  for (const { block, output, is_error, durationMs, images } of execResults) {
     toolCallCount++;
     let finalOutput = output;
 
@@ -198,7 +205,15 @@ export async function executeToolBlocks(
     results.push({
       type: "tool_result",
       tool_use_id: block.id,
-      content: finalOutput,
+      content: images
+        ? [
+            { type: "text", text: finalOutput },
+            ...images.map((img) => ({
+              type: "image" as const,
+              source: { type: "base64" as const, media_type: img.media_type, data: img.data },
+            })),
+          ]
+        : finalOutput,
       is_error,
     });
   }

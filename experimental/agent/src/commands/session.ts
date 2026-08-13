@@ -1,3 +1,4 @@
+import { toolResultText } from "../providers/types.js";
 /**
  * Session commands: /session, /history, /compact, /diff, /git
  */
@@ -117,7 +118,7 @@ export function historyCommand(parts: string[], ctx: CommandContext): boolean {
         for (const block of msg.content) {
           if (block.type === "tool_result") {
             const icon = block.is_error ? `${RED}\u2717${RESET}` : `${GREEN}\u2713${RESET}`;
-            const preview = (block.content ?? "").slice(0, 80).replace(/\n/g, " ");
+            const preview = toolResultText(block).slice(0, 80).replace(/\n/g, " ");
             process.stderr.write(`${DIM}  ${icon} tool_result ${preview}${preview.length >= 80 ? "..." : ""}${RESET}\n`);
           } else if (block.type === "text") {
             process.stderr.write(`${DIM}  ${(block as { text: string }).text.slice(0, 100)}${RESET}\n`);

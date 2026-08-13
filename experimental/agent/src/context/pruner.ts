@@ -1,4 +1,5 @@
 import type { LlmMessage, ContentBlock, ToolUseBlock, ToolResultBlock } from "../providers/types.js";
+import { toolResultText } from "../providers/types.js";
 import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 
 export interface PruneConfig {
@@ -92,7 +93,7 @@ function extractFromToolUse(
 }
 
 function extractError(block: ToolResultBlock, errorsSet: Set<string>): void {
-  const firstLine = block.content.split("\n")[0].trim();
+  const firstLine = toolResultText(block).split("\n")[0].trim();
   if (firstLine) {
     // Cap length to keep summary concise
     errorsSet.add(firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine);

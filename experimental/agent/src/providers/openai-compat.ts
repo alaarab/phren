@@ -1,6 +1,6 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { stripForeignReasoning } from "./history.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
 export function toOpenAiTools(tools: AgentToolDef[]) {
@@ -21,7 +21,7 @@ export function toOpenAiTools(tools: AgentToolDef[]) {
  * string, never null/absent: some gateways 400 on a null-content assistant
  * message, and history is durable, so one would poison every later turn.
  */
-export function toOpenAiMessages(system: string, messages: LlmMessage[], providerName?: string) {
+export function toOpenAiMessages(system: string, messages: LlmMessage[], providerName?: string, vision = false) {
   const out: Record<string, unknown>[] = [{ role: "system", content: system }];
   for (const msg of stripForeignReasoning(messages, providerName)) {
     if (msg.role === "assistant") {
@@ -50,7 +50,43 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[], provide
       } else {
         for (const block of msg.content) {
           if (block.type === "tool_result") {
-            out.push({ role: "tool", tool_call_id: block.tool_use_id, content: block.content });
+            if (typeof block.content === "string") {
+              out.push({ role: "tool", tool_call_id: block.tool_use_id, content: block.content });
+            } else {
+              // Mixed text/image result: the tool message carries the text;
+              // images follow as a user message with image_url parts (Chat
+              // Completions has no image slot on tool messages). Text-only
+              // models get a marker instead of a request that would 400 on
+              // every later turn of the durable history.
+              const textParts = block.content.filter((c) => c.type === "text").map((c) => (c.type === "text" ? c.text : ""));
+              const imageParts = block.content.filter((c) => c.type === "image");
+              out.push({ role: "tool", tool_call_id: block.tool_use_id, content: textParts.join("\n") });
+              if (imageParts.length > 0) {
+                if (vision) {
+                  out.push({
+                    role: "user",
+                    content: imageParts.map((c) => (c.type === "image" ? {
+                      type: "image_url",
+                      image_url: { url: `data:${c.source.media_type};base64,${c.source.data}` },
+                    } : { type: "text", text: "" })),
+                  });
+                } else {
+                  out.push({ role: "user", content: IMAGE_OMITTED_MARKER });
+                }
+              }
+            }
+          } else if (block.type === "image") {
+            if (vision) {
+              out.push({
+                role: "user",
+                content: [{
+                  type: "image_url",
+                  image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+                }],
+              });
+            } else {
+              out.push({ role: "user", content: IMAGE_OMITTED_MARKER });
+            }
           } else if (block.type === "text") {
             out.push({ role: "user", content: block.text });
           }
