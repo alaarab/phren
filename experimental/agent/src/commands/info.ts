@@ -6,8 +6,8 @@ import { estimateMessageTokens } from "../context/token-counter.js";
 import { execSync } from "node:child_process";
 
 const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const CYAN = "\x1b[36m";
+const _BOLD = "\x1b[1m";
+const _CYAN = "\x1b[36m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
@@ -28,7 +28,8 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /plan       Show conversation plan (tool calls so far)
   /undo       Undo last user message and response
   /history [n|full]  Show last N messages (default 10) with rich formatting
-  /compact    Compact conversation to save context space
+  /compact    Compact conversation (LLM checkpoint + knowledge promotion)
+  /review     Triage the phren review queue (go = manual, auto = model-assisted)
   /context    Show context window usage and provider info
   /mode       Toggle input mode (steering ↔ queue)
   /verbose    Toggle verbose tool output (show first 5 lines)

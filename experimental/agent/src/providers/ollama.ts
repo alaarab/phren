@@ -1,4 +1,8 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { toolResultText } from "./types.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
+
+const PROVIDER_NAME = "ollama";
 
 /** Convert Anthropic tool defs to OpenAI function format (Ollama uses OpenAI-compat). */
 function toOllamaTools(tools: AgentToolDef[]) {
@@ -10,7 +14,9 @@ function toOllamaTools(tools: AgentToolDef[]) {
 
 function toOllamaMessages(system: string, messages: LlmMessage[]) {
   const out: Record<string, unknown>[] = [{ role: "system", content: system }];
-  for (const msg of messages) {
+  // Reasoning is display-only for Ollama: local models regenerate their own
+  // thinking each turn, so history drops it entirely (own and foreign).
+  for (const msg of stripForeignReasoning(messages, undefined)) {
     if (typeof msg.content === "string") {
       out.push({ role: msg.role, content: msg.content });
     } else {
@@ -18,7 +24,15 @@ function toOllamaMessages(system: string, messages: LlmMessage[]) {
         if (block.type === "text") {
           out.push({ role: msg.role, content: block.text });
         } else if (block.type === "tool_result") {
-          out.push({ role: "tool", tool_call_id: block.tool_use_id, content: block.content });
+          // Text only: local models are text-only in this integration, so
+          // image parts degrade to a marker rather than an unsendable body.
+          const text = toolResultText(block);
+          const hasImages = Array.isArray(block.content) && block.content.some((c) => c.type === "image");
+          out.push({
+            role: "tool",
+            tool_call_id: block.tool_use_id,
+            content: hasImages ? `${text}\n${IMAGE_OMITTED_MARKER}` : text,
+          });
         } else if (block.type === "tool_use") {
           out.push({
             role: "assistant",
@@ -32,7 +46,7 @@ function toOllamaMessages(system: string, messages: LlmMessage[]) {
 }
 
 export class OllamaProvider implements LlmProvider {
-  name = "ollama";
+  name = PROVIDER_NAME;
   contextWindow = 32_000;
   maxOutputTokens: number;
   private baseUrl: string;
@@ -44,6 +58,11 @@ export class OllamaProvider implements LlmProvider {
     this.maxOutputTokens = maxOutputTokens ?? 8192;
   }
 
+  /** Thinking models (deepseek-r1 etc.) need think:true to separate reasoning from answer. */
+  private supportsThinking(): boolean {
+    return /deepseek-r1|qwen3|gpt-oss/i.test(this.model);
+  }
+
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
@@ -51,6 +70,7 @@ export class OllamaProvider implements LlmProvider {
       options: { num_predict: this.maxOutputTokens },
       stream: false,
     };
+    if (this.supportsThinking()) body.think = true;
     if (tools.length > 0) body.tools = toOllamaTools(tools);
 
     const res = await fetch(`${this.baseUrl}/api/chat`, {
@@ -67,6 +87,10 @@ export class OllamaProvider implements LlmProvider {
     const data = await res.json() as Record<string, unknown>;
     const message = data.message as Record<string, unknown> | undefined;
     const content: ContentBlock[] = [];
+
+    if (message?.thinking && typeof message.thinking === "string") {
+      content.push({ type: "reasoning", text: message.thinking, provider: PROVIDER_NAME });
+    }
 
     if (message?.content && typeof message.content === "string") {
       content.push({ type: "text", text: message.content });
@@ -96,6 +120,7 @@ export class OllamaProvider implements LlmProvider {
       options: { num_predict: this.maxOutputTokens },
       stream: true,
     };
+    if (this.supportsThinking()) body.think = true;
     if (tools.length > 0) body.tools = toOllamaTools(tools);
 
     const res = await fetch(`${this.baseUrl}/api/chat`, {
@@ -130,6 +155,9 @@ export class OllamaProvider implements LlmProvider {
         try { chunk = JSON.parse(line); } catch { continue; }
 
         const message = chunk.message as Record<string, unknown> | undefined;
+        if (message?.thinking && typeof message.thinking === "string") {
+          yield { type: "reasoning_delta", text: message.thinking };
+        }
         if (message?.content && typeof message.content === "string") {
           yield { type: "text_delta", text: message.content };
         }

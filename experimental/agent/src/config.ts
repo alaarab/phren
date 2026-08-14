@@ -21,6 +21,12 @@ export interface CliArgs {
   mcpConfig?: string;
   team?: string;
   multi: boolean;
+  /** Disable subagent tools in one-shot mode (they are on by default). */
+  noSubagents: boolean;
+  /** Disable LLM compaction (falls back to regex prune summaries). */
+  noLlmCompact: boolean;
+  /** Kernel write-fence for shell commands: off | auto | require. */
+  sandbox: "off" | "auto" | "require";
   help: boolean;
   version: boolean;
 }
@@ -39,10 +45,13 @@ Options:
   --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
+  --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
+  --no-llm-compact     Use regex prune summaries instead of LLM compaction
+  --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
-  --resume             Resume last session's conversation
+  --resume             Resume last session's conversation (task optional)
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
@@ -87,6 +96,9 @@ export function parseArgs(argv: string[]): CliArgs {
     verbose: false,
     interactive: false,
     resume: false,
+    noSubagents: false,
+    noLlmCompact: false,
+    sandbox: "auto",
     mcp: [],
     multi: false,
     help: false,
@@ -102,6 +114,12 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--dry-run") { args.dryRun = true; }
     else if (arg === "--verbose") { args.verbose = true; }
     else if (arg === "--interactive" || arg === "-i") { args.interactive = true; }
+    else if (arg === "--no-subagents") { args.noSubagents = true; }
+    else if (arg === "--no-llm-compact") { args.noLlmCompact = true; }
+    else if (arg === "--sandbox" && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
+    }
     else if (arg === "--plan") { args.plan = true; }
     else if (arg === "--resume") { args.resume = true; }
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }

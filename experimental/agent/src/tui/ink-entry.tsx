@@ -8,6 +8,7 @@ import type { AgentConfig } from "../agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "../agent-loop.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
+import { resolveSkillGesture } from "../commands.js";
 import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
@@ -27,7 +28,7 @@ const AGENT_VERSION = (_require("../../package.json") as { version: string }).ve
 
 export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): Promise<AgentSession> {
   const contextLimit = config.provider.contextWindow ?? 200_000;
-  const session = createSession(contextLimit);
+  const session = createSession(contextLimit, { log: config.sessionLog });
   const startTime = Date.now();
 
   let inputMode: InputMode = loadInputMode();
@@ -72,6 +73,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   // Mutable render state — updated then pushed to React via rerender()
   const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
+  let reasoningText = "";
   let thinking = false;
   let thinkStartTime = 0;
   let thinkElapsed: string | null = null;
@@ -135,6 +137,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         state={getAppState()}
         completedMessages={displayMessages}
         streamingText={displayStreaming}
+        reasoningText={agentConvo ? "" : reasoningText}
         completedToolCalls={displayToolCalls}
         activeTool={displayActiveTool}
         thinking={displayThinking}
@@ -220,7 +223,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   });
 
   function handleSubmit(input: string) {
-    const line = input.trim();
+    let line = input.trim();
     if (!line) return;
 
     // Permission prompt active — intercept y/n/a/s (process next in queue)
@@ -356,7 +359,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
 
     // Slash commands — capture stderr output and display as status message
     if (line.startsWith("/")) {
-      if (slashCommands.tryHandleCommand(line)) {
+      // /skill-name gesture: rewrite into a run_skill task and fall through
+      const skillTask = resolveSkillGesture(line, config.phrenCtx);
+      if (skillTask) {
+        completedMessages.push({ id: nextId(), kind: "status", text: `↳ running skill via ${line.split(/\s+/)[0]}` });
+        line = skillTask;
+      } else if (slashCommands.tryHandleCommand(line)) {
         update();
         return;
       }
@@ -402,6 +410,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     onTextDelta: (text) => {
       thinking = false;
       streamingText += text;
+      scheduleUpdate();
+    },
+    onReasoningDelta: (text) => {
+      reasoningText += text;
       scheduleUpdate();
     },
     onTextDone: () => {
@@ -455,6 +467,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     thinkStartTime = Date.now();
     thinkElapsed = null;
     streamingText = "";
+    reasoningText = "";
     currentToolCalls = [];
     activeTool = null;
     const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
@@ -481,6 +494,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       });
     }
     streamingText = "";
+    reasoningText = "";
     currentToolCalls = [];
     activeTool = null;
     running = false;

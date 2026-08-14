@@ -8,6 +8,7 @@ import {
   startSessionRecord,
   type SerializedSessionMessage,
 } from "@phren/cli/session/artifacts";
+import { addNote } from "@phren/cli/data/notes";
 import type { PhrenContext } from "./context.js";
 
 type SessionCounterField = "findingsAdded" | "tasksCompleted";
@@ -30,12 +31,50 @@ export function endSession(ctx: PhrenContext, sessionId: string, summary?: strin
   endSessionRecord(ctx.phrenPath, sessionId, summary);
 }
 
+function truncateLine(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
+/**
+ * Mirror a session summary into the project's notes. Notes are FTS-indexed
+ * but non-injectable — past sessions become searchable via phren_search with
+ * zero prompt-leak risk. Best effort, never throws.
+ */
+export function writeSessionNote(
+  ctx: PhrenContext,
+  opts: { sessionId?: string | null; task?: string; outcome?: string },
+): void {
+  if (!ctx.project) return;
+  try {
+    const parts = [`[agent session${opts.sessionId ? ` ${opts.sessionId.slice(0, 8)}` : ""}]`];
+    if (opts.task) parts.push(`task: ${truncateLine(opts.task, 200)}`);
+    if (opts.outcome) parts.push(`outcome: ${truncateLine(opts.outcome, 500)}`);
+    if (parts.length === 1) return;
+    addNote(ctx.phrenPath, ctx.project, parts.join(" — "));
+  } catch {
+    // best effort
+  }
+}
+
 export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: SessionCounterField): void {
   incrementSessionStateCounter(phrenPath, sessionId, counter);
 }
 
-export function getPriorSummary(ctx: PhrenContext): string | null {
-  return findMostRecentSummaryWithProject(ctx.phrenPath, ctx.project ?? undefined).summary;
+export interface PriorSummary {
+  summary: string;
+  project?: string;
+  endedAt?: string;
+}
+
+export function getPriorSummary(ctx: PhrenContext): PriorSummary | null {
+  const lookup = findMostRecentSummaryWithProject(ctx.phrenPath, ctx.project ?? undefined);
+  if (!lookup.summary) return null;
+  // The CLI lookup falls back to the most recent summary from ANY project when
+  // the current project has none. A different project's session summary is more
+  // likely to mislead than help, so drop it rather than inject it unlabeled.
+  if (ctx.project && lookup.project && lookup.project !== ctx.project) return null;
+  return { summary: lookup.summary, project: lookup.project, endedAt: lookup.endedAt };
 }
 
 export function saveSessionMessages(

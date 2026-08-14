@@ -20,7 +20,7 @@ Experimental (not published, not wired into the `phren` CLI):
 
 | Package | Path | Status | Description |
 |---------|------|--------|-------------|
-| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Kept in the monorepo for local iteration. Run directly via `pnpm --filter @phren/agent ...` or the built `phren-agent` binary — **not** via `phren`. |
+| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Built by root `pnpm build`; tested by the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`). Run via the built `phren-agent` binary — **not** via `phren`. |
 
 Outside the pnpm workspace:
 

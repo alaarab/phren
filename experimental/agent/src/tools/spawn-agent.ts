@@ -93,6 +93,9 @@ export function createListAgentsTool(spawner: AgentSpawner): AgentTool {
 export function createSpawnAgentTool(spawner: AgentSpawner): AgentTool {
   return {
     name: "spawn_agent",
+    // The foreground subagent wait is 300s; without a wider scheduler budget
+    // the default 120s race always won while the child kept running.
+    timeoutMs: 330_000,
     description: `Spawn a child agent. Two modes:
 
 **Subagent** (background=false, default): Runs the task and waits for the result. Output appears inline in your conversation. Use for quick parallel work like "search 3 files", "run tests", "check dependencies". The tool call blocks until the agent finishes and returns its response.

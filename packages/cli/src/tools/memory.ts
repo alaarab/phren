@@ -10,6 +10,13 @@ import {
 } from "../shared/governance.js";
 import { upsertCanonical } from "../shared/content.js";
 import { isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+
+/** truths.md path via the same store-aware routing upsertCanonical writes with. */
+function truthsFilePath(phrenPath: string, project: string): string {
+  return storeAwareProjectPath(phrenPath, project, "truths.md")
+    ?? path.join(phrenPath, project, "truths.md");
+}
 
 
 
@@ -41,8 +48,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = upsertCanonical(phrenPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const canonicalPath = path.join(phrenPath, project, "truths.md");
-        updateFileInIndex(canonicalPath);
+        updateFileInIndex(truthsFilePath(phrenPath, project));
         return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
       });
     }
@@ -69,7 +75,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
       }
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const truthsPath = path.join(phrenPath, project, "truths.md");
+      const truthsPath = truthsFilePath(phrenPath, project);
       if (!fs.existsSync(truthsPath)) {
         return mcpResponse({ ok: true, message: `No truths pinned for "${project}" yet.`, data: { project, truths: [], count: 0 } });
       }

@@ -5,9 +5,11 @@ import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
 import { writeFileTool } from "./tools/write-file.js";
 import { editFileTool } from "./tools/edit-file.js";
-import { shellTool, taskOutputTool, taskStopTool } from "./tools/shell.js";
+import { createShellTool, taskOutputTool, taskStopTool } from "./tools/shell.js";
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
+import { createReadImageTool } from "./tools/read-image.js";
+import { modelSupportsVision } from "./models.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
 import { createWebSearchTool } from "./tools/web-search.js";
 import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
@@ -18,10 +20,13 @@ import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/ph
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
-import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
+import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
-import { runAgent, createSession, runTurn } from "./agent-loop.js";
+import { createSession, runTurn } from "./agent-loop.js";
+import { SessionLog, seedFromMessages } from "./session/log.js";
+import { fileSink, findLatestEventLog, persistFork, restoreSessionLog } from "./session/persist.js";
+import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
@@ -118,6 +123,10 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
+  // `--resume` alone continues the prior session without a placeholder task
+  if (!args.task && args.resume) {
+    args.task = "Continue where the previous session left off.";
+  }
   if (!args.task && !args.interactive && !args.multi && !args.team) {
     console.error("Usage: phren-agent <task>\nRun phren-agent --help for more info.");
     process.exit(1);
@@ -139,13 +148,37 @@ export async function runAgentCli(raw: string[]) {
   // Build phren context
   const phrenCtx = await buildPhrenContext(args.project);
   let contextSnippet = "";
-  let priorSummary: string | null = null;
+  let priorSummary: import("./memory/session.js").PriorSummary | null = null;
   let sessionId: string | null = null;
 
   if (phrenCtx) {
     if (args.verbose) {
       process.stderr.write(`Phren: ${phrenCtx.phrenPath} (project: ${phrenCtx.project ?? "none"})\n`);
     }
+
+    // Review-queue surfacing. Interactive sessions get expiry + a triage
+    // banner; one-shot runs get a count only and never mutate the queue.
+    if (phrenCtx.project) {
+      try {
+        const { getQueueStatus, formatQueueBanner, expireStaleItems, resolveExpireDays } =
+          await import("./memory/review-triage.js");
+        if (args.interactive || args.multi || args.team) {
+          const expireDays = resolveExpireDays();
+          const { expired } = expireStaleItems(phrenCtx, expireDays);
+          if (expired > 0) {
+            process.stderr.write(`\x1b[2m[auto-rejected ${expired} stale review item(s) older than ${expireDays}d]\x1b[0m\n`);
+          }
+          const banner = formatQueueBanner(getQueueStatus(phrenCtx, 3));
+          if (banner) process.stderr.write(`\x1b[33m${banner}\x1b[0m\n`);
+        } else {
+          const { pending } = getQueueStatus(phrenCtx, 0);
+          if (pending > 0) {
+            process.stderr.write(`\x1b[2m[review queue: ${pending} pending — run phren-agent -i, then /review]\x1b[0m\n`);
+          }
+        }
+      } catch { /* best effort */ }
+    }
+
     contextSnippet = await buildContextSnippet(phrenCtx, args.task);
     priorSummary = getPriorSummary(phrenCtx);
     sessionId = startSession(phrenCtx);
@@ -177,15 +210,20 @@ export async function runAgentCli(raw: string[]) {
     mode: args.permissions,
     allowedPaths: [],
     projectRoot: process.cwd(),
+    sandboxMode: args.sandbox,
   });
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
-  registry.register(shellTool);
+  // Live-config factory: /permissions and sandbox mode changes apply per call
+  registry.register(createShellTool(() => registry.permissionConfig));
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
   registry.register(globTool);
   registry.register(grepTool);
+  if (modelSupportsVision(provider.name, provider.model ?? "")) {
+    registry.register(createReadImageTool(provider));
+  }
 
   if (phrenCtx) {
     registry.register(createPhrenSearchTool(phrenCtx));
@@ -236,6 +274,65 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
+  /** Durable event log for this run when a phren store is available. */
+  const makePersistedLog = (): SessionLog | undefined => {
+    if (!phrenCtx || !sessionId) return undefined;
+    return new SessionLog(
+      {
+        sessionId,
+        project: phrenCtx.project ?? undefined,
+        cwd: process.cwd(),
+        createdAt: new Date().toISOString(),
+      },
+      fileSink(phrenCtx.phrenPath, sessionId),
+    );
+  };
+
+  /**
+   * Resume seed: newest event log preferred, legacy v1 snapshot as fallback.
+   * MUST run before makePersistedLog(): creating this run's own (empty) log
+   * first would make it the newest discovery candidate and shadow the real
+   * previous session.
+   */
+  const makeResumedLog = (): SessionLog | undefined => {
+    if (!phrenCtx || !sessionId) return undefined;
+    const latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    if (latest) {
+      try {
+        const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
+        if (parent.length > 0) {
+          if (args.verbose) {
+            process.stderr.write(
+              `Resuming session ${parent.header.sessionId.slice(0, 8)} (${parent.header.project ?? "global"}) with ${parent.getMessages().length} messages from its event log\n`,
+            );
+          }
+          // This run gets its own forked log file, seeded with the parent's
+          // full history and linked via parentSession.
+          return persistFork(phrenCtx.phrenPath, parent, sessionId);
+        }
+      } catch (err: unknown) {
+        process.stderr.write(
+          `Cannot resume from event log (${err instanceof Error ? err.message : String(err)}); trying legacy snapshot\n`,
+        );
+      }
+    }
+    const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    if (priorSnapshot && priorSnapshot.messages.length > 0) {
+      if (args.verbose) {
+        process.stderr.write(
+          `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${priorSnapshot.project ?? "global"}) with ${priorSnapshot.messages.length} messages from a v1 snapshot\n`,
+        );
+      }
+      const log = makePersistedLog();
+      if (!log) return undefined;
+      seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
+      return log;
+    }
+    return undefined;
+  };
+
+  const resumedLog = args.resume && !args.interactive && !args.multi && !args.team ? makeResumedLog() : undefined;
+
   const agentConfig = {
     provider,
     registry,
@@ -247,6 +344,8 @@ export async function runAgentCli(raw: string[]) {
     plan: args.plan,
     lintTestConfig,
     sessionId,
+    sessionLog: resumedLog ?? makePersistedLog(),
+    ...(args.noLlmCompact ? { compaction: { enabled: false } } : {}),
   };
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
@@ -269,14 +368,21 @@ export async function runAgentCli(raw: string[]) {
 
     // Flush anti-patterns at session end
     if (phrenCtx) {
-      try { await session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
-      try { await evolveProjectContext(phrenCtx, provider, session.messages); } catch { /* best effort */ }
+      try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
+      try { await evolveProjectContext(phrenCtx, provider, session.messages, { sessionId }); } catch { /* best effort */ }
     }
 
     if (phrenCtx && sessionId) {
       const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
       endSession(phrenCtx, sessionId, lastText);
       saveSessionMessages(phrenCtx.phrenPath, sessionId, session.messages, phrenCtx.project ?? undefined);
+      if (session.messages.length > 0) {
+        writeSessionNote(phrenCtx, {
+          sessionId,
+          task: "interactive session",
+          outcome: `${session.messages.length} messages, ${session.toolCalls} tool calls`,
+        });
+      }
     }
     mcpCleanup?.();
     return;
@@ -302,37 +408,48 @@ export async function runAgentCli(raw: string[]) {
   });
 
   // One-shot mode
+  // Subagent tools are available by default (disable with --no-subagents);
+  // children run headless with auto-confirm permissions and exit when the
+  // parent's IPC channel closes.
+  let oneShotSpawner: import("./multi/spawner.js").AgentSpawner | undefined;
+  if (!args.noSubagents) {
+    const { AgentSpawner } = await import("./multi/spawner.js");
+    const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
+    oneShotSpawner = new AgentSpawner();
+    registry.register(createSpawnAgentTool(oneShotSpawner));
+    registry.register(createSendMessageTool(oneShotSpawner));
+    registry.register(createListAgentsTool(oneShotSpawner));
+  }
+
   try {
+    const contextLimit = provider.contextWindow ?? 200_000;
+
     let result;
-    if (args.resume && phrenCtx) {
-      // Resume: load previous messages and continue
-      const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
-      if (priorSnapshot && priorSnapshot.messages.length > 0) {
-        if (args.verbose) {
-          const projectLabel = priorSnapshot.project ?? "global";
-          process.stderr.write(
-            `Resuming session ${priorSnapshot.sessionId.slice(0, 8)} (${projectLabel}) with ${priorSnapshot.messages.length} messages\n`,
-          );
-        }
-        const contextLimit = provider.contextWindow ?? 200_000;
-        const session = createSession(contextLimit);
-        session.messages = priorSnapshot.messages as typeof session.messages;
-        const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
-        // Save messages for future resume
-        saveSessionMessages(phrenCtx.phrenPath, sessionId!, session.messages, phrenCtx.project ?? undefined);
-        result = {
-          finalText: turnResult.text,
-          turns: turnResult.turns,
-          toolCalls: turnResult.toolCalls,
-          totalCost: agentConfig.costTracker?.formatCost(),
-          messages: session.messages,
-        };
-      } else {
-        process.stderr.write("No previous session to resume.\n");
-        result = await runAgent(args.task, agentConfig);
-      }
+    if (args.resume && !resumedLog) {
+      process.stderr.write("No previous session to resume.\n");
+    }
+    if (resumedLog) {
+      const session = createSession(contextLimit, { log: resumedLog });
+      const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
+      result = {
+        finalText: turnResult.text,
+        turns: turnResult.turns,
+        toolCalls: turnResult.toolCalls,
+        totalCost: agentConfig.costTracker?.formatCost(),
+        messages: session.messages,
+        session,
+      };
     } else {
-      result = await runAgent(args.task, agentConfig);
+      const session = createSession(contextLimit, { log: agentConfig.sessionLog });
+      const turnResult = await runTurn(args.task, session, agentConfig);
+      result = {
+        finalText: turnResult.text,
+        turns: turnResult.turns,
+        toolCalls: turnResult.toolCalls,
+        totalCost: agentConfig.costTracker?.formatCost(),
+        messages: session.messages,
+        session,
+      };
     }
 
     if (args.verbose) {
@@ -350,18 +467,27 @@ export async function runAgentCli(raw: string[]) {
       // Save messages for resume
       saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages, phrenCtx.project ?? undefined);
 
-      // Evolve project context via lightweight LLM reflection
-      try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }
+      // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
+      try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
+
+      // Evolve project context via lightweight LLM reflection (also routes
+      // extracted knowledge through the graduated confidence pipeline)
+      try { await evolveProjectContext(phrenCtx, provider, result.messages, { sessionId }); } catch { /* best effort */ }
+
+      // Mirror the session into a searchable (non-injectable) note
+      writeSessionNote(phrenCtx, { sessionId, task: args.task, outcome: result.finalText });
     }
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     }
+    try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
     mcpCleanup?.();
     process.exit(1);
   }
 
+  try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
   mcpCleanup?.();
 }
 

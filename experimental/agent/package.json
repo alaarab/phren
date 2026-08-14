@@ -15,7 +15,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "biome lint --config-path ../../biome.json src/"
   },
   "dependencies": {
     "@phren/cli": "workspace:*",

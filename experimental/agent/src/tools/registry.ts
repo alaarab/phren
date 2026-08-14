@@ -21,6 +21,10 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  get(name: string): AgentTool | undefined {
+    return this.tools.get(name);
+  }
+
   remove(name: string): boolean {
     return this.tools.delete(name);
   }
@@ -45,7 +49,7 @@ export class ToolRegistry {
     }));
   }
 
-  async execute(name: string, input: Record<string, unknown>): Promise<AgentToolResult> {
+  async execute(name: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
     const tool = this.tools.get(name);
     if (!tool) return { output: `Unknown tool: ${name}`, is_error: true };
 
@@ -62,7 +66,7 @@ export class ToolRegistry {
     }
 
     try {
-      return await tool.execute(input);
+      return await tool.execute(input, signal);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { output: `Tool error: ${msg}`, is_error: true };

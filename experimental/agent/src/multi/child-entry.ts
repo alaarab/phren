@@ -10,13 +10,13 @@
  */
 
 import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
-import type { TurnHooks, AgentSession } from "../agent-loop.js";
+import type { TurnHooks, } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
 import { writeFileTool } from "../tools/write-file.js";
 import { editFileTool } from "../tools/edit-file.js";
-import { shellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
+import { createShellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
 import { globTool } from "../tools/glob.js";
 import { grepTool } from "../tools/grep.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
@@ -24,11 +24,9 @@ import { createPhrenFindingTool } from "../tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
 import { createSkillTool } from "../tools/skill.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
-import { buildPhrenContext, buildContextSnippet } from "../memory/context.js";
-import { startSession, endSession, getPriorSummary } from "../memory/session.js";
-import { loadProjectContext } from "../memory/project-context.js";
-import { buildSystemPrompt } from "../system-prompt.js";
-import { runAgent, createSession } from "../agent-loop.js";
+import { buildPhrenContext, } from "../memory/context.js";
+import { startSession, endSession, } from "../memory/session.js";
+import { runAgent, } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
 import type { LlmProvider } from "../providers/types.js";
@@ -123,10 +121,21 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     allowedPaths: [],
     projectRoot: payload.worktreePath ?? cwd,
   });
+  // Headless child: an "ask" verdict has no human to answer it, and the
+  // default readline prompt would hang forever on a closed stdin. Deny with
+  // a clear message instead (children normally run auto-confirm, so this
+  // only fires for the ask-category edge cases).
+  if (!process.stdin.isTTY) {
+    registry.askUser = async (toolName, _input, reason) => {
+      process.stderr.write(`[child] denied ${toolName} (needs approval, no interactive user): ${reason}\n`);
+      return false;
+    };
+  }
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
-  registry.register(shellTool);
+  // Children inherit the kernel write fence via the live registry config
+  registry.register(createShellTool(() => registry.permissionConfig));
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
   registry.register(globTool);
