@@ -4,7 +4,8 @@ import * as path from "path";
 import { findPhrenPath } from "@phren/cli/paths";
 import { resolveRuntimeProfile } from "@phren/cli/runtime-profile";
 import { buildIndex, detectProject } from "@phren/cli/shared";
-import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
+import { searchKnowledgeRows, rankResults, isInjectableDocType } from "@phren/cli/shared/retrieval";
+import { storeAwareProjectPath } from "@phren/cli/store-routing";
 import { readTasks } from "@phren/cli/data/tasks";
 import { readFindings } from "@phren/cli/data/access";
 
@@ -44,7 +45,10 @@ export async function buildPhrenContext(projectOverride?: string): Promise<Phren
 /** Read truths.md pinned entries for a project. */
 function readTruths(phrenPath: string, project: string): string[] {
   try {
-    const truthsPath = path.join(phrenPath, project, "truths.md");
+    // Store-aware: upsertCanonical writes via storeAwareProjectPath, so team-store
+    // truths live under the store root, not necessarily <phrenPath>/<project>/.
+    const truthsPath = storeAwareProjectPath(phrenPath, project, "truths.md")
+      ?? path.join(phrenPath, project, "truths.md");
     if (!fs.existsSync(truthsPath)) return [];
     const content = fs.readFileSync(truthsPath, "utf-8");
     return content.split("\n").filter((line) => line.startsWith("- "));
@@ -177,8 +181,13 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     });
     const ranked = rankResults(result.rows ?? [], taskKeywords, null, ctx.project || null, ctx.phrenPath, db);
 
-    if (ranked.length > 0) {
-      const snippets = ranked.slice(0, 5).map((r: { project: string; filename: string; content?: string }) => {
+    // Automatic injection path: drop non-injectable doc types (notes, review-queue).
+    // Notes are the user's private scratch space and review.md is a quarantine of
+    // unapproved candidates — neither may reach a prompt without an explicit search.
+    const injectable = ranked.filter((r: { type?: string }) => isInjectableDocType(r.type ?? ""));
+
+    if (injectable.length > 0) {
+      const snippets = injectable.slice(0, 5).map((r: { project: string; filename: string; content?: string }) => {
         const content = r.content?.slice(0, 400) ?? "";
         return `[${r.project}/${r.filename}] ${content}`;
       });

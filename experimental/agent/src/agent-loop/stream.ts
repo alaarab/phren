@@ -207,6 +207,8 @@ export interface ToolExecContext {
   antiPatterns: AntiPatternTracker;
   captureState: CaptureState;
   phrenCtx?: PhrenContext | null;
+  /** Session id threaded into auto-captured finding provenance. */
+  sessionId?: string | null;
   verbose: boolean;
   hooks?: TurnHooks;
   status: (msg: string) => void;
@@ -244,7 +246,7 @@ export async function executeToolBlocks(
       } catch { /* best effort */ }
 
       try {
-        await analyzeAndCapture(ctx.phrenCtx, output, ctx.captureState);
+        await analyzeAndCapture(ctx.phrenCtx, output, ctx.captureState, ctx.sessionId);
       } catch { /* best effort */ }
     }
 

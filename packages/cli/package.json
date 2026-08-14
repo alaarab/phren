@@ -29,6 +29,26 @@
       "types": "./dist/shared/retrieval.d.ts",
       "default": "./dist/shared/retrieval.js"
     },
+    "./shared/content": {
+      "types": "./dist/shared/content.d.ts",
+      "default": "./dist/shared/content.js"
+    },
+    "./shared/governance": {
+      "types": "./dist/shared/governance.d.ts",
+      "default": "./dist/shared/governance.js"
+    },
+    "./skill/registry": {
+      "types": "./dist/skill/registry.d.ts",
+      "default": "./dist/skill/registry.js"
+    },
+    "./cli/extract": {
+      "types": "./dist/cli/extract.d.ts",
+      "default": "./dist/cli/extract.js"
+    },
+    "./store-routing": {
+      "types": "./dist/store-routing.d.ts",
+      "default": "./dist/store-routing.js"
+    },
     "./data/access": {
       "types": "./dist/data/access.d.ts",
       "default": "./dist/data/access.js"

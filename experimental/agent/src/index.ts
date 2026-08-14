@@ -144,7 +144,7 @@ export async function runAgentCli(raw: string[]) {
   // Build phren context
   const phrenCtx = await buildPhrenContext(args.project);
   let contextSnippet = "";
-  let priorSummary: string | null = null;
+  let priorSummary: import("./memory/session.js").PriorSummary | null = null;
   let sessionId: string | null = null;
 
   if (phrenCtx) {
@@ -337,7 +337,7 @@ export async function runAgentCli(raw: string[]) {
 
     // Flush anti-patterns at session end
     if (phrenCtx) {
-      try { await session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
+      try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
       try { await evolveProjectContext(phrenCtx, provider, session.messages); } catch { /* best effort */ }
     }
 
@@ -430,7 +430,7 @@ export async function runAgentCli(raw: string[]) {
       saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages, phrenCtx.project ?? undefined);
 
       // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
-      try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx); } catch { /* best effort */ }
+      try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
 
       // Evolve project context via lightweight LLM reflection
       try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }

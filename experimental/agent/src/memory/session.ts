@@ -34,8 +34,20 @@ export function incrementSessionCounter(phrenPath: string, sessionId: string, co
   incrementSessionStateCounter(phrenPath, sessionId, counter);
 }
 
-export function getPriorSummary(ctx: PhrenContext): string | null {
-  return findMostRecentSummaryWithProject(ctx.phrenPath, ctx.project ?? undefined).summary;
+export interface PriorSummary {
+  summary: string;
+  project?: string;
+  endedAt?: string;
+}
+
+export function getPriorSummary(ctx: PhrenContext): PriorSummary | null {
+  const lookup = findMostRecentSummaryWithProject(ctx.phrenPath, ctx.project ?? undefined);
+  if (!lookup.summary) return null;
+  // The CLI lookup falls back to the most recent summary from ANY project when
+  // the current project has none. A different project's session summary is more
+  // likely to mislead than help, so drop it rather than inject it unlabeled.
+  if (ctx.project && lookup.project && lookup.project !== ctx.project) return null;
+  return { summary: lookup.summary, project: lookup.project, endedAt: lookup.endedAt };
 }
 
 export function saveSessionMessages(

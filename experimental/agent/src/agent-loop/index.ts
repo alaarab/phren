@@ -238,6 +238,7 @@ export async function runTurn(
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
       phrenCtx: config.phrenCtx,
+      sessionId: config.sessionId,
       repeatChain: session.repeatChain,
     });
     if (!hooks?.onToolStart) spinner.stop();
