@@ -7,6 +7,7 @@ import { seedFromMessages } from "../session/log.js";
 import type { CommandContext } from "../commands.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { planPrune } from "../context/pruner.js";
+import { compactWithLlm } from "../context/compactor.js";
 import { renderMarkdown } from "../multi/markdown.js";
 import { saveSessionMessages, loadLastSessionSnapshot } from "../memory/session.js";
 import { execSync } from "node:child_process";
@@ -151,19 +152,48 @@ export function historyCommand(parts: string[], ctx: CommandContext): boolean {
   return true;
 }
 
-export function compactCommand(_parts: string[], ctx: CommandContext): boolean {
+export async function compactCommand(_parts: string[], ctx: CommandContext): Promise<boolean> {
   const beforeCount = ctx.session.messages.length;
   const beforeTokens = estimateMessageTokens(ctx.session.messages);
-  const plan = planPrune(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
-  if (plan) {
-    ctx.session.log.replaceMessageRange(plan.startIndex, plan.endIndex, plan.summaryMessage);
+
+  // LLM checkpoint when a provider is wired up; regex fallback otherwise.
+  let applied = false;
+  let mode = "regex";
+  let routed = "";
+  if (ctx.provider && ctx.systemPrompt) {
+    const result = await compactWithLlm(ctx.provider, ctx.systemPrompt, ctx.session.messages, {
+      phrenCtx: ctx.phrenCtx,
+      sessionId: ctx.sessionId,
+      pruneConfig: { contextLimit: ctx.contextLimit, keepRecentTurns: 4 },
+      // Manual /compact should always try the LLM, even for small ranges.
+      config: { minPrunedTokens: 0 },
+    });
+    if (result) {
+      ctx.session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
+      applied = true;
+      mode = result.usedLlm ? "llm" : "regex";
+      if (result.promoted + result.queued > 0) {
+        routed = `, ${result.promoted} finding(s) promoted, ${result.queued} queued for review`;
+      }
+    }
+  } else {
+    const plan = planPrune(ctx.session.messages, { contextLimit: ctx.contextLimit, keepRecentTurns: 4 });
+    if (plan) {
+      ctx.session.log.replaceMessageRange(plan.startIndex, plan.endIndex, plan.summaryMessage);
+      applied = true;
+    }
+  }
+
+  if (!applied) {
+    process.stderr.write(`${DIM}Nothing to compact.${RESET}\n`);
+    return true;
   }
   const afterCount = ctx.session.messages.length;
   const afterTokens = estimateMessageTokens(ctx.session.messages);
   const reduction = beforeTokens > 0 ? ((1 - afterTokens / beforeTokens) * 100).toFixed(0) : "0";
   const fmtBefore = beforeTokens >= 1000 ? `${(beforeTokens / 1000).toFixed(1)}k` : String(beforeTokens);
   const fmtAfter = afterTokens >= 1000 ? `${(afterTokens / 1000).toFixed(1)}k` : String(afterTokens);
-  process.stderr.write(`${DIM}Compacted: ${beforeCount} -> ${afterCount} messages (~${fmtBefore} -> ~${fmtAfter} tokens, ${reduction}% reduction)${RESET}\n`);
+  process.stderr.write(`${DIM}Compacted (${mode}): ${beforeCount} -> ${afterCount} messages (~${fmtBefore} -> ~${fmtAfter} tokens, ${reduction}% reduction${routed})${RESET}\n`);
   return true;
 }
 

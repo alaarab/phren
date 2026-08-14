@@ -381,3 +381,93 @@ describe("agent-loop", () => {
     expect(session.messages.length).toBe(4); // user1 + assistant1 + user2 + assistant2
   });
 });
+
+// ── LLM compaction wiring in runTurn ─────────────────────────────────────────
+
+describe("runTurn compaction", () => {
+  beforeEach(() => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+
+  it("trips the LLM checkpoint at the prune threshold and lands it as a log replace", async () => {
+    const { createSession, runTurn } = await import("../agent-loop.js");
+    const { seedFromMessages } = await import("../session/log.js");
+
+    const checkpoint = `## Checkpoint Summary\nThe task was a long refactor; steps 0-9 landed; next step is verification. ${"pad ".repeat(20)}\n\n## Knowledge\n\`\`\`json\n{"items":[]}\n\`\`\``;
+
+    const compactionCalls: LlmMessage[][] = [];
+    const provider: LlmProvider = {
+      name: "mock",
+      contextWindow: 4_000, // 75% threshold = 3k tokens ≈ 12k chars
+      async chat(_system, messages): Promise<LlmResponse> {
+        const last = messages[messages.length - 1];
+        if (typeof last.content === "string" && last.content.includes("Context checkpoint")) {
+          compactionCalls.push(messages);
+          return { content: [{ type: "text", text: checkpoint }], stop_reason: "end_turn" };
+        }
+        return { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" };
+      },
+    };
+
+    const session = createSession(4_000);
+    const history: LlmMessage[] = [{ role: "user", content: "original task" }];
+    for (let i = 0; i < 10; i++) {
+      history.push({ role: "user", content: `step ${i}: ${"x".repeat(1500)}` });
+      history.push({ role: "assistant", content: `did step ${i}` });
+    }
+    seedFromMessages(session.log, history);
+
+    const config = makeConfig({
+      provider,
+      compaction: { minPrunedTokens: 0 }, // config plumbing: always try the LLM
+    });
+    const result = await runTurn("continue", session, config);
+
+    expect(result.text).toBe("done");
+    expect(compactionCalls).toHaveLength(1);
+    // The compaction call carried no tools and ended with the instruction.
+    const compacted = session.messages.find(
+      (m) => typeof m.content === "string" && m.content.includes("[Context compacted:"),
+    );
+    expect(compacted).toBeDefined();
+    expect(String(compacted!.content)).toContain("long refactor");
+    // The event log recorded the replace durably and still reconstructs.
+    session.log.assertReconstructs();
+  });
+
+  it("degrades to the regex summary when the checkpoint call fails", async () => {
+    const { createSession, runTurn } = await import("../agent-loop.js");
+    const { seedFromMessages } = await import("../session/log.js");
+
+    const provider: LlmProvider = {
+      name: "mock",
+      contextWindow: 4_000,
+      async chat(_system, messages): Promise<LlmResponse> {
+        const last = messages[messages.length - 1];
+        if (typeof last.content === "string" && last.content.includes("Context checkpoint")) {
+          throw new Error("summarizer down");
+        }
+        return { content: [{ type: "text", text: "done" }], stop_reason: "end_turn" };
+      },
+    };
+
+    const session = createSession(4_000);
+    const history: LlmMessage[] = [{ role: "user", content: "original task" }];
+    for (let i = 0; i < 10; i++) {
+      history.push({ role: "user", content: `step ${i}: ${"x".repeat(1500)}` });
+      history.push({ role: "assistant", content: `did step ${i}` });
+    }
+    seedFromMessages(session.log, history);
+
+    const config = makeConfig({ provider, compaction: { minPrunedTokens: 0 } });
+    const result = await runTurn("continue", session, config);
+
+    expect(result.text).toBe("done");
+    const compacted = session.messages.find(
+      (m) => typeof m.content === "string" && m.content.includes("[Context compacted:"),
+    );
+    expect(compacted).toBeDefined(); // regex fallback still pruned
+    session.log.assertReconstructs();
+  });
+});

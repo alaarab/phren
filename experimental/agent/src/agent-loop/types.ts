@@ -22,6 +22,8 @@ export interface AgentConfig {
   sessionId?: string | null;
   /** Durable event log for the session (in-memory when absent). */
   sessionLog?: SessionLog;
+  /** LLM compaction overrides (thresholds, disable flag). */
+  compaction?: Partial<import("../context/compactor.js").CompactionConfig>;
 }
 
 export interface AgentResult {

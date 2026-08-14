@@ -315,6 +315,7 @@ export async function runAgentCli(raw: string[]) {
     lintTestConfig,
     sessionId,
     sessionLog: resumedLog ?? makePersistedLog(),
+    ...(args.noLlmCompact ? { compaction: { enabled: false } } : {}),
   };
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)

@@ -1,6 +1,7 @@
 import type { ContentBlock, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
-import { shouldPrune, planPrune } from "../context/pruner.js";
+import { shouldPrune } from "../context/pruner.js";
+import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { withRetry } from "../providers/retry.js";
 import { checkFlushNeeded } from "../memory/context-flush.js";
@@ -77,20 +78,33 @@ export async function runTurn(
       if (verbose) status("[context flush injected]\n");
     }
 
-    // Prune context if approaching limit
+    // Prune context if approaching limit — LLM checkpoint with knowledge
+    // promotion, degrading to the regex summary on any failure.
     if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
-      const plan = planPrune(session.messages, { contextLimit, keepRecentTurns: 6 });
-      if (plan) {
-        session.log.replaceMessageRange(plan.startIndex, plan.endIndex, plan.summaryMessage);
+      const result = await compactWithLlm(provider, systemPrompt, session.messages, {
+        phrenCtx: config.phrenCtx,
+        sessionId: config.sessionId,
+        costTracker,
+        config: config.compaction,
+        pruneConfig: { contextLimit, keepRecentTurns: 6 },
+        signal,
+        verbose,
+      });
+      if (result) {
+        session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
+        const postCount = session.messages.length;
+        const postTokens = estimateMessageTokens(session.messages);
+        const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
+        const fmtPre = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}k` : String(preTokens);
+        const fmtPost = postTokens >= 1000 ? `${(postTokens / 1000).toFixed(1)}k` : String(postTokens);
+        const mode = result.usedLlm ? "llm" : "regex";
+        const routed = result.promoted + result.queued > 0
+          ? `, +${result.promoted} promoted, +${result.queued} queued`
+          : "";
+        status(`\x1b[2m[context compacted (${mode}): ${preCount} → ${postCount} messages, ~${fmtPre} → ~${fmtPost} tokens, ${reduction}% reduction${routed}]\x1b[0m\n`);
       }
-      const postCount = session.messages.length;
-      const postTokens = estimateMessageTokens(session.messages);
-      const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
-      const fmtPre = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}k` : String(preTokens);
-      const fmtPost = postTokens >= 1000 ? `${(postTokens / 1000).toFixed(1)}k` : String(postTokens);
-      status(`\x1b[2m[context pruned: ${preCount} → ${postCount} messages, ~${fmtPre} → ~${fmtPost} tokens, ${reduction}% reduction]\x1b[0m\n`);
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
