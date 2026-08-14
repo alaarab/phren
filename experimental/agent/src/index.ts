@@ -151,6 +151,30 @@ export async function runAgentCli(raw: string[]) {
     if (args.verbose) {
       process.stderr.write(`Phren: ${phrenCtx.phrenPath} (project: ${phrenCtx.project ?? "none"})\n`);
     }
+
+    // Review-queue surfacing. Interactive sessions get expiry + a triage
+    // banner; one-shot runs get a count only and never mutate the queue.
+    if (phrenCtx.project) {
+      try {
+        const { getQueueStatus, formatQueueBanner, expireStaleItems, resolveExpireDays } =
+          await import("./memory/review-triage.js");
+        if (args.interactive || args.multi || args.team) {
+          const expireDays = resolveExpireDays();
+          const { expired } = expireStaleItems(phrenCtx, expireDays);
+          if (expired > 0) {
+            process.stderr.write(`\x1b[2m[auto-rejected ${expired} stale review item(s) older than ${expireDays}d]\x1b[0m\n`);
+          }
+          const banner = formatQueueBanner(getQueueStatus(phrenCtx, 3));
+          if (banner) process.stderr.write(`\x1b[33m${banner}\x1b[0m\n`);
+        } else {
+          const { pending } = getQueueStatus(phrenCtx, 0);
+          if (pending > 0) {
+            process.stderr.write(`\x1b[2m[review queue: ${pending} pending — run phren-agent -i, then /review]\x1b[0m\n`);
+          }
+        }
+      } catch { /* best effort */ }
+    }
+
     contextSnippet = await buildContextSnippet(phrenCtx, args.task);
     priorSummary = getPriorSummary(phrenCtx);
     sessionId = startSession(phrenCtx);

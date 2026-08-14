@@ -169,7 +169,17 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     }
   } catch { /* silent */ }
 
-  // Section 5: FTS5 search
+  // Section 5: Review queue awareness — count + top items, clearly labeled as
+  // unverified so candidates are visible without leaking as facts.
+  if (ctx.project) {
+    try {
+      const { getQueueStatus, formatQueueContextSection } = await import("./review-triage.js");
+      const section = formatQueueContextSection(getQueueStatus(ctx, 3));
+      if (section) sections.push(section);
+    } catch { /* silent */ }
+  }
+
+  // Section 6: FTS5 search
   try {
     const db = await buildIndex(ctx.phrenPath, ctx.profile || undefined);
     const result = await searchKnowledgeRows(db, {

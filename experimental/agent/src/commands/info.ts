@@ -28,7 +28,8 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /plan       Show conversation plan (tool calls so far)
   /undo       Undo last user message and response
   /history [n|full]  Show last N messages (default 10) with rich formatting
-  /compact    Compact conversation to save context space
+  /compact    Compact conversation (LLM checkpoint + knowledge promotion)
+  /review     Triage the phren review queue (go = manual, auto = model-assisted)
   /context    Show context window usage and provider info
   /mode       Toggle input mode (steering ↔ queue)
   /verbose    Toggle verbose tool output (show first 5 lines)

@@ -56,11 +56,20 @@ describe("agent↔phren integration", () => {
     fs.rmSync(storeDir, { recursive: true, force: true });
   });
 
-  it("does not inject review-queue or notes content into the prompt snippet", async () => {
+  it("keeps review-queue content out of Related knowledge and notes out entirely", async () => {
     const snippet = await buildContextSnippet(ctx(), "zebrafish lattice cache");
     expect(snippet).toContain("zebrafish lattice cache must be invalidated");
-    expect(snippet).not.toContain("UNAPPROVED-zebrafish");
+    // Notes are private scratch — never injected anywhere.
     expect(snippet).not.toContain("PRIVATE-zebrafish");
+    // Queue content may appear ONLY inside the clearly-labeled review-queue
+    // section ("do NOT treat as truth"), never in Related knowledge.
+    const relatedIdx = snippet.indexOf("## Related knowledge");
+    if (relatedIdx >= 0) {
+      expect(snippet.slice(relatedIdx)).not.toContain("UNAPPROVED-zebrafish");
+    }
+    if (snippet.includes("UNAPPROVED-zebrafish")) {
+      expect(snippet).toMatch(/## Review queue[^#]*do NOT treat as truth[\s\S]*\[unverified\] UNAPPROVED-zebrafish/);
+    }
   });
 
   it("labels non-injectable doc types in explicit phren_search results", async () => {
