@@ -123,6 +123,10 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
+  // `--resume` alone continues the prior session without a placeholder task
+  if (!args.task && args.resume) {
+    args.task = "Continue where the previous session left off.";
+  }
   if (!args.task && !args.interactive && !args.multi && !args.team) {
     console.error("Usage: phren-agent <task>\nRun phren-agent --help for more info.");
     process.exit(1);

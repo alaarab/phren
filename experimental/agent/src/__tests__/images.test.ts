@@ -97,7 +97,7 @@ describe("read_image tool", () => {
   function visionProvider(vision: boolean): LlmProvider {
     return {
       name: "anthropic",
-      model: vision ? "claude-sonnet-4-20250514" : "unknown-text-model",
+      model: vision ? "claude-sonnet-5" : "unknown-text-model",
       async chat() {
         throw new Error("unused");
       },

@@ -25,26 +25,37 @@ export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xh
 const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
   anthropic: [
     {
-      id: "claude-sonnet-4-20250514",
+      id: "claude-sonnet-5",
       vision: true,
       provider: "anthropic",
-      label: "Sonnet 4",
-      contextWindow: 200_000,
-      maxOutputTokens: 16_384,
-      reasoningDefault: "medium",
-      reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 3, outputPer1M: 15 },
-    },
-    {
-      id: "claude-opus-4-20250514",
-      vision: true,
-      provider: "anthropic",
-      label: "Opus 4",
-      contextWindow: 200_000,
+      label: "Sonnet 5",
+      contextWindow: 1_000_000,
       maxOutputTokens: 32_768,
       reasoningDefault: "high",
       reasoningRange: ["low", "medium", "high", "xhigh"],
-      pricing: { inputPer1M: 15, outputPer1M: 75 },
+      pricing: { inputPer1M: 3, outputPer1M: 15 },
+    },
+    {
+      id: "claude-opus-5",
+      vision: true,
+      provider: "anthropic",
+      label: "Opus 5",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 32_768,
+      reasoningDefault: "high",
+      reasoningRange: ["low", "medium", "high", "xhigh"],
+      pricing: { inputPer1M: 5, outputPer1M: 25 },
+    },
+    {
+      id: "claude-opus-4-8",
+      vision: true,
+      provider: "anthropic",
+      label: "Opus 4.8",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 32_768,
+      reasoningDefault: "high",
+      reasoningRange: ["low", "medium", "high", "xhigh"],
+      pricing: { inputPer1M: 5, outputPer1M: 25 },
     },
     {
       id: "claude-haiku-4-5-20251001",
@@ -52,10 +63,10 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       provider: "anthropic",
       label: "Haiku 4.5",
       contextWindow: 200_000,
-      maxOutputTokens: 8_192,
+      maxOutputTokens: 16_384,
       reasoningDefault: null,
       reasoningRange: [],
-      pricing: { inputPer1M: 0.8, outputPer1M: 4 },
+      pricing: { inputPer1M: 1, outputPer1M: 5 },
     },
   ],
   openrouter: [
@@ -297,6 +308,9 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
 };
 
 const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
+  ["claude-fable-5", 32_768],
+  ["claude-opus-5", 32_768],
+  ["claude-sonnet-5", 32_768],
   ["claude-opus-4", 32_768],
   ["claude-sonnet-4", 16_384],
   ["claude-haiku-4", 8_192],
@@ -316,9 +330,16 @@ const LEGACY_OUTPUT_LIMITS: Array<[string, number]> = [
 ];
 
 const LEGACY_PRICING: Array<[string, ModelPricing]> = [
+  ["claude-fable-5", { inputPer1M: 10, outputPer1M: 50 }],
+  ["claude-opus-5", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-sonnet-5", { inputPer1M: 3, outputPer1M: 15 }],
+  ["claude-opus-4-8", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-opus-4-7", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-opus-4-6", { inputPer1M: 5, outputPer1M: 25 }],
+  ["claude-sonnet-4-6", { inputPer1M: 3, outputPer1M: 15 }],
   ["claude-opus-4", { inputPer1M: 15, outputPer1M: 75 }],
   ["claude-sonnet-4", { inputPer1M: 3, outputPer1M: 15 }],
-  ["claude-haiku-4", { inputPer1M: 0.8, outputPer1M: 4 }],
+  ["claude-haiku-4", { inputPer1M: 1, outputPer1M: 5 }],
   ["claude-3-5-sonnet", { inputPer1M: 3, outputPer1M: 15 }],
   ["claude-3-5-haiku", { inputPer1M: 0.8, outputPer1M: 4 }],
   ["claude-3-opus", { inputPer1M: 15, outputPer1M: 75 }],

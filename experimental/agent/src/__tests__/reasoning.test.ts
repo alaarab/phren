@@ -101,6 +101,55 @@ describe("Anthropic thinking budget", () => {
   });
 });
 
+describe("Anthropic adaptive thinking (4.6+/5-family)", () => {
+  function bodyOf(p: AnthropicProvider): Record<string, unknown> {
+    return (p as unknown as { buildRequestBody(s: string, m: unknown[], t: unknown[]): Record<string, unknown> })
+      .buildRequestBody("sys", [{ role: "user", content: "hi" }], []);
+  }
+
+  it("detects adaptive-thinking models", () => {
+    for (const model of ["claude-sonnet-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-fable-5"]) {
+      expect(new AnthropicProvider("k", model).usesAdaptiveThinking(), model).toBe(true);
+    }
+    for (const model of ["claude-sonnet-4-20250514", "claude-sonnet-4-5", "claude-haiku-4-5-20251001", "claude-opus-4-5"]) {
+      expect(new AnthropicProvider("k", model).usesAdaptiveThinking(), model).toBe(false);
+    }
+  });
+
+  it("sends adaptive thinking + effort, never budget_tokens", () => {
+    const p = new AnthropicProvider("key", "claude-opus-5", 16384, true, "high");
+    const body = bodyOf(p);
+    expect(body.thinking).toEqual({ type: "adaptive" });
+    expect(body.output_config).toEqual({ effort: "high" });
+  });
+
+  it("omits thinking config entirely when no effort is set", () => {
+    const p = new AnthropicProvider("key", "claude-sonnet-5", 16384, true);
+    const body = bodyOf(p);
+    expect(body.thinking).toBeUndefined();
+    expect(body.output_config).toBeUndefined();
+  });
+
+  it("maps xhigh to max on the 4.6 family (xhigh arrived with 4.7)", () => {
+    const p46 = new AnthropicProvider("key", "claude-opus-4-6", 16384, true, "xhigh");
+    expect(bodyOf(p46).output_config).toEqual({ effort: "max" });
+    const p5 = new AnthropicProvider("key", "claude-opus-5", 16384, true, "xhigh");
+    expect(bodyOf(p5).output_config).toEqual({ effort: "xhigh" });
+  });
+
+  it("legacy models keep the budget_tokens path", () => {
+    const p = new AnthropicProvider("key", "claude-sonnet-4-5", 16384, true, "high");
+    const body = bodyOf(p);
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 8192 });
+    expect(body.output_config).toBeUndefined();
+  });
+
+  it("picks up the catalog context window for current models", () => {
+    expect(new AnthropicProvider("k", "claude-sonnet-5").contextWindow).toBe(1_000_000);
+    expect(new AnthropicProvider("k", "claude-haiku-4-5-20251001").contextWindow).toBe(200_000);
+  });
+});
+
 describe("OpenAI-compat reasoning passback", () => {
   it("sends reasoning_content only on tool-call turns", () => {
     const withTool: LlmMessage[] = [

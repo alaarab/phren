@@ -84,7 +84,9 @@ Switch models mid-session with the `/model` command (interactive reasoning level
 | `--budget <dollars>` | Max spend in USD (aborts when exceeded) |
 | `--plan` | Plan mode: show plan before executing tools |
 | `--yolo` | Full-auto permissions — no confirmations |
-| `--resume` | Resume last session's conversation |
+| `--resume` | Resume last session's conversation (task optional — continues where it left off) |
+| `--sandbox <mode>` | Kernel write-fence for shell (bwrap): `off`, `auto` (default), `require` |
+| `--no-llm-compact` | Use regex prune summaries instead of LLM compaction |
 | `--multi` | Multi-agent TUI mode |
 | `--team <name>` | Team mode with shared task coordination |
 | `--verbose` | Debug-level logging |
@@ -115,7 +117,8 @@ All 23 commands available in the interactive TUI:
 | `/cost` | Show session cost breakdown |
 | `/plan` | Show/toggle plan mode |
 | `/undo` | Undo last file change |
-| `/compact` | Compress context (prune old messages) |
+| `/compact` | Compact context: LLM checkpoint + knowledge promotion (regex fallback) |
+| `/review` | Triage the phren review queue (`go` = manual, `auto` = model-assisted) |
 | `/context` | Show context window usage |
 | `/history` | Show conversation history |
 | `/turns` | Show turn count and stats |
@@ -234,6 +237,53 @@ The agent is deeply integrated with phren's memory layer:
 **On session end:**
 - Saves session summary and checkpoint
 - Records edited files and test state for exact resume
+- Mines the transcript for durable knowledge (same graduated pipeline as
+  compaction, below) and writes a searchable session note
+
+---
+
+## Compaction with knowledge promotion
+
+When the conversation approaches 75% of the context window (or on `/compact`),
+the agent asks the *same provider* for a structured checkpoint via prefix
+replay: the summarization request reuses the conversation's own system prompt
+and message prefix byte-identical, so the provider's KV cache covers
+everything except the final instruction. The response carries the summary plus
+candidate knowledge items, routed by the model's own confidence:
+
+| Confidence | Destination |
+|---|---|
+| ≥ 0.8 | `FINDINGS.md` immediately, with agent/session provenance + citation |
+| 0.5 – 0.8 | Review queue (`review.md`), with provenance metadata |
+| < 0.5 | Dropped |
+
+Any failure — call error, timeout, botched JSON, too-short summary — degrades
+to the old regex summary with identical prune indices, so compaction can never
+break a turn. The summary lands as a durable `log/replace` event; the pruned
+messages stay in the event log. Knobs: `--no-llm-compact`,
+`PHREN_AGENT_LLM_COMPACT=0`, `PHREN_AGENT_COMPACT_THRESHOLD`,
+`PHREN_AGENT_COMPACT_MIN_TOKENS` (skip the LLM below this pruned-range size,
+default 8k tokens).
+
+## Governance: the review-queue triage loop
+
+High-confidence knowledge never enters the queue (promotion above), so what
+does land there is genuinely uncertain — and the agent makes sure it gets
+looked at instead of silting up:
+
+- **Session start (interactive):** items older than 14 days are auto-rejected
+  (`PHREN_AGENT_QUEUE_EXPIRE_DAYS`, `0` = never; undated items never expire),
+  then a banner shows the pending count and top 3 items. One-shot runs print a
+  count only and never mutate the queue.
+- **`/review`** lists pending items. **`/review go`** is a per-item keypress
+  loop (approve / reject / edit / skip) over exact `review.md` lines.
+  **`/review auto`** asks the model to propose a verdict + one-line reason per
+  item, then applies the batch on one confirm — or preloads the proposals as
+  defaults in the interactive loop.
+- The warm-start context includes a clearly-labeled section (count + top 3,
+  "do NOT treat as truth") so the model knows candidate knowledge exists
+  without it leaking as fact. Notes and queue content are excluded from the
+  automatic injection path entirely; explicit `phren_search` results tag them.
 
 ---
 
@@ -249,6 +299,66 @@ The agent is deeply integrated with phren's memory layer:
 - Sensitive file patterns (`.env`, credentials) are protected
 - Shell commands have safety checks and timeouts
 - Environment variables are scrubbed before sending to LLM providers
+
+### Kernel sandbox (Linux, bubblewrap)
+
+With `--sandbox auto` (the default), shell commands are wrapped in `bwrap` so
+the filesystem is **read-only outside the workspace** — enforced by the
+kernel, which covers every child process, not just what in-process checks can
+see. Writable roots derive from the same permission config as the in-process
+path sandbox (project root + allowed paths + tmp), so the two layers cannot
+drift apart. When a sandboxed write is blocked, the tool result gets a
+`[sandbox]` annotation so the model redirects instead of retrying.
+
+| Mode | Behavior |
+|---|---|
+| `auto` (default) | Confine when a functional `bwrap` probe passes; otherwise run unconfined with a one-time notice (non-Linux included) |
+| `require` | Fail closed: no working bwrap ⇒ every shell call errors |
+| `off` | Never wrap |
+
+### web_fetch SSRF guard
+
+`web_fetch` rejects URLs that are — or resolve via DNS to — private,
+loopback, link-local (cloud metadata!), or CGNAT addresses, and follows
+redirects manually so each hop is re-checked. Override with
+`PHREN_AGENT_ALLOW_PRIVATE_FETCH=1` if your docs genuinely live on your LAN.
+
+---
+
+## Replay testing (keyless)
+
+Every run records a session event log — and any recording can be replayed as
+a scripted provider with **zero API cost and no credentials**:
+
+```bash
+PHREN_AGENT_REPLAY=path/to/session-<id>.events.jsonl phren-agent --yolo "same task"
+```
+
+Each recorded `assistant/message` replays as one response, in order; the loop
+errors loudly if the conversation diverges past the script. This turns any
+interesting real session into a deterministic regression test — CI runs the
+built binary against a committed fixture (scripted tool call → real shell
+execution → scripted final answer) on every push.
+
+## Live smoke test
+
+`scripts/agent-smoke.sh` runs one short real session per provider that has
+credentials configured (skips the rest): a real tool call plus the final
+answer check. Use it before releases or after provider-layer changes:
+
+```bash
+pnpm build && ./experimental/agent/scripts/agent-smoke.sh            # all configured
+./experimental/agent/scripts/agent-smoke.sh anthropic                # just one
+```
+
+## Skills
+
+The warm-start context lists enabled skills (name + description from the
+phren skill registry, project scope honored) so the model knows what exists
+instead of guessing `run_skill` names. In the REPL/TUI, an unknown slash
+input that matches a skill — by name, frontmatter `command`, or alias — is
+rewritten into a `run_skill` task: `/commit fix typo` runs your `commit`
+skill with those args. Built-in commands always win.
 
 ---
 

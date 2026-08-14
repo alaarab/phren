@@ -51,7 +51,7 @@ Options:
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
-  --resume             Resume last session's conversation
+  --resume             Resume last session's conversation (task optional)
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)

@@ -1,6 +1,6 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
-import type { ReasoningEffort } from "../models.js";
+import { getModelMetadata, type ReasoningEffort } from "../models.js";
 
 const PROVIDER_NAME = "anthropic";
 
@@ -14,6 +14,16 @@ const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
 
 /** Anthropic rejects budget_tokens below this. */
 const MIN_THINKING_BUDGET = 1024;
+
+/**
+ * Models that use adaptive thinking + output_config.effort. On these,
+ * `thinking: {type: "enabled", budget_tokens}` is deprecated (4.6 family)
+ * or a hard 400 (4.7+/5 family) — never send a budget to them.
+ */
+const ADAPTIVE_THINKING_RE = /^claude-(?:(?:opus|sonnet)-4-[678]|opus-5|sonnet-5|fable-5|mythos-5)/;
+
+/** xhigh effort arrived with 4.7; on the 4.6 family map it to "max". */
+const EFFORT_NO_XHIGH_RE = /^claude-(?:opus|sonnet)-4-6/;
 
 export class AnthropicProvider implements LlmProvider {
   name = PROVIDER_NAME;
@@ -32,10 +42,17 @@ export class AnthropicProvider implements LlmProvider {
     reasoningEffort?: ReasoningEffort,
   ) {
     this.apiKey = apiKey;
-    this.model = model ?? "claude-sonnet-4-20250514";
+    this.model = model ?? "claude-sonnet-5";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
     this.cacheEnabled = cacheEnabled;
     this.reasoningEffort = reasoningEffort;
+    const metadata = getModelMetadata(PROVIDER_NAME, this.model);
+    if (metadata) this.contextWindow = metadata.contextWindow;
+  }
+
+  /** True when the model takes adaptive thinking instead of budget_tokens. */
+  usesAdaptiveThinking(): boolean {
+    return ADAPTIVE_THINKING_RE.test(this.model);
   }
 
   /**
@@ -229,9 +246,21 @@ export class AnthropicProvider implements LlmProvider {
       max_tokens: this.maxOutputTokens,
     };
 
-    const budget = this.thinkingBudget();
-    if (budget !== null) {
-      body.thinking = { type: "enabled", budget_tokens: budget };
+    if (this.usesAdaptiveThinking()) {
+      // Adaptive thinking: the model decides when/how much to think; effort
+      // controls depth. budget_tokens would 400 on 4.7+/5-family models.
+      if (this.reasoningEffort) {
+        body.thinking = { type: "adaptive" };
+        const effort = EFFORT_NO_XHIGH_RE.test(this.model) && this.reasoningEffort === "xhigh"
+          ? "max"
+          : this.reasoningEffort;
+        body.output_config = { effort };
+      }
+    } else {
+      const budget = this.thinkingBudget();
+      if (budget !== null) {
+        body.thinking = { type: "enabled", budget_tokens: budget };
+      }
     }
 
     if (tools.length > 0) {
