@@ -4,7 +4,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import type { AgentTool } from "./types.js";
+import type { PermissionConfig } from "../permissions/types.js";
 import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
+import { wrapWithSandbox, classifySandboxDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,96 +18,130 @@ const MAX_OUTPUT_BYTES = 100_000;
 const backgroundTasks = new Map<string, { pid: number; outputFile: string; done: boolean; exitCode: number | null }>();
 let nextBgId = 1;
 
-export const shellTool: AgentTool = {
-  name: "shell",
-  // Internal budget maxes at 120s; give the scheduler a little headroom so
-  // the tool's own richer timeout message wins the race.
-  timeoutMs: MAX_TIMEOUT_MS + 5_000,
-  description: "Run a shell command and return stdout + stderr. Use run_in_background for long-running commands (builds, test suites, dev servers). Use description to explain what the command does.",
-  input_schema: {
-    type: "object",
-    properties: {
-      command: { type: "string", description: "Shell command to execute." },
-      description: { type: "string", description: "Human-readable description of what this command does (shown to user)." },
-      cwd: { type: "string", description: "Working directory. Defaults to process cwd." },
-      timeout: { type: "number", description: "Timeout in ms. Default: 30000, max: 120000." },
-      run_in_background: { type: "boolean", description: "If true, run in background and return a task_id. Use task_output to get results later." },
+/**
+ * Shell tool factory. `getPermissions` is read per call so /permissions and
+ * /sandbox changes apply live; the kernel write fence derives its writable
+ * roots from the SAME config as the in-process path sandbox.
+ */
+export function createShellTool(getPermissions?: () => PermissionConfig): AgentTool {
+  return {
+    name: "shell",
+    // Internal budget maxes at 120s; give the scheduler a little headroom so
+    // the tool's own richer timeout message wins the race.
+    timeoutMs: MAX_TIMEOUT_MS + 5_000,
+    description: "Run a shell command and return stdout + stderr. Use run_in_background for long-running commands (builds, test suites, dev servers). Use description to explain what the command does.",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Shell command to execute." },
+        description: { type: "string", description: "Human-readable description of what this command does (shown to user)." },
+        cwd: { type: "string", description: "Working directory. Defaults to process cwd." },
+        timeout: { type: "number", description: "Timeout in ms. Default: 30000, max: 120000." },
+        run_in_background: { type: "boolean", description: "If true, run in background and return a task_id. Use task_output to get results later." },
+      },
+      required: ["command"],
     },
-    required: ["command"],
-  },
-  async execute(input, signal) {
-    const command = input.command as string;
-    const cwd = (input.cwd as string) || process.cwd();
-    const timeout = Math.min(MAX_TIMEOUT_MS, (input.timeout as number) || DEFAULT_TIMEOUT_MS);
-    const description = input.description as string | undefined;
-    const runInBackground = input.run_in_background as boolean;
+    async execute(input, signal) {
+      const command = input.command as string;
+      const cwd = (input.cwd as string) || process.cwd();
+      const timeout = Math.min(MAX_TIMEOUT_MS, (input.timeout as number) || DEFAULT_TIMEOUT_MS);
+      const description = input.description as string | undefined;
+      const runInBackground = input.run_in_background as boolean;
 
-    const safety = checkShellSafety(command);
-    if (!safety.safe && safety.severity === "block") {
-      return { output: `Blocked: ${safety.reason}`, is_error: true };
-    }
-
-    const isWindows = process.platform === "win32";
-    const shell = isWindows ? "cmd" : "bash";
-    const shellArgs = isWindows ? ["/c", command] : ["-c", command];
-
-    // Background execution
-    if (runInBackground) {
-      const taskId = `bg-${nextBgId++}`;
-      const outputFile = path.join(os.tmpdir(), `phren-bg-${taskId}.log`);
-      const fd = fs.openSync(outputFile, "w");
-
-      const child = spawn(shell, shellArgs, {
-        cwd,
-        stdio: ["ignore", fd, fd],
-        env: scrubEnv(),
-        detached: true,
-      });
-
-      const task = { pid: child.pid!, outputFile, done: false, exitCode: null as number | null };
-      backgroundTasks.set(taskId, task);
-
-      child.on("exit", (code) => {
-        task.done = true;
-        task.exitCode = code;
-        fs.closeSync(fd);
-      });
-
-      child.unref();
-
-      const desc = description ? ` (${description})` : "";
-      return { output: `Background task ${taskId} started${desc}. PID: ${child.pid}. Use task_output to get results.` };
-    }
-
-    // Foreground execution — async so concurrent tool batches actually run
-    // concurrently (execFileSync blocked the event loop, making batch
-    // concurrency fictional and timeouts unenforceable mid-call) and so the
-    // scheduler's abort signal can kill a hung command.
-    try {
-      const { stdout, stderr } = await execFileAsync(shell, shellArgs, {
-        cwd,
-        encoding: "utf-8",
-        timeout,
-        maxBuffer: MAX_OUTPUT_BYTES,
-        env: scrubEnv(),
-        ...(signal ? { signal } : {}),
-      });
-      const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-      return { output: combined || "(no output)" };
-    } catch (err: unknown) {
-      if (err && typeof err === "object" && ("stdout" in err || "stderr" in err)) {
-        const e = err as { stdout?: string; stderr?: string; code?: number | string; killed?: boolean; signal?: string };
-        const combined = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-        if (e.killed || e.signal === "SIGTERM") {
-          return { output: `Command timed out or was cancelled after ${timeout}ms\n${combined}`, is_error: true };
-        }
-        return { output: `Exit code ${typeof e.code === "number" ? e.code : 1}\n${combined}`, is_error: true };
+      const safety = checkShellSafety(command);
+      if (!safety.safe && safety.severity === "block") {
+        return { output: `Blocked: ${safety.reason}`, is_error: true };
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      return { output: msg, is_error: true };
-    }
-  },
-};
+
+      const isWindows = process.platform === "win32";
+      const shell = isWindows ? "cmd" : "bash";
+      const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+
+      // Kernel write fence — one decision feeds both spawn paths.
+      const perms = getPermissions?.();
+      let decision: { argv: string[]; sandboxed: boolean; notice?: string };
+      try {
+        decision = wrapWithSandbox([shell, ...shellArgs], {
+          mode: perms?.sandboxMode ?? "off",
+          workspaceRoot: perms?.projectRoot ?? process.cwd(),
+          extraWritable: perms?.allowedPaths ?? [],
+        });
+      } catch (err: unknown) {
+        if (err instanceof SandboxRequiredError) {
+          return { output: err.message, is_error: true };
+        }
+        throw err;
+      }
+      const noticePrefix = decision.notice ? `${decision.notice}\n` : "";
+      const [exe, ...exeArgs] = decision.argv;
+
+      // Background execution
+      if (runInBackground) {
+        const taskId = `bg-${nextBgId++}`;
+        const outputFile = path.join(os.tmpdir(), `phren-bg-${taskId}.log`);
+        const fd = fs.openSync(outputFile, "w");
+
+        const child = spawn(exe, exeArgs, {
+          cwd,
+          stdio: ["ignore", fd, fd],
+          env: scrubEnv(),
+          detached: true,
+        });
+
+        const task = { pid: child.pid!, outputFile, done: false, exitCode: null as number | null };
+        backgroundTasks.set(taskId, task);
+
+        child.on("exit", (code) => {
+          task.done = true;
+          task.exitCode = code;
+          fs.closeSync(fd);
+        });
+
+        child.unref();
+
+        const desc = description ? ` (${description})` : "";
+        const confined = decision.sandboxed ? " [sandboxed]" : "";
+        return { output: `${noticePrefix}Background task ${taskId} started${desc}${confined}. PID: ${child.pid}. Use task_output to get results.` };
+      }
+
+      // Foreground execution — async so concurrent tool batches actually run
+      // concurrently (execFileSync blocked the event loop, making batch
+      // concurrency fictional and timeouts unenforceable mid-call) and so the
+      // scheduler's abort signal can kill a hung command.
+      try {
+        const { stdout, stderr } = await execFileAsync(exe, exeArgs, {
+          cwd,
+          encoding: "utf-8",
+          timeout,
+          maxBuffer: MAX_OUTPUT_BYTES,
+          env: scrubEnv(),
+          ...(signal ? { signal } : {}),
+        });
+        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+        return { output: noticePrefix + (combined || "(no output)") };
+      } catch (err: unknown) {
+        if (err && typeof err === "object" && ("stdout" in err || "stderr" in err)) {
+          const e = err as { stdout?: string; stderr?: string; code?: number | string; killed?: boolean; signal?: string };
+          const combined = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
+          if (e.killed || e.signal === "SIGTERM") {
+            return { output: `${noticePrefix}Command timed out or was cancelled after ${timeout}ms\n${combined}`, is_error: true };
+          }
+          // Explain kernel write-fence denials so the model redirects instead
+          // of retrying (classify combined output — commands often 2>&1)
+          const denial = decision.sandboxed
+            ? classifySandboxDenial(combined, perms?.projectRoot ?? process.cwd())
+            : null;
+          return { output: `${noticePrefix}Exit code ${typeof e.code === "number" ? e.code : 1}\n${combined}${denial ?? ""}`, is_error: true };
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        return { output: msg, is_error: true };
+      }
+    },
+  };
+}
+
+/** Back-compat singleton: no permission source, so the sandbox stays off. */
+export const shellTool: AgentTool = createShellTool();
 
 // Task output and stop tools
 export const taskOutputTool: AgentTool = {

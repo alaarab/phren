@@ -16,7 +16,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
 import { writeFileTool } from "../tools/write-file.js";
 import { editFileTool } from "../tools/edit-file.js";
-import { shellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
+import { createShellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
 import { globTool } from "../tools/glob.js";
 import { grepTool } from "../tools/grep.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
@@ -134,7 +134,8 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
-  registry.register(shellTool);
+  // Children inherit the kernel write fence via the live registry config
+  registry.register(createShellTool(() => registry.permissionConfig));
   registry.register(taskOutputTool);
   registry.register(taskStopTool);
   registry.register(globTool);
