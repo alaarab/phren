@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
-import { handleCommand } from "./commands.js";
+import { handleCommand, resolveSkillGesture } from "./commands.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { loadInputMode } from "./settings.js";
 
@@ -79,7 +79,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
   });
 
   for await (const line of rl) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed) {
       rl.prompt();
       continue;
@@ -87,8 +87,13 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     allHistory.push(trimmed);
 
-    // Handle slash commands
-    if (handleCommand(trimmed, buildCommandContext())) {
+    // /skill-name gesture: rewrite into a run_skill task before command dispatch
+    const skillTask = resolveSkillGesture(trimmed, config.phrenCtx);
+    if (skillTask) {
+      process.stderr.write(`${DIM}↳ running skill via ${trimmed.split(/\s+/)[0]}${RESET}\n`);
+      trimmed = skillTask;
+    } else if (handleCommand(trimmed, buildCommandContext())) {
+      // Handle slash commands
       rl.prompt();
       continue;
     }

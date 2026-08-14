@@ -169,7 +169,21 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     }
   } catch { /* silent */ }
 
-  // Section 5: Review queue awareness — count + top items, clearly labeled as
+  // Section 5: Available skills catalog — the model should know what skills
+  // exist (name + description) instead of guessing names for run_skill.
+  try {
+    const { getScopedSkills } = await import("@phren/cli/skill/registry");
+    const skills = getScopedSkills(ctx.phrenPath, ctx.profile, ctx.project ?? undefined)
+      .filter((s) => s.enabled);
+    if (skills.length > 0) {
+      const lines = skills.slice(0, 20).map(
+        (s) => `- ${s.name}${s.description ? ` — ${s.description}` : ""}`,
+      );
+      sections.push(`## Available skills (invoke with run_skill)\n\n${lines.join("\n")}`);
+    }
+  } catch { /* silent */ }
+
+  // Section 6: Review queue awareness — count + top items, clearly labeled as
   // unverified so candidates are visible without leaking as facts.
   if (ctx.project) {
     try {
@@ -179,7 +193,7 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 6: FTS5 search
+  // Section 7: FTS5 search
   try {
     const db = await buildIndex(ctx.phrenPath, ctx.profile || undefined);
     const result = await searchKnowledgeRows(db, {

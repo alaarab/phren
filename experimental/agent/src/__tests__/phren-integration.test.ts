@@ -124,4 +124,39 @@ describe("agent↔phren integration", () => {
     const missing = await tool.execute({ name: "does-not-exist" });
     expect(missing.is_error).toBe(true);
   });
+
+  it("injects a skills catalog section into the prompt snippet", async () => {
+    fs.mkdirSync(path.join(storeDir, "global", "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(storeDir, "global", "skills", "commit.md"),
+      "---\ndescription: Commit helper with conventions\n---\nBODY\n",
+    );
+
+    const snippet = await buildContextSnippet(ctx(), "anything");
+    expect(snippet).toContain("## Available skills (invoke with run_skill)");
+    expect(snippet).toContain("- commit — Commit helper with conventions");
+  });
+
+  it("resolves /skill-name gestures to run_skill tasks, by name and by alias", async () => {
+    const { resolveSkillGesture } = await import("../commands.js");
+    fs.mkdirSync(path.join(storeDir, "global", "skills"), { recursive: true });
+    fs.writeFileSync(
+      path.join(storeDir, "global", "skills", "commit.md"),
+      "---\ndescription: Commit helper\ncommand: /commit\naliases: [/ci]\n---\nBODY\n",
+    );
+
+    // By name, with args carried through
+    const byName = resolveSkillGesture("/commit fix typo", ctx());
+    expect(byName).toContain('run_skill with name="commit"');
+    expect(byName).toContain('args="fix typo"');
+
+    // By alias
+    expect(resolveSkillGesture("/ci", ctx())).toContain('name="commit"');
+
+    // Built-in commands always win; unknown names pass through as null
+    expect(resolveSkillGesture("/help", ctx())).toBeNull();
+    expect(resolveSkillGesture("/nonexistent-skill", ctx())).toBeNull();
+    expect(resolveSkillGesture("not a slash", ctx())).toBeNull();
+    expect(resolveSkillGesture("/commit", null)).toBeNull();
+  });
 });

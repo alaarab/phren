@@ -13,6 +13,7 @@ import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, cost
 import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { reviewCommand } from "./commands/review.js";
+import { findSkill, getScopedSkills } from "@phren/cli/skill/registry";
 import { modelCommand, providerCommand, presetCommand } from "./commands/model.js";
 import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
@@ -70,6 +71,36 @@ export const COMMAND_NAMES: readonly string[] = [
   "/mode", "/permissions", "/verbose", "/theme", "/agent",
   "/exit", "/quit", "/q",
 ];
+
+/**
+ * /skill-name gesture: an unknown slash input matching a phren skill (by name,
+ * frontmatter command, or alias) becomes a model task that invokes run_skill.
+ * Returns the rewritten task, or null when the input is not a skill gesture.
+ * Built-in commands always win. Never throws.
+ */
+export function resolveSkillGesture(input: string, phrenCtx?: PhrenContext | null): string | null {
+  if (!phrenCtx || !input.startsWith("/")) return null;
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0];
+  if (COMMAND_NAMES.includes(cmd)) return null;
+  const args = parts.slice(1).join(" ");
+  const bare = cmd.slice(1);
+  if (!bare) return null;
+  try {
+    let name: string | null = null;
+    const byName = findSkill(phrenCtx.phrenPath, phrenCtx.profile, phrenCtx.project ?? undefined, bare);
+    if (byName && !("error" in byName) && byName.enabled) name = byName.name;
+    if (!name) {
+      const all = getScopedSkills(phrenCtx.phrenPath, phrenCtx.profile, phrenCtx.project ?? undefined);
+      const match = all.find((s) => s.enabled && (s.command === cmd || s.aliases.includes(cmd)));
+      if (match) name = match.name;
+    }
+    if (!name) return null;
+    return `[user invoked ${cmd}] Call run_skill with name="${name}"${args ? ` and args="${args}"` : ""}, then follow the skill's instructions.`;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Try to handle a slash command. Returns true if the input was a command.
