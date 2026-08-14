@@ -89,6 +89,21 @@ const SUMMARY_HEADING_RE = /^##\s*Checkpoint Summary\b.*$/im;
 const FENCED_JSON_RE = /```(?:json)?\s*\n([\s\S]*?)```/;
 const MIN_SUMMARY_CHARS = 50;
 
+/**
+ * Extract knowledge items from any response text using the same ladder as the
+ * checkpoint parser: fenced json first, bare-object salvage second, [] on any
+ * failure. Shared with the session-end reflection.
+ */
+export function extractKnowledgeItems(text: string): KnowledgeItem[] {
+  const fenced = text.match(FENCED_JSON_RE);
+  if (fenced) {
+    const items = parseItems(fenced[1]);
+    if (items.length > 0) return items;
+  }
+  const bare = text.match(/\{[\s\S]*"items"[\s\S]*\}/);
+  return bare ? parseItems(bare[0]) : [];
+}
+
 function parseItems(raw: string): KnowledgeItem[] {
   let parsed: unknown;
   try {

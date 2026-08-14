@@ -20,7 +20,7 @@ import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/ph
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
-import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot } from "./memory/session.js";
+import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { createSession, runTurn } from "./agent-loop.js";
@@ -363,13 +363,20 @@ export async function runAgentCli(raw: string[]) {
     // Flush anti-patterns at session end
     if (phrenCtx) {
       try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
-      try { await evolveProjectContext(phrenCtx, provider, session.messages); } catch { /* best effort */ }
+      try { await evolveProjectContext(phrenCtx, provider, session.messages, { sessionId }); } catch { /* best effort */ }
     }
 
     if (phrenCtx && sessionId) {
       const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
       endSession(phrenCtx, sessionId, lastText);
       saveSessionMessages(phrenCtx.phrenPath, sessionId, session.messages, phrenCtx.project ?? undefined);
+      if (session.messages.length > 0) {
+        writeSessionNote(phrenCtx, {
+          sessionId,
+          task: "interactive session",
+          outcome: `${session.messages.length} messages, ${session.toolCalls} tool calls`,
+        });
+      }
     }
     mcpCleanup?.();
     return;
@@ -457,8 +464,12 @@ export async function runAgentCli(raw: string[]) {
       // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
       try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
 
-      // Evolve project context via lightweight LLM reflection
-      try { await evolveProjectContext(phrenCtx, provider, result.messages); } catch { /* best effort */ }
+      // Evolve project context via lightweight LLM reflection (also routes
+      // extracted knowledge through the graduated confidence pipeline)
+      try { await evolveProjectContext(phrenCtx, provider, result.messages, { sessionId }); } catch { /* best effort */ }
+
+      // Mirror the session into a searchable (non-injectable) note
+      writeSessionNote(phrenCtx, { sessionId, task: args.task, outcome: result.finalText });
     }
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));

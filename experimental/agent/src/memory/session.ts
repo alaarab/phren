@@ -8,6 +8,7 @@ import {
   startSessionRecord,
   type SerializedSessionMessage,
 } from "@phren/cli/session/artifacts";
+import { addNote } from "@phren/cli/data/notes";
 import type { PhrenContext } from "./context.js";
 
 type SessionCounterField = "findingsAdded" | "tasksCompleted";
@@ -28,6 +29,32 @@ export function startSession(ctx: PhrenContext): string {
 
 export function endSession(ctx: PhrenContext, sessionId: string, summary?: string): void {
   endSessionRecord(ctx.phrenPath, sessionId, summary);
+}
+
+function truncateLine(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
+/**
+ * Mirror a session summary into the project's notes. Notes are FTS-indexed
+ * but non-injectable — past sessions become searchable via phren_search with
+ * zero prompt-leak risk. Best effort, never throws.
+ */
+export function writeSessionNote(
+  ctx: PhrenContext,
+  opts: { sessionId?: string | null; task?: string; outcome?: string },
+): void {
+  if (!ctx.project) return;
+  try {
+    const parts = [`[agent session${opts.sessionId ? ` ${opts.sessionId.slice(0, 8)}` : ""}]`];
+    if (opts.task) parts.push(`task: ${truncateLine(opts.task, 200)}`);
+    if (opts.outcome) parts.push(`outcome: ${truncateLine(opts.outcome, 500)}`);
+    if (parts.length === 1) return;
+    addNote(ctx.phrenPath, ctx.project, parts.join(" — "));
+  } catch {
+    // best effort
+  }
 }
 
 export function incrementSessionCounter(phrenPath: string, sessionId: string, counter: SessionCounterField): void {
