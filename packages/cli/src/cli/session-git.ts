@@ -175,9 +175,17 @@ async function reconcileMergeableFiles(cwd: string, snapshots: Map<string, strin
     if (!fs.existsSync(fullPath)) continue;
     const current = fs.readFileSync(fullPath, "utf8");
     const filename = path.basename(relPath).toLowerCase();
-    const merged = filename === "findings.md"
-      ? mergeFindings(current, localBeforePull)
-      : mergeTask(current, localBeforePull);
+    let merged: string;
+    try {
+      merged = filename === "findings.md"
+        ? mergeFindings(current, localBeforePull)
+        : mergeTask(current, localBeforePull);
+    } catch (err: unknown) {
+      // mergeFindings refuses rather than committing a lossy result. Leave the
+      // file exactly as the pull left it so the user still has both versions.
+      debugLog(`reconcileMergeableFiles: skipping ${relPath}: ${errorMessage(err)}`);
+      continue;
+    }
     if (merged === current) continue;
     fs.writeFileSync(fullPath, merged);
     changedAny = true;

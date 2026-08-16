@@ -6,6 +6,10 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
+    // Catches a block that can never run — how the team-store commit/push in
+    // push_changes sat dead behind a try/catch whose every path returned, while
+    // the tool reported "Pushed to remote".
+    "allowUnreachableCode": false,
     "declaration": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

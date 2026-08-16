@@ -205,52 +205,111 @@ export function extractConflictVersions(content: string): { ours: string; theirs
   return { ours: oursLines.join("\n"), theirs: theirsLines.join("\n") };
 }
 
-// Parse FINDINGS.md into a map of date -> finding blocks.
-// Each finding is a bullet line plus any immediately following HTML comment lines
-// (e.g. <!-- phren:cite {...} -->). These are stored as multi-line strings and
-// deduplicated by the bullet text only, preserving provenance comments.
-function parseFindingsEntries(content: string): Map<string, string[]> {
-  const entries = new Map<string, string[]>();
+/** A FINDINGS.md split into the parts a merge has to reassemble. */
+interface ParsedFindings {
+  title: string;
+  /** Everything between the title and the first date heading (consolidated markers…). */
+  preamble: string[];
+  /** date -> finding blocks (bullet plus its continuation lines). */
+  dates: Map<string, string[]>;
+  /** Everything from the first archive block or non-date section to EOF. */
+  trailing: string[];
+}
+
+/** Does this line open a region that is not a live date section? */
+function opensTrailingRegion(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.startsWith("<details")) return true;
+  if (trimmed.startsWith("<!-- phren:archive:start")) return true;
+  if (line.startsWith("## ") && !/^\d{4}-\d{2}-\d{2}$/.test(line.slice(3).trim())) return true;
+  return false;
+}
+
+/**
+ * Parse FINDINGS.md into title / preamble / date sections / trailing.
+ *
+ * Two rules matter for not losing content:
+ *
+ * 1. A finding block is its bullet plus **every** following line up to the next
+ *    bullet, heading, or blank line — not only `<!--` comments. Hand-written
+ *    indented detail lines ("  - rationale: …") used to end the block, which
+ *    dropped them *and* the citation comment that followed them.
+ * 2. Once an archive wrapper (`<details>`, `<!-- phren:archive:start -->`) or a
+ *    non-date `## ` section starts, everything after it is trailing content that
+ *    is carried through verbatim. Parsing archived bullets as live date entries
+ *    is how a merge promoted archived findings back into the active section.
+ */
+function parseFindings(content: string): ParsedFindings {
+  const lines = content.split("\n");
+  const title = lines[0] ?? "# Findings";
+
+  const preamble: string[] = [];
+  const dates = new Map<string, string[]>();
+  const trailing: string[] = [];
+
   let currentDate = "";
   let currentBlock: string[] = [];
+  let phase: "preamble" | "dates" | "trailing" = "preamble";
 
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith("## ")) {
-      // Flush any pending block before switching date
-      if (currentBlock.length > 0 && currentDate) {
-        entries.get(currentDate)!.push(currentBlock.join("\n"));
-        currentBlock = [];
-      }
-      const heading = line.slice(3).trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(heading)) {
-        currentDate = heading;
-        if (!entries.has(currentDate)) entries.set(currentDate, []);
-      }
-    } else if (line.startsWith("- ") && currentDate) {
-      // Flush previous block
-      if (currentBlock.length > 0) {
-        entries.get(currentDate)!.push(currentBlock.join("\n"));
-      }
-      currentBlock = [line];
-    } else if (currentBlock.length > 0 && /^\s*<!--/.test(line)) {
-      // HTML comment continuation of current finding block
-      currentBlock.push(line);
-    } else {
-      // Non-comment, non-bullet line: flush any pending block
-      if (currentBlock.length > 0 && currentDate) {
-        entries.get(currentDate)!.push(currentBlock.join("\n"));
-        currentBlock = [];
-      }
+  const flush = () => {
+    if (currentBlock.length > 0 && currentDate) {
+      dates.get(currentDate)!.push(currentBlock.join("\n").replace(/\s+$/, ""));
     }
-  }
-  // Flush final block
-  if (currentBlock.length > 0 && currentDate) {
-    entries.get(currentDate)!.push(currentBlock.join("\n"));
-  }
+    currentBlock = [];
+  };
 
-  return entries;
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (phase === "trailing") {
+      trailing.push(line);
+      continue;
+    }
+
+    if (opensTrailingRegion(line)) {
+      flush();
+      phase = "trailing";
+      trailing.push(line);
+      continue;
+    }
+
+    if (line.startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(line.slice(3).trim())) {
+      flush();
+      phase = "dates";
+      currentDate = line.slice(3).trim();
+      if (!dates.has(currentDate)) dates.set(currentDate, []);
+      continue;
+    }
+
+    if (phase === "preamble") {
+      preamble.push(line);
+      continue;
+    }
+
+    if (line.startsWith("- ")) {
+      flush();
+      currentBlock = [line];
+      continue;
+    }
+
+    if (line.trim() !== "") {
+      // Either a continuation of the current finding (an indented sub-bullet, a
+      // metadata comment, a wrapped sentence) or, with no bullet open, a stray
+      // run of content — a fenced block, a stray paragraph. Both are kept as
+      // part of a block so the writer can put them back; dropping "lines the
+      // parser did not recognise" is what made this merge lossy.
+      currentBlock.push(line);
+      continue;
+    }
+
+    flush();
+  }
+  flush();
+
+  while (preamble.length > 0 && preamble[preamble.length - 1].trim() === "") preamble.pop();
+  while (trailing.length > 0 && trailing[trailing.length - 1].trim() === "") trailing.pop();
+
+  return { title, preamble, dates, trailing };
 }
 
 // Extract the bullet text from a finding block (first line) for dedup purposes
@@ -259,110 +318,129 @@ function findingBulletText(block: string): string {
   return block.split("\n")[0].replace(METADATA_REGEX.findingId, "").replace(/\s+/g, " ").trim();
 }
 
-/**
- * Extract non-entry preamble content from a FINDINGS.md string.
- * Returns lines that appear before the first date section heading (## YYYY-MM-DD)
- * and are not the title line, so things like <!-- consolidated: ... --> markers
- * and <details>phren:archive blocks are preserved during merge.
- */
-function extractFindingsPreamble(content: string): string[] {
-  const lines = content.split("\n");
-  const preamble: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(line.slice(3).trim())) break;
-    preamble.push(line);
+/** Union two line lists, keeping order and dropping lines already present. */
+function unionLines(ourLines: string[], theirLines: string[]): string[] {
+  const present = new Set(ourLines.map((line) => line.trim()).filter(Boolean));
+  const out = [...ourLines];
+  for (const line of theirLines) {
+    const key = line.trim();
+    if (key && present.has(key)) continue;
+    if (key) present.add(key);
+    out.push(line);
   }
-  // Drop the title line (index 0) since it's handled separately
-  return preamble.slice(1);
+  while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return out;
 }
 
 /**
- * Extract postamble content from a FINDINGS.md string.
- * Returns lines that appear after all date sections, such as <details> archive blocks.
+ * Union trailing regions (archive `<details>` blocks, non-date sections).
+ *
+ * Segment-wise rather than line-wise: filtering individual lines could strip a
+ * bullet out of theirs' `<details>` block and leave a stray `</details>`. When
+ * one side's content lines are a subset of the other's, the subset is dropped —
+ * that covers the common "theirs is ours plus one archived finding" case. When
+ * they genuinely differ, both are emitted: a duplicated archive block is
+ * recoverable, a deleted one is not.
  */
-function extractFindingsPostamble(content: string): string[] {
-  const lines = content.split("\n");
-  // Find the last date-section heading
-  let lastDateIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(lines[i].slice(3).trim())) {
-      lastDateIdx = i;
-      break;
-    }
-  }
-  if (lastDateIdx === -1) return [];
-  // Skip forward past the date section's content to find postamble
-  for (let i = lastDateIdx + 1; i < lines.length; i++) {
-    if (lines[i].startsWith("## ") && !/^\d{4}-\d{2}-\d{2}$/.test(lines[i].slice(3).trim())) {
-      return lines.slice(i);
-    }
-    if (lines[i].startsWith("<details") || lines[i].startsWith("<!-- consolidated:")) {
-      return lines.slice(i);
-    }
-  }
-  return [];
+function unionTrailing(ourTrailing: string[], theirTrailing: string[]): string[] {
+  if (ourTrailing.length === 0) return [...theirTrailing];
+  if (theirTrailing.length === 0) return [...ourTrailing];
+
+  const ourKeys = new Set(ourTrailing.map((line) => line.trim()).filter(Boolean));
+  const theirContent = theirTrailing.map((line) => line.trim()).filter(Boolean);
+  if (theirContent.every((line) => ourKeys.has(line))) return [...ourTrailing];
+
+  const theirKeys = new Set(theirContent);
+  const ourContent = ourTrailing.map((line) => line.trim()).filter(Boolean);
+  if (ourContent.every((line) => theirKeys.has(line))) return [...theirTrailing];
+
+  return [...ourTrailing, "", ...theirTrailing];
 }
+
+/** Content lines a merge must round-trip: no blanks, no title, no date headings. */
+function significantLines(content: string): string[] {
+  return content
+    .split("\n")
+    .slice(1)
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .filter((line) => !(line.startsWith("## ") && /^\d{4}-\d{2}-\d{2}$/.test(line.slice(3).trim())));
+}
+
+/** Raised when a merge would drop content; the caller must leave the conflict alone. */
+export class FindingsMergeLossError extends Error {}
 
 /**
  * Merge two FINDINGS.md versions: union entries per date, newest date first.
- * Deduplicates by bullet text only, keeping comment lines from whichever
- * version is kept (ours takes priority).
- * Preserves preamble content (consolidated markers) and postamble (archive blocks).
+ *
+ * Deduplicates by bullet text, keeping the continuation lines of whichever copy
+ * wins (ours takes priority). Preamble and trailing regions are unioned from
+ * **both** sides — taking them from `ours` alone silently deleted theirs'
+ * archive blocks and non-date sections.
+ *
+ * Runs unattended (push_changes, session-stop conflict recovery) and its result
+ * is committed and pushed, so it verifies itself: every content line of either
+ * input must appear in the output, and a merge that cannot manage that throws
+ * `FindingsMergeLossError` rather than committing the loss. Callers leave the
+ * conflict for the user.
  */
 export function mergeFindings(ours: string, theirs: string): string {
-  const ourEntries = parseFindingsEntries(ours);
-  const theirEntries = parseFindingsEntries(theirs);
+  const { text, dedupedContinuations } = buildMergedFindings(ours, theirs);
 
-  const allDates = [...new Set([...ourEntries.keys(), ...theirEntries.keys()])].sort().reverse();
-
-  const titleLine = ours.split("\n")[0] || "# Findings";
-  // Preserve preamble from ours (consolidated markers, etc.)
-  const preamble = extractFindingsPreamble(ours);
-  // Preserve postamble from ours (archive <details> blocks, etc.)
-  const postamble = extractFindingsPostamble(ours);
-
-  const lines = [titleLine];
-  if (preamble.length > 0) {
-    lines.push(...preamble);
-  } else {
-    lines.push("");
+  const present = new Set(text.split("\n").map((line) => line.trim()));
+  const lost = [...significantLines(ours), ...significantLines(theirs)]
+    .filter((line) => !present.has(line))
+    // A block that lost a dedup race takes its own continuation lines with it —
+    // that is the intended rule (the finding is present, ours' provenance wins),
+    // not the content loss this guard exists to catch.
+    .filter((line) => !dedupedContinuations.has(line));
+  if (lost.length > 0) {
+    throw new FindingsMergeLossError(
+      `Refusing to auto-merge ${FINDINGS_FILENAME}: ${lost.length} line(s) would be dropped, ` +
+        `starting with "${lost[0].slice(0, 80)}". Resolve this conflict by hand.`,
+    );
   }
+  return text;
+}
+
+function buildMergedFindings(ours: string, theirs: string): { text: string; dedupedContinuations: Set<string> } {
+  const ourSide = parseFindings(ours);
+  const theirSide = parseFindings(theirs);
+
+  const allDates = [...new Set([...ourSide.dates.keys(), ...theirSide.dates.keys()])].sort().reverse();
+  const lines = [ourSide.title || theirSide.title || "# Findings"];
+  const dedupedContinuations = new Set<string>();
+
+  const preamble = unionLines(ourSide.preamble, theirSide.preamble);
+  if (preamble.length > 0) lines.push(...preamble, "");
+  else lines.push("");
 
   for (const date of allDates) {
-    const ourItems = ourEntries.get(date) ?? [];
-    const theirItems = theirEntries.get(date) ?? [];
-
-    // Dedup by bullet text, ours wins on conflict
     const seen = new Set<string>();
     const merged: string[] = [];
-    for (const block of ourItems) {
+    for (const block of [...(ourSide.dates.get(date) ?? []), ...(theirSide.dates.get(date) ?? [])]) {
       const key = findingBulletText(block);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(block);
+      if (seen.has(key)) {
+        for (const line of block.split("\n").slice(1)) {
+          const trimmed = line.trim();
+          if (trimmed) dedupedContinuations.add(trimmed);
+        }
+        continue;
       }
-    }
-    for (const block of theirItems) {
-      const key = findingBulletText(block);
-      if (!seen.has(key)) {
-        seen.add(key);
-        merged.push(block);
-      }
+      seen.add(key);
+      merged.push(block);
     }
 
     if (merged.length > 0) {
       lines.push(`## ${date}`, "");
-      for (const block of merged) {
-        lines.push(block, "");
-      }
+      for (const block of merged) lines.push(block, "");
     }
   }
 
-  if (postamble.length > 0) {
-    lines.push(...postamble);
-  }
+  const trailing = unionTrailing(ourSide.trailing, theirSide.trailing);
+  if (trailing.length > 0) lines.push(...trailing, "");
 
-  return lines.join("\n");
+  return { text: lines.join("\n"), dedupedContinuations };
 }
 
 /** A parsed task record that may span multiple lines (bullet + Context: continuation). */
