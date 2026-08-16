@@ -931,6 +931,22 @@ describe("machines, profiles, and shell state", () => {
     expect(listed.data["fresh-box"]).toBe("personal");
   });
 
+  it("writes into the comments-only starter machines.yaml", () => {
+    // The shipped starter file is all comments, which yaml.load resolves to
+    // null and listMachines reports as MALFORMED_YAML. "No mappings yet" must
+    // not be mistaken for "mappings phren cannot parse" — that would make
+    // `phren init --machine <name>` a no-op on every fresh install.
+    fs.writeFileSync(
+      path.join(tmpDir, "machines.yaml"),
+      "# Map machine hostnames to profiles.\n#\n#   work-laptop: work\n\n",
+    );
+    const result = setMachineProfile(tmpDir, "test-box", "personal");
+    expect(result.ok).toBe(true);
+    const listed = listMachines(tmpDir);
+    if (!listed.ok) return;
+    expect(listed.data["test-box"]).toBe("personal");
+  });
+
   it("preserves a profile's defaults block and comments across add/remove", () => {
     const profilePath = path.join(tmpDir, "profiles", "personal.yaml");
     fs.writeFileSync(

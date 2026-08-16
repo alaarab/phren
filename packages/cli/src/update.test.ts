@@ -51,7 +51,7 @@ describe("runPhrenUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Already up to date.";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -79,7 +79,7 @@ describe("runPhrenUpdate", () => {
     );
     expect(mockExecFileSync).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "--health"],
+      [expect.stringMatching(/(?<!mcp[\\/])dist[\\/]index\.js$/), "--health"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });
@@ -186,8 +186,8 @@ describe("runPhrenUpdate", () => {
       if (cmd === "git" && args[0] === "pull") return "Fast-forward";
       if (cmd === npmExec() && args[0] === "install") return "";
       if (cmd === npmExec() && args[0] === "run" && args[1] === "build") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
-      if (cmd === process.execPath && /mcp[\\/]+dist[\\/]+index\.js$/.test(String(args[0])) && args[1] === "init") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "--health") return "";
+      if (cmd === process.execPath && /(?<!mcp[\\/])dist[\\/]index\.js$/.test(String(args[0])) && args[1] === "init") return "";
       throw new Error(`Unexpected command: ${cmd} ${args.join(" ")}`);
     });
 
@@ -197,7 +197,7 @@ describe("runPhrenUpdate", () => {
     expect(result.message).toContain("Refreshed starter assets.");
     expect(mockExecFileSync).toHaveBeenCalledWith(
       process.execPath,
-      [expect.stringMatching(/mcp[\\/]dist[\\/]index\.js$/), "init", "--apply-starter-update", "-y"],
+      [expect.stringMatching(/(?<!mcp[\\/])dist[\\/]index\.js$/), "init", "--apply-starter-update", "-y"],
       expect.objectContaining({ encoding: "utf8" })
     );
   });

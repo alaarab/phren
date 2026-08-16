@@ -192,13 +192,17 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   const machinesPath = path.join(phrenPath, "machines.yaml");
   return withSafeLock(machinesPath, () => {
     const current = listMachines(phrenPath);
-    // A file that exists but will not parse must never be rewritten from an
-    // empty map: writeMachines rebuilds the whole file, so that would delete
-    // every other machine's mapping. machines.yaml sits in the store root and is
-    // git-synced, so conflict markers are the likely cause — exactly the case
-    // where the other entries still matter. Same contract as store-registry's
-    // readRegistryForMutation.
-    if (!current.ok && current.code !== PhrenError.FILE_NOT_FOUND) {
+    // A file that exists and carries mappings phren cannot parse must never be
+    // rewritten from an empty map: writeMachines rebuilds the whole file, so
+    // that would delete every other machine's mapping. machines.yaml sits in
+    // the store root and is git-synced, so conflict markers are the likely
+    // cause — exactly the case where the other entries still matter. Same
+    // contract as store-registry's readRegistryForMutation.
+    //
+    // "No mappings yet" is not the same thing: the shipped starter file is all
+    // comments, which yaml.load resolves to null and listMachines reports as
+    // MALFORMED_YAML. That file is fine to write into.
+    if (!current.ok && current.code !== PhrenError.FILE_NOT_FOUND && hasMachineEntries(machinesPath)) {
       return phrenErr(
         `${machinesPath} exists but could not be read — refusing to rewrite it (that would drop the mappings phren cannot parse). ` +
           `Fix the file by hand (check for git conflict markers), then map again. Problem: ${current.error}`,
@@ -210,6 +214,18 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
     writeMachines(phrenPath, data);
     return phrenOk(`Mapped machine ${machine} -> ${profile}.`);
   });
+}
+
+/** Does machines.yaml hold anything beyond comments and blank lines? */
+function hasMachineEntries(machinesPath: string): boolean {
+  try {
+    return fs
+      .readFileSync(machinesPath, "utf8")
+      .split("\n")
+      .some((line) => line.trim() !== "" && !line.trimStart().startsWith("#"));
+  } catch {
+    return false;
+  }
 }
 
 
