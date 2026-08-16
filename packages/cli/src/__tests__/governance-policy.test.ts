@@ -541,6 +541,31 @@ describe("pruneDeadMemories TTL promotion", () => {
     expect(queue).not.toContain("Still current retry budget note");
   });
 
+  // The prune resolved the retention policy once, outside the per-project loop,
+  // so a project that configured a longer window still had its findings deleted
+  // on the global schedule — silently, by nightly background maintenance.
+  it("honors a per-project retention override instead of the global window", async () => {
+    const { writeProjectConfig } = await import("../project-config.js");
+    const OLD_PROJECT = "long-retention";
+    const oldDate = new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10);
+
+    fs.mkdirSync(path.join(phrenPath, OLD_PROJECT), { recursive: true });
+    fs.writeFileSync(
+      path.join(phrenPath, OLD_PROJECT, "FINDINGS.md"),
+      [`# ${OLD_PROJECT} Findings`, "", `## ${oldDate}`, "", "- Archival decision worth keeping for years", ""].join("\n"),
+    );
+    // Global default is 365 days; this project asks for ten years.
+    writeProjectConfig(phrenPath, OLD_PROJECT, { config: { retentionPolicy: { retentionDays: 3650 } } });
+
+    const result = pruneDeadMemories(phrenPath, OLD_PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.pruned).toBe(0);
+
+    const findings = fs.readFileSync(path.join(phrenPath, OLD_PROJECT, "FINDINGS.md"), "utf8");
+    expect(findings).toContain("Archival decision worth keeping for years");
+  });
+
   it("reports but does not write in dry-run", () => {
     seedExpiredFinding();
     const result = pruneDeadMemories(phrenPath, PROJECT, true);

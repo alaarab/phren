@@ -45,8 +45,18 @@ function acquireFileLock(lockPath: string): void {
             // Can't read lock file (deleted between stat and read) → retry
           }
           if (!ownerAlive) {
+            // Owner is dead: the lock is genuinely stale, so drop it and retry
+            // immediately — no wait penalty, the next write should win.
             try { fs.unlinkSync(lockPath); } catch { /* already gone */ }
+            continue;
           }
+          // Owner is alive holding a long-running lock. This is still a wait:
+          // skipping the poll here spins the (synchronous) loop at 100% CPU and
+          // never advances `waited`, so maxWait could never be reached and the
+          // caller hung forever — including when a recycled PID makes an
+          // orphaned lock look owned.
+          sleep(pollInterval);
+          waited += pollInterval;
           continue;
         }
       } catch (statErr: unknown) {

@@ -1867,7 +1867,7 @@ describe("CLI integration: uninstall", () => {
   // escape cannot come back unnoticed.
   it("does not touch the machine's global npm package", () => {
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1888,7 +1888,7 @@ describe("CLI integration: uninstall", () => {
     expect(before.mcpServers?.phren).toBeDefined();
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1920,7 +1920,7 @@ describe("CLI integration: uninstall", () => {
     fs.writeFileSync(machineFile, "uninstall-box\n");
 
     const { exitCode, stdout } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1929,9 +1929,29 @@ describe("CLI integration: uninstall", () => {
     expect(fs.existsSync(machineFile)).toBe(false);
   });
 
+  it("refuses to delete the store in a non-interactive session without --yes", () => {
+    const projDir = path.join(phrenDir, "keep-me");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# Findings\n- irreplaceable insight");
+
+    // runCli pipes stdio, so stdin/stdout are not TTYs — the same shape as an
+    // agent shell or a CI step, which is exactly where an accidental
+    // `phren uninstall` must not silently destroy the user's knowledge.
+    const { exitCode, stdout } = runCli(
+      ["uninstall"],
+      { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("--yes");
+    expect(stdout).toContain("Uninstall cancelled.");
+    expect(fs.existsSync(phrenDir)).toBe(true);
+    expect(fs.readFileSync(path.join(projDir, "FINDINGS.md"), "utf8")).toContain("irreplaceable insight");
+  }, 30_000);
+
   it("handles missing settings file gracefully", () => {
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1947,7 +1967,7 @@ describe("CLI integration: uninstall", () => {
     );
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1966,7 +1986,7 @@ describe("CLI integration: uninstall", () => {
     );
 
     const { stdout, exitCode } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);
@@ -1992,7 +2012,7 @@ describe("CLI integration: uninstall", () => {
     fs.symlinkSync(path.join(globalDir, "CLAUDE.md"), path.join(githubDir, "copilot-instructions.md"));
 
     const { exitCode, stdout } = runCli(
-      ["uninstall"],
+      ["uninstall", "-y"],
       { PHREN_PATH: phrenDir, HOME: homeDir, USERPROFILE: homeDir }
     );
     expect(exitCode).toBe(0);

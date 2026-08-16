@@ -61,20 +61,28 @@ When the cited file changes significantly or disappears, phren penalizes the fin
 
 ### Role-based access control
 
-Four roles with six action types:
+Three roles, enforced on mutating operations:
 
-| Role | Read | Write | Delete | Approve | Admin | Export |
-|------|------|-------|--------|---------|-------|--------|
-| admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| maintainer | ✓ | ✓ | ✓ | ✓ | — | ✓ |
-| contributor | ✓ | ✓ | — | — | — | — |
-| viewer | ✓ | — | — | — | — | — |
+| Role | Add / edit findings, tasks, notes | Delete findings, tasks, notes | Change config |
+|------|-----------------------------------|-------------------------------|---------------|
+| `admin` | ✓ | ✓ | ✓ |
+| `contributor` | ✓ | ✓ | — |
+| `reader` | — | — | — |
 
-Configure with `phren config access`.
+Configure with `phren config access set --admins=… --contributors=… --readers=…`.
+When every list is empty (the default), the store is in **open mode** and all
+actions are permitted.
 
-### Approval workflows
+**Contributors can delete.** `remove_finding`, `remove_task` and `remove_note`
+are all in the contributor action set, so granting contributor on a shared store
+also grants permanent deletion of team knowledge. Only `manage_config` is
+admin-only.
 
-High-risk operations (bulk delete, policy changes, imports from untrusted sources) can require human approval before executing. Configure thresholds via `phren config workflow`.
+**Scope of enforcement.** Roles are checked in the MCP tool layer, which is how
+agents reach the store. Reads are not gated — there is no read action — and the
+actor is self-declared through the `PHREN_ACTOR` environment variable. Treat this
+as a coordination boundary between cooperating teammates, not as a security
+boundary against a motivated local user.
 
 ### The review queue: what approve and reject actually do
 
@@ -151,24 +159,31 @@ A human can inspect every finding, see its confidence score, view its git histor
 
 ## Configuration reference
 
+Every value is passed as `--key=value`. A bare positional (`set ttlDays 90`) is
+rejected rather than silently applying nothing. Add `--project <name>` to any
+`get`/`set` to read or write a per-project override instead of the global default.
+
 ```bash
 # Policy (decay, TTL, retention)
 phren config policy get
-phren config policy set ttlDays 90
-phren config policy set retentionDays 365
-phren config policy set minInjectConfidence 0.35
+phren config policy set --ttlDays=90 --retentionDays=365 --minInjectConfidence=0.35
+phren config policy set --project my-app --retentionDays=3650   # per-project override
+phren config policy set --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65
 
-# Access control
+# Access control — roles are admins / contributors / readers
 phren config access get
-phren config access set role contributor
+phren config access set --admins=alice --contributors=bob,carol --readers=dave
 
-# Workflow (approval gates)
+# Workflow (review-queue routing and capture behavior)
 phren config workflow get
-phren config workflow set requireApproval true
+phren config workflow set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts
+phren config task-mode auto            # auto | manual
+phren config finding-sensitivity balanced   # minimal | conservative | balanced | aggressive
 
-# Index (what gets indexed)
+# Index (what gets indexed) — note the flags are --include / --exclude
 phren config index get
-phren config index set includeGlobs "**/*.md"
+phren config index set --include="**/*.md" --exclude="**/node_modules/**"
+phren config index set --includeHidden=false
 ```
 
 ## Running the governance checks

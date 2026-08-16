@@ -1479,7 +1479,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
             '<input type="text" id="wf-input-riskySections" value="' + esc(Array.isArray(wf.riskySections) ? wf.riskySections.join(', ') : '') + '" placeholder="Review, Stale, Conflicts" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:var(--text-sm);background:var(--surface);color:var(--ink)">' +
             '<button data-ts-action="' + (isProject ? 'setProjectWorkflow' : 'setGlobalWorkflow') + '" data-field="riskySections" class="settings-chip active" style="font-size:11px">Set</button>' +
             '</div>';
-          wfHtml += '<div class="settings-control-note">Comma-separated sections that trigger approval gates when memories are written (Review, Stale, Conflicts).</div></div>';
+          wfHtml += '<div class="settings-control-note">Comma-separated review.md sections treated as risky, so their entries are held for human triage instead of being injected (Review, Stale, Conflicts).</div></div>';
           workflowEl.innerHTML = wfHtml;
         }
 

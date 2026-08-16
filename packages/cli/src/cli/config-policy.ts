@@ -15,6 +15,30 @@ import { updateProjectConfigOverrides } from "../project-config.js";
 import { isValidProjectName } from "../utils.js";
 import { parseProjectArg, warnIfUnregistered } from "./config-shared.js";
 
+/**
+ * Reject a `set` that parsed no `--key=value` pairs.
+ *
+ * Every set parser skips args without a `--` prefix, so the documented-looking
+ * `phren config policy set ttlDays 90` produced an EMPTY patch — which still
+ * wrote the policy file, appended an "update_policy" audit entry, and printed
+ * the unchanged policy as if it had applied. A user hardening a shared store
+ * came away believing a limit was in force that never was.
+ */
+function requireFlagPairs(setArgs: string[], usage: string): void {
+  const hasPair = setArgs.some((arg) => {
+    if (!arg.startsWith("--")) return false;
+    const [k, v] = arg.slice(2).split("=");
+    return Boolean(k) && v !== undefined;
+  });
+  if (hasPair) return;
+  console.error("No settings changed: every value must be given as --key=value.");
+  if (setArgs.length > 0) {
+    console.error(`  Received: ${setArgs.join(" ")}`);
+  }
+  console.error(`  Usage: ${usage}`);
+  process.exit(1);
+}
+
 // ── Finding sensitivity config ────────────────────────────────────────────────
 
 export const FINDING_SENSITIVITY_CONFIG: Record<FindingSensitivityLevel, {
@@ -224,6 +248,7 @@ export async function handleRetentionPolicy(args: string[]) {
         console.error(`Invalid project name: "${projectArg}"`);
         process.exit(1);
       }
+      requireFlagPairs(filteredArgs.slice(1), "phren config policy set --ttlDays=90 --retentionDays=365 --project <name>");
       warnIfUnregistered(phrenPath, projectArg);
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const existingRetention = current.retentionPolicy ?? {};
@@ -247,6 +272,7 @@ export async function handleRetentionPolicy(args: string[]) {
       console.log(JSON.stringify({ _project: projectArg, ...resolved.retentionPolicy }, null, 2));
       return;
     }
+    requireFlagPairs(filteredArgs.slice(1), "phren config policy set --ttlDays=90 --retentionDays=365");
     const patch: Record<string, unknown> = {};
     for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;
@@ -299,6 +325,7 @@ export async function handleWorkflowPolicy(args: string[]) {
         console.error(`Invalid project name: "${projectArg}"`);
         process.exit(1);
       }
+      requireFlagPairs(filteredArgs.slice(1), "phren config workflow set --autoAcceptThreshold=0.75 --project <name>");
       warnIfUnregistered(phrenPath, projectArg);
       updateProjectConfigOverrides(phrenPath, projectArg, (current) => {
         const nextConfig = { ...current };
@@ -328,6 +355,7 @@ export async function handleWorkflowPolicy(args: string[]) {
       console.log(JSON.stringify({ _project: projectArg, ...resolved.workflowPolicy }, null, 2));
       return;
     }
+    requireFlagPairs(filteredArgs.slice(1), "phren config workflow set --autoAcceptThreshold=0.75");
     const patch: Record<string, unknown> = {};
     for (const arg of filteredArgs.slice(1)) {
       if (!arg.startsWith("--")) continue;

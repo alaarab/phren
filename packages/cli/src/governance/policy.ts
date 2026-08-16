@@ -1048,7 +1048,6 @@ function collectTtlExpiredEntries(
  * filled up.
  */
 export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<PruneMemoriesResult> {
-  const policy = getRetentionPolicy(phrenPath);
   if (project && !isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const dirs = project
     ? (() => {
@@ -1057,12 +1056,16 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
     })()
     : getProjectDirs(phrenPath).filter((dir) => path.basename(dir) !== "global");
   let pruned = 0;
-  const cutoffDays = policy.retentionDays;
   const dryRunDetails: string[] = [];
 
   for (const dir of dirs) {
     const file = resolveFindingsPath(dir);
     if (!file) continue;
+    // Retention is resolvable per project (`phren config policy set --project X
+    // --retentionDays=…`), and the injection path already honours that. Resolve
+    // it inside the loop: hoisting it applied the *global* window to every
+    // project, permanently deleting findings a project's own config said to keep.
+    const cutoffDays = getRetentionPolicy(phrenPath, path.basename(dir)).retentionDays;
     // Q23: see docs/decisions/Q23-per-file-lock-concurrent-writers.md
     withFileLock(file, () => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -1123,7 +1126,8 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
     const file = resolveFindingsPath(dir);
     if (!file) continue;
     const projectName = path.basename(dir);
-    const expiredEntries = collectTtlExpiredEntries(file, projectName, policy.ttlDays, lastRetrieval);
+    const ttlDays = getRetentionPolicy(phrenPath, projectName).ttlDays;
+    const expiredEntries = collectTtlExpiredEntries(file, projectName, ttlDays, lastRetrieval);
     if (!expiredEntries.length) continue;
     ttlExpired += expiredEntries.length;
     if (dryRun) {

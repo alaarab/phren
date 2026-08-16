@@ -145,6 +145,35 @@ describe("concurrent write safety - in-process", () => {
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
+  it("a stale-looking lock held by a LIVE process still times out", () => {
+    // The dangerous case the other stale-lock tests miss: an orphaned lock file
+    // whose recorded PID has been recycled by an unrelated live process. The
+    // owner looks alive, so the lock is never reclaimed — acquisition must
+    // still give up at maxWait instead of spinning forever at 100% CPU.
+    fs.writeFileSync(path.join(projectDir, "tasks.md"), SAMPLE_TASK);
+    const lockPath = path.join(projectDir, "tasks.md.lock");
+    fs.writeFileSync(lockPath, `${process.pid}\n${Date.now() - 60000}`);
+    const past = new Date(Date.now() - 60000);
+    fs.utimesSync(lockPath, past, past);
+
+    const savedMaxWait = process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+    process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = "500";
+    const started = Date.now();
+    try {
+      const msg = addTask(tmpDir, PROJECT, "Should not be written");
+      const elapsed = Date.now() - started;
+      expect(msg.ok).toBe(false);
+      if (!msg.ok) expect(msg.code).toBe(PhrenError.LOCK_TIMEOUT);
+      // Bounded by maxWait (plus a generous margin), not unbounded.
+      expect(elapsed).toBeLessThan(5000);
+      expect(fs.existsSync(lockPath)).toBe(true); // a live owner's lock is left alone
+    } finally {
+      if (savedMaxWait === undefined) delete process.env.PHREN_FILE_LOCK_MAX_WAIT_MS;
+      else process.env.PHREN_FILE_LOCK_MAX_WAIT_MS = savedMaxWait;
+      fs.unlinkSync(lockPath);
+    }
+  }, 10_000);
+
   it("lock is always cleaned up even when operation returns an error", () => {
     const findingsPath = path.join(projectDir, "FINDINGS.md");
     const lockPath = findingsPath + ".lock";
