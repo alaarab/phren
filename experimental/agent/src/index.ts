@@ -160,13 +160,13 @@ export async function runAgentCli(raw: string[]) {
     // banner; one-shot runs get a count only and never mutate the queue.
     if (phrenCtx.project) {
       try {
-        const { getQueueStatus, formatQueueBanner, expireStaleItems, resolveExpireDays } =
+        const { getQueueStatus, formatQueueBanner, formatExpiryNotice, expireStaleItems, resolveExpireDays } =
           await import("./memory/review-triage.js");
         if (args.interactive || args.multi || args.team) {
           const expireDays = resolveExpireDays();
-          const { expired } = expireStaleItems(phrenCtx, expireDays);
-          if (expired > 0) {
-            process.stderr.write(`\x1b[2m[auto-rejected ${expired} stale review item(s) older than ${expireDays}d]\x1b[0m\n`);
+          const notice = formatExpiryNotice(expireStaleItems(phrenCtx, expireDays));
+          if (notice) {
+            process.stderr.write(`\x1b[2m[${notice} — older than ${expireDays}d]\x1b[0m\n`);
           }
           const banner = formatQueueBanner(getQueueStatus(phrenCtx, 3));
           if (banner) process.stderr.write(`\x1b[33m${banner}\x1b[0m\n`);

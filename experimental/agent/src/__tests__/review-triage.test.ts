@@ -8,6 +8,7 @@ import {
   getQueueStatus,
   listQueueItems,
   expireStaleItems,
+  formatExpiryNotice,
   formatQueueBanner,
   formatQueueContextSection,
   proposeTriage,
@@ -101,6 +102,35 @@ describe("review-triage", () => {
   it("expireDays 0 disables expiry", () => {
     writeQueue([`- [${isoDaysAgo(100)}] Very old`]);
     expect(expireStaleItems(ctx(), 0).expired).toBe(0);
+  });
+
+  it("never deletes a live finding when its queue line expires", () => {
+    // Governance queues findings that already live in FINDINGS.md ("is this
+    // still true?"). Expiry must drop the question, not the knowledge.
+    const text = "Sessions must be closed before the pool is drained";
+    fs.writeFileSync(
+      path.join(storeDir, project, "FINDINGS.md"),
+      `# ${project} Findings\n\n## Patterns\n\n- [pattern] ${text}\n`,
+    );
+    writeQueue([`- [${isoDaysAgo(40)}] ${text}`]);
+
+    const result = expireStaleItems(ctx(), 14);
+    expect(result.expired).toBe(1);
+    expect(result.texts).toEqual([text]);
+
+    expect(listQueueItems(ctx())).toHaveLength(0);
+    const findings = fs.readFileSync(path.join(storeDir, project, "FINDINGS.md"), "utf-8");
+    expect(findings).toContain(text);
+  });
+
+  it("expiry notice names what it dropped and says findings are untouched", () => {
+    expect(formatExpiryNotice({ expired: 0, texts: [] })).toBeNull();
+
+    const notice = formatExpiryNotice({ expired: 5, texts: ["alpha", "beta", "gamma", "delta", "epsilon"] })!;
+    expect(notice).toContain("removed 5 stale items");
+    expect(notice).toContain('"alpha"');
+    expect(notice).toContain("+2 more");
+    expect(notice).toContain("existing findings untouched");
   });
 
   it("resolveExpireDays honors the env override", () => {

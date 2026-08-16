@@ -1022,6 +1022,25 @@ export function rejectQueueItem(phrenPath: string, project: string, lineText: st
   return result.ok ? phrenOk(result.data.message) : result;
 }
 
+/**
+ * Drop a queue line and nothing else.
+ *
+ * Unlike `rejectQueueItem`, this never touches FINDINGS.md or `reference/topics/`.
+ * It is the verb for "stop asking me about this", not "this is wrong" — which is
+ * what automated expiry needs: a governance-queued finding that already lives in
+ * FINDINGS.md must survive its queue line timing out.
+ */
+export function dequeueQueueItem(phrenPath: string, project: string, lineText: string): PhrenResult<string> {
+  const located = locateQueueLine(phrenPath, project, lineText);
+  if (!located.ok) return forwardErr(located);
+
+  const dequeued = dequeueLine(phrenPath, project, lineText);
+  if (!dequeued.ok) return forwardErr(dequeued);
+
+  appendAuditLog(phrenPath, "review_dequeue", `project=${project}`);
+  return phrenOk(`Removed queue item from ${project} (content left untouched)`);
+}
+
 /** Edit a queue item's text in review.md and the corresponding finding in FINDINGS.md. */
 export function editQueueItem(phrenPath: string, project: string, lineText: string, newText: string): PhrenResult<string> {
   const trimmed = newText.replace(/[\r\n]+/g, " ").trim();
