@@ -17,6 +17,7 @@ import {
   sessionsDir,
   runtimeHealthFile,
   isRecord,
+  PhrenError,
 } from "../shared.js";
 import { ensurePrivateDir, homePath } from "../phren-paths.js";
 import { isLiveForeignPhrenRoot, phrenRootFromGlobalClaudeLink } from "./guard-globals.js";
@@ -92,8 +93,21 @@ function normalizeProjects(raw: unknown): string[] {
   return raw.map((entry) => String(entry));
 }
 
-function profileLooksRealProject(project: string): boolean {
-  return project === "global" || !LEGACY_SAMPLE_PROJECTS.has(project);
+/**
+ * Is this profile entry the abandoned starter sample rather than a real project?
+ *
+ * The name alone is not evidence: "my-api" is an ordinary repository name (and was
+ * the example in phren's own phren-profiles skill). Name-only pruning stripped real
+ * projects from every profile on every SessionStart — and since bootstrapProject
+ * re-adds the active project, that produced endless add/remove churn on a
+ * git-synced YAML file. Require that the project directory is actually absent
+ * from the store: phren stopped shipping those directories, so a leftover entry
+ * with nothing on disk is the sample, and an entry with real content is not.
+ */
+function profileLooksRealProject(phrenPath: string, project: string): boolean {
+  if (project === "global") return true;
+  if (!LEGACY_SAMPLE_PROJECTS.has(project)) return true;
+  return fs.existsSync(path.join(phrenPath, project));
 }
 
 function pruneLegacySampleProjectsFromProfiles(phrenPath: string): { filesUpdated: number; removed: number } {
@@ -109,7 +123,7 @@ function pruneLegacySampleProjectsFromProfiles(phrenPath: string): { filesUpdate
       const parsed = yaml.load(fs.readFileSync(fullPath, "utf8"), { schema: yaml.CORE_SCHEMA });
       if (!isRecord(parsed)) continue;
       const originalProjects = normalizeProjects(parsed.projects);
-      const nextProjects = originalProjects.filter(profileLooksRealProject);
+      const nextProjects = originalProjects.filter((project) => profileLooksRealProject(phrenPath, project));
       if (nextProjects.length === originalProjects.length) continue;
       removed += originalProjects.length - nextProjects.length;
       const nextData = { ...parsed, projects: nextProjects };
@@ -417,11 +431,17 @@ export function repairPreexistingInstall(
     ? ensureGeneratedSkillArtifacts(phrenPath, preferredHome)
     : [];
   const repairedGlobalSymlink = caps.linkGlobalClaudeMd ? repairGlobalClaudeSymlink(phrenPath) : false;
+  // Both of these write into the user's home (~/.phren-context.md and
+  // ~/.claude/projects/<key>/memory/MEMORY.md). `assisted` and `manual` exist so
+  // phren writes nothing outside its own store, and selfHeal is the capability
+  // that says "re-create home files every SessionStart" — so they belong behind
+  // it, like the skill links and the global symlink above.
+  const writesHome = caps.selfHeal;
   return {
     profileFilesUpdated: profileRepair.filesUpdated,
     removedLegacyProjects: profileRepair.removed,
-    createdContextFile: ensureGeneratedContextFile(preferredHome),
-    createdRootMemory: ensureGeneratedRootMemory(preferredHome),
+    createdContextFile: writesHome ? ensureGeneratedContextFile(preferredHome) : false,
+    createdRootMemory: writesHome ? ensureGeneratedRootMemory(preferredHome) : false,
     createdGlobalAssets,
     createdRuntimeAssets,
     createdFeatureDefaults,
@@ -564,31 +584,51 @@ function gitRemoteStatus(phrenPath: string): { ok: boolean; detail: string } {
   }
 }
 
-function copyStarterFile(phrenPath: string, src: string, dest: string): string | null {
+export interface StarterFileUpdate {
+  /** Store-relative path of the file that now holds the shipped content. */
+  file: string;
+  action: "created" | "replaced";
+  /** Store-relative path of the pre-update copy, when one was kept. */
+  backup?: string;
+}
+
+/**
+ * Install one shipped starter file over its on-disk copy, keeping a backup.
+ *
+ * The old behavior staged differing files into `.runtime/starter-updates/*.new`
+ * and returned the staged path, which callers reported as "applied". Since a
+ * shipped template always differs from an older install's copy — that is what an
+ * upgrade *is* — no live file was ever refreshed, `.runtime/` is gitignored so the
+ * staged copies never synced, and `phren update --refresh-starter` then deleted
+ * them. Every existing install stayed pinned to the skill text it was created
+ * with, so bugs in the shipped skills could never reach anyone.
+ *
+ * These files are phren-managed (`<store>/global/`), and the caller asked for
+ * `--apply-starter-update`, so applying is the requested action. The previous
+ * contents go to `.runtime/starter-backups/` — gitignored, out of the synced
+ * tree, and recoverable if the user had hand-edited a skill.
+ */
+function copyStarterFile(phrenPath: string, src: string, dest: string): StarterFileUpdate | null {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const relative = path.relative(phrenPath, dest);
   if (!fs.existsSync(dest)) {
     fs.copyFileSync(src, dest);
-    return dest;
+    return { file: relative, action: "created" };
   }
 
   const existing = fs.readFileSync(dest);
   const incoming = fs.readFileSync(src);
-  if (existing.equals(incoming)) {
-    return null;
-  }
+  if (existing.equals(incoming)) return null;
 
-  const relative = path.relative(phrenPath, dest);
-  const stagingDir = path.join(phrenPath, ".runtime", "starter-updates", path.dirname(relative));
-  fs.mkdirSync(stagingDir, { recursive: true });
-  const currentPath = path.join(stagingDir, `${path.basename(dest)}.current`);
-  const stagedPath = path.join(stagingDir, `${path.basename(dest)}.new`);
-  fs.copyFileSync(dest, currentPath);
-  fs.copyFileSync(src, stagedPath);
-  return stagedPath;
+  const backupPath = path.join(phrenPath, ".runtime", "starter-backups", `v${VERSION}`, relative);
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  fs.copyFileSync(dest, backupPath);
+  fs.copyFileSync(src, dest);
+  return { file: relative, action: "replaced", backup: path.relative(phrenPath, backupPath) };
 }
 
-export function applyStarterTemplateUpdates(phrenPath: string): string[] {
-  const updates: string[] = [];
+export function applyStarterTemplateUpdates(phrenPath: string): StarterFileUpdate[] {
+  const updates: StarterFileUpdate[] = [];
   const starterGlobal = path.join(STARTER_DIR, "global");
   if (!fs.existsSync(starterGlobal)) return updates;
 
@@ -596,7 +636,7 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
   const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
   if (fs.existsSync(starterClaude)) {
     const written = copyStarterFile(phrenPath, starterClaude, targetClaude);
-    if (written) updates.push(path.relative(phrenPath, written));
+    if (written) updates.push(written);
   }
 
   const starterSkillsDir = path.join(starterGlobal, "skills");
@@ -608,11 +648,11 @@ export function applyStarterTemplateUpdates(phrenPath: string): string[] {
       const dest = path.join(targetSkillsDir, f.name);
       if (f.isFile() && f.name.endsWith(".md")) {
         const written = copyStarterFile(phrenPath, src, dest);
-        if (written) updates.push(path.relative(phrenPath, written));
+        if (written) updates.push(written);
       } else if (f.isDirectory() && fs.existsSync(path.join(src, "SKILL.md"))) {
         for (const inner of walkSkillFolder(src)) {
           const written = copyStarterFile(phrenPath, path.join(src, inner), path.join(dest, inner));
-          if (written) updates.push(path.relative(phrenPath, written));
+          if (written) updates.push(written);
         }
       }
     }
@@ -1461,13 +1501,25 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }
   } catch (err: unknown) {
+    // An unparsable machines.yaml is fatal here, not "no existing mapping":
+    // treating it as absent would hand a file full of git conflict markers to
+    // setMachineProfile on a passive init refresh. setMachineProfile refuses to
+    // rewrite it, but the user needs to hear why.
     logger.debug("setup", `updateMachinesYaml parse: ${errorMessage(err)}`);
+    console.warn(
+      `  ⚠ ${machinesFile} could not be parsed — leaving machine mappings untouched.\n` +
+        `    Fix the file by hand (check for git conflict markers), then run 'phren init' again.`,
+    );
+    return;
   }
 
   // Passive init/link refreshes should keep an existing mapping; explicit overrides can remap.
   if (hasExistingMapping && !machine && !profile) return;
   const mapping = setMachineProfile(phrenPath, machineName, profileName);
-  if (!mapping.ok) logger.debug("setup", `updateMachinesYaml setMachineProfile: ${mapping.error}`);
+  if (!mapping.ok) {
+    logger.debug("setup", `updateMachinesYaml setMachineProfile: ${mapping.error}`);
+    if (mapping.code === PhrenError.MALFORMED_YAML) console.warn(`  ⚠ ${mapping.error}`);
+  }
 }
 
 /**

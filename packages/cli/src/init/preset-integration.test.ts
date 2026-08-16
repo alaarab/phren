@@ -109,6 +109,61 @@ describe.sequential("management preset init integration", () => {
     expect(fs.existsSync(homeClaude)).toBe(false);
   });
 
+  it("assisted self-heal writes neither generated home file", async () => {
+    // "phren writes NOTHING outside its own store" was false: both of these were
+    // created on every SessionStart regardless of preset, and MEMORY.md lands
+    // inside Claude Code's own per-project memory directory.
+    const phrenPath = path.join(tmpRoot, "homefiles");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const contextFile = path.join(homeDir, ".phren-context.md");
+    const memoryKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
+    const memoryFile = path.join(homeDir, ".claude", "projects", memoryKey, "memory", "MEMORY.md");
+    expect(fs.existsSync(contextFile)).toBe(true);
+    expect(fs.existsSync(memoryFile)).toBe(true);
+
+    writeInstallPreferences(phrenPath, { managementPreset: "assisted" });
+    fs.rmSync(contextFile, { force: true });
+    fs.rmSync(memoryFile, { force: true });
+    suppressOutput(() => repairPreexistingInstall(phrenPath));
+
+    expect(fs.existsSync(contextFile)).toBe(false);
+    expect(fs.existsSync(memoryFile)).toBe(false);
+  });
+
+  it("downgrading to assisted removes the generated home files", async () => {
+    const phrenPath = path.join(tmpRoot, "homefiles-teardown");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const contextFile = path.join(homeDir, ".phren-context.md");
+    const memoryKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
+    const memoryFile = path.join(homeDir, ".claude", "projects", memoryKey, "memory", "MEMORY.md");
+    expect(fs.existsSync(contextFile)).toBe(true);
+    expect(fs.existsSync(memoryFile)).toBe(true);
+
+    const { runPreset } = await import("./init-preset.js");
+    await suppressOutput(() => runPreset("assisted", { yes: true }));
+
+    expect(fs.existsSync(contextFile)).toBe(false);
+    expect(fs.existsSync(memoryFile)).toBe(false);
+  });
+
+  it("never removes a hand-written file at the generated home paths", async () => {
+    const phrenPath = path.join(tmpRoot, "homefiles-userowned");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+
+    const contextFile = path.join(homeDir, ".phren-context.md");
+    fs.writeFileSync(contextFile, "# my own notes, no phren marker\n");
+
+    const { runPreset } = await import("./init-preset.js");
+    await suppressOutput(() => runPreset("assisted", { yes: true }));
+
+    expect(fs.readFileSync(contextFile, "utf8")).toBe("# my own notes, no phren marker\n");
+  });
+
   it("phren preset managed -> assisted tears down home symlink, and back restores it", async () => {
     const phrenPath = path.join(tmpRoot, "switch");
     process.env.PHREN_PATH = phrenPath;

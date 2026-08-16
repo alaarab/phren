@@ -24,7 +24,7 @@ import {
   resolveManagementCapabilities,
   type ManagementCapabilities,
 } from "./management-preset.js";
-import { removePhrenHomeSymlinks, removePhrenWrappers, sweepAgentSkillSymlinks, sweepProjectMirrors } from "./teardown.js";
+import { removeGeneratedHomeFiles, removePhrenHomeSymlinks, removePhrenWrappers, sweepAgentSkillSymlinks, sweepProjectMirrors } from "./teardown.js";
 import { printSelfWiringSnippet } from "./self-wiring.js";
 import { DEFAULT_PHREN_PATH, log, confirmPrompt } from "./shared.js";
 
@@ -116,6 +116,11 @@ export async function runPreset(arg?: string, opts: { yes?: boolean } = {}): Pro
   if (prevCaps.installSkillLinks && !caps.installSkillLinks) sweepAgentSkillSymlinks(phrenPath);
   if (prevCaps.installWrappers && !caps.installWrappers) removePhrenWrappers();
   if (prevCaps.repoMirroring && !caps.repoMirroring) sweepProjectMirrors(phrenPath);
+  // selfHeal is what puts ~/.phren-context.md and the generated root MEMORY.md in
+  // the user's home. Downgrading to a preset that writes nothing outside the
+  // store has to take them back out, or "phren writes NOTHING outside its own
+  // store" stays false for anyone who started on managed.
+  if (prevCaps.selfHeal && !caps.selfHeal) removeGeneratedHomeFiles();
 
   // Setup of artifacts the new preset adds but the previous one lacked.
   const setupNeeded =

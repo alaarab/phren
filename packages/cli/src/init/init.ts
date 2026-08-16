@@ -565,10 +565,14 @@ export async function runInit(opts: InitOptions = {}) {
       }
       if (opts.applyStarterUpdate) {
         const updated = applyStarterTemplateUpdates(phrenPath);
+        const replaced = updated.filter((entry) => entry.action === "replaced");
         if (updated.length) {
           log(`  Applied starter template updates (${updated.length} file${updated.length === 1 ? "" : "s"}).`);
+          if (replaced.length) {
+            log(`  Previous copies kept at .runtime/starter-backups/v${VERSION}/ (${replaced.length} file${replaced.length === 1 ? "" : "s"}).`);
+          }
         } else {
-          log(`  No starter template updates were applied (starter files not found).`);
+          log(`  Starter templates already up to date.`);
         }
       }
       writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });

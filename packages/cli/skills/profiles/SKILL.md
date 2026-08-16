@@ -35,8 +35,8 @@ name: work
 description: Work laptop with company projects
 projects:
   - global
-  - my-api
-  - frontend
+  - acme-billing
+  - acme-web
 ```
 
 When you sync on a machine mapped to this profile, only those projects appear. Personal projects stay off work machines.

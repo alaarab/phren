@@ -82,7 +82,57 @@ export function resolveActiveProfile(phrenPath: string, requestedProfile?: strin
 
   const profiles = listProfiles(phrenPath);
   if (!profiles.ok) return phrenOk(undefined);
-  return phrenOk(profiles.data[0]?.name);
+
+  // No mapping matched. With a single profile there is nothing to get wrong, so
+  // adopt it quietly. With several, the mapping key is the OS hostname — which
+  // changes on a re-image, a WSL/devcontainer switch, or a brand-new laptop that
+  // cloned the store — and silently adopting the alphabetically-first profile
+  // puts another profile's projects on a machine the user never mapped. Still
+  // return it (returning undefined would index *every* profile's projects, which
+  // is strictly worse), but say so exactly once so the user can fix the mapping.
+  const assumed = profiles.data[0]?.name;
+  if (assumed && profiles.data.length > 1) warnUnmappedMachine(getMachineName(), assumed);
+  return phrenOk(assumed);
+}
+
+/** Machines already warned about this process — the notice is per-run, not per-call. */
+const warnedUnmappedMachines = new Set<string>();
+
+function warnUnmappedMachine(machine: string, assumed: string): void {
+  if (warnedUnmappedMachines.has(machine)) return;
+  warnedUnmappedMachines.add(machine);
+  logger.debug("profile-store", `machine ${machine} unmapped; assuming profile ${assumed}`);
+  if (process.env.PHREN_QUIET === "1") return;
+  process.stderr.write(
+    `[phren] machine "${machine}" is not mapped in machines.yaml — assuming profile "${assumed}". ` +
+      `Run 'phren profile map ${machine} <profile>' to pin it.\n`,
+  );
+}
+
+/** Test hook: forget which machines have been warned about. */
+export function _resetUnmappedMachineWarnings(): void {
+  warnedUnmappedMachines.clear();
+}
+
+/**
+ * Is this machine's profile an assumption rather than a mapping? `phren status`
+ * surfaces this so an unmapped machine is visible before it indexes the wrong
+ * profile's projects.
+ */
+export function describeProfileMapping(phrenPath: string): { machine: string; mapped: boolean; assumed?: string } {
+  const machine = getMachineName();
+  const machines = listMachines(phrenPath);
+  const profiles = listProfiles(phrenPath);
+  if (machines.ok && profiles.ok) {
+    for (const name of [machine, defaultMachineName()]) {
+      const mapped = machines.data[name];
+      if (mapped && profiles.data.some((entry) => entry.name === mapped)) {
+        return { machine, mapped: true };
+      }
+    }
+  }
+  const assumed = profiles.ok ? profiles.data[0]?.name : undefined;
+  return { machine, mapped: false, ...(assumed ? { assumed } : {}) };
 }
 
 export function getDefaultMachineAlias(): string {
@@ -142,6 +192,19 @@ export function setMachineProfile(phrenPath: string, machine: string, profile: s
   const machinesPath = path.join(phrenPath, "machines.yaml");
   return withSafeLock(machinesPath, () => {
     const current = listMachines(phrenPath);
+    // A file that exists but will not parse must never be rewritten from an
+    // empty map: writeMachines rebuilds the whole file, so that would delete
+    // every other machine's mapping. machines.yaml sits in the store root and is
+    // git-synced, so conflict markers are the likely cause — exactly the case
+    // where the other entries still matter. Same contract as store-registry's
+    // readRegistryForMutation.
+    if (!current.ok && current.code !== PhrenError.FILE_NOT_FOUND) {
+      return phrenErr(
+        `${machinesPath} exists but could not be read — refusing to rewrite it (that would drop the mappings phren cannot parse). ` +
+          `Fix the file by hand (check for git conflict markers), then map again. Problem: ${current.error}`,
+        PhrenError.MALFORMED_YAML,
+      );
+    }
     const data = current.ok ? current.data : {};
     data[machine] = profile;
     writeMachines(phrenPath, data);
@@ -264,13 +327,57 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
   return phrenOk(profiles);
 }
 
+/**
+ * Rewrite a profile's `projects` list, preserving everything else in the file.
+ *
+ * Read-modify-write of the parsed document rather than a fresh dump of the three
+ * fields the caller happens to know about: a profile also carries a `defaults:`
+ * policy block (findingSensitivity, proactivity, retention/decay, workflow) that
+ * getActiveProfileDefaults reads, plus any key a future version adds. Rebuilding
+ * from scratch silently reverted the user's governance config to global defaults
+ * on every `:profile add`/`remove` — and project rename is remove-then-add, so
+ * the second write overwrote the .bak with the already-stripped copy.
+ *
+ * The leading comment block is re-attached the same way writeMachines does.
+ */
 function writeProfile(file: string, name: string, projects: string[], description?: string): void {
   const backup = `${file}.bak`;
-  if (fs.existsSync(file)) fs.copyFileSync(file, backup);
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  if (existing) fs.copyFileSync(file, backup);
+
+  let preserved: Record<string, unknown> = {};
+  if (existing) {
+    try {
+      const parsed = yaml.load(existing, { schema: yaml.CORE_SCHEMA });
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        preserved = { ...(parsed as Record<string, unknown>) };
+      }
+    } catch {
+      // Unparsable file: listProfiles already refused it upstream, so callers
+      // never reach here with one. Fall back to the minimal document.
+    }
+  }
+  delete preserved.name;
+  delete preserved.description;
+  delete preserved.projects;
+
+  const headerLines: string[] = [];
+  for (const line of existing.split("\n")) {
+    if (line.startsWith("#") || line.trim() === "") {
+      headerLines.push(line);
+      continue;
+    }
+    break;
+  }
+  const header = headerLines.length ? `${headerLines.join("\n").replace(/\n+$/, "")}\n` : "";
+
   const normalized = [...new Set(projects)].sort();
-  const out = yaml.dump({ name, ...(description ? { description } : {}), projects: normalized }, { lineWidth: 1000 });
+  const out = yaml.dump(
+    { name, ...(description ? { description } : {}), projects: normalized, ...preserved },
+    { lineWidth: 1000 },
+  );
   const tmpPath = `${file}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, out);
+  fs.writeFileSync(tmpPath, header + out);
   fs.renameSync(tmpPath, file);
 }
 

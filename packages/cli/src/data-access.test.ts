@@ -29,6 +29,12 @@ import {
   TASKS_FILENAME,
 } from "./data/access.js";
 import { PhrenError } from "./shared.js";
+import {
+  getActiveProfileDefaults,
+  resolveActiveProfile,
+  describeProfileMapping,
+  _resetUnmappedMachineWarnings,
+} from "./profile-store.js";
 import { grantAdmin, makeTempDir, resultMsg, spawnTsxWorker, REPO_ROOT } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -899,6 +905,93 @@ describe("machines, profiles, and shell state", () => {
     const listed = listProfiles(tmpDir);
     expect(listed.ok).toBe(false);
     if (!listed.ok) expect(listed.code).toBe(PhrenError.MALFORMED_YAML);
+  });
+
+  it("refuses to rewrite machines.yaml it cannot parse, keeping the other mappings", () => {
+    // machines.yaml is git-synced, so conflict markers are the likely cause —
+    // exactly when the other machines' mappings still matter.
+    const machinesPath = path.join(tmpDir, "machines.yaml");
+    const conflicted = "laptop: personal\n<<<<<<< HEAD\ndesktop: personal\n=======\ndesktop: work\n>>>>>>> origin/main\nserver: personal\n";
+    fs.writeFileSync(machinesPath, conflicted);
+
+    const result = setMachineProfile(tmpDir, "newbox", "personal");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe(PhrenError.MALFORMED_YAML);
+    expect(result.error).toContain("refusing to rewrite");
+    expect(fs.readFileSync(machinesPath, "utf8")).toBe(conflicted);
+  });
+
+  it("still creates machines.yaml when it does not exist yet", () => {
+    fs.unlinkSync(path.join(tmpDir, "machines.yaml"));
+    const result = setMachineProfile(tmpDir, "fresh-box", "personal");
+    expect(result.ok).toBe(true);
+    const listed = listMachines(tmpDir);
+    if (!listed.ok) return;
+    expect(listed.data["fresh-box"]).toBe("personal");
+  });
+
+  it("preserves a profile's defaults block and comments across add/remove", () => {
+    const profilePath = path.join(tmpDir, "profiles", "personal.yaml");
+    fs.writeFileSync(
+      profilePath,
+      "# my personal profile\nname: personal\ndescription: personal things\nprojects:\n  - testproject\ndefaults:\n  findingSensitivity: aggressive\n  retentionPolicy:\n    ttlDays: 400\n",
+    );
+
+    expect(addProjectToProfile(tmpDir, "personal", "another-proj").ok).toBe(true);
+    let defaults = getActiveProfileDefaults(tmpDir, "personal");
+    expect(defaults?.findingSensitivity).toBe("aggressive");
+    expect(defaults?.retentionPolicy?.ttlDays).toBe(400);
+    expect(fs.readFileSync(profilePath, "utf8")).toContain("# my personal profile");
+
+    // Rename does remove-then-add, so the second write must not strip it either.
+    expect(removeProjectFromProfile(tmpDir, "personal", "another-proj").ok).toBe(true);
+    defaults = getActiveProfileDefaults(tmpDir, "personal");
+    expect(defaults?.findingSensitivity).toBe("aggressive");
+    expect(defaults?.retentionPolicy?.ttlDays).toBe(400);
+  });
+
+  it("warns once when the machine is unmapped and several profiles exist", () => {
+    _resetUnmappedMachineWarnings();
+    fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "some-other-machine: personal\n");
+    fs.writeFileSync(path.join(tmpDir, "profiles", "client-acme.yaml"), "name: client-acme\nprojects:\n  - acme\n");
+
+    const warnings: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as unknown as { write: (chunk: string) => boolean }).write = (chunk: string) => {
+      warnings.push(String(chunk));
+      return true;
+    };
+    try {
+      const first = resolveActiveProfile(tmpDir);
+      const second = resolveActiveProfile(tmpDir);
+      expect(first.ok && first.data).toBe("client-acme");
+      expect(second.ok && second.data).toBe("client-acme");
+    } finally {
+      (process.stderr as unknown as { write: typeof original }).write = original;
+    }
+
+    const unmapped = warnings.filter((line) => line.includes("is not mapped in machines.yaml"));
+    expect(unmapped).toHaveLength(1);
+    expect(describeProfileMapping(tmpDir).mapped).toBe(false);
+  });
+
+  it("adopts a sole profile without warning", () => {
+    _resetUnmappedMachineWarnings();
+    fs.writeFileSync(path.join(tmpDir, "machines.yaml"), "some-other-machine: personal\n");
+
+    const warnings: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    (process.stderr as unknown as { write: (chunk: string) => boolean }).write = (chunk: string) => {
+      warnings.push(String(chunk));
+      return true;
+    };
+    try {
+      expect(resolveActiveProfile(tmpDir)).toMatchObject({ ok: true, data: "personal" });
+    } finally {
+      (process.stderr as unknown as { write: typeof original }).write = original;
+    }
+    expect(warnings.filter((line) => line.includes("is not mapped"))).toHaveLength(0);
   });
 
   it("listProjectCards includes summary/docs", () => {

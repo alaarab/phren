@@ -27,6 +27,7 @@ import {
 } from "./init/init.js";
 import { configureHooksIfEnabled } from "./init/init-configure.js";
 import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck } from "./init/setup.js";
+import { STARTER_DIR } from "./init/shared.js";
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 
@@ -98,21 +99,34 @@ describe.sequential("mcp mode configuration", () => {
     delete process.env.PHREN_PATH;
   });
 
-  it("stages starter updates for modified global CLAUDE.md instead of overwriting it", () => {
+  it("actually refreshes a differing global CLAUDE.md and keeps the old copy", () => {
+    // Staging instead of applying is what pinned every existing install to the
+    // skill text it was created with — a shipped template always differs from an
+    // older copy, so nothing was ever refreshed.
     const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
     fs.mkdirSync(path.dirname(targetClaude), { recursive: true });
     fs.writeFileSync(targetClaude, "# custom user CLAUDE\n");
 
     const updates = applyStarterTemplateUpdates(phrenPath);
-    const stagedClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.new");
-    const currentClaude = path.join(phrenPath, ".runtime", "starter-updates", "global", "CLAUDE.md.current");
+    const shipped = fs.readFileSync(path.join(STARTER_DIR, "global", "CLAUDE.md"), "utf8");
 
-    expect(fs.readFileSync(targetClaude, "utf8")).toBe("# custom user CLAUDE\n");
-    expect(fs.existsSync(`${targetClaude}.bak`)).toBe(false);
-    expect(fs.existsSync(`${targetClaude}.new`)).toBe(false);
-    expect(fs.existsSync(stagedClaude)).toBe(true);
-    expect(fs.existsSync(currentClaude)).toBe(true);
-    expect(updates).toContain(path.join(".runtime", "starter-updates", "global", "CLAUDE.md.new"));
+    expect(fs.readFileSync(targetClaude, "utf8")).toBe(shipped);
+
+    const entry = updates.find((u) => u.file === path.join("global", "CLAUDE.md"));
+    expect(entry?.action).toBe("replaced");
+    expect(entry?.backup).toBeTruthy();
+    expect(fs.readFileSync(path.join(phrenPath, entry!.backup!), "utf8")).toBe("# custom user CLAUDE\n");
+    // The backup lives under the gitignored runtime dir, not the synced tree.
+    expect(entry!.backup!.startsWith(".runtime/") || entry!.backup!.startsWith(`.runtime${path.sep}`)).toBe(true);
+  });
+
+  it("reports nothing to do when the on-disk copy already matches the shipped one", () => {
+    const targetClaude = path.join(phrenPath, "global", "CLAUDE.md");
+    fs.mkdirSync(path.dirname(targetClaude), { recursive: true });
+    fs.copyFileSync(path.join(STARTER_DIR, "global", "CLAUDE.md"), targetClaude);
+
+    const updates = applyStarterTemplateUpdates(phrenPath);
+    expect(updates.find((u) => u.file === path.join("global", "CLAUDE.md"))).toBeUndefined();
   });
 
   it("ships starter gitignore entries for local governance runtime state", () => {

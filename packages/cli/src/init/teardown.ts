@@ -43,6 +43,38 @@ export function removePhrenHomeSymlinks(): string[] {
   return removed;
 }
 
+/** Path of the root memory file phren generates inside Claude Code's own memory dir. */
+export function generatedRootMemoryPath(home = homeDir()): string {
+  const key = home.replace(/[/\\:]/g, "-").replace(/^-/, "");
+  return path.join(home, ".claude", "projects", key, "memory", "MEMORY.md");
+}
+
+/**
+ * Remove the two files phren generates in the user's home under `selfHeal`:
+ * `~/.phren-context.md` and the root `MEMORY.md` written into Claude Code's own
+ * per-project memory directory. Both carry a phren marker, so a user-authored
+ * file at either path is left alone.
+ */
+export function removeGeneratedHomeFiles(): string[] {
+  const removed: string[] = [];
+  const targets: Array<{ file: string; marker: string; label: string }> = [
+    { file: homePath(".phren-context.md"), marker: "<!-- phren-managed -->", label: "machine context file" },
+    { file: generatedRootMemoryPath(), marker: "<!-- phren:projects:start -->", label: "generated root memory" },
+  ];
+  for (const { file, marker, label } of targets) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      if (!fs.readFileSync(file, "utf8").includes(marker)) continue;
+      fs.unlinkSync(file);
+      log(`  Removed ${label}: ${file}`);
+      removed.push(file);
+    } catch (err: unknown) {
+      debugLog(`teardown: cleanup failed for ${file}: ${errorMessage(err)}`);
+    }
+  }
+  return removed;
+}
+
 /** Remove ~/.local/bin/{copilot,cursor,codex,phren} wrappers that carry the phren marker. */
 export function removePhrenWrappers(): string[] {
   const removed: string[] = [];

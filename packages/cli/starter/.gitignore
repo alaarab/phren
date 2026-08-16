@@ -4,6 +4,10 @@
 .sessions/
 .cache/
 
+# Pre-write snapshots (machines.yaml.bak, profiles/*.yaml.bak). Local recovery
+# copies, not shared state — committing them syncs one machine's stale view.
+*.bak
+
 # Feature flags and API keys. `phren init` writes this file itself
 # (ensureDefaultFeatureFlags), and docs/environment.md tells users to put
 # OPENAI_API_KEY / ANTHROPIC_API_KEY / PHREN_LLM_KEY in it — so on a synced

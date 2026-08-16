@@ -21,6 +21,7 @@ import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
 import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { describeProfileMapping } from "./profile-store.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
 
@@ -118,7 +119,14 @@ export async function runStatus() {
     console.log(`  ${DIM}sync${RESET}     ${manifest.syncMode}`);
   }
   if (profile) {
-    console.log(`  ${DIM}profile${RESET}  ${profile}`);
+    // Name the assumption when the machine is not in machines.yaml — an unmapped
+    // machine scopes the store to whatever profile sorts first, which is how
+    // another profile's projects end up indexed on a machine nobody mapped.
+    const mapping = describeProfileMapping(phrenPath);
+    const suffix = mapping.mapped
+      ? ""
+      : ` ${YELLOW}(assumed — machine "${mapping.machine}" is not mapped in machines.yaml; run 'phren profile map ${mapping.machine} ${profile}')${RESET}`;
+    console.log(`  ${DIM}profile${RESET}  ${profile}${suffix}`);
   }
 
   // Management preset + MCP + hooks status
