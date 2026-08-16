@@ -98,6 +98,9 @@ function getTopicConfigData(phrenPath: string, project: string) {
       domain: result.domain ?? raw?.domain ?? null,
       topics: result.topics,
       pinnedTopics: raw?.pinnedTopics ?? [],
+      // A topic-config.json that exists but was rejected reported source
+      // "default" with no hint that the file was being ignored.
+      ...(result.error ? { configError: result.error } : {}),
     },
   };
 }

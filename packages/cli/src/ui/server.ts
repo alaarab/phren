@@ -789,7 +789,22 @@ function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
         execFileSync("git", args, { cwd: ctx.phrenPath, encoding: "utf8", timeout: EXEC_TIMEOUT }).trim();
       const status = runGit(["status", "--porcelain"]);
       if (!status) return jsonOk(res, { ok: true, message: "Nothing to sync — working tree clean." });
-      runGit(["add", "--", "*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]);
+      // Stage each extension separately: `git add` exits 128 as soon as ONE
+      // pathspec matches nothing, and a normal store has no tracked .yml,
+      // .jsonl or .txt (.runtime/*.jsonl is gitignored, and gitignored files do
+      // not satisfy a pathspec). One combined add therefore failed on every
+      // non-clean store and the user saw a raw git fatal instead of a sync.
+      for (const spec of ["*.md", "*.json", "*.yaml", "*.yml", "*.jsonl", "*.txt"]) {
+        try {
+          execFileSync("git", ["add", "--", spec], {
+            cwd: ctx.phrenPath,
+            encoding: "utf8",
+            timeout: EXEC_TIMEOUT,
+            // A non-matching pathspec is expected here; don't print git's fatal.
+            stdio: ["ignore", "ignore", "ignore"],
+          });
+        } catch { /* no file with this extension */ }
+      }
       const stagedFiles = runGit(["diff", "--cached", "--name-only"]);
       if (!stagedFiles) return jsonOk(res, { ok: true, message: "Nothing to sync — no matching files to commit." });
       runGit(["commit", "-m", message, "--only", "--", ...stagedFiles.split("\n").filter(Boolean)]);

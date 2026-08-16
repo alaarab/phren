@@ -1051,3 +1051,84 @@ describe.sequential("web-ui JSON API auth and removed queue routes", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe.sequential("web-ui /api/sync", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  function git(args: string[]): string {
+    return require("child_process").execFileSync("git", args, {
+      cwd: tmpRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "phren test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "phren test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    }).trim();
+  }
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-ui-sync-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+
+    // A store as `phren init` leaves it: .md, .json and .yaml, and a gitignored
+    // .runtime/*.jsonl. No tracked .yml, .jsonl or .txt anywhere — which is why
+    // one combined `git add` with six literal pathspecs always aborted.
+    write(path.join(tmpRoot, ".config", "retention-policy.json"), '{"ttlDays":120}\n');
+    write(path.join(tmpRoot, "machines.yaml"), "laptop: personal\n");
+    write(path.join(tmpRoot, ".gitignore"), ".runtime/\n");
+    write(path.join(tmpRoot, ".runtime", "lookup-events.jsonl"), '{"e":1}\n');
+    git(["init", "--initial-branch=main"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "phren test"]);
+    git(["add", "-A"]);
+    git(["commit", "-m", "init"]);
+    // Dirty the tree so sync has something to do.
+    write(path.join(tmpRoot, "demo", "FINDINGS.md"), "# demo FINDINGS\n\n## 2026-03-01\n\n- [decision] Changed\n");
+
+    authToken = "sync-token";
+    csrfTokens = new Map<string, number>();
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
+    await new Promise<void>((resolve) => { server!.listen(0, "127.0.0.1", () => resolve()); });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("commits a store that has no .yml, .jsonl or .txt files", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    const csrf = JSON.parse(csrfRes.body).token as string;
+
+    const res = await postForm(port, "/api/sync", { _auth: authToken, _csrf: csrf, message: "ui sync" });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.ok, res.body).toBe(true);
+    expect(String(body.message)).not.toMatch(/did not match any files/);
+
+    // The commit actually landed, carrying the edited finding.
+    expect(git(["log", "-1", "--pretty=%s"])).toBe("ui sync");
+    expect(git(["show", "HEAD:demo/FINDINGS.md"])).toContain("Changed");
+  });
+});

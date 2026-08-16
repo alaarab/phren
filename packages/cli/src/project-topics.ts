@@ -150,7 +150,7 @@ const SOFTWARE_TOPICS: ProjectTopic[] = [
     slug: "architecture",
     label: "Architecture",
     description: "System shape, module boundaries, design patterns, and structural decisions.",
-    keywords: ["architecture", "design", "pattern", "layer", "module", "system", "structure", "microservice", "monolith", "event-driven", "plugin"],
+    keywords: ["architecture", "design", "pattern", "layer", "module", "system", "structure", "microservice", "monolith", "event-driven"],
   },
   {
     slug: "debugging",
@@ -174,7 +174,7 @@ const SOFTWARE_TOPICS: ProjectTopic[] = [
     slug: "data",
     label: "Data",
     description: "Data models, serialization, parsing, validation, and data flow details.",
-    keywords: ["data", "model", "schema", "serialize", "deserialize", "json", "csv", "transform", "validate", "parse", "format", "encode"],
+    keywords: ["data", "serialize", "deserialize", "json", "csv", "transform", "validate", "parse", "format", "encode"],
   },
   {
     slug: "mobile",
@@ -186,7 +186,7 @@ const SOFTWARE_TOPICS: ProjectTopic[] = [
     slug: "ai_ml",
     label: "AI / ML",
     description: "Models, embeddings, prompts, inference, and ML-specific systems.",
-    keywords: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"],
+    keywords: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "inference", "training", "neural", "gpt", "claude"],
   },
   {
     slug: "general",
@@ -208,7 +208,7 @@ const DOMAIN_TOPICS: Record<string, ProjectTopic[]> = {
       slug: "production",
       label: "Production",
       description: "Session workflow, recording choices, and production techniques.",
-      keywords: ["production", "recording", "session", "tracking", "workflow", "arrangement", "producer"],
+      keywords: ["production", "recording", "session", "tracking", "workflow", "producer"],
     },
     {
       slug: "mixing",
@@ -352,7 +352,7 @@ const DOMAIN_TOPICS: Record<string, ProjectTopic[]> = {
       slug: "style",
       label: "Style",
       description: "Tone, diction, constraints, and stylistic direction.",
-      keywords: ["style", "tone", "voice", "diction", "register", "aesthetic"],
+      keywords: ["style", "tone", "diction", "register", "aesthetic"],
     },
     {
       slug: "research",
@@ -661,7 +661,7 @@ export function getBuiltinTopics(phrenPath?: string, project?: string): ProjectT
   return merged;
 }
 
-export function readProjectTopics(phrenPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[]; domain?: string } {
+export function readProjectTopics(phrenPath: string, project: string): { source: ProjectTopicSource; topics: ProjectTopic[]; domain?: string; error?: string } {
   const builtinTopics = getBuiltinTopics(phrenPath, project);
   const configPath = topicConfigPath(phrenPath, project);
   if (!configPath || !fs.existsSync(configPath)) {
@@ -674,8 +674,11 @@ export function readProjectTopics(phrenPath: string, project: string): { source:
   const normalized = ensureGeneralTopic(normalizeTopics(parsed.topics));
   const validationError = validateTopics(normalized);
   if (validationError) {
+    // Falling back silently made a rejected config indistinguishable from having
+    // none: `get_config topic` reported source "default" while the file sat
+    // plainly on disk, and the only trace was a debug line. Return the reason.
     debugLog(`readProjectTopics: invalid ${configPath}: ${validationError}`);
-    return { source: "default", topics: builtinTopics };
+    return { source: "default", topics: builtinTopics, error: validationError };
   }
   return { source: "custom", topics: normalized, domain: typeof parsed.domain === "string" ? parsed.domain : undefined };
 }
