@@ -12,7 +12,11 @@ vi.mock("fs", async () => {
     ...actual,
     readFileSync: (target: unknown, ...rest: unknown[]) => {
       if (typeof target === "string") {
-        const base = target.slice(target.lastIndexOf("/") + 1);
+        // Split on either separator — Windows paths use "\\", so slicing at the
+        // last "/" returned the whole path and nothing was ever counted. Done
+        // inline rather than with path.basename: this factory is hoisted above
+        // the imports, which is why readCounts goes through vi.hoisted.
+        const base = target.split(/[\\/]/).pop() ?? "";
         if (base === "impact.jsonl" || base === "impact-summary.json") {
           readCounts.set(base, (readCounts.get(base) ?? 0) + 1);
         }
