@@ -39,6 +39,15 @@ import {
 } from "./input.js";
 import { errorMessage } from "../utils.js";
 
+/** Remove the final character, keeping surrogate pairs and combining marks intact. */
+function dropLastCharacter(s: string): string {
+  if (!s) return s;
+  const chars = [...s];
+  chars.pop();
+  while (chars.length && /\p{M}/u.test(chars[chars.length - 1]!)) chars.pop();
+  return chars.join("");
+}
+
 // ── Shell class ──────────────────────────────────────────────────────────────
 
 export class PhrenShell {
@@ -195,9 +204,12 @@ export class PhrenShell {
     if (key === "\x03") return false;
     if (key === "\x1b") { this.cancelInput(); return true; }
     if (key === "\r" || key === "\n") { await this.submitInput(); return true; }
-    if (key === "\x7f" || key === "\x08") { this.inputBuf = this.inputBuf.slice(0, -1); return true; }
-    if (key.startsWith("\x1b[")) return true;
-    if (key.length === 1 && key.charCodeAt(0) >= 32) { this.inputBuf += key; return true; }
+    if (key === "\x7f" || key === "\x08") { this.inputBuf = dropLastCharacter(this.inputBuf); return true; }
+    if (key.startsWith("\x1b")) return true;
+    // Accept any printable key. Astral characters (emoji, and anything else the
+    // user pastes) span two UTF-16 units, so this cannot test key.length === 1.
+    const cp = key.codePointAt(0);
+    if (cp !== undefined && cp >= 32 && cp !== 0x7f) { this.inputBuf += key; return true; }
     return true;
   }
 
