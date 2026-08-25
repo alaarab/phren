@@ -6,12 +6,12 @@ settings:
 
 overrides:
   fast-uri: ^3.1.4
-  vite: ^8.0.16
-  hono: ^4.12.25
+  vite: ^8.2.2
+  hono: ^4.12.34
   '@hono/node-server': '>=2.0.5'
   body-parser: '>=2.3.0'
-  ip-address: ^10.2.0
-  undici: ^7.28.0
+  ip-address: ^10.3.1
+  undici: ^7.29.0
   form-data: '>=4.0.6'
   uuid: ^14.0.0
   tmp@<0.2.6: '>=0.2.7'
@@ -431,7 +431,7 @@ packages:
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4.12.25
+      hono: ^4.12.34
 
   '@inquirer/ansi@2.0.7':
     resolution: {integrity: sha512-3eTuUO1vH2cZm2ZKHeQxnOqlTi9EfZDGgIe3BL3I4u+rJHocr9Fz86M4fjYABPvFnQG/gGK551HqDiIcETwU6Q==}
@@ -974,7 +974,7 @@ packages:
     resolution: {integrity: sha512-2XJVD55d1o5AZous5CCGKS74g/riOj9odEt2bQpCVZeblHyHdnMeFl4jl0XjU21stf4mbjUkew2eXQZt65g5CQ==}
     peerDependencies:
       msw: ^2.4.9
-      vite: ^8.0.16
+      vite: ^8.2.2
     peerDependenciesMeta:
       msw:
         optional: true
@@ -2692,7 +2692,7 @@ packages:
       '@vitest/ui': 4.1.11
       happy-dom: '*'
       jsdom: '*'
-      vite: ^8.0.16
+      vite: ^8.2.2
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true
