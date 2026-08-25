@@ -5,6 +5,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-08-24
+
+### Fixed
+
+- **The interactive shell dropped input and tore its frames.** The shell compared an
+  entire stdin chunk against a single key, but Node delivers whatever bytes arrived in
+  one read, not one keypress: arrow autorepeat arrives as `\x1b[B\x1b[B\x1b[B`, fast
+  typing as `ub`, paste as the whole string — none matched a branch, so they repainted
+  with no state change. Three coalesced downs moved the cursor one row; typing "hub"
+  into the filter left "h". Chunks are now decoded into discrete keys (CSI, SS3, bare
+  ESC, grapheme-safe) and drained through one pump, repaints from the three independent
+  sources are single-flight, and each frame is emitted in one synchronized-update write
+  with the cursor hidden and autowrap off.
+- **The startup splash drew over itself.** The intro painted a frame taller than the
+  terminal — a blank line, twelve rows of character art, the hint block, a trailing
+  blank and a trailing newline. Everything past the last row scrolls the alternate
+  buffer, and once it has scrolled every cursor-home repaint lands on shifted rows, so
+  each animation frame drew over the last: ghost logo rows, a doubled tagline, a
+  doubled "Loading shell…", at any height of 17 rows or less. `paintFrame` now clips a
+  frame to the terminal's rows, which covers the dashboard too — it was overflowing by
+  a line at ten rows. The intro also carried its own copy of the side-by-side layout
+  and ignored terminal width entirely, so below about 72 columns the tagline was
+  chopped mid-word; and it aligned its two columns with `String.padEnd` on art lines
+  full of truecolor escapes, which counts escape bytes as width and therefore padded
+  nothing. Both paths now share one layout that measures display cells and steps down
+  through smaller arrangements — art beside logo, art alone, logo alone, wordmark —
+  according to the space actually available. Verified against the real CLI through a
+  pty from 36x20 to 200x60: no scroll at any size.
+- **Team-store projects were invisible in the shell.** `listProjectCards` walked the
+  team stores and then filtered what it found through the active profile's project
+  list. A profile only ever names projects in the primary store, so nothing from a team
+  store could pass and every shared project was missing — on a two-team-store machine
+  the Projects view showed 2 entries instead of 24. Team stores already carry their own
+  subscription list in `StoreEntry.projects`, so the profile filter was redundant as
+  well as fatal. Project rows now also show which store they came from, and `global` is
+  no longer listed twice when the active profile names it.
+- **The Windows test suite passes again.** CI had been red on `windows-latest`
+  for every run since 0.1.43 — 9 failures across 5 files, four distinct causes.
+  The TypeScript and Swift suites read one committed fixture corpus and compare
+  it byte for byte, which is the whole proof that both implementations agree on
+  the store format; with no `.gitattributes`, git's autocrlf rewrote those bytes
+  on a Windows checkout, so findings dates parsed as `unknown` and a rendered
+  `tasks.md` was compared LF against a CRLF fixture. `fragment-graph` built the
+  `CLAUDE.md` path by concatenating with `/`, which Node accepts on Windows but
+  which yields a mixed-separator string no other path in the process matches. A
+  read-counting test mock derived a basename with `lastIndexOf("/")`, which
+  returns -1 on Windows. And the extract-proactivity tests pointed the store at
+  a filesystem-root path that is unwritable on Unix — so state that was supposed
+  to persist failed silently and each test started clean by accident, while on
+  Windows the same path is a writable drive root and the state leaked between
+  tests (and onto the developer's drive).
+
 ## [0.1.43] - 2026-08-02
 
 ### Removed
