@@ -913,6 +913,37 @@ describe("machines, profiles, and shell state", () => {
     expect(card?.docs).toContain("tasks.md");
   });
 
+  // A profile lists projects in the primary store, so a team store's projects
+  // never appear in it — filtering them through the profile hid every one.
+  it("listProjectCards lists team-store projects the profile does not name", () => {
+    const teamDir = path.join(tmpDir, "..", `team-${path.basename(tmpDir)}`);
+    fs.mkdirSync(path.join(teamDir, "teamproj"), { recursive: true });
+    fs.writeFileSync(path.join(teamDir, "teamproj", "summary.md"), "# teamproj\n\nShared work\n");
+    fs.mkdirSync(path.join(tmpDir, "global"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, "profiles"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "profiles", "solo.yaml"),
+      `name: solo\nprojects:\n  - global\n  - ${PROJECT}\n`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "stores.yaml"),
+      `version: 1\nstores:\n  - id: aaaaaaaa\n    name: primary\n    path: ${tmpDir}\n    role: primary\n    sync: managed-git\n  - id: bbbbbbbb\n    name: team\n    path: ${teamDir}\n    role: team\n    sync: managed-git\n`,
+    );
+
+    try {
+      const cards = listProjectCards(tmpDir, "solo");
+      const team = cards.find((c) => c.name === "teamproj");
+      expect(team).toBeDefined();
+      expect(team?.store).toBe("team");
+      expect(cards.find((c) => c.name === PROJECT)?.store).toBeUndefined();
+      // global is pinned to the top, and listed once even though the profile names it.
+      expect(cards.filter((c) => c.name === "global")).toHaveLength(1);
+      expect(cards[0].name).toBe("global");
+    } finally {
+      fs.rmSync(teamDir, { recursive: true, force: true });
+    }
+  });
+
   it("save/load/reset shell state round trips", () => {
     saveShellState(tmpDir, {
       version: 1,

@@ -14,6 +14,15 @@ vi.mock("../utils.js", async (importOriginal) => {
   };
 });
 
+// Each test gets its own store directory. The mock used to return a fixed
+// "/tmpphren-proactivity-test", which is unwritable at the filesystem root on
+// Linux and macOS — so extract's processed-memory write failed silently and
+// every test started clean by accident. On Windows the same string resolves to
+// a writable drive root, the state file persisted, and because gitLog() reuses
+// one commit hash the second test in the file saw it as already extracted and
+// captured nothing.
+const { storePath } = vi.hoisted(() => ({ storePath: { current: "" } }));
+
 vi.mock("../shared.js", async (importOriginal) => {
   const orig: any = await importOriginal();
   return {
@@ -21,7 +30,7 @@ vi.mock("../shared.js", async (importOriginal) => {
     debugLog: vi.fn(),
     appendAuditLog: vi.fn(),
     EXEC_TIMEOUT_MS: 5000,
-    getPhrenPath: () => "/tmpphren-proactivity-test",
+    getPhrenPath: () => storePath.current,
   };
 });
 
@@ -101,15 +110,23 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
 // ── CLI extract proactivity gating ──────────────────────────────────────────
 
 describe("cli-extract proactivity gating", () => {
+  let store: { path: string; cleanup: () => void };
+
   beforeEach(() => {
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_FINDINGS;
+    store = makeTempDir("cli-extract-proactivity-");
+    grantAdmin(store.path);
+    fs.mkdirSync(path.join(store.path, "demo"), { recursive: true });
+    storePath.current = store.path;
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_FINDINGS;
+    storePath.current = "";
+    store.cleanup();
   });
 
   it("keeps heuristic repo signal capture at high", async () => {
@@ -181,7 +198,7 @@ describe("cli-extract proactivity gating", () => {
 
     expect(appendFindingJournal).not.toHaveBeenCalled();
     expect(appendReviewQueue).not.toHaveBeenCalled();
-    expect(appendAuditLog).toHaveBeenCalledWith("/tmpphren-proactivity-test", "extract_memories", "project=demo skipped=proactivity_low");
+    expect(appendAuditLog).toHaveBeenCalledWith(store.path, "extract_memories", "project=demo skipped=proactivity_low");
   });
 });
 

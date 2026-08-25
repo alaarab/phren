@@ -174,6 +174,7 @@ interface ProjectDashboardEntry {
   name: string;
   summary: string;
   docs: string[];
+  store?: string;
   activeCount: number;
   queueCount: number;
   findingCount: number;
@@ -277,8 +278,9 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     const bullet = isActive ? style.green("●") : style.dim("○");
     const nameStr = isActive ? style.boldGreen(card.name) : style.bold(card.name);
     const docsStr = style.dim(`[A${card.activeCount} · Q${card.queueCount} · F${card.findingCount} · R${card.reviewCount}]`);
+    const storeStr = card.store ? `  ${style.dim("·")} ${style.cyan(card.store)}` : "";
 
-    let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}`;
+    let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}${storeStr}`;
     let summaryRow = `        ${style.dim(card.summary || "No summary yet.")}`;
 
     if (isSelected) {
