@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import {
   atomicWriteText,
   debugLog,
@@ -106,7 +107,7 @@ function pruneLegacySampleProjectsFromProfiles(phrenPath: string): { filesUpdate
     if (!file.endsWith(".yaml")) continue;
     const fullPath = path.join(profilesDir, file);
     try {
-      const parsed = yaml.load(fs.readFileSync(fullPath, "utf8"), { schema: yaml.CORE_SCHEMA });
+      const parsed = loadYamlDocument(fs.readFileSync(fullPath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       if (!isRecord(parsed)) continue;
       const originalProjects = normalizeProjects(parsed.projects);
       const nextProjects = originalProjects.filter(profileLooksRealProject);
@@ -1456,7 +1457,7 @@ export function updateMachinesYaml(phrenPath: string, machine?: string, profile?
 
   let hasExistingMapping = false;
   try {
-    const loaded = yaml.load(fs.readFileSync(machinesFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const loaded = loadYamlDocument(fs.readFileSync(machinesFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (loaded && typeof loaded === "object" && !Array.isArray(loaded)) {
       hasExistingMapping = Object.prototype.hasOwnProperty.call(loaded, machineName);
     }

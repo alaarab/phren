@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import {
   phrenErr,
   PhrenError,
@@ -96,7 +97,7 @@ export function listMachines(phrenPath: string): PhrenResult<Record<string, stri
   if (!fs.existsSync(machinesPath)) return phrenErr(`machines.yaml not found. Run 'phren init' to set up your phren.`, PhrenError.FILE_NOT_FOUND);
   try {
     const raw = fs.readFileSync(machinesPath, "utf8");
-    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return phrenErr(`machines.yaml is empty or not valid YAML. Check the file format or run 'phren doctor --fix'.`, PhrenError.MALFORMED_YAML);
 
     const cleaned: Record<string, string> = {};
@@ -244,7 +245,7 @@ export function listProfiles(phrenPath: string): PhrenResult<ProfileInfo[]> {
     const full = path.join(profilesDir, file);
     try {
       const raw = fs.readFileSync(full, "utf8");
-      const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+      const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       const data = parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : null;

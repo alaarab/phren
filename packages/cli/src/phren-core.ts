@@ -89,6 +89,30 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * `yaml.load` with js-yaml 4's empty-document behaviour.
+ *
+ * js-yaml 5 throws YAMLException("expected a document, but the input is empty")
+ * for input that is blank, whitespace, or comments only — where 4 returned
+ * `undefined`. phren's config files legitimately look like that: a freshly
+ * scaffolded `machines.yaml` is a single header comment, and an untouched
+ * profile can be empty. Every caller already handles `undefined`, but a throw
+ * is read as a parse failure, which would report those files as malformed —
+ * and `stores.yaml` refuses to write back over a file it could not parse, so
+ * an empty registry would have become unrepairable by the CLI.
+ *
+ * Only genuinely empty documents are absorbed. `---`, `null` and real syntax
+ * errors reach js-yaml exactly as before.
+ */
+export function loadYamlDocument<T = unknown>(
+  source: string,
+  load: (source: string) => unknown,
+): T | undefined {
+  // Strip blank and comment-only lines; anything left is a document to parse.
+  if (!source.replace(/^\s*(#.*)?$/gm, "").trim()) return undefined;
+  return load(source) as T;
+}
+
 /** Shallow-merge data onto defaults so missing keys get filled in. */
 export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T {
   const merged = { ...defaults } as Record<string, unknown>;

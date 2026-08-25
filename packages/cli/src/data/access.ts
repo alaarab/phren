@@ -4,6 +4,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import {
   appendAuditLog,
   phrenErr,
@@ -262,7 +263,7 @@ function validateAggregateQueueProfile(phrenPath: string, profile?: string): Phr
 
   let data: unknown;
   try {
-    data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+    data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   } catch {
     return phrenErr(`Malformed profile YAML: ${profilePath}`, PhrenError.MALFORMED_YAML);
   }

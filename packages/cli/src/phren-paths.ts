@@ -4,7 +4,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
-import { PhrenError, isRecord, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
+import { PhrenError, isRecord, loadYamlDocument, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { FINDINGS_FILENAME } from "./data/access.js";
 
@@ -154,7 +154,7 @@ export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
   const manifestFile = rootManifestPath(phrenPath);
   if (!fs.existsSync(manifestFile)) return null;
   try {
-    const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(manifestFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     return normalizeManifest(parsed);
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`readRootManifest: ${errorMessage(err)}`);
@@ -611,7 +611,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       return [];
     }
     try {
-      const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+      const data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       const projects = isRecord(data) ? data.projects : undefined;
       if (!Array.isArray(projects)) {
         errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);

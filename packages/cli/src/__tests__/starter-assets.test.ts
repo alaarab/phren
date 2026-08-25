@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 
 const CLI_ROOT = path.resolve(__dirname, "..", "..");
 const STARTER_ROOT = path.join(CLI_ROOT, "starter");
@@ -15,21 +16,24 @@ describe("shipped starter assets", () => {
 
     for (const file of profileFiles) {
       const fullPath = path.join(profilesDir, file);
-      const parsed = yaml.load(fs.readFileSync(fullPath, "utf8"), { schema: yaml.CORE_SCHEMA }) as {
+      const parsed = loadYamlDocument<{
         name?: unknown;
         description?: unknown;
         projects?: unknown;
-      };
+      }>(fs.readFileSync(fullPath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }))!;
       expect(parsed).toBeTruthy();
       expect(typeof parsed.name).toBe("string");
       expect(Array.isArray(parsed.projects)).toBe(true);
       expect((parsed.projects as unknown[]).every((entry) => typeof entry === "string")).toBe(true);
     }
 
-    const machines = yaml.load(fs.readFileSync(path.join(STARTER_ROOT, "machines.yaml"), "utf8"), {
-      schema: yaml.CORE_SCHEMA,
-    });
-    expect(machines ?? {}).toEqual({});
+    // Comment-only: js-yaml 4 returned undefined, js-yaml 5 throws, and
+    // loadYamlDocument keeps the reading the rest of the CLI relies on.
+    const machines = loadYamlDocument(
+      fs.readFileSync(path.join(STARTER_ROOT, "machines.yaml"), "utf8"),
+      (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }),
+    );
+    expect(machines).toBeUndefined();
   });
 
   it("ships only documented templates, and every template has the required files", () => {

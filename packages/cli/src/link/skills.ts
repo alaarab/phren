@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import { debugLog } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { buildSharedLifecycleCommands } from "../hooks.js";
@@ -42,7 +43,7 @@ export function parseSkillFrontmatter(rawContent: string): { frontmatter: Record
   const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return { frontmatter: null, body: content };
   try {
-    const parsed = yaml.load(match[1]) as Record<string, unknown>;
+    const parsed = loadYamlDocument<Record<string, unknown>>(match[1], (text) => yaml.load(text));
     return { frontmatter: parsed && typeof parsed === "object" ? parsed : null, body: match[2] };
   } catch (err: unknown) {
     debugLog(`parseSkillFrontmatter: malformed YAML frontmatter: ${errorMessage(err)}`);

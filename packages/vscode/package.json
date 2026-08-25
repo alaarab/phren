@@ -799,9 +799,9 @@
     "publish:extension": "vsce publish --no-dependencies"
   },
   "devDependencies": {
-    "@types/node": "^25.9.2",
-    "@types/vscode": "^1.120.0",
+    "@types/node": "^26.3.0",
+    "@types/vscode": "^1.134.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
