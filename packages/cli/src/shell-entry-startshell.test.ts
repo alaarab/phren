@@ -34,6 +34,8 @@ vi.mock("./shell/render.js", () => ({
   enterFullscreen: vi.fn(() => { process.stdout.write("\x1b[?1049h"); }),
   exitFullscreen: vi.fn(() => { process.stdout.write("\x1b[?1049l"); }),
   shellStartupFrames: vi.fn().mockReturnValue(["frame1"]),
+  composeStartupFrame: vi.fn().mockReturnValue(["frame1"]),
+  fitFrame: (lines: string[]) => lines.join("\n"),
   gradient: (s: string) => s,
   badge: (s: string) => s,
   stripAnsi: (s: string) => s,

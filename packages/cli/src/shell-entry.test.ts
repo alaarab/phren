@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as path from "path";
 import { startLiveStatePoller, resolveStartupIntroPlan } from "./shell/entry.js";
-import { shellStartupFrames, stripAnsi } from "./shell/render.js";
+import { shellStartupFrames, composeStartupFrame, fitFrame, stripAnsi } from "./shell/render.js";
 import { makeTempDir, writeFile } from "./test-helpers.js";
 
 describe("startLiveStatePoller", () => {
@@ -259,23 +259,26 @@ describe("resolveStartupIntroPlan", () => {
 
 describe("shellStartupFrames", () => {
   let origColumns: number | undefined;
+  let origRows: number | undefined;
 
   beforeEach(() => {
     origColumns = process.stdout.columns;
+    origRows = process.stdout.rows;
   });
 
   afterEach(() => {
     Object.defineProperty(process.stdout, "columns", { value: origColumns, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, "rows", { value: origRows, writable: true, configurable: true });
   });
 
-  it("returns a single merged frame for wide terminals (>= 72 cols)", () => {
+  it("returns a single merged frame for wide terminals (>= 69 cols)", () => {
     Object.defineProperty(process.stdout, "columns", { value: 120, writable: true, configurable: true });
     const frames = shellStartupFrames("0.0.1");
     expect(frames.length).toBe(1);
     expect(frames[0]).toContain("phren");
   });
 
-  it("returns a single stacked frame for medium terminals (56-71 cols)", () => {
+  it("returns a single stacked frame for medium terminals (44-68 cols)", () => {
     Object.defineProperty(process.stdout, "columns", { value: 60, writable: true, configurable: true });
     const frames = shellStartupFrames("0.0.1");
     expect(frames.length).toBe(1);
@@ -283,7 +286,7 @@ describe("shellStartupFrames", () => {
     expect(plain).toContain("phren");
   });
 
-  it("returns multiple progressive frames for narrow terminals (< 56 cols)", () => {
+  it("returns multiple progressive frames for narrow terminals (< 44 cols)", () => {
     Object.defineProperty(process.stdout, "columns", { value: 40, writable: true, configurable: true });
     const frames = shellStartupFrames("0.0.1");
     expect(frames.length).toBe(3);
@@ -296,7 +299,7 @@ describe("shellStartupFrames", () => {
   it("falls back to 80 columns when process.stdout.columns is 0", () => {
     Object.defineProperty(process.stdout, "columns", { value: 0, writable: true, configurable: true });
     const frames = shellStartupFrames("0.0.1");
-    // 0 || 80 = 80, which is >= 72, so wide layout
+    // 0 || 80 = 80, which is >= 69, so wide layout
     expect(frames.length).toBe(1);
   });
 
@@ -314,5 +317,43 @@ describe("shellStartupFrames", () => {
       const plain = stripAnsi(frames.join("\n"));
       expect(plain).toContain("local memory for working agents");
     }
+  });
+
+  // A splash taller or wider than the terminal scrolls the alternate screen,
+  // and every cursor-home repaint after that lands on shifted rows — which is
+  // what made the intro frames stack on top of each other.
+  it("never composes a frame taller than the terminal", () => {
+    const art = Array.from({ length: 12 }, () => "x".repeat(24));
+    for (const rows of [10, 14, 16, 24, 45]) {
+      Object.defineProperty(process.stdout, "rows", { value: rows, writable: true, configurable: true });
+      for (const cols of [40, 60, 80, 120]) {
+        Object.defineProperty(process.stdout, "columns", { value: cols, writable: true, configurable: true });
+        const frame = composeStartupFrame(art, "1.0.0", "Loading shell…");
+        expect(frame.length).toBeLessThanOrEqual(rows);
+        for (const line of frame) expect(stripAnsi(line).length).toBeLessThan(cols);
+      }
+    }
+  });
+
+  it("keeps the character art aligned with the logo despite ANSI in the art", () => {
+    Object.defineProperty(process.stdout, "rows", { value: 40, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, "columns", { value: 120, writable: true, configurable: true });
+    // Art rows carry per-pixel colour codes; padding must measure display cells.
+    const art = Array.from({ length: 12 }, () => `\x1b[38;2;1;2;3m${"▒".repeat(24)}\x1b[0m`);
+    const frame = composeStartupFrame(art, "1.0.0");
+    // Five of the six logo rows carry block glyphs; the last is all box-drawing.
+    const logoRows = frame.filter(line => stripAnsi(line).includes("█"));
+    expect(logoRows.length).toBe(5);
+    const starts = new Set(logoRows.map(line => stripAnsi(line).indexOf("█")));
+    expect([...starts]).toEqual([26]);
+  });
+
+  it("fitFrame clamps rows and erases the rest of every line", () => {
+    Object.defineProperty(process.stdout, "rows", { value: 3, writable: true, configurable: true });
+    Object.defineProperty(process.stdout, "columns", { value: 20, writable: true, configurable: true });
+    const painted = fitFrame(["a", "b", "c", "d", "e"]);
+    const lines = painted.split("\n");
+    expect(lines.length).toBe(3);
+    for (const line of lines) expect(line.endsWith("\x1b[K")).toBe(true);
   });
 });
