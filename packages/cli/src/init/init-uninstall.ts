@@ -68,7 +68,7 @@ function runSyncCommand(command: string, args: string[]): SyncCommandResult {
   }
 }
 
-function shouldUninstallCurrentGlobalPackage(): boolean {
+export function shouldUninstallCurrentGlobalPackage(): boolean {
   // `npm uninstall -g` resolves against the machine's real npm prefix, which
   // no amount of PHREN_PATH/HOME redirection sandboxes. A test that spawns
   // `phren uninstall` against temp directories would therefore delete the
