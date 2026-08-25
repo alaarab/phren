@@ -1,16 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  UNIVERSAL_TECH_TERMS_RE,
-  EXTRA_FRAGMENT_PATTERNS,
-  phrenOk,
-  phrenErr,
-  forwardErr,
-  parsePhrenErrorCode,
-  isRecord,
-  withDefaults,
-  capCache,
-  PhrenError,
-} from "./phren-core.js";
+import * as yaml from "js-yaml";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_FRAGMENT_PATTERNS, phrenOk, phrenErr, forwardErr, parsePhrenErrorCode, isRecord, withDefaults, capCache, PhrenError, loadYamlDocument } from "./phren-core.js";
 
 // ── UNIVERSAL_TECH_TERMS_RE ─────────────────────────────────────────────────
 
@@ -300,5 +290,35 @@ describe("capCache", () => {
     expect(cache.has("k0")).toBe(false);
     expect(cache.has("k99")).toBe(false);
     expect(cache.has("k100")).toBe(true);
+  });
+});
+
+describe("loadYamlDocument", () => {
+  const load = (text: string) => yaml.load(text, { schema: yaml.CORE_SCHEMA });
+
+  // js-yaml 5 throws YAMLException on these; js-yaml 4 returned undefined, and
+  // every caller in the CLI reads undefined as "nothing configured yet". A
+  // scaffolded machines.yaml really is one header comment.
+  it.each([
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["blank lines", "\n\n"],
+    ["one comment", "# machine-name: profile-name\n"],
+    ["several comments", "# a\n# b\n"],
+    ["indented comment", "  # x\n\n"],
+  ])("returns undefined for %s", (_label, source) => {
+    expect(loadYamlDocument(source, load)).toBeUndefined();
+  });
+
+  it("parses real documents, including ones with leading comments", () => {
+    expect(loadYamlDocument("a: 1\n", load)).toEqual({ a: 1 });
+    expect(loadYamlDocument("# lead\na: 1\n", load)).toEqual({ a: 1 });
+    expect(loadYamlDocument("[]\n", load)).toEqual([]);
+  });
+
+  it("does not absorb an explicit null document or a syntax error", () => {
+    expect(loadYamlDocument("---\n", load)).toBeNull();
+    expect(loadYamlDocument("null\n", load)).toBeNull();
+    expect(() => loadYamlDocument("a: [\n", load)).toThrow();
   });
 });

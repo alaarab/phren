@@ -16,6 +16,25 @@ const MAX_OUTPUT_BYTES = 100_000;
 
 // Background task tracking
 const backgroundTasks = new Map<string, { pid: number; outputFile: string; done: boolean; exitCode: number | null }>();
+
+/**
+ * Background task logs live in a private directory, not loose in os.tmpdir().
+ *
+ * On Linux /tmp is world-writable (mode 1777) and the task ids are sequential,
+ * so `phren-bg-bg-1.log` was a name any other local account could predict and
+ * pre-create as a symlink to a file this user can write — `openSync(…, "w")`
+ * follows it, which turns a background shell command into an arbitrary-file
+ * overwrite running as us. mkdtemp gives a 0700 directory with a random name,
+ * and the "wx" flag refuses to open a path that already exists.
+ */
+let backgroundLogRoot: string | undefined;
+
+function backgroundLogDir(): string {
+  if (!backgroundLogRoot || !fs.existsSync(backgroundLogRoot)) {
+    backgroundLogRoot = fs.mkdtempSync(path.join(os.tmpdir(), "phren-bg-"));
+  }
+  return backgroundLogRoot;
+}
 let nextBgId = 1;
 
 /**
@@ -78,8 +97,8 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
       // Background execution
       if (runInBackground) {
         const taskId = `bg-${nextBgId++}`;
-        const outputFile = path.join(os.tmpdir(), `phren-bg-${taskId}.log`);
-        const fd = fs.openSync(outputFile, "w");
+        const outputFile = path.join(backgroundLogDir(), `${taskId}.log`);
+        const fd = fs.openSync(outputFile, "wx");
 
         const child = spawn(exe, exeArgs, {
           cwd,

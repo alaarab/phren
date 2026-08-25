@@ -14,17 +14,17 @@
     "install-hooks": "cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@playwright/test": "^1.60.0",
+    "@biomejs/biome": "^2.5.10",
+    "@playwright/test": "^1.62.1",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.9.2",
-    "@vitest/coverage-v8": "^4.1.8",
-    "esbuild": "^0.28.1",
-    "tsx": "^4.22.4",
-    "turbo": "^2.9.16",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8"
+    "@types/node": "^26.3.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.12",
+    "turbo": "^2.10.11",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=20.0.0"

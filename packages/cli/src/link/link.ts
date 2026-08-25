@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import { execFileSync } from "child_process";
 import { ROOT } from "../package-metadata.js";
 import {
@@ -116,14 +117,14 @@ export function findProfileFile(phrenPath: string, profileName: string): string 
   if (!fs.existsSync(profilesDir)) return null;
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
+    const data = loadYamlDocument<ProfileData>(fs.readFileSync(path.join(profilesDir, f), "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (data?.name === profileName) return path.join(profilesDir, f);
   }
   return null;
 }
 
 export function getProfileProjects(profileFile: string): string[] {
-  const data = yaml.load(fs.readFileSync(profileFile, "utf8"), { schema: yaml.CORE_SCHEMA }) as ProfileData | undefined;
+  const data = loadYamlDocument<ProfileData>(fs.readFileSync(profileFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   return Array.isArray(data?.projects) ? data.projects : [];
 }
 

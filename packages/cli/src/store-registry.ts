@@ -4,7 +4,7 @@ import * as path from "path";
 import * as yaml from "js-yaml";
 import { expandHomePath, atomicWriteText } from "./phren-paths.js";
 import { withFileLock } from "./governance/locks.js";
-import { isRecord, PhrenError } from "./phren-core.js";
+import { isRecord, loadYamlDocument, PhrenError } from "./phren-core.js";
 import { getProjectDirs } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export function readStoreRegistryDetailed(phrenPath: string): RegistryReadResult
 
   let parsed: unknown;
   try {
-    parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
   } catch (err) {
     return { registry: null, problems: [`${STORES_FILENAME} is not valid YAML: ${String(err)}`], lossy: true };
   }
@@ -268,7 +268,7 @@ export function readTeamBootstrap(storePath: string): TeamBootstrap | null {
 
   try {
     const raw = fs.readFileSync(filePath, "utf8");
-    const parsed = yaml.load(raw, { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(raw, (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!isRecord(parsed) || typeof parsed.name !== "string") return null;
     return {
       name: parsed.name,
