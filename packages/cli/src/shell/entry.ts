@@ -11,8 +11,8 @@ import {
   enterFullscreen,
   exitFullscreen,
   shellStartupFrames,
-  gradient,
-  badge,
+  composeStartupFrame,
+  fitFrame,
 } from "./render.js";
 import { KeyDecoder, ESC_FLUSH_MS } from "./keys.js";
 import { createPhrenAnimator } from "../phren-art.js";
@@ -36,8 +36,8 @@ interface StartupIntroPlan {
   markSeen: boolean;
 }
 
-function renderIntroFrame(frame: string, footer?: string): void {
-  paintFrame(footer ? `${frame}\n${footer}\n` : `${frame}\n`);
+function renderIntroFrame(lines: string[]): void {
+  paintFrame(fitFrame(lines));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -91,7 +91,7 @@ async function playStartupIntro(
 
   if (plan.variant === "full") {
     for (const frame of frames.slice(0, -1)) {
-      renderIntroFrame(frame);
+      renderIntroFrame(frame.split("\n"));
       await sleep(160);
     }
   }
@@ -100,33 +100,8 @@ async function playStartupIntro(
   const animator = createPhrenAnimator({ facing: "right" });
   animator.start();
 
-  const _cols = process.stdout.columns || 80;
-  const tagline = style.dim("local memory for working agents");
-  const versionBadge = badge(`v${VERSION}`, style.boldBlue);
-  const logoLines = [
-    "██████╗ ██╗  ██╗██████╗ ███████╗███╗   ██╗",
-    "██╔══██╗██║  ██║██╔══██╗██╔════╝████╗  ██║",
-    "██████╔╝███████║██████╔╝█████╗  ██╔██╗ ██║",
-    "██╔═══╝ ██╔══██║██╔══██╗██╔══╝  ██║╚██╗██║",
-    "██║     ██║  ██║██║  ██║███████╗██║ ╚████║",
-    "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
-  ].map(l => gradient(l));
-  const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
-
   function renderAnimatedFrame(hint?: string): void {
-    const phrenLines = animator.getFrame();
-    const rightSide = ["", "", ...logoLines, "", infoLine];
-    const charWidth = 26;
-    const maxLines = Math.max(phrenLines.length, rightSide.length);
-    const merged: string[] = [""];
-    for (let i = 0; i < maxLines; i++) {
-      const left = (i < phrenLines.length ? phrenLines[i] : "").padEnd(charWidth);
-      const right = i < rightSide.length ? rightSide[i] : "";
-      merged.push(left + right);
-    }
-    if (hint) merged.push("", `  ${hint}`);
-    merged.push("");
-    renderIntroFrame(merged.join("\n"));
+    renderIntroFrame(composeStartupFrame(animator.getFrame(), VERSION, hint));
   }
 
   // Animate during dwell/loading period

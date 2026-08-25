@@ -240,6 +240,18 @@ describe("frame painting", () => {
     expect(writes[0]).toBe("\x1b[?2026h\x1b[Hbody\x1b[J\x1b[?2026l");
   });
 
+  it("clips a frame taller than the terminal instead of scrolling it", () => {
+    const origRows = process.stdout.rows;
+    Object.defineProperty(process.stdout, "rows", { value: 3, writable: true, configurable: true });
+    try {
+      const writes = captureWrites();
+      paintFrame("a\nb\nc\nd\n");
+      expect(writes[0]).toBe("\x1b[?2026h\x1b[Ha\nb\nc\x1b[J\x1b[?2026l");
+    } finally {
+      Object.defineProperty(process.stdout, "rows", { value: origRows, writable: true, configurable: true });
+    }
+  });
+
   it("hides the cursor on entry so it does not race across the redraw", () => {
     const writes = captureWrites();
     enterFullscreen();

@@ -375,60 +375,109 @@ export function exitFullscreen(): void {
  * dragged the caret across the screen on every keystroke.
  */
 export function paintFrame(frame: string): void {
-  process.stdout.write(SYNC_BEGIN + "\x1b[H" + frame + "\x1b[J" + SYNC_END);
+  // A frame with more lines than the terminal has rows scrolls the alternate
+  // buffer, and once it scrolls every later cursor-home repaint lands on
+  // shifted rows and the frames stack on top of each other. Clip the overflow
+  // (including a trailing newline on the last row) rather than scroll.
+  const rows = Math.max(1, process.stdout.rows || 24);
+  const lines = frame.split("\n");
+  const body = lines.length > rows ? lines.slice(0, rows).join("\n") : frame;
+  process.stdout.write(SYNC_BEGIN + "\x1b[H" + body + "\x1b[J" + SYNC_END);
+}
+
+// The character art is a fixed-size pixel grid; the gap keeps the logo off it.
+const ART_WIDTH = 24;
+const ART_GAP = 2;
+const LOGO_WIDTH = Math.max(...PHREN_LOGO.map(displayWidth));
+
+/**
+ * The wordmark line, split onto two rows when the terminal is too narrow to
+ * carry the tagline alongside the version badge.
+ */
+function startupInfoLines(version: string, available: number): string[] {
+  const tagline = style.dim("local memory for working agents");
+  const head = `${gradient("◆")} ${style.bold("phren")}  ${badge(`v${version}`, style.boldBlue)}`;
+  const single = `${head}  ${tagline}`;
+  return displayWidth(single) <= available ? [single] : [head, tagline];
+}
+
+/**
+ * Lay out one splash frame from the character art the caller supplies (a live
+ * animation frame, or the static art).
+ *
+ * Every branch is chosen so the result fits the terminal it is about to be
+ * painted into: the wide layout needs room for art + gap + logo, the stacked
+ * one drops the logo rather than clipping it, and a terminal too short for the
+ * character drops the character rather than pushing the tagline off the bottom.
+ * A frame taller than the screen would scroll the alternate buffer, and once it
+ * scrolls every later cursor-home repaint lands on shifted rows, stacking the
+ * frames on top of each other.
+ */
+export function composeStartupFrame(artLines: string[], version: string, hint?: string): string[] {
+  const cols = renderWidth();
+  const rows = process.stdout.rows || 24;
+  const logoLines = PHREN_LOGO.map(line => gradient(line));
+  const hintLines = hint ? ["", `  ${hint}`] : [];
+  // One blank line above, one below, plus the hint block.
+  const budget = rows - 2 - hintLines.length;
+
+  const stackedInfo = startupInfoLines(version, cols - 2).map(line => `  ${line}`);
+
+  const sideBySide = (): string[] => {
+    // Logo is 6 lines; the leading blanks centre it against the character.
+    const rightSide = ["", "", ...logoLines, "", ...startupInfoLines(version, cols - ART_WIDTH - ART_GAP)];
+    const lines: string[] = [];
+    for (let i = 0; i < Math.max(artLines.length, rightSide.length); i++) {
+      // padToWidth measures display cells; String.padEnd counts the art's ANSI
+      // bytes as width and pads nothing at all.
+      const left = padToWidth(i < artLines.length ? artLines[i] : "", ART_WIDTH + ART_GAP);
+      lines.push(left + (i < rightSide.length ? rightSide[i] : ""));
+    }
+    return lines;
+  };
+
+  // Widest layout the terminal can carry, then progressively less of it: art
+  // beside the logo, art alone, logo alone, and finally just the wordmark.
+  const candidates: string[][] = [];
+  if (cols >= ART_WIDTH + ART_GAP + LOGO_WIDTH) candidates.push(sideBySide());
+  candidates.push([...artLines, "", ...stackedInfo]);
+  if (cols >= LOGO_WIDTH + 2) candidates.push([...logoLines.map(line => `  ${line}`), "", ...stackedInfo]);
+  candidates.push(stackedInfo);
+
+  const body = candidates.find(lines => lines.length <= budget) ?? stackedInfo;
+  return ["", ...body, ...hintLines, ""];
+}
+
+/**
+ * Clamp a frame to the terminal before painting: truncate each line to the
+ * render width, erase whatever the previous frame left to the right of it, and
+ * drop rows past the bottom so the frame can never scroll the screen.
+ */
+export function fitFrame(lines: string[]): string {
+  const cols = renderWidth();
+  const rows = Math.max(1, process.stdout.rows || 24);
+  return lines
+    .slice(0, rows)
+    .map(line => truncateLine(line, cols) + "\x1b[K")
+    .join("\n");
 }
 
 export function shellStartupFrames(version: string): string[] {
   const cols = process.stdout.columns || 80;
-  const tagline = style.dim("local memory for working agents");
-  const versionBadge = badge(`v${version}`, style.boldBlue);
 
-  if (cols >= 72) {
-    // Side-by-side: phren character on left, logo text on right
-    const phrenLines = PHREN_STARTUP_ART;
-    const logoLines = PHREN_LOGO.map(line => gradient(line));
-    const infoLine = `${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`;
-
-    // Logo is 6 lines, pad to align vertically with character center
-    const rightSide = [
-      "", "", ...logoLines, "", infoLine,
-    ];
-
-    // Merge side by side: character left (26 cols), logo right
-    const charWidth = 26;
-    const maxLines = Math.max(phrenLines.length, rightSide.length);
-    const merged: string[] = [""];
-    for (let i = 0; i < maxLines; i++) {
-      const left = (i < phrenLines.length ? phrenLines[i] : "").padEnd(charWidth);
-      const right = i < rightSide.length ? rightSide[i] : "";
-      merged.push(left + right);
-    }
-    merged.push("");
-
-    return [
-      // Frame 1: Logo with character side by side immediately
-      merged.join("\n"),
-    ];
-  }
-
-  if (cols >= 56) {
-    // Medium terminal: stacked but compact
-    const logo = PHREN_LOGO.map(line => "  " + gradient(line));
-    const sep = gradient("━".repeat(Math.min(52, cols)));
-
-    return [
-      ["", ...logo, `  ${sep}`, `  ${gradient("◆")} ${style.bold("phren")}  ${versionBadge}  ${tagline}`, ""].join("\n"),
-    ];
+  if (cols >= 44) {
+    return [fitFrame(composeStartupFrame(PHREN_STARTUP_ART, version))];
   }
 
   // Narrow terminal: progressive text reveal with gradient
   const stages = ["p", "phr", "phren"];
   const spinners = ["◜", "◠", "◝"];
-  return stages.map((stage, i) => [
+  const infoLines = startupInfoLines(version, renderWidth() - 2).map(line => `  ${line}`);
+  return stages.map((stage, i) => fitFrame([
     "",
     `  ${gradient(stage)} ${style.dim(spinners[i])}`,
     "",
-    `  ${versionBadge}  ${tagline}`,
+    ...infoLines,
     "",
-  ].join("\n"));
+  ]));
 }
