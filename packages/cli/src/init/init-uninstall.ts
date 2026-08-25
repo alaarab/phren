@@ -31,6 +31,7 @@ import {
 } from "./config.js";
 import type { HookEntry, HookMap } from "./config.js";
 import { DEFAULT_PHREN_PATH, log } from "./shared.js";
+import { sweepProjectMirrors } from "./teardown.js";
 
 const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
 
@@ -67,22 +68,19 @@ function runSyncCommand(command: string, args: string[]): SyncCommandResult {
   }
 }
 
-/**
- * When set, `phren uninstall` skips machine-global side effects that reach
- * outside PHREN_PATH and the agent config files — removing the global npm
- * package and any VS Code extension. The test harness sets this so a sandboxed
- * uninstall test can never delete the developer's real install: npm's global
- * prefix (and the `code` CLI) ignore a sandboxed HOME, so without this guard a
- * test running `phren uninstall` shells out to a real `npm uninstall -g`.
- */
-export function skipGlobalUninstallSideEffects(): boolean {
-  return process.env.PHREN_SKIP_GLOBAL_UNINSTALL === "1";
-}
-
 export function shouldUninstallCurrentGlobalPackage(): boolean {
-  if (skipGlobalUninstallSideEffects()) return false;
-  // Always attempt to remove the global package if it exists, regardless of
-  // whether the uninstaller was invoked from the global install or a local repo.
+  // `npm uninstall -g` resolves against the machine's real npm prefix, which
+  // no amount of PHREN_PATH/HOME redirection sandboxes. A test that spawns
+  // `phren uninstall` against temp directories would therefore delete the
+  // developer's actual global install — it did, repeatedly, before this
+  // guard. The test helpers set this for every spawned CLI.
+  if (process.env.PHREN_SKIP_GLOBAL_NPM_UNINSTALL === "1") {
+    log(`  Skipped global npm package removal (PHREN_SKIP_GLOBAL_NPM_UNINSTALL=1)`);
+    return false;
+  }
+  // Otherwise always attempt to remove the global package if it exists,
+  // regardless of whether the uninstaller was invoked from the global install
+  // or a local repo.
   const npmRootResult = runSyncCommand(getNpmCommand(), ["root", "-g"]);
   if (!npmRootResult.ok) return false;
   const npmRoot = npmRootResult.stdout.trim();
@@ -472,6 +470,13 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     } catch (err: unknown) {
       debugLog(`uninstall: skill symlink sweep failed: ${errorMessage(err)}`);
     }
+    // Remove per-project repo mirror symlinks + phren-managed .git/info/exclude
+    // lines BEFORE deleting the store (this reads project config from the store).
+    try {
+      sweepProjectMirrors(phrenPath);
+    } catch (err: unknown) {
+      debugLog(`uninstall: project mirror sweep failed: ${errorMessage(err)}`);
+    }
   }
 
   if (phrenPath && fs.existsSync(phrenPath)) {
@@ -488,32 +493,29 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     uninstallCurrentGlobalPackage();
   }
 
-  // Remove VS Code extension if installed (skipped in sandboxed/test runs —
-  // `code` ignores a sandboxed HOME and would mutate the real editor).
-  if (!skipGlobalUninstallSideEffects()) {
-    try {
-      const codeResult = execFileSync("code", ["--list-extensions"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 10_000,
-      });
-      const phrenExts = codeResult.split("\n").filter((ext) => ext.toLowerCase().includes("phren"));
-      for (const ext of phrenExts) {
-        const trimmed = ext.trim();
-        if (!trimmed) continue;
-        try {
-          execFileSync("code", ["--uninstall-extension", trimmed], {
-            stdio: ["ignore", "pipe", "ignore"],
-            timeout: 15_000,
-          });
-          log(`  Removed VS Code extension (${trimmed})`);
-        } catch (err: unknown) {
-          debugLog(`uninstall: VS Code extension removal failed for ${trimmed}: ${errorMessage(err)}`);
-        }
+  // Remove VS Code extension if installed
+  try {
+    const codeResult = execFileSync("code", ["--list-extensions"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    });
+    const phrenExts = codeResult.split("\n").filter((ext) => ext.toLowerCase().includes("phren"));
+    for (const ext of phrenExts) {
+      const trimmed = ext.trim();
+      if (!trimmed) continue;
+      try {
+        execFileSync("code", ["--uninstall-extension", trimmed], {
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 15_000,
+        });
+        log(`  Removed VS Code extension (${trimmed})`);
+      } catch (err: unknown) {
+        debugLog(`uninstall: VS Code extension removal failed for ${trimmed}: ${errorMessage(err)}`);
       }
-    } catch {
-      // code CLI not available — skip
     }
+  } catch {
+    // code CLI not available — skip
   }
 
   log(`\nPhren config, hooks, and installed data removed.`);

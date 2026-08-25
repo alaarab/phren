@@ -116,6 +116,15 @@ export class PhrenClient {
 
     child.on("error", (error: Error) => {
       this.rejectPending(error);
+      // A spawn failure (e.g. ENOENT/EACCES on mcpServerPath or nodePath) can
+      // fire "error" without ever firing "exit", since the process never
+      // actually started. Without arming a reconnect here too, that case
+      // left the client permanently wedged — every future call would just
+      // write into a dead pipe and eventually time out, with no retry ever
+      // attempted. scheduleReconnect() already guards against double-firing
+      // (its `this.reconnecting` check), so it's safe to call from both
+      // handlers when both do fire for the same failure.
+      this.scheduleReconnect();
     });
 
     return child;
@@ -166,7 +175,29 @@ export class PhrenClient {
   }
 
   async getFindings(project: string): Promise<unknown> {
-    return this.callTool("get_findings", { project });
+    // The MCP tool defaults to 50. The extension renders findings directly and
+    // must not mistake that first page for the project's complete contents.
+    return this.callTool("get_findings", { project, limit: 200 });
+  }
+
+  async getNotes(project: string, date?: string): Promise<unknown> {
+    return this.callTool("get_notes", date ? { project, date } : { project });
+  }
+
+  async addNote(project: string, text: string, date?: string): Promise<unknown> {
+    return this.callTool("add_note", date ? { project, text, date } : { project, text });
+  }
+
+  async editNote(project: string, note: string, text: string): Promise<unknown> {
+    return this.callTool("edit_note", { project, note, text });
+  }
+
+  async removeNote(project: string, note: string): Promise<unknown> {
+    return this.callTool("remove_note", { project, note });
+  }
+
+  async promoteNote(project: string, note: string, findingType?: string): Promise<unknown> {
+    return this.callTool("promote_note", findingType ? { project, note, findingType } : { project, note });
   }
 
   async getTasks(project: string, options: GetTasksOptions = {}): Promise<unknown> {
@@ -558,11 +589,18 @@ export class PhrenClient {
       return result;
     }
 
+    // JSON.parse failing (non-JSON tool text) is the only thing this should
+    // fall back for. unwrapToolResponse's ok:false throw must propagate to
+    // the caller — it used to be inside this try, so a legitimate
+    // {ok:false, error:"..."} response was mistaken for "wasn't JSON" and
+    // silently downgraded to the raw response text as if it had succeeded.
+    let parsed: unknown;
     try {
-      return this.unwrapToolResponse(JSON.parse(textBlock.text) as unknown);
+      parsed = JSON.parse(textBlock.text);
     } catch {
       return textBlock.text;
     }
+    return this.unwrapToolResponse(parsed);
   }
 
   private unwrapToolResponse(value: unknown): unknown {

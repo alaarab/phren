@@ -730,7 +730,10 @@ export function applyViewShortcut(host: NavigationHost, key: string): boolean {
 
 // ── Navigate-mode key handler ─────────────────────────────────────────────────
 
-export async function handleNavigateKey(host: NavigationHost, key: string): Promise<boolean> {
+export async function handleNavigateKey(host: NavigationHost, rawKey: string): Promise<boolean> {
+  // Terminals in application-cursor mode send SS3 (ESC O A) instead of CSI
+  // (ESC [ A) for the arrow keys; normalise so both spellings navigate.
+  const key = /^\x1bO[A-D]$/.test(rawKey) ? `\x1b[${rawKey[2]}` : rawKey;
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
   if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }

@@ -1,4 +1,10 @@
-export function buildSystemPrompt(phrenContext: string, priorSummary: string | null, providerInfo?: { name: string; model?: string }): string {
+export interface PriorSummaryInfo {
+  summary: string;
+  project?: string;
+  endedAt?: string;
+}
+
+export function buildSystemPrompt(phrenContext: string, priorSummary: PriorSummaryInfo | string | null, providerInfo?: { name: string; model?: string }): string {
   const modelNote = providerInfo ? ` You are running on ${providerInfo.name}${providerInfo.model ? ` (model: ${providerInfo.model})` : ""}.` : "";
   const parts = [
     `You are phren-agent, an autonomous coding agent with persistent memory.${modelNote}`,
@@ -33,7 +39,15 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: string | n
   ];
 
   if (priorSummary) {
-    parts.push("", `## Last session\n${priorSummary}`);
+    if (typeof priorSummary === "string") {
+      parts.push("", `## Last session\n${priorSummary}`);
+    } else {
+      const meta: string[] = [];
+      if (priorSummary.project) meta.push(`project: ${priorSummary.project}`);
+      if (priorSummary.endedAt) meta.push(`ended: ${priorSummary.endedAt.slice(0, 16).replace("T", " ")}`);
+      const header = meta.length > 0 ? `## Last session (${meta.join(", ")})` : "## Last session";
+      parts.push("", `${header}\n${priorSummary.summary}`);
+    }
   }
 
   if (phrenContext) {

@@ -208,6 +208,25 @@ describe("handleBackgroundMaintenance", () => {
     expect(auditContent).toContain("background_maintenance");
   });
 
+  it("promotes TTL-expired findings to the Stale queue", async () => {
+    // Regression: promotion used to live in handlePruneMemories, so nightly maintenance —
+    // which calls pruneDeadMemories directly — never ran it and ## Stale stayed empty.
+    const phren = makePhren();
+    grantAdmin(phren);
+    const today = new Date().toISOString().slice(0, 10);
+    makeProject(phren, "proj", {
+      "FINDINGS.md": `# proj Findings\n\n## ${today}\n\n- Deploy ordering rule nobody reads anymore <!-- created: 2020-01-01 -->\n`,
+    });
+
+    const { handleBackgroundMaintenance } = await importGovern(phren);
+    await handleBackgroundMaintenance("proj");
+
+    const queue = fs.readFileSync(path.join(phren, "proj", "review.md"), "utf8");
+    const staleSection = queue.split("## Stale")[1] ?? "";
+    expect(staleSection).toContain("[ttl-expired: 2020-01-01]");
+    expect(staleSection).toContain("Deploy ordering rule nobody reads anymore");
+  });
+
   it("cleans up lock file even on success", async () => {
     const phren = makePhren();
     grantAdmin(phren);

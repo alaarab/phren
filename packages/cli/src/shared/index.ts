@@ -83,7 +83,9 @@ import {
   ensureGlobalEntitiesTable,
 } from "./fragment-graph.js";
 import { bootstrapSqlJs } from "./sqljs.js";
+import { spawnDetachedChild } from "./process.js";
 import { getProjectOwnershipMode, getProjectSourcePath, readProjectConfig } from "../project-config.js";
+import { resolveRepoRootForPath } from "../git-worktree.js";
 import {
   buildSourceDocKey,
   decodeStringRow,
@@ -199,6 +201,9 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "tasks.md": "task",
   "changelog.md": "changelog",
   "truths.md": "canonical",
+  // review.md is indexed on purpose so `search_knowledge` can answer "why is this in my
+  // queue?", but `review-queue` is in NON_INJECTABLE_TYPES (shared/retrieval.ts): it is
+  // unreviewed, quarantined content and must never be pushed into a prompt automatically.
   "review.md": "review-queue",
 };
 
@@ -209,6 +214,7 @@ function pathHasSegment(relPath: string, segment: string): boolean {
 
 export function classifyFile(filename: string, relPath: string): string {
   // Directory takes priority over filename-based classification
+  if (pathHasSegment(relPath, "notes")) return "notes";
   if (pathHasSegment(relPath, "reference")) return "reference";
   if (pathHasSegment(relPath, "skills")) return "skill";
   const mapped = FILE_TYPE_MAP[filename.toLowerCase()];
@@ -304,16 +310,10 @@ export function resolveImports(
   return _resolveImportsRecursive(content, phrenPath, new Set<string>(), 0);
 }
 
-function touchSentinel(phrenPath: string): void {
-  const dir = path.join(phrenPath, ".runtime");
-  const sentinelPath = path.join(dir, "phren-sentinel");
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(sentinelPath, Date.now().toString());
-  } catch (err: unknown) {
-    logger.debug("touchSentinel", errorMessage(err));
-  }
-}
+// `touchSentinel()` used to write `.runtime/phren-sentinel` here. Nothing ever
+// read that file — index freshness is decided by index-sentinel.json (directory
+// mtimes + a re-hash of the recorded file list), and a content write already
+// changes the file's own mtime, so the stat-hash invalidates on its own.
 
 function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: string[]): string {
   const policy = getIndexPolicy(phrenPath);
@@ -436,9 +436,61 @@ const INDEX_SCHEMA_VERSION = 3; // bump when FTS schema changes to force full re
 // Deletion share above which an incremental update falls back to a full rebuild.
 const MAX_INCREMENTAL_DELETE_RATIO = 0.5;
 
-function hashFileContent(filePath: string): string {
-  const content = fs.readFileSync(filePath, "utf-8");
+function hashContent(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function hashFileContent(filePath: string): string {
+  return hashContent(fs.readFileSync(filePath, "utf-8"));
+}
+
+/** Read a file's text, or null when it is gone/unreadable (races with deletion are normal). */
+function readFileOrNull(filePath: string): string | null {
+  try {
+    return fs.readFileSync(filePath, "utf-8");
+  } catch (err: unknown) {
+    logger.debug("readFileOrNull", errorMessage(err));
+    return null;
+  }
+}
+
+/**
+ * Carries a file's bytes from the pass that hashes it to the pass that indexes
+ * it, so one rebuild reads each file exactly once instead of 2x (hash + insert)
+ * or 3x (hash + insert + fragment extraction on findings files).
+ *
+ * Bounded on purpose: the incremental path can, in the worst case, see every
+ * file as changed, and holding a whole store's markdown in memory to save a
+ * re-read is a bad trade. Past the budget the cache simply stops accepting
+ * entries and the consumer falls back to reading from disk — slower, never
+ * wrong.
+ */
+const BUILD_CONTENT_BUDGET_BYTES = 32 * 1024 * 1024;
+
+class BuildContentCache {
+  private entries = new Map<string, string>();
+  private bytes = 0;
+
+  put(filePath: string, content: string): void {
+    if (this.bytes + content.length > BUILD_CONTENT_BUDGET_BYTES) return;
+    if (this.entries.has(filePath)) return;
+    this.entries.set(filePath, content);
+    this.bytes += content.length;
+  }
+
+  /** Read-and-forget: content is consumed exactly once, then released. */
+  take(filePath: string): string | undefined {
+    const hit = this.entries.get(filePath);
+    if (hit === undefined) return undefined;
+    this.entries.delete(filePath);
+    this.bytes -= hit.length;
+    return hit;
+  }
+
+  clear(): void {
+    this.entries.clear();
+    this.bytes = 0;
+  }
 }
 
 /** Errors expected from idempotent schema migrations run against older cached DBs. */
@@ -642,10 +694,10 @@ function insertFileIntoIndex(
   db: SqlJsDatabase,
   entry: FileEntry,
   phrenPath: string,
-  opts?: { scheduleEmbeddings?: boolean }
+  opts?: { scheduleEmbeddings?: boolean; content?: string }
 ): boolean {
   try {
-    const raw = fs.readFileSync(entry.fullPath, "utf-8");
+    const raw = opts?.content ?? fs.readFileSync(entry.fullPath, "utf-8");
     const content = normalizeIndexedContent(raw, entry.type, phrenPath);
     const indexedContent = applyReferenceTopicHints(entry, content, phrenPath);
     db.run(
@@ -673,9 +725,48 @@ function extractLegacyTopicSlug(entry: FileEntry): string | null {
   return match[1].toLowerCase();
 }
 
+/**
+ * Build-scoped memo for `readProjectTopics()`.
+ *
+ * `readProjectTopics` derives adaptive topics by reading and tokenising the
+ * *whole* project corpus — CLAUDE.md, FINDINGS.md and every reference/*.md —
+ * on each call (see `buildTopicContentSignal` in project-topics.ts). It is
+ * called once per reference document, so a project with R reference docs read
+ * and tokenised its own corpus R times per rebuild. Measured on a 1892-file
+ * store (46 projects x 34 reference docs): 60,180 markdown reads for 1892
+ * files, ~85% of a 9.4s cold build spent in topic re-derivation.
+ *
+ * The answer is per-project, not per-document, and the corpus cannot change
+ * mid-build, so one derivation per project per build is exactly equivalent.
+ * The memo is armed only for the duration of `buildIndexImpl`; single-file
+ * callers such as `updateFileInIndex` keep reading through.
+ */
+const _buildTopicCache = new Map<string, ReturnType<typeof readProjectTopics>>();
+let _buildTopicCacheActive = false;
+
+function beginTopicBuildCache(): void {
+  _buildTopicCacheActive = true;
+  _buildTopicCache.clear();
+}
+
+function endTopicBuildCache(): void {
+  _buildTopicCacheActive = false;
+  _buildTopicCache.clear();
+}
+
+function readProjectTopicsForBuild(phrenPath: string, project: string): ReturnType<typeof readProjectTopics> {
+  if (!_buildTopicCacheActive) return readProjectTopics(phrenPath, project);
+  const key = `${phrenPath} ${project}`;
+  const hit = _buildTopicCache.get(key);
+  if (hit) return hit;
+  const resolved = readProjectTopics(phrenPath, project);
+  _buildTopicCache.set(key, resolved);
+  return resolved;
+}
+
 function detectReferenceTopics(entry: FileEntry, content: string, phrenPath: string): ProjectTopic[] {
   if (entry.type !== "reference") return [];
-  const { topics } = readProjectTopics(phrenPath, entry.project);
+  const { topics } = readProjectTopicsForBuild(phrenPath, entry.project);
   if (!topics.length) return [];
 
   const topicBySlug = new Map<string, ProjectTopic>(topics.map((topic) => [topic.slug, topic]));
@@ -764,12 +855,13 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
     const type = classifyFile(filename, relFile);
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
-    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
+    // Single read feeds the insert, fragment extraction and the content hash.
+    const raw = readFileOrNull(resolvedPath);
+    if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
       // Re-extract fragments for finding files
       if (type === "findings") {
         try {
-          const content = fs.readFileSync(resolvedPath, "utf-8");
-          extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
         } catch (err: unknown) {
           logger.debug("updateFileInIndex entityExtraction", errorMessage(err));
         }
@@ -779,7 +871,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     // Update hash map for this file
     try {
       const hashData = loadHashMap(phrenPath);
-      hashData.hashes[resolvedPath] = hashFileContent(resolvedPath);
+      hashData.hashes[resolvedPath] = raw !== null ? hashContent(raw) : hashFileContent(resolvedPath);
       const stat = fs.statSync(resolvedPath);
       saveHashMap(phrenPath, hashData.hashes, undefined, { [resolvedPath]: { mtimeMs: stat.mtimeMs, size: stat.size } });
     } catch (err: unknown) {
@@ -798,56 +890,249 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       }
     })();
   }
-
-  touchSentinel(phrenPath);
   invalidateDfCache();
 }
 
-/** Read/write a sentinel that caches the phren hash to skip full recomputation. */
-function readHashSentinel(phrenPath: string): { hash: string; computedAt: number } | null {
+// ── Index freshness sentinel ────────────────────────────────────────────────
+//
+// The sentinel exists to skip `globAllFiles()` — the single most expensive part
+// of a warm `buildIndex` (≈14ms on a 400-file store, ≈46ms on a 1900-file one,
+// versus ≈0.7ms/4.3ms to re-stat the same files).
+//
+// It works in two steps, and BOTH are required for correctness:
+//
+//   1. Directory-mtime scan. POSIX bumps a directory's mtime whenever an entry
+//      inside it is created, removed or renamed, so if every directory in the
+//      indexed tree still has the exact mtime it had at build time, the *set*
+//      of indexed files provably has not changed and the glob can be skipped.
+//   2. Re-hash the recorded file list. A directory's mtime does NOT change when
+//      a file inside it is edited in place, so step 1 alone would happily serve
+//      a stale index. `computePhrenHash()` over the recorded paths re-stats
+//      every file and catches edits — the same hash the slow path computes.
+//
+// `.runtime` is deliberately excluded from step 1 (see SENTINEL_SKIP_DIRS).
+
+/**
+ * Directories that never hold indexed content and must stay out of the mtime
+ * scan.
+ *
+ * `.runtime` is the load-bearing entry. It is phren's own scratch dir, and
+ * `_buildIndexGuarded()` creates `.runtime/index-rebuild.lock` on entry and
+ * unlinks it on exit — i.e. *after* the sentinel is written. Any scan that
+ * includes `.runtime` therefore sees a directory that is unconditionally newer
+ * than the sentinel it is being compared against, on every single call. That is
+ * why the fast path had never once fired. `updateRuntimeHealth()` and the debug
+ * log dirty it too, but the rebuild lock alone is enough to guarantee a miss.
+ */
+const SENTINEL_SKIP_DIRS: ReadonlySet<string> = new Set([
+  ".runtime",
+  ".sessions",
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+]);
+
+const INDEX_SENTINEL_VERSION = 3;
+
+interface IndexSentinel {
+  version: number;
+  hash: string;
+  computedAt: number;
+  /** Sentinel is per-profile: profiles index different project sets. */
+  profile: string;
+  /** [mtimeMs, size] of .config/index-policy.json; it decides what gets globbed. */
+  policy: [number, number];
+  /** Resolved store project dirs, so a stores.yaml/profile change invalidates. */
+  projectDirs: string[];
+  /** The glob result this hash was computed from. */
+  files: string[];
+  /** dir -> mtimeMs, sampled immediately *before* the glob ran. */
+  dirs: Record<string, number>;
+}
+
+function indexSentinelPath(phrenPath: string): string {
+  return runtimeFile(phrenPath, "index-sentinel.json");
+}
+
+function statIndexPolicy(phrenPath: string): [number, number] {
   try {
-    const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
+    const stat = fs.statSync(path.join(phrenPath, ".config", "index-policy.json"));
+    return [stat.mtimeMs, stat.size];
+  } catch {
+    return [-1, -1];
+  }
+}
+
+/**
+ * Every directory whose entry list can change which files end up in the index:
+ * the phren root, its config/profiles dirs, each store root, the full tree
+ * under every project dir, the global skills tree, and the native agent memory
+ * dirs. A dir-only walk — no per-file stats, no glob pattern matching.
+ */
+function collectContentDirs(phrenPath: string, projectDirs: string[]): string[] {
+  const out = new Set<string>([
+    phrenPath,
+    path.join(phrenPath, ".config"),
+    path.join(phrenPath, "profiles"),
+  ]);
+  const walk = (dir: string): void => {
+    out.add(dir);
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || SENTINEL_SKIP_DIRS.has(entry.name)) continue;
+      walk(path.join(dir, entry.name));
+    }
+  };
+  for (const dir of projectDirs) {
+    out.add(path.dirname(dir)); // store root
+    walk(dir);
+  }
+  walk(path.join(phrenPath, "global", "skills"));
+  // Native agent memory (~/.claude/projects/*/memory) is indexed too, but the
+  // surrounding project dirs are huge — watch only the two levels that matter.
+  const nativeRoot = path.join(homeDir(), ".claude", "projects");
+  out.add(nativeRoot);
+  try {
+    for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
+      if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+    }
+  } catch {
+    // no native memory dirs — the nativeRoot entry above still catches creation
+  }
+  return [...out];
+}
+
+function snapshotContentDirs(phrenPath: string, projectDirs: string[]): Record<string, number> {
+  const snapshot: Record<string, number> = {};
+  for (const dir of collectContentDirs(phrenPath, projectDirs)) {
+    try {
+      snapshot[dir] = fs.statSync(dir).mtimeMs;
+    } catch {
+      snapshot[dir] = -1; // absent now; reappearing is itself a change
+    }
+  }
+  return snapshot;
+}
+
+function readIndexSentinel(phrenPath: string): IndexSentinel | null {
+  try {
+    const sentinelPath = indexSentinelPath(phrenPath);
     if (!fs.existsSync(sentinelPath)) return null;
-    const data = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as { hash?: string; computedAt?: number };
-    if (typeof data.hash === "string" && typeof data.computedAt === "number") {
-      return { hash: data.hash, computedAt: data.computedAt };
+    const data = JSON.parse(fs.readFileSync(sentinelPath, "utf-8")) as Partial<IndexSentinel>;
+    if (
+      data.version === INDEX_SENTINEL_VERSION &&
+      typeof data.hash === "string" &&
+      typeof data.computedAt === "number" &&
+      typeof data.profile === "string" &&
+      Array.isArray(data.policy) &&
+      Array.isArray(data.projectDirs) &&
+      Array.isArray(data.files) &&
+      data.dirs && typeof data.dirs === "object"
+    ) {
+      return data as IndexSentinel;
     }
   } catch (err: unknown) {
-    logger.debug("readHashSentinel", errorMessage(err));
+    logger.debug("readIndexSentinel", errorMessage(err));
   }
   return null;
 }
 
-function writeHashSentinel(phrenPath: string, hash: string): void {
+function writeIndexSentinel(
+  phrenPath: string,
+  entry: { hash: string; profile?: string; projectDirs: string[]; files: string[]; dirs: Record<string, number> },
+): void {
   try {
-    const sentinelPath = runtimeFile(phrenPath, "index-sentinel.json");
-    fs.writeFileSync(sentinelPath, JSON.stringify({ hash, computedAt: Date.now() }));
+    const sentinel: IndexSentinel = {
+      version: INDEX_SENTINEL_VERSION,
+      hash: entry.hash,
+      computedAt: Date.now(),
+      profile: entry.profile ?? "",
+      policy: statIndexPolicy(phrenPath),
+      projectDirs: entry.projectDirs,
+      files: entry.files,
+      dirs: entry.dirs,
+    };
+    fs.writeFileSync(indexSentinelPath(phrenPath), JSON.stringify(sentinel));
   } catch (err: unknown) {
-    logger.debug("writeHashSentinel", errorMessage(err));
+    logger.debug("writeIndexSentinel", errorMessage(err));
   }
 }
 
-function isSentinelFresh(phrenPath: string, sentinel: { computedAt: number }): boolean {
-  // Check mtime of key directories — if any are newer than the sentinel, it's stale
-  const dirsToCheck = [
-    phrenPath,
-    path.join(phrenPath, ".config"),
-    path.join(phrenPath, ".runtime"),
-  ];
-  // Also check team store root directories so changes there invalidate the cache
-  if (_cachedStoreProjectDirs && _cachedStorePhrenPath === phrenPath) {
-    const storeRoots = new Set(_cachedStoreProjectDirs.map(d => path.dirname(d)));
-    for (const root of storeRoots) dirsToCheck.push(root);
+/**
+ * True when nothing that feeds the index hash can have changed since the
+ * sentinel was written. Deliberately conservative: any unreadable directory,
+ * any mtime that differs *at all* (not just "newer"), a profile or project-set
+ * change, or an index-policy edit all report stale.
+ */
+function isSentinelFresh(
+  phrenPath: string,
+  sentinel: IndexSentinel,
+  profile: string | undefined,
+  projectDirs: string[],
+): boolean {
+  if (sentinel.profile !== (profile ?? "")) return false;
+
+  const [policyMtime, policySize] = statIndexPolicy(phrenPath);
+  if (sentinel.policy[0] !== policyMtime || sentinel.policy[1] !== policySize) return false;
+
+  if (sentinel.projectDirs.length !== projectDirs.length) return false;
+  const currentDirs = new Set(projectDirs);
+  for (const dir of sentinel.projectDirs) {
+    if (!currentDirs.has(dir)) return false;
   }
-  for (const dir of dirsToCheck) {
+
+  for (const [dir, mtimeMs] of Object.entries(sentinel.dirs)) {
+    let current: number;
     try {
-      const stat = fs.statSync(dir);
-      if (stat.mtimeMs > sentinel.computedAt) return false;
-    } catch (err: unknown) {
-      logger.debug("isSentinelFresh statDir", errorMessage(err));
+      current = fs.statSync(dir).mtimeMs;
+    } catch {
+      current = -1;
     }
+    if (current !== mtimeMs) return false;
   }
   return true;
+}
+
+/**
+ * The slow path: snapshot directory mtimes, glob, hash, and seal a new sentinel.
+ *
+ * The snapshot is taken *before* the glob on purpose. Anything written during or
+ * after the glob leaves the recorded mtime behind the real one, so the next
+ * freshness check reports stale — the conservative direction.
+ */
+function globAndSealSentinel(
+  phrenPath: string,
+  profile: string | undefined,
+  projectDirs: string[],
+): { globResult: { filePaths: string[]; entries: FileEntry[] }; hash: string } {
+  const dirs = snapshotContentDirs(phrenPath, projectDirs);
+  const globResult = globAllFiles(phrenPath, profile);
+  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  writeIndexSentinel(phrenPath, { hash, profile, projectDirs, files: globResult.filePaths, dirs });
+  return { globResult, hash };
+}
+
+/**
+ * Resolve the current index hash without globbing when the sentinel proves the
+ * file set is unchanged. Returns null when the caller must fall back to a glob.
+ */
+function hashFromFreshSentinel(
+  phrenPath: string,
+  profile: string | undefined,
+  projectDirs: string[],
+): string | null {
+  const sentinel = readIndexSentinel(phrenPath);
+  if (!sentinel || !isSentinelFresh(phrenPath, sentinel, profile, projectDirs)) return null;
+  // File set is proven unchanged; re-stat those files so an in-place edit
+  // (which leaves every directory mtime untouched) still busts the cache.
+  const hash = computePhrenHash(phrenPath, profile, sentinel.files);
+  return hash === sentinel.hash ? hash : null;
 }
 
 /**
@@ -1020,38 +1305,26 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   await refreshStoreProjectDirs(phrenPath, profile);
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   beginUserFragmentBuildCache(phrenPath, projectDirs.map(dir => path.basename(dir)));
+  beginTopicBuildCache();
+  const contentCache = new BuildContentCache();
   try {
 
   // ── Cache dir + hash sentinel ─────────────────────────────────────────────
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("buildIndexImpl userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+  pruneFtsCacheRoot(storeCacheKey(phrenPath, profile));
+  const cacheDir = ftsCacheDir(phrenPath, profile);
 
-  // Fast path: if the sentinel is fresh, skip the expensive glob + hash computation
-  const sentinel = readHashSentinel(phrenPath);
+  // Fast path: if the sentinel is fresh, skip the expensive glob computation.
   let hash: string;
   let globResult: { filePaths: string[]; entries: FileEntry[] } | null = null;
-  if (sentinel && isSentinelFresh(phrenPath, sentinel)) {
-    hash = sentinel.hash;
-    const cacheFile = path.join(cacheDir, `${hash}.db`);
-    if (fs.existsSync(cacheFile)) {
-      // Sentinel cache hit — defer glob; only load it if incremental path needs it
-      globResult = null;
-    } else {
-      // Cache file was cleaned up, fall through to full computation
-      globResult = globAllFiles(phrenPath, profile);
-      hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-      writeHashSentinel(phrenPath, hash);
-    }
+  const sentinelHash = hashFromFreshSentinel(phrenPath, profile, projectDirs);
+  if (sentinelHash && fs.existsSync(path.join(cacheDir, `${sentinelHash}.db`))) {
+    // Sentinel cache hit — defer glob; only load it if incremental path needs it
+    hash = sentinelHash;
   } else {
-    globResult = globAllFiles(phrenPath, profile);
-    hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-    writeHashSentinel(phrenPath, hash);
+    // Sentinel stale, content changed, or the cache file was cleaned up.
+    const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+    globResult = sealed.globResult;
+    hash = sealed.hash;
   }
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
@@ -1081,6 +1354,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           appendIndexEvent(phrenPath, {
             event: "build_index",
             cache: "hit",
+            // The glob was skipped entirely. Recorded so "is the fast path
+            // firing?" is answerable from the event log instead of by reasoning.
+            sentinel: true,
             hash: hash.slice(0, 12),
             elapsedMs: Date.now() - t0,
             profile: profile || "",
@@ -1093,9 +1369,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
         debugLog(`sentinel-hit DB load failed, falling back to full rebuild: ${errorMessage(err)}`);
       }
       // Need glob for rebuild
-      globResult = globAllFiles(phrenPath, profile);
-      hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-      writeHashSentinel(phrenPath, hash);
+      const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+      globResult = sealed.globResult;
+      hash = sealed.hash;
     }
     try {
       const cached = fs.readFileSync(cacheFile);
@@ -1137,7 +1413,16 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             const prevMeta = savedMeta[entry.fullPath];
             const statUnchanged = prevHash !== undefined && prevMeta !== undefined
               && prevMeta.mtimeMs === stat.mtimeMs && prevMeta.size === stat.size;
-            const fileHash = statUnchanged ? prevHash : hashFileContent(entry.fullPath);
+            let fileHash: string;
+            if (statUnchanged) {
+              fileHash = prevHash;
+            } else {
+              // The only read of this file in this rebuild: hand the bytes to the
+              // insert pass below instead of letting it read them again.
+              const raw = fs.readFileSync(entry.fullPath, "utf-8");
+              fileHash = hashContent(raw);
+              contentCache.put(entry.fullPath, raw);
+            }
             currentHashes[entry.fullPath] = fileHash;
             currentMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
             if (!(entry.fullPath in savedHashes)) {
@@ -1168,6 +1453,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           appendIndexEvent(phrenPath, {
             event: "build_index",
             cache: "hit",
+            sentinel: false,
             hash: hash.slice(0, 12),
             elapsedMs: Date.now() - t0,
             profile: profile || "",
@@ -1210,12 +1496,15 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
                 db.run("DELETE FROM docs WHERE path = ?", [entry.fullPath]);
               }
 
-              if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
+              // Reuse the bytes read during hashing; only fall back to disk when
+              // the carry cache declined the file (budget) or never saw it.
+              const carried = contentCache.take(entry.fullPath);
+              const raw = carried ?? readFileOrNull(entry.fullPath);
+              if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
                 updatedCount++;
                 if (entry.type === "findings") {
                   try {
-                    const content = fs.readFileSync(entry.fullPath, "utf-8");
-                    extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
                   } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
                 }
               }
@@ -1230,7 +1519,6 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
           }
 
           saveHashMap(phrenPath, currentHashes, new Set(Object.keys(currentHashes)), currentMeta);
-          touchSentinel(phrenPath);
           invalidateDfCache();
 
           // Save updated cache
@@ -1268,9 +1556,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   // ── Full rebuild ──────────────────────────────────────────────────────────
   // Ensure glob data is available for full rebuild (may be null from sentinel fast-path fallback)
   if (!globResult) {
-    globResult = globAllFiles(phrenPath, profile);
-    hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
-    writeHashSentinel(phrenPath, hash);
+    const sealed = globAndSealSentinel(phrenPath, profile, projectDirs);
+    globResult = sealed.globResult;
+    hash = sealed.hash;
   }
   const db = new SQL.Database();
   db.run(`
@@ -1295,22 +1583,38 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
   const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
-  for (const entry of allFiles) {
-    try {
-      newHashes[entry.fullPath] = hashFileContent(entry.fullPath);
-      const stat = fs.statSync(entry.fullPath);
-      newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
-    } catch (err: unknown) {
-        logger.debug("computePhrenHash skip", errorMessage(err));
+  // One read per file: the bytes feed the content hash, the FTS insert and (for
+  // findings) fragment extraction. Every insert is batched into a single
+  // transaction so sql.js does not open and commit one per statement.
+  db.run("BEGIN");
+  let fullRebuildCommitted = false;
+  try {
+    for (const entry of allFiles) {
+      const raw = readFileOrNull(entry.fullPath);
+      if (raw === null) continue;
+      try {
+        newHashes[entry.fullPath] = hashContent(raw);
+        const stat = fs.statSync(entry.fullPath);
+        newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
+      } catch (err: unknown) {
+        logger.debug("buildIndex statFile", errorMessage(err));
       }
-    if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true })) {
-      fileCount++;
-      // Extract fragments from finding files (if not loaded from cache)
-      if (!entityGraphLoaded && entry.type === "findings") {
-        try {
-          const content = fs.readFileSync(entry.fullPath, "utf-8");
-          extractAndLinkFragments(db, content, getEntrySourceDocKey(entry, phrenPath), phrenPath);
-        } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
+      if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
+        fileCount++;
+        // Extract fragments from finding files (if not loaded from cache)
+        if (!entityGraphLoaded && entry.type === "findings") {
+          try {
+            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
+        }
+      }
+    }
+    db.run("COMMIT");
+    fullRebuildCommitted = true;
+  } finally {
+    if (!fullRebuildCommitted) {
+      try { db.run("ROLLBACK"); } catch (err: unknown) {
+        logger.debug("buildIndex fullRebuildRollback", errorMessage(err));
       }
     }
   }
@@ -1334,7 +1638,6 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
 
   // ── Finalize: persist hashes, save cache, log ─────────────────────────────
   saveHashMap(phrenPath, newHashes, new Set(Object.keys(newHashes)), newMeta);
-  touchSentinel(phrenPath);
   invalidateDfCache();
 
   const buildMs = Date.now() - t0;
@@ -1367,6 +1670,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   return db;
   } finally {
     endUserFragmentBuildCache(phrenPath);
+    endTopicBuildCache();
+    contentCache.clear();
   }
 }
 
@@ -1397,18 +1702,16 @@ function isRebuildLockHeld(phrenPath: string): boolean {
   }
 }
 
-async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+async function loadIndexSnapshotOrEmpty(
+  phrenPath: string,
+  profile?: string,
+  knownHash?: string,
+): Promise<SqlJsDatabase> {
   const SQL = await bootstrapSqlJs() as SqlJsStatic;
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("loadIndexSnapshotOrEmpty userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
-  const globResult = globAllFiles(phrenPath, profile);
-  const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
+  const cacheDir = ftsCacheDir(phrenPath, profile);
+  // `knownHash` lets loadIndexForHook skip a second glob for a hash it just
+  // computed (and already knows misses).
+  const hash = knownHash ?? computePhrenHash(phrenPath, profile, globAllFiles(phrenPath, profile).filePaths);
   const cacheFile = path.join(cacheDir, `${hash}.db`);
 
   if (fs.existsSync(cacheFile)) {
@@ -1419,7 +1722,10 @@ async function loadIndexSnapshotOrEmpty(phrenPath: string, profile?: string): Pr
     }
   }
 
-  // Before returning empty, try to load any stale-but-usable cache file
+  // Before returning empty, fall back to an older snapshot *of this store*.
+  // cacheDir is store+profile scoped, so nothing here can belong to another
+  // store — serving a neighbour's index would inject its knowledge into this
+  // store's prompts.
   try {
     if (fs.existsSync(cacheDir)) {
       const cacheFiles = fs.readdirSync(cacheDir)
@@ -1494,6 +1800,197 @@ export async function buildIndex(phrenPath: string, profile?: string): Promise<S
   return db;
 }
 
+/** Per-user FTS cache root (os.tmpdir()/phren-fts-<uid>). */
+function ftsCacheRoot(): string {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch (err: unknown) {
+    logger.debug("ftsCacheRoot userInfo", errorMessage(err));
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
+  }
+  return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+
+/**
+ * Store identity, independent of content. A snapshot's filename is a *content*
+ * hash, so an older snapshot of this store has a different name than the
+ * current one — there is no way to recognise your own stale caches by hash.
+ * Identity therefore has to live in the path.
+ */
+function storeCacheKey(phrenPath: string, profile?: string): string {
+  return crypto.createHash("sha1")
+    .update(`${path.resolve(phrenPath)}|${profile ?? ""}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * FTS cache directory for one store+profile: os.tmpdir()/phren-fts-<uid>/<storeKey>/.
+ *
+ * The per-user root used to hold every store's `<contentHash>.db` side by side,
+ * and the "serve a stale snapshot" fallback picked the newest .db in it without
+ * checking whose it was. With two stores configured — phren's own documented
+ * personal + team setup — one store's knowledge could be injected into the
+ * other's agent prompt whenever the second store's hash missed. Scoping the
+ * directory makes every scan trivially store-local. It also keeps the
+ * "prune older snapshots" sweep from evicting a sibling store's cache and
+ * forcing it into a full rebuild on its next build.
+ */
+function ftsCacheDir(phrenPath: string, profile?: string): string {
+  return path.join(ftsCacheRoot(), storeCacheKey(phrenPath, profile));
+}
+
+/** Store cache dirs older than this are dropped; a cold rebuild recreates them. */
+const FTS_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Hard cap on retained store dirs, so a burst of transient stores cannot pile up. */
+const FTS_CACHE_MAX_STORES = 64;
+
+/**
+ * Keep the cache root bounded, once per process.
+ *
+ * The old flat layout self-limited to a single snapshot because every full
+ * rebuild unlinked all the others — cross-store eviction was the (accidental)
+ * garbage collector. Per-store directories fix the contamination that caused,
+ * but nothing would ever reclaim a directory again: one test-suite run alone
+ * left 524 store dirs / 36MB behind. So prune explicitly.
+ *
+ * Also removes pre-0.1.41 snapshots sitting flat in the root: they are not
+ * attributable to any store, so they can only ever be mis-served.
+ */
+let _ftsCachePruned = false;
+
+/**
+ * @internal Exported for tests. The prune is a one-shot per process, so a test
+ * that needs to set up state *after* a build (which consumes it) has no other
+ * way to exercise the pruning logic a second time.
+ */
+export function __resetFtsCachePruneGuardForTests(): void {
+  _ftsCachePruned = false;
+}
+
+function pruneFtsCacheRoot(keepKey: string): void {
+  if (_ftsCachePruned) return;
+  _ftsCachePruned = true;
+  try {
+    const root = ftsCacheRoot();
+    if (!fs.existsSync(root)) return;
+    const now = Date.now();
+    const stores: { name: string; mtimeMs: number }[] = [];
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      const full = path.join(root, entry.name);
+      if (entry.isFile()) {
+        if (entry.name.endsWith(".db")) {
+          try { fs.unlinkSync(full); } catch { /* best effort */ }
+        }
+        continue;
+      }
+      if (!entry.isDirectory() || entry.name === keepKey) continue;
+      let mtimeMs = 0;
+      try { mtimeMs = fs.statSync(full).mtimeMs; } catch { /* treat as ancient */ }
+      if (now - mtimeMs > FTS_CACHE_TTL_MS) {
+        try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* best effort */ }
+        continue;
+      }
+      stores.push({ name: entry.name, mtimeMs });
+    }
+    if (stores.length <= FTS_CACHE_MAX_STORES) return;
+    stores.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const store of stores.slice(FTS_CACHE_MAX_STORES)) {
+      try { fs.rmSync(path.join(root, store.name), { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  } catch (err: unknown) {
+    logger.debug("pruneFtsCacheRoot", errorMessage(err));
+  }
+}
+
+/**
+ * Non-blocking index loader for the UserPromptSubmit / PostToolUse hooks.
+ * Unlike buildIndex(), this NEVER blocks a hook on a 2-12s rebuild:
+ *   - exact stat-hash cache hit → serve it immediately (fast path);
+ *   - miss but a usable (possibly stale) cache exists → serve the stale snapshot
+ *     now and kick a *detached* `background-reindex` (deduped by the rebuild
+ *     lock) so the next prompt gets fresh results. A single prompt's context may
+ *     lag one write — far better than freezing the prompt;
+ *   - cold start (no cache at all) → block once on a full build so the very first
+ *     prompt isn't empty.
+ * Freshness stays correct over time: an edit bumps mtime → new stat-hash → this
+ * misses → a rebuild is scheduled → the following prompt hits the new cache.
+ */
+export async function loadIndexForHook(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+  pruneFtsCacheRoot(storeCacheKey(phrenPath, profile));
+  const cacheDir = ftsCacheDir(phrenPath, profile);
+  // Resolve team stores the same way buildIndex does. Without this the hook's
+  // file set (and therefore its hash) can never match the one buildIndex sealed,
+  // so every prompt would miss the cache and spawn a redundant reindex.
+  await refreshStoreProjectDirs(phrenPath, profile);
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
+  // Skip the glob when the sentinel proves nothing changed (see the sentinel
+  // block above): ~20x cheaper than re-globbing, and yields the same hash.
+  const sentinelHash = hashFromFreshSentinel(phrenPath, profile, projectDirs);
+  const hash = sentinelHash
+    ?? computePhrenHash(phrenPath, profile, globAllFiles(phrenPath, profile).filePaths);
+  const cacheFile = path.join(cacheDir, `${hash}.db`);
+  const SQL = await bootstrapSqlJs() as SqlJsStatic;
+
+  // Fast path: exact stat-hash hit (no file changed mtime/size since the build).
+  if (fs.existsSync(cacheFile)) {
+    try {
+      const db = new SQL.Database(fs.readFileSync(cacheFile));
+      const docCount = db.exec("SELECT COUNT(*) FROM docs")?.[0]?.values?.[0]?.[0] as number ?? 0;
+      if (docCount > 0) {
+        appendIndexEvent(phrenPath, { event: "build_index", cache: "hit", sentinel: sentinelHash !== null, hash: hash.slice(0, 12), elapsedMs: 0, profile: profile || "" });
+        return db;
+      }
+      db.close();
+    } catch (err: unknown) {
+      debugLog(`loadIndexForHook fast-path load failed: ${errorMessage(err)}`);
+    }
+  }
+
+  // Miss. Serve stale immediately if *this store* has a snapshot; else
+  // cold-build once. cacheDir is store+profile scoped, so another store's
+  // snapshot can never satisfy this check.
+  let hasStale = false;
+  try {
+    hasStale = fs.existsSync(cacheDir) && fs.readdirSync(cacheDir).some(f => f.endsWith(".db"));
+  } catch (err: unknown) {
+    logger.debug("loadIndexForHook staleScan", errorMessage(err));
+  }
+  if (!hasStale) {
+    // Cold start: no snapshot exists at all. Block once rather than inject an
+    // empty context — "instant but empty" is worse than "slow but right".
+    return buildIndex(phrenPath, profile);
+  }
+
+  // Schedule a detached rebuild for next time (rebuild lock dedups concurrent hooks).
+  let scheduled = false;
+  if (!isRebuildLockHeld(phrenPath)) {
+    const entry = process.argv[1];
+    if (entry && /index\.(c?js|mjs|ts)$/.test(entry) && fs.existsSync(entry)) {
+      try {
+        spawnDetachedChild([entry, "background-reindex"], { phrenPath }).unref();
+        scheduled = true;
+        debugLog(`loadIndexForHook: scheduled detached background-reindex (stat-hash miss ${hash.slice(0, 8)})`);
+      } catch (err: unknown) {
+        debugLog(`loadIndexForHook: detached reindex spawn failed: ${errorMessage(err)}`);
+      }
+    }
+  }
+  // The prompt is about to be answered from a snapshot that predates the latest
+  // write. That trade is deliberate, but it must not be invisible: record it so
+  // "why did phren miss the finding I just wrote?" is answerable from the log.
+  appendIndexEvent(phrenPath, {
+    event: "build_index",
+    cache: "stale",
+    hash: hash.slice(0, 12),
+    rebuildScheduled: scheduled,
+    elapsedMs: 0,
+    profile: profile || "",
+  });
+  return loadIndexSnapshotOrEmpty(phrenPath, profile, hash);
+}
+
 async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
   const lockTarget = runtimeFile(phrenPath, "index-rebuild");
   if (isRebuildLockHeld(phrenPath)) {
@@ -1524,14 +2021,7 @@ async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<
 
 /** Find the FTS cache file for a specific phrenPath+profile. Returns exists + size. */
 export function findFtsCacheForPath(phrenPath: string, profile?: string): { exists: boolean; sizeBytes?: number } {
-  let userSuffix: string;
-  try {
-    userSuffix = String(os.userInfo().uid);
-  } catch (err: unknown) {
-    logger.debug("findFtsCacheForPath userInfo", errorMessage(err));
-    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
-  }
-  const cacheDir = path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+  const cacheDir = ftsCacheDir(phrenPath, profile);
   try {
     const globResult = globAllFiles(phrenPath, profile);
     const hash = computePhrenHash(phrenPath, profile, globResult.filePaths);
@@ -1552,7 +2042,9 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
     return manifest.primaryProject || null;
   }
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
-  const resolvedCwd = path.resolve(cwd);
+  // A session running inside a git worktree belongs to the repository the
+  // worktree came from — its own path never matches any registered sourcePath.
+  const resolvedCwd = resolveRepoRootForPath(cwd);
   let bestMatch: { project: string; length: number } | null = null;
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);

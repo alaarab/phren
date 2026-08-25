@@ -1,5 +1,5 @@
-import React from "react";
-import { Box, Text, useStdout } from "ink";
+
+import { Text, useStdout } from "ink";
 import { PERMISSION_LABELS } from "../ansi.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import type { Theme } from "../themes.js";

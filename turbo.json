@@ -3,7 +3,11 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**", "out/**"]
+    },
+    "phren-vscode#build": {
+      "dependsOn": ["@phren/cli#build"],
+      "outputs": ["out/**"]
     },
     "test": {
       "dependsOn": ["build"]

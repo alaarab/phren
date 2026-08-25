@@ -1,10 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult } from "../shared.js";
+import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult, type FindingTag } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
-import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import {
   type FindingCitation,
   type FindingProvenance,
@@ -15,7 +16,7 @@ import {
   getRepoRoot,
   inferCitationLocation,
 } from "./citation.js";
-import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref, detectConflicts, extractDynamicEntities } from "./dedup.js";
+import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCoref } from "./dedup.js";
 import { validateFindingsFormat, validateFinding } from "./validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./archive.js";
 import {
@@ -47,11 +48,28 @@ interface PreparedFinding {
 
 const LIFECYCLE_ANNOTATION_RE = METADATA_REGEX.lifecycleAnnotation;
 
+/** Default finding-id source: 8 lowercase hex chars from a CSPRNG. Overridable
+ *  via `AddFindingOptions.idSource` for deterministic fixture generation
+ *  (apps/ios/scripts/generate-fixtures.mjs) — production callers never set it,
+ *  so this is the only thing that ever runs outside tests. */
+function defaultFindingIdSource(): string {
+  return crypto.randomBytes(4).toString("hex");
+}
+
 interface AddFindingOptions {
   extraAnnotations?: string[];
   sessionId?: string;
   scope?: string;
   provenance?: FindingProvenance;
+  /**
+   * Clock and id-source overrides. Both default to the real clock/CSPRNG, so
+   * omitting them is byte-identical to today's behaviour; they exist solely so
+   * `generate-fixtures.mjs` can make its output reproducible the same way
+   * `notes.addNote`'s `now` option and `tasks.addTask`'s `createdAt` option
+   * already let the fixture generator fix the clock for notes and tasks.
+   */
+  now?: Date;
+  idSource?: () => string;
 }
 
 export interface AddFindingResult {
@@ -132,7 +150,16 @@ function resolveFindingCitationInput(
   return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
 
-export function autoDetectFindingType(text: string): string | null {
+/**
+ * Heuristically infer a finding's type tag from its own wording when the
+ * caller didn't supply one. Return type is FindingTag (not FindingType)
+ * because "workaround" and "context" are valid outputs here even though
+ * they aren't part of the smaller offered/pickable FINDING_TYPES set —
+ * both still have a FINDING_TYPE_DECAY row and are searchable via
+ * search_knowledge's `tag` filter (FINDING_TAGS), so this function agrees
+ * with both.
+ */
+export function autoDetectFindingType(text: string): FindingTag | null {
   const lower = text.toLowerCase();
   if (/\b(we decided|decision:|chose .+ over|went with)\b/.test(lower)) return 'decision';
   if (/\b(bug:|bug in|found a bug|broken|crashes|fails when)\b/.test(lower)) return 'bug';
@@ -155,12 +182,13 @@ interface PrepareFindingOpts {
   inferredRepo?: string;
   headCommit?: string;
   phrenPath?: string;
+  idSource?: () => string;
 }
 
 function prepareFinding(
   opts: PrepareFindingOpts,
 ): { status: "added"; finding: PreparedFinding } | { status: "duplicate" } | { status: "rejected"; reason: string } {
-  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, phrenPath } = opts;
+  const { finding: learning, project, fullHistory, extraAnnotations, citationInput, scope, provenance, nowIso, inferredRepo, headCommit, idSource } = opts;
   const secretType = scanForSecrets(learning);
   if (secretType) {
     return { status: "rejected", reason: `Contains ${secretType}` };
@@ -179,7 +207,7 @@ function prepareFinding(
       normalizedLearning = `[${detected}] ${normalizedLearning}`;
     }
   }
-  const fid = crypto.randomBytes(4).toString("hex");
+  const fid = (idSource ?? defaultFindingIdSource)();
   const fidComment = `<!-- fid:${fid} -->`;
   const createdComment = `<!-- created: ${today} -->`;
   const scopeComment = buildScopeComment(scope);
@@ -193,20 +221,14 @@ function prepareFinding(
     return { status: "duplicate" };
   }
 
-  const existingBullets = fullHistory.split("\n").filter((l) => l.startsWith("- "));
-  const dynamicEntities = phrenPath ? extractDynamicEntities(phrenPath, project) : undefined;
-  const conflicts = detectConflicts(normalizedLearning, existingBullets, dynamicEntities);
-  if (conflicts.length > 0) {
-    const snippet = conflicts[0].replace(/^-\s+/, "").replace(/<!--.*?-->/g, "").trim().slice(0, 80);
-    lifecycle = {
-      status: "contradicted",
-      status_updated: today,
-      status_reason: "conflicts_with",
-      status_ref: snippet,
-    };
-    bullet += ` <!-- conflicts_with: "${snippet}" --> <!-- phren:contradicts "${snippet}" -->`;
-    debugLog(`add_finding: conflict detected for "${project}": ${snippet}`);
-  }
+  // NOTE: heuristic contradiction detection is intentionally NOT done here. The lexical
+  // heuristic (shared entity + opposing polarity) produces false positives, so it must
+  // never silently mutate the stored finding's status. Instead the MCP add_finding tool
+  // surfaces heuristic conflict *candidates* (via findConflictCandidates) in its response
+  // so the calling agent — an LLM already in the loop with full context — can judge them,
+  // exactly as it already does for potential duplicates. A hard "contradicted" status is
+  // reserved for the LLM-confirmed path (checkSemanticConflicts) and explicit user
+  // resolution via resolve_contradiction.
   if (extraAnnotations && extraAnnotations.length > 0) {
     const lifecycleFromExtra = parseFindingLifecycle(`- lifecycle ${extraAnnotations.join(" ")}`);
     if (
@@ -274,7 +296,7 @@ function insertFindingIntoContent(content: string, today: string, bullet: string
 
 export function upsertCanonical(phrenPath: string, project: string, memory: string): PhrenResult<string> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const canonicalPath = path.join(resolvedDir, "truths.md");
   const today = new Date().toISOString().slice(0, 10);
@@ -311,12 +333,12 @@ export function addFindingToFile(
   const findingError = validateFinding(learning);
   if (findingError) return phrenErr(findingError, PhrenError.EMPTY_INPUT);
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 
   // Secret/PII scan — reject before anything else (before existence check, before lock)
-  const nowIso = new Date().toISOString();
+  const nowIso = (opts?.now ?? new Date()).toISOString();
   const today = nowIso.slice(0, 10);
   const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project, citationInput);
   if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
@@ -344,6 +366,7 @@ export function addFindingToFile(
     const preparedForNewFile = prepareFinding({
       finding: learning, project, fullHistory: "", extraAnnotations: opts?.extraAnnotations,
       citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+      idSource: opts?.idSource,
     });
     if (!fs.existsSync(learningsPath)) {
       if (preparedForNewFile.status === "rejected") {
@@ -378,6 +401,7 @@ export function addFindingToFile(
     const prepared = prepareFinding({
       finding: learning, project, fullHistory: historyForDedup, extraAnnotations: opts?.extraAnnotations,
       citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, inferredRepo, headCommit, phrenPath,
+      idSource: opts?.idSource,
     });
     if (prepared.status === "rejected") {
       return phrenErr(`Rejected: finding appears to contain a secret (${prepared.reason.replace(/^Contains /, "")}). Strip credentials before saving.`, PhrenError.VALIDATION_ERROR);
@@ -475,7 +499,7 @@ export function addFindingsToFile(
   opts?: { extraAnnotationsByFinding?: string[][]; sessionId?: string; scope?: string; provenance?: FindingProvenance }
 ): PhrenResult<{ added: string[]; skipped: string[]; rejected: { text: string; reason: string }[] }> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const learningsPath = path.join(resolvedDir, FINDINGS_FILENAME);
 

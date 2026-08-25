@@ -80,6 +80,56 @@ export async function runBestEffortGit(args: string[], cwd: string): Promise<{ o
   return { ok: false, error: "git command failed" };
 }
 
+/**
+ * True when local HEAD and the tracking branch share no common ancestor.
+ *
+ * This is what happens when a store's remote is re-initialized: every
+ * `pull --rebase` fails, the rebase is aborted, and the next commit re-enters
+ * the same loop forever. A generic "pull failed" sends the user chasing
+ * network problems, so it is worth naming — no retry will ever fix it.
+ *
+ * Returns false when there is no upstream, or when git cannot answer; callers
+ * treat that as "some other failure" and report the raw error instead.
+ */
+export async function hasUnrelatedHistories(cwd: string): Promise<boolean> {
+  const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
+  if (!upstream.ok || !upstream.output) return false;
+
+  // Make sure we are comparing against what the remote actually has now.
+  await runBestEffortGit(["fetch", "--quiet"], cwd);
+
+  const localHead = await runBestEffortGit(["rev-parse", "HEAD"], cwd);
+  const remoteHead = await runBestEffortGit(["rev-parse", upstream.output.trim()], cwd);
+  if (!localHead.ok || !remoteHead.ok || !localHead.output || !remoteHead.output) return false;
+
+  // `merge-base` exits non-zero with no output when the two commits are
+  // unrelated, which is exactly the signal we want.
+  const mergeBase = await runBestEffortGit(["merge-base", localHead.output.trim(), remoteHead.output.trim()], cwd);
+  return !mergeBase.ok || !mergeBase.output?.trim();
+}
+
+/**
+ * Files phren is allowed to auto-stage in a team store. Anything not in this
+ * list (notably `.runtime/`, secrets, build output) is skipped on session-stop
+ * and `push_changes`.
+ */
+export const TEAM_STORE_PATHSPECS = [
+  "*/journal/*",
+  "*/tasks.md",
+  "*/truths.md",
+  "*/FINDINGS.md",
+  "*/FINDINGS.md.bak",
+  "*/summary.md",
+  "*/review.md",
+  "*/CLAUDE.md",
+  "*/topic-config.json",
+  "*/phren.project.yaml",
+  "*/reference/**",
+  "*/skills/**",
+  "*/notes/**",
+  ".phren-team.yaml",
+] as const;
+
 export async function countUnsyncedCommits(cwd: string): Promise<number> {
   const upstream = await runBestEffortGit(["rev-parse", "--abbrev-ref", "@{upstream}"], cwd);
   if (!upstream.ok || !upstream.output) {

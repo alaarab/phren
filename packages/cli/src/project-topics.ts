@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { debugLog } from "./shared.js";
 import { withFileLock } from "./shared/governance.js";
-import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName, safeProjectPath } from "./utils.js";
+import { STOP_WORDS, errorMessage, extractKeywords, isValidProjectName } from "./utils.js";
+import { storeAwareProjectPath } from "./store-routing.js";
 import { walkDirectory } from "./shared/data-utils.js";
 import { FINDINGS_FILENAME } from "./data/access.js";
 
@@ -478,11 +479,11 @@ function ensureGeneralTopic(topics: ProjectTopic[]): ProjectTopic[] {
 }
 
 function topicConfigPath(phrenPath: string, project: string): string | null {
-  return safeProjectPath(phrenPath, project, TOPIC_CONFIG_FILENAME);
+  return storeAwareProjectPath(phrenPath, project, TOPIC_CONFIG_FILENAME);
 }
 
 function projectDirPath(phrenPath: string, project: string): string | null {
-  return safeProjectPath(phrenPath, project);
+  return storeAwareProjectPath(phrenPath, project);
 }
 
 function topicReferenceRelativePath(slug: string): string {
@@ -490,7 +491,7 @@ function topicReferenceRelativePath(slug: string): string {
 }
 
 export function topicReferencePath(phrenPath: string, project: string, slug: string): string | null {
-  return safeProjectPath(phrenPath, project, "reference", "topics", `${normalizeTopicSlug(slug)}.md`);
+  return storeAwareProjectPath(phrenPath, project, "reference", "topics", `${normalizeTopicSlug(slug)}.md`);
 }
 
 function readJsonFile<T>(filePath: string): T | null {
@@ -514,12 +515,12 @@ function countByTerm(terms: string[]): Map<string, number> {
 function readTopicInputContent(phrenPath: string, project: string): string[] {
   const parts: string[] = [];
   for (const file of ["CLAUDE.md", FINDINGS_FILENAME]) {
-    const filePath = safeProjectPath(phrenPath, project, file);
+    const filePath = storeAwareProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8").trim();
     if (content) parts.push(content);
   }
-  const referenceDir = safeProjectPath(phrenPath, project, "reference");
+  const referenceDir = storeAwareProjectPath(phrenPath, project, "reference");
   if (referenceDir && fs.existsSync(referenceDir)) {
     for (const filePath of readReferenceMarkdownFiles(referenceDir)) {
       try {
@@ -932,7 +933,7 @@ export function listProjectReferenceDocs(phrenPath: string, project: string, top
   const projectDir = projectDirPath(phrenPath, project);
   if (!projectDir) return { topicDocs: [], otherDocs: [] };
   const topicDocs = listProjectTopicDocs(phrenPath, project, topics);
-  const referenceDir = safeProjectPath(phrenPath, project, "reference");
+  const referenceDir = storeAwareProjectPath(phrenPath, project, "reference");
   if (!referenceDir || !fs.existsSync(referenceDir)) return { topicDocs, otherDocs: [] };
   const otherDocs: ProjectReferenceDocInfo[] = [];
   for (const filePath of readReferenceMarkdownFiles(referenceDir)) {
@@ -954,7 +955,7 @@ export function listProjectReferenceDocs(phrenPath: string, project: string, top
 
 function listLegacyTopicDocs(phrenPath: string, project: string): LegacyTopicDocInfo[] {
   const projectDir = projectDirPath(phrenPath, project);
-  const referenceDir = safeProjectPath(phrenPath, project, "reference");
+  const referenceDir = storeAwareProjectPath(phrenPath, project, "reference");
   if (!projectDir || !referenceDir || !fs.existsSync(referenceDir)) return [];
   const files = fs.readdirSync(referenceDir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
@@ -995,7 +996,7 @@ function tokenizeSuggestionTerms(text: string): string[] {
 function collectSuggestionCorpus(phrenPath: string, project: string): string {
   const parts: string[] = [];
   for (const file of ["CLAUDE.md", "summary.md", FINDINGS_FILENAME]) {
-    const filePath = safeProjectPath(phrenPath, project, file);
+    const filePath = storeAwareProjectPath(phrenPath, project, file);
     if (!filePath || !fs.existsSync(filePath)) continue;
     const content = fs.readFileSync(filePath, "utf8");
     if (file === FINDINGS_FILENAME) {
@@ -1117,9 +1118,9 @@ export function getProjectTopicsResponse(phrenPath: string, project: string): Pr
 function resolveReferenceContentPath(phrenPath: string, project: string, file: string): string | null {
   if (!isValidProjectName(project) || !file || file.includes("\0")) return null;
   if (!file.endsWith(".md")) return null;
-  const filePath = safeProjectPath(phrenPath, project, file);
+  const filePath = storeAwareProjectPath(phrenPath, project, file);
   if (!filePath) return null;
-  const referenceRoot = safeProjectPath(phrenPath, project, "reference");
+  const referenceRoot = storeAwareProjectPath(phrenPath, project, "reference");
   if (!referenceRoot) return null;
   const normalizedRoot = referenceRoot + path.sep;
   if (filePath !== referenceRoot && !filePath.startsWith(normalizedRoot)) return null;
@@ -1135,7 +1136,7 @@ export function readReferenceContent(phrenPath: string, project: string, file: s
 
 export function reclassifyLegacyTopicDocs(phrenPath: string, project: string): ReclassifyTopicsResult {
   const { topics } = readProjectTopics(phrenPath, project);
-  const referenceDir = safeProjectPath(phrenPath, project, "reference");
+  const referenceDir = storeAwareProjectPath(phrenPath, project, "reference");
   if (!referenceDir || !fs.existsSync(referenceDir)) return { movedFiles: 0, movedEntries: 0, skipped: [] };
   const skipped: Array<{ file: string; reason: string }> = [];
   const archivedBullets = collectArchivedBulletsRecursively(path.join(referenceDir, "topics"));

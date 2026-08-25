@@ -87,6 +87,9 @@ describe("setAccessRoles", () => {
 
   it("merges with existing global roles, replacing only the provided keys", () => {
     setAccessRoles(phrenPath, { admins: ["alice"], readers: ["carol"] });
+    // Once an ACL exists, editing it requires an admin actor — same rule as
+    // every other action under a configured ACL.
+    process.env.PHREN_ACTOR = "alice";
     setAccessRoles(phrenPath, { admins: ["dave"] });
     const stored = readGlobal();
     expect(stored.admins).toEqual(["dave"]);
@@ -151,6 +154,10 @@ describe("contributor role", () => {
     expect(permissionDeniedError(phrenPath, "add_task")).toBeNull();
     expect(permissionDeniedError(phrenPath, "complete_task")).toBeNull();
     expect(permissionDeniedError(phrenPath, "edit_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "edit_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "remove_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "promote_note")).toBeNull();
   });
 
   it("blocks contributors from admin-only actions", () => {
@@ -178,6 +185,7 @@ describe("reader role", () => {
     expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "remove_finding")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "add_task")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "manage_config")).not.toBeNull();
   });
 });
@@ -219,6 +227,94 @@ describe("no PHREN_ACTOR set", () => {
     });
     delete process.env.PHREN_ACTOR;
     expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+  });
+});
+
+// ── Privilege escalation via the ACL writer ──────────────────────────────────
+//
+// `manage_config` was declared admin-only in the role table and then never
+// checked anywhere, while setAccessRoles — reachable from MCP `set_config`,
+// the web UI's POST /api/settings/access, and `phren config access set` —
+// wrote the ACL unguarded. Any actor the ACL denied could add itself to
+// `admins` and undo every other check. These tests exist so that cannot
+// silently come back.
+
+describe("ACL self-escalation", () => {
+  function storedAdmins(): unknown {
+    const file = path.join(phrenPath, ".config", "access-control.json");
+    return JSON.parse(fs.readFileSync(file, "utf8")).admins;
+  }
+
+  beforeEach(() => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+      readers: ["reader-user"],
+    });
+  });
+
+  it("blocks a contributor from writing itself into admins", () => {
+    process.env.PHREN_ACTOR = "contrib-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["contrib-user"] })).toThrow(/Permission denied/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks a reader from rewriting the ACL", () => {
+    process.env.PHREN_ACTOR = "reader-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["reader-user"] })).toThrow(/Permission denied/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks an actor that is not listed at all", () => {
+    process.env.PHREN_ACTOR = "mallory";
+    expect(() => setAccessRoles(phrenPath, { admins: ["mallory"] })).toThrow(/not listed/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks an unset actor once an ACL is configured", () => {
+    delete process.env.PHREN_ACTOR;
+    expect(() => setAccessRoles(phrenPath, { admins: ["nobody"] })).toThrow(/PHREN_ACTOR/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("still lets an admin edit the ACL", () => {
+    process.env.PHREN_ACTOR = "admin-user";
+    const written = setAccessRoles(phrenPath, { admins: ["admin-user", "second-admin"] });
+    expect(written.admins).toEqual(["admin-user", "second-admin"]);
+  });
+
+  it("blocks escalation through the per-project ACL too", () => {
+    writeProjectYaml(phrenPath, "myproject", [
+      "access:",
+      "  contributors:",
+      "    - contrib-user",
+    ].join("\n"));
+    process.env.PHREN_ACTOR = "contrib-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["contrib-user"] }, "myproject")).toThrow(/Permission denied/);
+    expect(readProjectConfig(phrenPath, "myproject").access?.admins ?? []).toEqual([]);
+  });
+});
+
+describe("ACL bootstrap stays possible", () => {
+  it("allows the first write when no ACL exists anywhere (open mode)", () => {
+    delete process.env.PHREN_ACTOR;
+    const written = setAccessRoles(phrenPath, { admins: ["first-admin"] });
+    expect(written.admins).toEqual(["first-admin"]);
+  });
+
+  it("allows a write when the ACL exists but every role list is empty", () => {
+    writeAccessControl(phrenPath, { admins: [], contributors: [], readers: [] });
+    delete process.env.PHREN_ACTOR;
+    const written = setAccessRoles(phrenPath, { admins: ["first-admin"] });
+    expect(written.admins).toEqual(["first-admin"]);
+  });
+
+  it("allows the first per-project write when only a global ACL names the actor", () => {
+    writeAccessControl(phrenPath, { admins: ["admin-user"] });
+    writeProjectYaml(phrenPath, "myproject", "version: 1\n");
+    process.env.PHREN_ACTOR = "admin-user";
+    const written = setAccessRoles(phrenPath, { contributors: ["bob"] }, "myproject");
+    expect(written.contributors).toEqual(["bob"]);
   });
 });
 

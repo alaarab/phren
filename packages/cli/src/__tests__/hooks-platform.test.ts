@@ -7,6 +7,7 @@ import {
   configureAllHooks,
   readCustomHooks,
   runCustomHooks,
+  isEphemeralNpxPath,
   type CustomHookEvent,
 } from "../hooks.js";
 import { makeTempDir } from "../test-helpers.js";
@@ -101,6 +102,21 @@ describe("hooks platform compatibility", () => {
       for (const cmd of [cmds.sessionStart, cmds.userPromptSubmit, cmds.stop, cmds.hookTool]) {
         expect(cmdContainsPath(cmd, phrenPath)).toBe(true);
       }
+    });
+  });
+
+  describe("isEphemeralNpxPath", () => {
+    it("flags posix npx cache paths", () => {
+      expect(isEphemeralNpxPath("/home/u/.npm/_npx/bdb5dcd91e5f08ef/node_modules/@phren/cli/dist/index.js")).toBe(true);
+    });
+    it("flags windows npx cache paths", () => {
+      expect(isEphemeralNpxPath("C:\\Users\\u\\AppData\\npm-cache\\_npx\\ab12\\node_modules\\@phren\\cli\\dist\\index.js")).toBe(true);
+    });
+    it("does not flag stable install paths", () => {
+      expect(isEphemeralNpxPath("/home/u/.local/bin/phren")).toBe(false);
+      expect(isEphemeralNpxPath("/usr/lib/node_modules/@phren/cli/dist/index.js")).toBe(false);
+      // A directory literally named "_npxthings" must not false-positive.
+      expect(isEphemeralNpxPath("/home/u/_npxthings/index.js")).toBe(false);
     });
   });
 

@@ -20,6 +20,8 @@ import {
   detectProject,
 } from "./hooks-context.js";
 import { logger } from "../logger.js";
+import { findingQualityReason } from "../content/quality.js";
+import { rotateJsonlIfLarge } from "../phren-paths.js";
 import {
   buildIndex,
   queryRows,
@@ -152,6 +154,7 @@ export async function handleHookTool() {
     try {
       const logFile = runtimeFile(ctx.phrenPath, "tool-log.jsonl");
       fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      rotateJsonlIfLarge(logFile);
       fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
     } catch (err: unknown) {
       logger.debug("hooks-session", `hookTool toolLog: ${errorMessage(err)}`);
@@ -242,10 +245,12 @@ interface LearningCandidate {
 }
 
 // Negative lookahead `(?!\(|\[)` rejects markdown link/reference patterns:
-//   [Architecture](#architecture)  ← TOC anchor, content was being captured as "(#architecture)"
-//   [bug][1]                       ← markdown reference link, content was being captured as "[1]"
-// produced garbage review-queue entries like "[architecture] (#architecture)".
-const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|tradeoff|architecture|bug)\](?!\(|\[)\s*(.+)/i;
+//   [Pattern](#pattern)  ← TOC anchor, content was being captured as "(#pattern)"
+//   [bug][1]             ← markdown reference link, content was being captured as "[1]"
+// produced garbage review-queue entries like "[pattern] (#pattern)".
+// Tag list mirrors FINDING_TAGS (phren-core.ts): everything phren can write,
+// offered or auto-detected, not just the smaller offered FINDING_TYPES set.
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|bug|workaround|context)\](?!\(|\[)\s*(.+)/i;
 
 export function filterToolFindingsForProactivity(
   candidates: Array<{ text: string; confidence: number; explicit?: boolean }>,
@@ -357,7 +362,15 @@ export function extractToolFindings(
     }
   }
 
-  return candidates;
+  // Single quality gate for everything this hook scrapes. Explicit [tag] matches are not
+  // exempt: the tag scraper happily matched phren's own prompt text and code fragments
+  // like `[pattern] ");` and queued them for review.
+  return candidates.filter((candidate) => {
+    const reason = findingQualityReason(candidate.text);
+    if (!reason) return true;
+    debugLog(`extractToolFindings: rejected (${reason}): ${candidate.text.slice(0, 80)}`);
+    return false;
+  });
 }
 
 // ── Context hook handler ────────────────────────────────────────────────────

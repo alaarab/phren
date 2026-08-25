@@ -1,7 +1,7 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, StreamDelta } from "./types.js";
 import { toOpenAiTools, toOpenAiMessages, parseOpenAiResponse, parseOpenAiStream } from "./openai-compat.js";
 import type { ReasoningEffort } from "../models.js";
-import { lookupMaxOutputTokens } from "../models.js";
+import { lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
 export class OpenRouterProvider implements LlmProvider {
   name = "openrouter";
@@ -21,7 +21,7 @@ export class OpenRouterProvider implements LlmProvider {
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
       max_tokens: this.maxOutputTokens,
     };
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
@@ -42,13 +42,13 @@ export class OpenRouterProvider implements LlmProvider {
       throw new Error(`OpenRouter API error ${res.status}: ${text}`);
     }
 
-    return parseOpenAiResponse(await res.json() as Record<string, unknown>);
+    return parseOpenAiResponse(await res.json() as Record<string, unknown>, this.name);
   }
 
   async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
       max_tokens: this.maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },
@@ -96,7 +96,7 @@ export class OpenAiProvider implements LlmProvider {
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
       max_tokens: this.maxOutputTokens,
     };
     if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort;
@@ -113,13 +113,13 @@ export class OpenAiProvider implements LlmProvider {
       throw new Error(`OpenAI API error ${res.status}: ${text}`);
     }
 
-    return parseOpenAiResponse(await res.json() as Record<string, unknown>);
+    return parseOpenAiResponse(await res.json() as Record<string, unknown>, this.name);
   }
 
   async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: toOpenAiMessages(system, messages),
+      messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
       max_tokens: this.maxOutputTokens,
       stream: true,
       stream_options: { include_usage: true },

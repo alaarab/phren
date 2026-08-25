@@ -3,6 +3,7 @@ import { OpenRouterProvider, OpenAiProvider } from "./openrouter.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { OllamaProvider } from "./ollama.js";
 import { CodexProvider } from "./codex.js";
+import { ReplayProvider } from "./replay.js";
 import { hasCodexToken } from "./codex-auth.js";
 import { resolveApiKey } from "@phren/cli/auth/profiles";
 import {
@@ -39,6 +40,12 @@ export function resolveProvider(
   overrideMaxOutput?: number,
   overrideReasoning?: string,
 ): LlmProvider {
+  // Keyless replay of a recorded session — takes precedence over everything
+  // so regression tests can run the real binary with no credentials at all.
+  if (process.env.PHREN_AGENT_REPLAY) {
+    return ReplayProvider.fromEventLog(process.env.PHREN_AGENT_REPLAY);
+  }
+
   const { provider: explicit, model: normalizedModel } = normalizeProviderSelection(overrideProvider, overrideModel);
   const normalizedReasoning = normalizeReasoningEffort(overrideReasoning ?? process.env.PHREN_AGENT_REASONING);
   const openRouterKey = resolveApiKey("openrouter", "OPENROUTER_API_KEY");
@@ -70,7 +77,13 @@ export function resolveProvider(
   if (explicit === "anthropic" || (!explicit && anthropicKey)) {
     if (!anthropicKey) throw new Error("Anthropic credentials are required. Set ANTHROPIC_API_KEY or run 'phren auth set-key anthropic'.");
     const model = normalizedModel ?? getDefaultModel("anthropic");
-    return new AnthropicProvider(anthropicKey, model, resolveLimit("anthropic", model));
+    return new AnthropicProvider(
+      anthropicKey,
+      model,
+      resolveLimit("anthropic", model),
+      true,
+      resolveReasoning("anthropic", model),
+    );
   }
 
   if (explicit === "ollama" || (!explicit && process.env.PHREN_OLLAMA_URL && process.env.PHREN_OLLAMA_URL !== "off")) {

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getProjectDirs } from "./phren-paths.js";
 import { PhrenError } from "./phren-core.js";
-import { isValidProjectName } from "./utils.js";
+import { isValidProjectName, safeProjectPath } from "./utils.js";
 import { resolveAllStores, type StoreEntry } from "./store-registry.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -134,6 +134,27 @@ export function listAllProjects(
   }
 
   return results;
+}
+
+/**
+ * Store-aware variant of safeProjectPath for callers holding the primary store
+ * root: when the project directory does not exist in `phrenPath`, resolve the
+ * owning store from the registry and build the path under it instead. Falls
+ * back to the (nonexistent) primary-store path when the project is in no store
+ * or is ambiguous, so callers' existing not-found handling fires unchanged.
+ */
+export function storeAwareProjectPath(phrenPath: string, project: string, ...segments: string[]): string | null {
+  let root = phrenPath;
+  const primaryDir = safeProjectPath(phrenPath, project);
+  if (!primaryDir) return null;
+  if (!fs.existsSync(primaryDir)) {
+    try {
+      root = resolveProject(phrenPath, project).store.path;
+    } catch {
+      // keep the primary root
+    }
+  }
+  return safeProjectPath(root, project, ...segments);
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────

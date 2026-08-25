@@ -2,6 +2,17 @@
 
 All environment variables are optional. phren uses sensible defaults when they are not set.
 
+## Management presets
+
+How much of your machine phren wires up is controlled by a **management preset**
+(`managed` | `assisted` | `manual`), set with `phren init --preset <name>` and
+switchable anytime with `phren preset <name>`. The preset lives in
+`install-preferences.json` (absent → `managed`). `managed` is the default and
+symlinks into `~/.claude`, installs wrappers, and self-heals every session;
+`assisted` keeps hooks + MCP but writes nothing outside the store; `manual` is an
+MCP server only. See [footprint.md](footprint.md) for a full path-by-path table
+and precedence rules. `phren status` shows the active preset and what it touches.
+
 ## Core
 
 | Variable | Type | Default | Description |
@@ -10,6 +21,7 @@ All environment variables are optional. phren uses sensible defaults when they a
 | `PHREN_PROFILE` | string | (empty) | Active profile name. Filters which projects are indexed. When empty, all projects are indexed. |
 | `PHREN_DEBUG` | `0` or `1` | `0` | Set to `1` to enable debug logging to `~/.phren/debug.log`. |
 | `PHREN_ACTOR` | string | `$USER` or `$USERNAME` | Identifies who performed a governance action. Used in audit logs and access control checks. |
+| `PHREN_SKIP_GLOBAL_NPM_UNINSTALL` | `0` or `1` | `0` | Set to `1` to make `phren uninstall` leave the global npm package (`@phren/cli`) installed. `npm uninstall -g` targets the machine's real npm prefix, which `PHREN_PATH`/`HOME` cannot redirect — set this whenever you run `phren uninstall` against a sandboxed store you don't want affecting the machine. The test helpers set it for every spawned CLI. |
 
 ## Context Injection (hook-prompt)
 

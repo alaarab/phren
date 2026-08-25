@@ -21,25 +21,39 @@ async function openGraph(page: Page): Promise<void> {
   await page.goto(harness.secureUrl, { waitUntil: "domcontentloaded" });
   await page.locator("button.nav-item").filter({ hasText: "Graph" }).click();
   await expect(page.locator("#graph-canvas")).toBeVisible();
-  // Wait for the Sigma runtime to mount with real nodes.
+  // Wait for the Three.js runtime to mount with real, positioned nodes.
   await page.waitForFunction(() => {
     const g = (window as unknown as { phrenGraph?: { __renderer?: string; getData?: () => { nodes: unknown[] } } }).phrenGraph;
-    return !!g && g.__renderer === "sigma" && !!g.getData && g.getData().nodes.length > 0;
+    return !!g && g.__renderer === "three" && !!g.getData && g.getData().nodes.length > 0;
   }, undefined, { timeout: 15_000 });
+  // Give the force layout a moment to assign world positions (walkTo needs them).
+  await page.waitForTimeout(1500);
 }
 
 test.describe.serial("web-ui graph walk (phren follows the live feed)", () => {
   test.beforeAll(async () => { harness = await createWebUiHarness(); });
   test.afterAll(async () => { await harness.cleanup(); });
 
-  test("exposes a walkTo API and renders the mascot overlay", async ({ page }) => {
+  test("walkTo targets real nodes and rejects unknown ids", async ({ page }) => {
     await openGraph(page);
 
-    const hasWalkTo = await page.evaluate(() => typeof (window as unknown as { phrenGraph?: { walkTo?: unknown } }).phrenGraph?.walkTo === "function");
-    expect(hasWalkTo).toBe(true);
+    const result = await page.evaluate(() => {
+      const g = (window as unknown as { phrenGraph: { walkTo: (id: string) => boolean; getData: () => { nodes: Array<{ id: string }> } } }).phrenGraph;
+      if (typeof g?.walkTo !== "function") return { hasWalkTo: false, real: false, bogus: true };
+      const first = g.getData().nodes[0];
+      return {
+        hasWalkTo: true,
+        real: first ? g.walkTo(first.id) : false,
+        bogus: g.walkTo("finding:does-not-exist"),
+      };
+    });
+    expect(result.hasWalkTo).toBe(true);
+    expect(result.real).toBe(true);
+    expect(result.bogus).toBe(false);
 
-    // The mascot runs on an overlay <canvas> appended inside #graph-canvas.
-    await expect.poll(async () => page.locator("#graph-canvas canvas").count(), { timeout: 5_000 }).toBeGreaterThan(1);
+    // The mascot lives inside the single WebGL canvas as a sprite — no
+    // overlay canvas (that was the old Sigma renderer's design).
+    await expect.poll(async () => page.locator("#graph-canvas canvas").count()).toBeGreaterThan(0);
   });
 
   test("a live lookup sends phren walking to the matching node", async ({ page }) => {

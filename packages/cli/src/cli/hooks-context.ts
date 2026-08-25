@@ -77,6 +77,7 @@ export {
   EXEC_TIMEOUT_MS,
   getProjectDirs,
   findProjectNameCaseInsensitive,
+  projectSlugFromPath,
   homePath,
 } from "../shared.js";
 export {

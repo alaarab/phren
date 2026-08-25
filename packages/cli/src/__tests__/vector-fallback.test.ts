@@ -9,6 +9,10 @@ vi.mock("../shared/ollama.js", () => ({
   getEmbeddingModel: vi.fn().mockReturnValue("nomic-embed-text"),
   getOllamaUrl: vi.fn().mockReturnValue("http://localhost:11434"),
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
+  // Reachability gating and its budget are covered in embedding-hook-path.test.ts;
+  // here the backend is simply assumed up so hydration is what gets exercised.
+  isEmbeddingBackendReachable: vi.fn().mockResolvedValue(true),
+  getVectorQueryTimeoutMs: vi.fn().mockReturnValue(5000),
 }));
 
 vi.mock("../shared/embedding-cache.js", () => {
@@ -18,6 +22,7 @@ vi.mock("../shared/embedding-cache.js", () => {
       size: () => entries.length,
       load: vi.fn(),
       getAllEntries: () => entries,
+      sourceMarker: () => null,
       _setEntries: (e: typeof entries) => { entries = e; },
     }),
   };

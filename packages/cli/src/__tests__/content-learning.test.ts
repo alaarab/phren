@@ -114,6 +114,24 @@ describe("addFindings bulk", () => {
   });
 });
 
+describe("addFinding does not auto-mark heuristic conflicts", () => {
+  it("keeps a conflicting finding active and writes no conflict marker (the agent decides instead)", () => {
+    const r1 = addFindingToFile(tmp.path, PROJECT, "Always use Docker for build caching to speed up local development");
+    expect(r1.ok).toBe(true);
+
+    const r2 = addFindingToFile(tmp.path, PROJECT, "Never use Docker for build caching — bare metal is faster for our pipeline");
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.data.status).toBe("added");
+
+    const content = fs.readFileSync(findingsPath(), "utf-8");
+    // The stored finding is never silently demoted or annotated by the lexical heuristic —
+    // contradiction handling is surfaced to the agent by the MCP tool, not written to disk here.
+    expect(content).not.toContain('phren:status "contradicted"');
+    expect(content).not.toContain("phren:contradicts");
+    expect(content).not.toContain("phren:possible_conflict");
+  });
+});
+
 describe("supersession", () => {
   it("marks old finding as superseded when new one specifies supersedes", () => {
     const oldFinding = "Use Redis for caching with default TTL settings";

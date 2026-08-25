@@ -11,9 +11,9 @@ import {
   getProjectDirs,
 } from "../shared.js";
 import { validateTaskFormat } from "../shared/content.js";
-import { safeProjectPath } from "../utils.js";
 import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
@@ -224,9 +224,9 @@ export function applyGravity(items: TaskItem[]): TaskItem[] {
 }
 
 export function canonicalTaskFilePath(phrenPath: string, project: string): string | null {
-  const resolved = safeProjectPath(phrenPath, project);
-  if (!resolved) return null;
-  return path.join(resolved, TASKS_FILENAME);
+  // Store-aware: locks and writes must target the owning store's file, not a
+  // phantom primary-store path.
+  return storeAwareProjectPath(phrenPath, project, TASKS_FILENAME);
 }
 
 export function isTaskFileName(filename: string): boolean {
@@ -551,6 +551,8 @@ export function addTasks(phrenPath: string, project: string, items: string[], op
 export function completeTasks(phrenPath: string, project: string, matches: string[]): PhrenResult<{ completed: string[]; errors: string[] }> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -578,6 +580,8 @@ export function completeTasks(phrenPath: string, project: string, matches: strin
 export function completeTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -599,6 +603,8 @@ export function completeTask(phrenPath: string, project: string, match: string):
 export function removeTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -617,6 +623,8 @@ export function removeTask(phrenPath: string, project: string, match: string): P
 export function removeTasks(phrenPath: string, project: string, matches: string[]): PhrenResult<{ removed: string[]; errors: string[] }> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -655,6 +663,8 @@ export function updateTask(
 ): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -737,6 +747,8 @@ export function updateTask(
 export function pinTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -761,6 +773,8 @@ export function pinTask(phrenPath: string, project: string, match: string): Phre
 export function unpinTask(phrenPath: string, project: string, match: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -782,6 +796,8 @@ export function unpinTask(phrenPath: string, project: string, match: string): Ph
 export function reorderTask(phrenPath: string, project: string, match: string, targetRank: number): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -818,6 +834,8 @@ export function reorderTask(phrenPath: string, project: string, match: string, t
 export function appendChildFinding(phrenPath: string, project: string, match: string, findingId: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -839,6 +857,8 @@ export function appendChildFinding(phrenPath: string, project: string, match: st
 export function promoteTask(phrenPath: string, project: string, match: string, moveToActive: boolean): PhrenResult<TaskItem> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -866,6 +886,8 @@ export function promoteTask(phrenPath: string, project: string, match: string, m
 export function workNextTask(phrenPath: string, project: string): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -893,6 +915,8 @@ export function workNextTask(phrenPath: string, project: string): PhrenResult<st
 export function tidyDoneTasks(phrenPath: string, project: string, keep: number = 30, dryRun?: boolean): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
@@ -910,7 +934,9 @@ export function tidyDoneTasks(phrenPath: string, project: string, keep: number =
 
     parsed.data.items.Done = parsed.data.items.Done.slice(0, safeKeep);
 
-    const archiveFile = taskArchivePath(phrenPath, project);
+    // Archive into the store that owns the tasks file (bPath = <store>/<project>/tasks.md),
+    // so secondary-store task history never lands in the primary store's .config.
+    const archiveFile = taskArchivePath(path.dirname(path.dirname(bPath)), project);
     fs.mkdirSync(path.dirname(archiveFile), { recursive: true });
     const stamp = new Date().toISOString();
     const lines = archived.map((item) => `- [x] ${item.line}${item.context ? `\n  Context: ${item.context}` : ""}`);
@@ -937,6 +963,8 @@ export function linkTaskIssue(
 ): PhrenResult<TaskItem> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
 
   return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);

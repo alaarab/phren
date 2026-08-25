@@ -257,17 +257,18 @@ describe("extractToolFindings", () => {
     expect(errorHandling).toBeUndefined();
   });
 
-  it("emits [bug] for Bash with explicit is_error signal on a non-noisy command", () => {
+  it("does NOT emit [bug] for a failing Bash command (transient log, not a finding)", () => {
+    // A shell failure records one machine's state on one day. Observed stores accumulated
+    // 56 of these in a single project, e.g. "[bug] command 'phren doctor --fix 2>&1 | tail'
+    // failed: EACCES ... mkdir '/home/alaarab/emv/.claude/skills'". The quality gate in
+    // content/quality.ts rejects the whole template.
     const candidates = extractToolFindings(
       "Bash",
       { command: "npm run build" },
       "Error: Cannot find module '@/utils'\n  at Module._resolveFilename",
       { is_error: true, stdout: "", stderr: "Error: Cannot find module" }
     );
-    const bug = candidates.find((c) => c.text.includes("[bug]"));
-    expect(bug).toBeDefined();
-    expect(bug!.confidence).toBe(0.55);
-    expect(bug!.text).toContain("npm run build");
+    expect(candidates.find((c) => c.text.includes("[bug]"))).toBeUndefined();
   });
 
   it("does NOT emit [bug] for Bash without an explicit error signal (no exit_code, no is_error)", () => {
@@ -311,15 +312,14 @@ describe("extractToolFindings", () => {
     expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
   });
 
-  it("emits [bug] for non-noisy command with non-zero exit_code even without is_error", () => {
+  it("does NOT emit [bug] for a non-zero exit_code either", () => {
     const candidates = extractToolFindings(
       "Bash",
       { command: "cargo test" },
       "test result: FAILED. 0 passed; 3 failed",
       { exit_code: 101 }
     );
-    const bug = candidates.find((c) => c.text.startsWith("[bug] command"));
-    expect(bug).toBeDefined();
+    expect(candidates.find((c) => c.text.startsWith("[bug] command"))).toBeUndefined();
   });
 
   it("returns empty for normal successful tool output", () => {
@@ -338,16 +338,19 @@ describe("extractToolFindings", () => {
     expect(bug!.confidence).toBe(0.85);
   });
 
-  it("does NOT capture markdown TOC anchors as [architecture] (#architecture) entries", () => {
-    // Regression: a README with `- [Architecture](#architecture)` used to match
-    // EXPLICIT_TAG_PATTERN and emit "[architecture] (#architecture)" candidates.
+  it("does NOT capture markdown TOC anchors as [pattern] (#pattern) entries", () => {
+    // Regression: a README with `- [Pattern](#pattern)` used to match
+    // EXPLICIT_TAG_PATTERN and emit "[pattern] (#pattern)" candidates.
+    // (Originally reproduced with "[Architecture](#architecture)" — that tag
+    // was dropped from the vocabulary, so the example now uses "pattern",
+    // which is still offered/produced and still needs the same guard.)
     const candidates = extractToolFindings(
       "Read",
       { file_path: "/repo/README.md" },
-      "## Table of Contents\n- [Architecture](#architecture)\n- [Releases](#releases)\n"
+      "## Table of Contents\n- [Pattern](#pattern)\n- [Releases](#releases)\n"
     );
-    const arch = candidates.find((c) => c.text.includes("(#architecture)"));
-    expect(arch).toBeUndefined();
+    const tocAnchor = candidates.find((c) => c.text.includes("(#pattern)"));
+    expect(tocAnchor).toBeUndefined();
   });
 
   it("does NOT capture markdown reference links as tagged findings", () => {

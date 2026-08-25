@@ -852,7 +852,7 @@
             <p>Run init to configure hooks and MCP for your agents:</p>
             <pre><code>phren init</code></pre>
             <p>Expected output:</p>
-            <pre><code>phren init v0.1.33
+            <pre><code>phren init v0.1.34
   Detected agents: Claude Code, Copilot
   Created ~/.phren/
   Registered MCP server in ~/.claude/settings.json
@@ -1063,17 +1063,16 @@ phren hooks errors --limit 5</code></pre>
         </div>
 
         <h3 id="c-finding-types">Finding Types</h3>
-        <p>Phren recognises seven finding types:</p>
+        <p>Phren recognises six finding types. <code>decision</code>, <code>pattern</code>, <code>pitfall</code>, and <code>bug</code> can be set explicitly (the <code>findingType</code> param, or a manual <code>[tag]</code> prefix); <code>workaround</code> and <code>context</code> are written only by phren's own auto-tagging, but decay and search filtering treat all six the same way.</p>
         <div class="tag-list">
           <span class="tag-pill special">[decision]</span>
           <span class="tag-pill">[pattern]</span>
           <span class="tag-pill">[pitfall]</span>
-          <span class="tag-pill">[observation]</span>
-          <span class="tag-pill">[tradeoff]</span>
-          <span class="tag-pill">[architecture]</span>
           <span class="tag-pill">[bug]</span>
+          <span class="tag-pill">[workaround]</span>
+          <span class="tag-pill">[context]</span>
         </div>
-        <p><code>[decision]</code> never decays. <code>[observation]</code> expires after 14 days. All other types follow the default decay curve.</p>
+        <p><code>[decision]</code> never decays. <code>[bug]</code> and <code>[context]</code> expire fastest (30 days); <code>[workaround]</code> next (60 days); <code>[pattern]</code> and <code>[pitfall]</code> last longest (365 days).</p>
         <p><strong>Citations:</strong> Findings can carry optional citations linking them to source code. Findings with valid citations rank higher; findings with missing citations receive a 0.8x penalty.</p>
 
         <h3 id="c-finding-lifecycle">Lifecycle States</h3>
@@ -1273,16 +1272,21 @@ sequenceDiagram
         <table class="docs-table">
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
+            <tr><td><code>PHREN_FEATURE_TOOL_HOOK</code></td><td>enabled</td><td>Spawns a subprocess after every tool call (PostToolUse hook) — the flag most likely to affect performance; see <code>feature-flags.md</code></td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_EXTRACT</code></td><td>enabled</td><td>Auto memory extraction from project context on each prompt</td></tr>
+            <tr><td><code>PHREN_FEATURE_DAILY_MAINTENANCE</code></td><td>enabled</td><td>Daily background pruning and lock-enforcement job</td></tr>
             <tr><td><code>PHREN_FEATURE_AUTO_CAPTURE</code></td><td>disabled</td><td>Extract insights from transcripts at session end</td></tr>
             <tr><td><code>PHREN_FEATURE_GIT_CONTEXT_FILTER</code></td><td>disabled</td><td>Git-context file relevance filtering in search</td></tr>
             <tr><td><code>PHREN_FEATURE_PROGRESSIVE_DISCLOSURE</code></td><td>disabled</td><td>Compact memory index instead of full snippets</td></tr>
             <tr><td><code>PHREN_FEATURE_HYBRID_SEARCH</code></td><td>enabled</td><td>TF-IDF cosine fallback in search_knowledge</td></tr>
+            <tr><td><code>PHREN_FEATURE_QUERY_CORRELATION</code></td><td>disabled</td><td>Log query-to-finding correlations to pre-warm recurring searches</td></tr>
+            <tr><td><code>PHREN_FEATURE_FACT_EXTRACT</code></td><td>disabled</td><td>LLM call per finding to extract a structured preference/fact</td></tr>
+            <tr><td><code>PHREN_FEATURE_GH_MINING</code></td><td>disabled</td><td>Mine GitHub PRs/CI/issues in <code>phren maintain extract</code></td></tr>
           </tbody>
         </table>
 
         <h2 id="cfg-governance">Governance Files <a href="#cfg-governance" class="anchor-link">#</a></h2>
-        <p>Policy is configured via JSON files in <code>~/.phren/.governance/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
+        <p>Policy is configured via JSON files in <code>~/.phren/.config/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
         <pre><code>phren config policy get
 phren config policy set memoryTTLDays=90 decayMultiplier=0.8
 phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
@@ -1574,7 +1578,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">All 54 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">All 59 tools exposed by the phren MCP server. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
 
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
@@ -1588,6 +1592,14 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">get_review_queue</span><span class="ref-card-desc">Items waiting for review</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">manage_review_item</span><span class="ref-card-desc">Approve, reject, or edit a review queue item</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, line, action, new_text?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">doctor_fix</span><span class="ref-card-desc">Run doctor self-heal and apply fixes</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
+
+        <h2 id="mcp-notes">Daily Notes <span class="cat-badge cat-memory">5 tools</span> <a href="#mcp-notes" class="anchor-link">#</a></h2>
+        <p>Lightweight daily Markdown notes are explicitly searchable but are not automatically injected or included in finding lifecycle and graph processing.</p>
+        <details class="ref-card"><summary><span class="ref-card-name">get_notes</span><span class="ref-card-desc">List daily notes newest-first</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, date?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">add_note</span><span class="ref-card-desc">Add a daily Markdown note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, text, date?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">edit_note</span><span class="ref-card-desc">Replace note text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, text)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">remove_note</span><span class="ref-card-desc">Remove one note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">promote_note</span><span class="ref-card-desc">Copy a note to durable findings</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, findingType?)</div></div></details>
 
         <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">6 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
 
@@ -2026,7 +2038,7 @@ sequenceDiagram
             <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project CLAUDE.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
             <tr><td><code>~/.phren/profiles/</code></td><td>YAML files mapping project sets to profiles</td></tr>
             <tr><td><code>~/.phren/machines.yaml</code></td><td>Machine-to-profile mapping</td></tr>
-            <tr><td><code>~/.phren/.governance/</code></td><td>Policy JSON, access control, install preferences</td></tr>
+            <tr><td><code>~/.phren/.config/</code></td><td>Retention/workflow/index policy JSON, access-control.json</td></tr>
             <tr><td><code>~/.phren/.runtime/</code></td><td>Audit log, debug log, telemetry, search history, locks</td></tr>
             <tr><td><code>~/.phren/.sessions/</code></td><td>Session markers, extraction markers</td></tr>
           </tbody>
@@ -2079,7 +2091,7 @@ npm test</code></pre>
             <tr><th>Path</th><th>What it does</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>mcp/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (53 public tools across 12 modules)</td></tr>
+            <tr><td><code>packages/cli/src/index.ts</code></td><td>CLI routing + MCP server bootstrap (59 public tools across 13 modules)</td></tr>
             <tr><td><code>mcp/src/shared.ts</code></td><td>Shared path/runtime helpers and core exports</td></tr>
             <tr><td><code>mcp/src/cli.ts</code></td><td>CLI subcommands (search, doctor, shell, etc.)</td></tr>
             <tr><td><code>mcp/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
@@ -2373,7 +2385,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
           <li><strong>Push failed:</strong> the commit stays local and phren records the error so <code>phren status</code> can show it.</li>
           <li><strong>Hooks disabled or stale:</strong> retrieval stops, but your files are still there; rerun <code>phren init</code>.</li>
           <li><strong>Stale index:</strong> search quality drops until the next rebuild; <code>phren doctor</code> will flag index trouble.</li>
-          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.governance/access-control.json</code>.</li>
+          <li><strong>Governance lockout:</strong> if access control blocks a write, nothing is silently discarded; check <code>.config/access-control.json</code>.</li>
         </ul>
 
         <h2 id="trust-decay">How does trust decay work? <a href="#trust-decay" class="anchor-link">#</a></h2>
@@ -2491,7 +2503,7 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
             <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
           </tbody>
         </table>
-        <p>Access control is configured in <code>~/.phren/.governance/access-control.json</code>. If no file exists, all users have full access.</p>
+        <p>Access control is configured in <code>~/.phren/.config/access-control.json</code>. If no file exists, all users have full access.</p>
 
         <h3 id="audit-log">Audit Log</h3>
         <p>All mutations are recorded in <code>~/.phren/.runtime/audit.log</code>. Each entry includes the actor, action, timestamp, and relevant parameters.</p>

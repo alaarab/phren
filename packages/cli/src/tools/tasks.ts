@@ -147,7 +147,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const resolvedPath = resolveStoreForProject(ctx, project).phrenPath;
+        const resolvedPath = resolveStoreForProject(ctx, project, "read").phrenPath;
         const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
@@ -180,7 +180,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       // Full task list for one project
       if (project) {
         if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-        const resolvedPath = resolveStoreForProject(ctx, project).phrenPath;
+        const resolvedPath = resolveStoreForProject(ctx, project, "read").phrenPath;
         const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;

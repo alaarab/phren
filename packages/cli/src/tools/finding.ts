@@ -4,7 +4,8 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { logger } from "../logger.js";
-import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
+import { isValidProjectName, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import {
   removeFinding as removeFindingCore,
   removeFindings as removeFindingsCore,
@@ -24,7 +25,7 @@ import {
   checkSemanticConflicts,
   autoMergeConflicts,
 } from "../shared/content.js";
-import { jaccardTokenize, jaccardSimilarity, stripMetadata } from "../content/dedup.js";
+import { jaccardTokenize, jaccardSimilarity, stripMetadata, detectConflicts, extractDynamicEntities } from "../content/dedup.js";
 import type { PhrenResult } from "../phren-core.js";
 import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
@@ -39,7 +40,7 @@ import {
   resolveFindingContradiction,
 } from "../finding/lifecycle.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { TEAM_STORE_PATHSPECS } from "../cli-hooks-git.js";
+import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
 
 
 
@@ -72,6 +73,29 @@ function findJaccardCandidates(phrenPath: string, project: string, finding: stri
     }
     return candidates;
   } catch {
+    return [];
+  }
+}
+
+// Heuristic conflict candidates surfaced to the calling agent so it can decide whether a
+// genuine contradiction exists — no extra LLM/API call, the agent in the loop is the judge.
+// Mirrors findJaccardCandidates (potential duplicates). Capped to keep the response small.
+const MAX_CONFLICT_CANDIDATES = 5;
+
+export function findConflictCandidates(phrenPath: string, project: string, finding: string): string[] {
+  try {
+    const findingsPath = path.join(phrenPath, project, FINDINGS_FILENAME);
+    if (!fs.existsSync(findingsPath)) return [];
+    const content = fs.readFileSync(findingsPath, "utf8");
+    const activeBullets = content.split("\n").filter((l) => l.startsWith("- ") && !isInactiveFindingLine(l));
+    if (activeBullets.length === 0) return [];
+    const dynamicEntities = extractDynamicEntities(phrenPath, project);
+    return detectConflicts(finding, activeBullets, dynamicEntities)
+      .map((line) => stripMetadata(line).replace(/^-\s+/, "").trim().slice(0, 80))
+      .filter((snippet) => snippet.length > 0)
+      .slice(0, MAX_CONFLICT_CANDIDATES);
+  } catch (err: unknown) {
+    logger.debug("add_finding", `findConflictCandidates: ${errorMessage(err)}`);
     return [];
   }
 }
@@ -115,7 +139,7 @@ function withLifecycleMutation<T>(
   return writeQueue(async () => {
     const result = handler();
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     const mapped = mapResponse(result.data);
     return mcpResponse({ ok: true, message: mapped.message, data: mapped.data });
@@ -190,11 +214,14 @@ async function handleAddFinding(
       runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
 
       const allPotentialDuplicates: Array<{ finding: string; candidates: PotentialDuplicate[] }> = [];
+      const allPotentialConflicts: Array<{ finding: string; candidates: string[] }> = [];
       const extraAnnotationsByFinding: string[][] = [];
 
       for (const f of findings) {
         const candidates = findJaccardCandidates(phrenPath, project, f);
         if (candidates.length > 0) allPotentialDuplicates.push({ finding: f, candidates });
+        const conflictCandidates = findConflictCandidates(phrenPath, project, f);
+        if (conflictCandidates.length > 0) allPotentialConflicts.push({ finding: f, candidates: conflictCandidates });
         try {
           const conflicts = await checkSemanticConflicts(phrenPath, project, f);
           extraAnnotationsByFinding.push(conflicts.checked && conflicts.annotations.length > 0 ? conflicts.annotations : []);
@@ -227,6 +254,7 @@ async function handleAddFinding(
           skipped,
           rejected,
           ...(allPotentialDuplicates.length > 0 ? { potentialDuplicates: allPotentialDuplicates } : {}),
+          ...(allPotentialConflicts.length > 0 ? { potentialConflicts: allPotentialConflicts } : {}),
         },
       });
     });
@@ -238,6 +266,8 @@ async function handleAddFinding(
       const taggedFinding = applyFindingTypePrefix(finding, findingType);
       // Jaccard "maybe zone" scan — free, no LLM call. Return candidates so the agent decides.
       const potentialDuplicates = findJaccardCandidates(phrenPath, project, taggedFinding);
+      // Heuristic contradiction candidates — also free, also agent-decides. No extra API call.
+      const potentialConflicts = findConflictCandidates(phrenPath, project, taggedFinding);
       const semanticConflicts = await checkSemanticConflicts(phrenPath, project, taggedFinding);
       runCustomHooks(phrenPath, "pre-finding", { PHREN_PROJECT: project });
       const result = addFindingToFile(phrenPath, project, taggedFinding, citation, {
@@ -297,9 +327,16 @@ async function handleAddFinding(
       // extractAndLinkFragments. We surface hints here so callers can see what was detected.
       const detectedFragments = extractFragmentNames(taggedFinding);
 
+      // Surface heuristic conflict candidates for the agent to judge (only when the LLM path
+      // didn't already confirm a conflict, to avoid double-reporting the same relationship).
+      const conflictNote = (potentialConflicts.length > 0 && conflictsWithList.length === 0)
+        ? ` ⚠ Possible contradiction with existing finding(s): ${potentialConflicts.map((c) => `"${c}"`).join("; ")}.` +
+          ` If this genuinely contradicts one, resolve it with resolve_contradiction (or supersede_finding); if they're unrelated, ignore this note.`
+        : "";
+
       return mcpResponse({
         ok: true,
-        message: result.data.message,
+        message: result.data.message + conflictNote,
         data: {
           project,
           finding: taggedFinding,
@@ -308,6 +345,7 @@ async function handleAddFinding(
           ...(conflictsWithList.length > 0 ? { conflicts: conflictsWithList } : {}),
           ...(detectedFragments.length > 0 ? { detectedFragments } : {}),
           ...(potentialDuplicates.length > 0 ? { potentialDuplicates } : {}),
+          ...(potentialConflicts.length > 0 ? { potentialConflicts } : {}),
           scope: normalizedScope,
         }
       });
@@ -423,7 +461,7 @@ async function handleGetContradictions(
   // Build project list from all stores (primary + team)
   let projectsWithPaths: Array<{ project: string; storePath: string }>;
   if (project) {
-    const resolved = resolveStoreForProject(ctx, project);
+    const resolved = resolveStoreForProject(ctx, project, "read");
     projectsWithPaths = [{ project: resolved.project, storePath: resolved.phrenPath }];
   } else {
     const { listAllProjects } = await import("../store-routing.js");
@@ -494,7 +532,7 @@ async function handleEditFinding(
   return withWriteQueue(async () => {
     const result = editFindingCore(phrenPath, project, old_text, new_text);
     if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({
       ok: true,
@@ -526,7 +564,7 @@ async function handleRemoveFinding(
     return withWriteQueue(async () => {
       const result = removeFindingsCore(phrenPath, project, finding);
       if (!result.ok) return mcpResponse({ ok: false, error: result.message });
-      const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+      const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
       if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
       return mcpResponse({ ok: true, message: result.message, data: result.data });
     });
@@ -535,7 +573,7 @@ async function handleRemoveFinding(
   return withWriteQueue(async () => {
     const result = removeFindingCore(phrenPath, project, finding);
     if (!result.ok) return mcpResponse({ ok: false, error: result.message });
-    const resolvedFindingsDir = safeProjectPath(phrenPath, project);
+    const resolvedFindingsDir = storeAwareProjectPath(phrenPath, project);
     if (resolvedFindingsDir) updateFileInIndex(path.join(resolvedFindingsDir, FINDINGS_FILENAME));
     return mcpResponse({ ok: true, message: result.message, data: result.data });
   });
@@ -576,6 +614,14 @@ async function handlePushChanges(
       runCustomHooks(phrenPath, "pre-save");
       // Stage all files including untracked (new project dirs, first FINDINGS.md, etc.)
       runGit(["add", "--sparse", "-A"]);
+      // Belt-and-suspenders: unstage sensitive files that .gitignore should
+      // already block (mirrors the same defensive reset in cli/session-stop.ts's
+      // auto-save). .config/auth-profiles.json is the legacy path for
+      // auth/profiles.ts's credential store (API keys, OpenAI Codex OAuth
+      // tokens) — this catches a store where the file was already tracked
+      // before it was gitignored, so a later token refresh doesn't get
+      // re-staged and pushed. Failures here are non-fatal (files may not exist).
+      try { runGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"]); } catch { /* best effort */ }
       runGit(["commit", "-m", commitMsg]);
 
       let hasRemote = false;
@@ -736,7 +782,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
           .optional()
-          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'tradeoff' (deliberate compromise), 'architecture' (structural design note), 'bug' (confirmed defect or failure)."),
+          .describe("Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'bug' (confirmed defect or failure)."),
         scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
       }),
     },

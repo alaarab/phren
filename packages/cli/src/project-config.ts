@@ -2,9 +2,11 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import { readInstallPreferences } from "./init/preferences.js";
 import { debugLog } from "./shared.js";
-import { errorMessage, safeProjectPath } from "./utils.js";
+import { errorMessage } from "./utils.js";
+import { storeAwareProjectPath } from "./store-routing.js";
 import { withFileLock } from "./shared/governance.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 
@@ -73,7 +75,7 @@ export function projectConfigPath(phrenPath: string, project: string): string {
 }
 
 function resolveProjectConfigPath(phrenPath: string, project: string): string | null {
-  return safeProjectPath(phrenPath, project, "phren.project.yaml");
+  return storeAwareProjectPath(phrenPath, project, "phren.project.yaml");
 }
 
 function writeProjectConfigFile(configPath: string, next: ProjectConfig): void {
@@ -114,7 +116,7 @@ export function readProjectConfig(phrenPath: string, project: string): ProjectCo
     return cached.config;
   }
   try {
-    const parsed = yaml.load(fs.readFileSync(configPath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(configPath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     const config = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProjectConfig : {};
     _projectConfigCache.set(configPath, { mtimeMs, config });
     return config;

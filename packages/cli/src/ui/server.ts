@@ -12,7 +12,10 @@ import {
 import { getNonPrimaryStores, subscribeStoreProjects, unsubscribeStoreProjects } from "../store-registry.js";
 import {
   editFinding,
+  editQueueItem,
+  approveQueueItem,
   readReviewQueue,
+  rejectQueueItem,
   removeFinding,
   readFindings,
   addFinding as addFindingStore,
@@ -24,13 +27,15 @@ import {
   TASKS_FILENAME,
   FINDINGS_FILENAME,
 } from "../data/access.js";
-import { isValidProjectName, errorMessage, queueFilePath, safeProjectPath } from "../utils.js";
+import { entryScoreKey } from "../governance/scores.js";
+import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
 import {
   buildGraph,
   collectProjectsForUI,
   collectSkillsForUI,
   getHooksData,
+  isAllowedHookConfigPath,
   isAllowedSkillPath,
   readSyncSnapshot,
   recentAccepted,
@@ -49,8 +54,9 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "../project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
-import { setAccessRoles, ACCESS_ROLE_KEYS, type AccessRolePatch } from "../governance/rbac.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, updateRetentionPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
+import { listProfiles, setMachineProfile, getDefaultMachineAlias } from "../profile-store.js";
+import { setAccessRoles, ACCESS_ROLE_KEYS, permissionDeniedError, type AccessRolePatch } from "../governance/rbac.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
 import { buildConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -58,6 +64,9 @@ import { findSkill } from "../skill/registry.js";
 import { setSkillEnabledAndSync } from "../skill/files.js";
 import { repairPreexistingInstall } from "../init/setup.js";
 import { logger } from "../logger.js";
+import { addNote, editNote, listNotes, removeNote } from "../data/notes.js";
+import { promoteNote } from "../core/note.js";
+import { FINDING_TYPES, type FindingType } from "../shared.js";
 
 export interface WebUiOptions {
   authToken?: string;
@@ -584,7 +593,9 @@ function handleGetSkills(res: Res, ctx: RouteCtx): void {
 
 function handleGetSkillContent(res: Res, url: string, ctx: RouteCtx): void {
   const filePath = String(parseQs(url).path || "");
-  if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path", 400);
+  if (!filePath || (!isAllowedSkillPath(filePath, ctx.phrenPath) && !isAllowedHookConfigPath(filePath, ctx.phrenPath))) {
+    return jsonErr(res, "Invalid path", 400);
+  }
   if (!fs.existsSync(filePath)) return jsonErr(res, "File not found");
   jsonOk(res, { ok: true, content: fs.readFileSync(filePath, "utf8") });
 }
@@ -756,6 +767,17 @@ function handleGetFindings(res: Res, pathname: string, ctx: RouteCtx): void {
   jsonOk(res, result.ok ? { ok: true, data: { project, findings: result.data } } : { ok: false, error: result.error });
 }
 
+function handleGetNotes(res: Res, url: string, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/notes/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  const date = String(parseQs(url).date || "") || undefined;
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+  const result = listNotes(basePath, project, { date, limit: 500 });
+  jsonOk(res, result.ok
+    ? { ok: true, data: { project, notes: result.data } }
+    : { ok: false, error: result.error, errorCode: result.code });
+}
+
 // ── POST handlers ─────────────────────────────────────────────────────────────
 
 function handlePostSync(req: Req, res: Res, url: string, ctx: RouteCtx): void {
@@ -787,12 +809,8 @@ function handlePostApprove(req: Req, res: Res, url: string, ctx: RouteCtx): void
     const line = String(parsed.line || "");
     if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
     try {
-      const qPath = queueFilePath(ctx.phrenPath, project);
-      if (fs.existsSync(qPath)) {
-        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
-        fs.writeFileSync(qPath, lines.join("\n"));
-      }
-      jsonOk(res, { ok: true });
+      const result = approveQueueItem(ctx.phrenPath, project, line);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
     }
@@ -805,14 +823,8 @@ function handlePostReject(req: Req, res: Res, url: string, ctx: RouteCtx): void 
     const line = String(parsed.line || "");
     if (!project || !isValidProjectName(project) || !line) return jsonErr(res, "Missing project or line");
     try {
-      const qPath = queueFilePath(ctx.phrenPath, project);
-      if (fs.existsSync(qPath)) {
-        const lines = fs.readFileSync(qPath, "utf8").split("\n").filter((l) => l.trim() !== line.trim());
-        fs.writeFileSync(qPath, lines.join("\n"));
-      }
-      const findingText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-      if (findingText) removeFinding(ctx.phrenPath, project, findingText);
-      jsonOk(res, { ok: true });
+      const result = rejectQueueItem(ctx.phrenPath, project, line);
+      jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
     }
@@ -826,8 +838,7 @@ function handlePostEdit(req: Req, res: Res, url: string, ctx: RouteCtx): void {
     const newText = String(parsed.new_text || "");
     if (!project || !isValidProjectName(project) || !line || !newText) return jsonErr(res, "Missing project, line, or new_text");
     try {
-      const oldText = line.replace(/^-\s*/, "").replace(/<!--.*?-->/g, "").trim();
-      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      const result = editQueueItem(ctx.phrenPath, project, line, newText);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     } catch (err: unknown) {
       jsonErr(res, errorMessage(err));
@@ -839,7 +850,9 @@ function handlePostSkillSave(req: Req, res: Res, url: string, ctx: RouteCtx): vo
   withPostBody(req, res, url, ctx, (parsed) => {
     const filePath = String(parsed.path || "");
     const content = String(parsed.content || "");
-    if (!filePath || !isAllowedSkillPath(filePath, ctx.phrenPath)) return jsonErr(res, "Invalid path");
+    if (!filePath || (!isAllowedSkillPath(filePath, ctx.phrenPath) && !isAllowedHookConfigPath(filePath, ctx.phrenPath))) {
+      return jsonErr(res, "Invalid path");
+    }
     try {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
@@ -1026,6 +1039,10 @@ function handlePostSettingsAccess(req: Req, res: Res, url: string, ctx: RouteCtx
       if (Object.prototype.hasOwnProperty.call(parsed, role)) patch[role] = toList(parsed[role]);
     }
     if (!Object.keys(patch).length) return jsonErr(res, "Provide at least one of: admins, contributors, readers");
+    // Rewriting the ACL is admin-only — otherwise a denied actor could POST
+    // itself into `admins` here and undo every other check on this server.
+    const denied = permissionDeniedError(ctx.phrenPath, "manage_config", project || undefined);
+    if (denied) return jsonErr(res, denied, 403);
     try {
       const written = setAccessRoles(ctx.phrenPath, patch, project || undefined);
       jsonOk(res, { ok: true, access: written });
@@ -1045,7 +1062,6 @@ function handlePostSettingsMcpEnabled(req: Req, res: Res, url: string, ctx: Rout
 
 function handleGetProfiles(res: Res, ctx: RouteCtx): void {
   try {
-    const { listProfiles } = require("../profile-store.js");
     const profileResult = listProfiles(ctx.phrenPath);
     if (!profileResult.ok) {
       return jsonOk(res, { ok: false, error: profileResult.error, profiles: [] });
@@ -1062,7 +1078,6 @@ function handlePostProfile(req: Req, res: Res, url: string, ctx: RouteCtx): void
     const profileName = String(parsed.profile || "").trim();
     if (!profileName) return jsonErr(res, "Profile name required", 400);
     try {
-      const { setMachineProfile, getDefaultMachineAlias } = require("../profile-store.js");
       const machineAlias = getDefaultMachineAlias();
       const result = setMachineProfile(ctx.phrenPath, machineAlias, profileName);
       if (!result.ok) return jsonErr(res, result.error || "Failed to switch profile", 500);
@@ -1115,7 +1130,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
     if (globalUpdate) {
       try {
         if (NUMERIC_RETENTION_FIELDS.includes(field)) {
-          const { updateRetentionPolicy } = require("../governance/policy.js");
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
             const num = parseFloat(value);
@@ -1126,7 +1140,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           if (!result.ok) return jsonErr(res, result.error || "Failed to update retention policy", 500);
           return jsonOk(res, { ok: true, retentionPolicy: result.data });
         } else if (field.startsWith("decay.")) {
-          const { updateRetentionPolicy } = require("../governance/policy.js");
           const point = field.slice("decay.".length);
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
@@ -1143,7 +1156,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
           if (!result.ok) return jsonErr(res, result.error || "Failed to update workflow policy", 500);
           return jsonOk(res, { ok: true, workflowPolicy: result.data });
         } else if (NUMERIC_WORKFLOW_FIELDS.includes(field)) {
-          const { updateWorkflowPolicy } = require("../governance/policy.js");
           let updateData: Record<string, unknown> = {};
           if (!clearField) {
             const num = parseFloat(value);
@@ -1210,6 +1222,30 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
   });
 }
 
+/**
+ * Resolve a graph node's score_key back to the exact FINDINGS.md bullet text
+ * (including its [tag] prefix). Score keys are minted per-bullet by the graph
+ * builder, so this pins the precise entry even when display texts are
+ * ambiguous (e.g. two findings differing only by tag). Returns null when the
+ * key doesn't resolve — callers fall back to text matching.
+ */
+function findBulletTextByScoreKey(phrenPath: string, project: string, scoreKey: string): string | null {
+  try {
+    const file = path.join(phrenPath, project, FINDINGS_FILENAME);
+    if (!fs.existsSync(file)) return null;
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      const tag = line.match(/^-\s+\[([a-z_-]+)\]\s+(.+?)(?:\s*<!--.*-->)?$/);
+      const plain = tag ? null : line.match(/^-\s+(.+?)(?:\s*<!--.*-->)?$/);
+      const entry = tag ? `[${tag[1]}] ${tag[2].trim()}` : plain ? plain[1].trim() : null;
+      if (!entry) continue;
+      if (entryScoreKey(project, FINDINGS_FILENAME, entry) === scoreKey) return entry;
+    }
+  } catch {
+    // unreadable file — fall back to text matching
+  }
+  return null;
+}
+
 function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, ctx: RouteCtx): void {
   const project = decodeURIComponent(pathname.slice("/api/findings/".length));
   if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
@@ -1226,7 +1262,9 @@ function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, 
       const oldText = String(parsed.old_text || "");
       const newText = String(parsed.new_text || "");
       if (!oldText || !newText) return jsonErr(res, "old_text and new_text are required");
-      const result = editFinding(ctx.phrenPath, project, oldText, newText);
+      const scoreKey = String(parsed.score_key || "");
+      const resolved = scoreKey ? findBulletTextByScoreKey(ctx.phrenPath, project, scoreKey) : null;
+      const result = editFinding(ctx.phrenPath, project, resolved || oldText, newText);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     });
   } else {
@@ -1234,10 +1272,63 @@ function handleFindingsWrite(req: Req, res: Res, url: string, pathname: string, 
     withPostBody(req, res, url, ctx, (parsed) => {
       const text = String(parsed.text || "");
       if (!text) return jsonErr(res, "text is required");
-      const result = removeFinding(ctx.phrenPath, project, text);
+      const scoreKey = String(parsed.score_key || "");
+      const resolved = scoreKey ? findBulletTextByScoreKey(ctx.phrenPath, project, scoreKey) : null;
+      const result = removeFinding(ctx.phrenPath, project, resolved || text);
       jsonOk(res, { ok: result.ok, error: result.ok ? undefined : result.error });
     });
   }
+}
+
+function handleNotesWrite(req: Req, res: Res, url: string, pathname: string, ctx: RouteCtx): void {
+  const project = decodeURIComponent(pathname.slice("/api/notes/".length));
+  if (!project || !isValidProjectName(project)) return jsonErr(res, "Invalid project name", 400);
+  const basePath = resolveProjectBasePath(ctx.phrenPath, project);
+
+  withPostBody(req, res, url, ctx, (parsed) => {
+    const selector = String(parsed.note || "");
+    if (req.method === "POST" && String(parsed.action || "") === "promote") {
+      if (!selector) return jsonErr(res, "note is required", 400);
+      const denied = permissionDeniedError(basePath, "promote_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const findingTypeRaw = String(parsed.finding_type || "");
+      if (findingTypeRaw && !FINDING_TYPES.includes(findingTypeRaw as FindingType)) {
+        return jsonErr(res, `Invalid finding type: ${findingTypeRaw}`, 400);
+      }
+      const result = promoteNote(basePath, project, selector, findingTypeRaw as FindingType | undefined);
+      return jsonOk(res, result.ok
+        ? { ok: true, data: result.data, message: `Promoted ${result.data.note.id} to a finding.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    if (req.method === "POST") {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required", 400);
+      const denied = permissionDeniedError(basePath, "add_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const date = String(parsed.date || "") || undefined;
+      const result = addNote(basePath, project, text, { date });
+      return jsonOk(res, result.ok
+        ? { ok: true, data: { note: result.data }, message: `Added ${result.data.id}.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    if (!selector) return jsonErr(res, "note is required", 400);
+    if (req.method === "PUT") {
+      const text = String(parsed.text || "");
+      if (!text) return jsonErr(res, "text is required", 400);
+      const denied = permissionDeniedError(basePath, "edit_note", project);
+      if (denied) return jsonErr(res, denied, 403);
+      const result = editNote(basePath, project, selector, text);
+      return jsonOk(res, result.ok
+        ? { ok: true, data: { note: result.data }, message: `Updated ${result.data.id}.` }
+        : { ok: false, error: result.error, errorCode: result.code });
+    }
+    const denied = permissionDeniedError(basePath, "remove_note", project);
+    if (denied) return jsonErr(res, denied, 403);
+    const result = removeNote(basePath, project, selector);
+    return jsonOk(res, result.ok
+      ? { ok: true, data: { note: result.data }, message: `Removed ${result.data.id}.` }
+      : { ok: false, error: result.error, errorCode: result.code });
+  });
 }
 
 // ── Main router ───────────────────────────────────────────────────────────────
@@ -1305,6 +1396,7 @@ export function createWebUiHttpServer(
       if (pathname.startsWith("/api/skill-content")) return handleGetSkillContent(res, url, ctx);
       if (pathname.startsWith("/api/graph")) return await handleGetGraph(res, url, ctx);
       if (pathname.startsWith("/api/findings/")) return handleGetFindings(res, pathname, ctx);
+      if (pathname.startsWith("/api/notes/")) return handleGetNotes(res, url, pathname, ctx);
     }
 
     // ── POST/PUT/DELETE routes ──
@@ -1339,6 +1431,7 @@ export function createWebUiHttpServer(
       }
       // Prefix-matched write routes
       if (pathname.startsWith("/api/findings/")) return handleFindingsWrite(req, res, url, pathname, ctx);
+      if (pathname.startsWith("/api/notes/")) return handleNotesWrite(req, res, url, pathname, ctx);
     }
 
     res.writeHead(404, { "content-type": "text/plain" });

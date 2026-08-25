@@ -3,7 +3,8 @@
  * and saves them as findings at session end.
  */
 import type { PhrenContext } from "./context.js";
-import { addFinding } from "@phren/cli/core/finding";
+import { addFindingToFile } from "@phren/cli/shared/content";
+import { agentProvenance } from "./provenance.js";
 
 interface ToolAttempt {
   name: string;
@@ -65,7 +66,7 @@ export class AntiPatternTracker {
   /**
    * Save top 3 anti-patterns as findings at session end.
    */
-  async flushAntiPatterns(ctx: PhrenContext): Promise<number> {
+  async flushAntiPatterns(ctx: PhrenContext, sessionId?: string | null): Promise<number> {
     if (!ctx.project) return 0;
 
     const patterns = this.extractAntiPatterns().slice(0, 3);
@@ -75,7 +76,10 @@ export class AntiPatternTracker {
     try {
       for (const p of patterns) {
         const finding = `[anti-pattern] ${p.tool}: failed with ${p.failedInput.slice(0, 100)} (${p.failedOutput.slice(0, 80)}), succeeded with ${p.succeededInput.slice(0, 100)}`;
-        await addFinding(ctx.phrenPath, ctx.project, finding);
+        addFindingToFile(ctx.phrenPath, ctx.project, finding, undefined, {
+          provenance: agentProvenance(sessionId),
+          ...(sessionId ? { sessionId } : {}),
+        });
         saved++;
       }
     } catch {

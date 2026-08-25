@@ -10,7 +10,7 @@ import { PhrenClient } from "./phrenClient";
  * Rejects path traversal characters, dots, slashes, and other unsafe patterns.
  * Mirrors the server-side isValidProjectName() from mcp/src/utils.ts.
  */
-function isValidProjectName(name: string): boolean {
+export function isValidProjectName(name: string): boolean {
   if (!name || name.length === 0) return false;
   if (name.length > 100) return false;
   if (name.includes("\0") || name.includes("/") || name.includes("\\") || name.includes("..")) return false;
@@ -19,7 +19,7 @@ function isValidProjectName(name: string): boolean {
 
 /**
  * Load the web-ui graph script from the MCP dist.
- * This gives us the Sigma.js v3 renderer with ForceAtlas2 layout, drag, glow, etc.
+ * This gives us the Three.js / 3d-force-graph renderer with 3D force layout, bloom, drag, etc.
  *
  * Resolution order:
  * 1. Same directory as compiled extension JS (works in .vsix packaging)
@@ -29,8 +29,8 @@ function isValidProjectName(name: string): boolean {
 function loadGraphScript(): string {
   const candidates = [
     path.resolve(__dirname, "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "memory-ui-graph.runtime.js"),
-    path.resolve(__dirname, "..", "..", "mcp", "dist", "generated", "memory-ui-graph.browser.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "memory-ui-graph.runtime.js"),
+    path.resolve(__dirname, "..", "..", "cli", "dist", "generated", "memory-ui-graph.browser.js"),
   ];
   for (const candidate of candidates) {
     try {
@@ -72,6 +72,11 @@ interface FindingData {
   stableId?: string;
   topicSlug: string;
   topicLabel: string;
+}
+
+interface FindingPage {
+  findings: FindingData[];
+  total: number;
 }
 
 interface TaskData {
@@ -116,6 +121,8 @@ interface GraphNode {
   taskItemId?: string;
   checked?: boolean;
   store?: string;
+  findingCount?: number;
+  taskCount?: number;
 }
 
 interface GraphEdge {
@@ -167,7 +174,7 @@ function resolveStorePath(): string {
   return path.join(os.homedir(), ".phren");
 }
 
-function computeMtimeKey(storePath: string): string {
+export function computeMtimeKey(storePath: string): string {
   try {
     const entries = fs.readdirSync(storePath, { withFileTypes: true });
     const parts: string[] = [];
@@ -228,7 +235,9 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       suppressWatcherUntil = Date.now() + 1500;
       graphData = await loadGraphData(client);
       graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-      panel.webview.html = renderGraphHtml(panel.webview, graphData);
+      // In-place data swap — the webview remounts the renderer and keeps the
+      // user's camera pose (a full HTML rewrite reset the whole scene).
+      void panel.webview.postMessage({ type: "graphData", payload: graphData });
     }
 
     async function mutate<T>(fn: () => Promise<T>): Promise<T> {
@@ -423,6 +432,124 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       return;
     }
 
+    if (command === "deleteBatch") {
+      const items = asArray(message.items)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+      if (!items.length) return;
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete ${items.length} item${items.length > 1 ? "s" : ""}?`,
+        { modal: true },
+        "Delete",
+      );
+      if (confirmed !== "Delete") return;
+
+      const deleted: Array<{ kind: string; projectName: string; text: string; item: string }> = [];
+      await mutate(async () => {
+        for (const it of items) {
+          const kind = asString(it.kind);
+          const projectName = asString(it.projectName);
+          if (!projectName || !isValidProjectName(projectName)) continue;
+          try {
+            if (kind === "finding") {
+              const text = asString(it.text) ?? "";
+              await client.removeFinding(projectName, text);
+              deleted.push({ kind, projectName, text, item: "" });
+            } else if (kind === "task") {
+              const item = asString(it.item) ?? asString(it.text) ?? "";
+              await client.removeTask(projectName, item);
+              deleted.push({ kind, projectName, text: asString(it.text) ?? "", item });
+            }
+          } catch {
+            // Skip failures; the refresh below reflects whatever succeeded.
+          }
+        }
+      });
+      await refreshGraph();
+      // Offer an in-graph undo for the whole batch.
+      void panel.webview.postMessage({
+        type: "batchRemoved",
+        undo: { items: deleted, label: `Deleted ${deleted.length} item${deleted.length === 1 ? "" : "s"}` },
+      });
+      if (deleted.length < items.length) {
+        vscode.window.showWarningMessage(`Deleted ${deleted.length} of ${items.length} items.`);
+      }
+      return;
+    }
+
+    if (command === "mergeFindings") {
+      const projectName = asString(message.projectName);
+      const text1 = asString(message.text1) ?? "";
+      const text2 = asString(message.text2) ?? "";
+      if (!projectName || !isValidProjectName(projectName) || !text1 || !text2) return;
+
+      const confirmed = await vscode.window.showWarningMessage(
+        "Merge these 2 findings into one?",
+        { modal: true },
+        "Merge",
+      );
+      if (confirmed !== "Merge") return;
+
+      try {
+        const merged = `${text1}\n${text2}`;
+        await mutate(async () => {
+          await client.removeFinding(projectName, text1);
+          await client.removeFinding(projectName, text2);
+          await client.addFinding(projectName, merged);
+        });
+        await refreshGraph();
+        // Offer an in-graph undo (restore originals, drop the merged bullet).
+        void panel.webview.postMessage({
+          type: "mergeDone",
+          undo: { projectName, merged, originals: [text1, text2] },
+        });
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to merge findings: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "undoMerge") {
+      const projectName = asString(message.projectName);
+      const merged = asString(message.merged) ?? "";
+      const originals = asArray(message.originals).filter((t): t is string => typeof t === "string");
+      if (!projectName || !isValidProjectName(projectName) || !merged || originals.length !== 2) return;
+      try {
+        await mutate(async () => {
+          await client.removeFinding(projectName, merged);
+          await client.addFinding(projectName, originals[0]);
+          await client.addFinding(projectName, originals[1]);
+        });
+        await refreshGraph();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Failed to undo merge: ${toErrorMessage(err)}`);
+      }
+      return;
+    }
+
+    if (command === "undoDeleteBatch") {
+      const items = asArray(message.items)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+      if (!items.length) return;
+      await mutate(async () => {
+        for (const it of items) {
+          const kind = asString(it.kind);
+          const projectName = asString(it.projectName);
+          if (!projectName || !isValidProjectName(projectName)) continue;
+          try {
+            if (kind === "finding") await client.addFinding(projectName, asString(it.text) ?? "");
+            else if (kind === "task") await client.addTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
+          } catch {
+            // best-effort restore
+          }
+        }
+      });
+      await refreshGraph();
+      return;
+    }
+
     if (command === "undoDeleteTask") {
       const projectName = asString(message.projectName);
       const item = asString(message.item);
@@ -454,7 +581,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           try {
             graphData = await loadGraphData(client);
             graphCache = { key: computeMtimeKey(storePath), payload: graphData };
-            panel.webview.html = renderGraphHtml(panel.webview, graphData);
+            void panel.webview.postMessage({ type: "graphData", payload: graphData });
           } catch (err) {
             // Surface silently — user still sees the last-known graph.
             console.error("phren: failed to refresh graph on external change", err);
@@ -477,7 +604,7 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
 
 /* ── Data loading ────────────────────────────────────────── */
 
-async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
+export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const projects = await fetchProjects(client);
 
   // Parallel per-project fetches (including topic configs)
@@ -515,11 +642,12 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
   const edges: GraphEdge[] = [];
   const summaryMap: Record<string, ProjectSummaryData> = {};
   // Build project nodes (skip empty orphans)
-  for (const { projectName, summary, findings, tasks, topicConfig, store } of perProjectResults) {
-    if (findings.length === 0 && tasks.length === 0) continue;
+  for (const { projectName, summary, findings: findingPage, tasks, topicConfig, store } of perProjectResults) {
+    const findings = findingPage.findings;
+    if (findingPage.total === 0 && tasks.length === 0) continue;
 
     const projectNodeId = `project:${projectName}`;
-    summaryMap[projectName] = { ...summary, findingCount: findings.length, taskCount: tasks.length };
+    summaryMap[projectName] = { ...summary, findingCount: findingPage.total, taskCount: tasks.length };
 
     nodes.push({
       id: projectNodeId,
@@ -528,9 +656,11 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
       label: projectName,
       subtype: "project",
       text: summary.summary,
-      radius: Math.min(14 + Math.sqrt(findings.length + tasks.length) * 1.5, 30),
+      radius: Math.min(14 + Math.sqrt(findingPage.total + tasks.length) * 1.5, 30),
       color: "#7B68AE",
       store,
+      findingCount: findingPage.total,
+      taskCount: tasks.length,
     });
 
     // Finding nodes
@@ -677,7 +807,7 @@ async function loadGraphData(client: PhrenClient): Promise<GraphPayload> {
 
 /* ── Fetch helpers ───────────────────────────────────────── */
 
-async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string; store?: string }[]> {
+export async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief?: string; store?: string }[]> {
   const raw = await client.listProjects();
   const data = responseData(raw);
   const seen = new Set<string>();
@@ -699,7 +829,7 @@ async function fetchProjects(client: PhrenClient): Promise<{ name: string; brief
   return parsed;
 }
 
-async function fetchProjectSummary(client: PhrenClient, project: string): Promise<ProjectSummaryData> {
+export async function fetchProjectSummary(client: PhrenClient, project: string): Promise<ProjectSummaryData> {
   const raw = await client.getProjectSummary(project);
   const data = responseData(raw);
   const files: ProjectSummaryFile[] = [];
@@ -720,7 +850,7 @@ async function fetchProjectSummary(client: PhrenClient, project: string): Promis
   };
 }
 
-async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingData[]> {
+export async function fetchFindings(client: PhrenClient, project: string, projectTopics?: TopicMeta[]): Promise<FindingPage> {
   const raw = await client.getFindings(project);
   const data = responseData(raw);
   const parsed: FindingData[] = [];
@@ -739,10 +869,11 @@ async function fetchFindings(client: PhrenClient, project: string, projectTopics
       topicLabel: topic.label,
     });
   }
-  return parsed;
+  const total = typeof data?.total === "number" && Number.isFinite(data.total) ? data.total : undefined;
+  return { findings: parsed, total: total === undefined ? parsed.length : total };
 }
 
-async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
+export async function fetchTopicConfig(client: PhrenClient, project: string): Promise<TopicMeta[]> {
   try {
     const raw = await client.getTopicConfig(project);
     const data = responseData(raw);
@@ -765,7 +896,7 @@ async function fetchTopicConfig(client: PhrenClient, project: string): Promise<T
   }
 }
 
-async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
+export async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
   const raw = await client.getTasks(project, { status: "all", done_limit: 10 });
   const data = responseData(raw);
   const items = asRecord(data?.items);
@@ -802,7 +933,7 @@ async function fetchTasks(client: PhrenClient, project: string): Promise<TaskDat
   return parsed;
 }
 
-async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
+export async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
   try {
     const raw = await client.readGraph();
     const data = responseData(raw);
@@ -839,13 +970,13 @@ function buildScoreLookup(scores: MemoryScores): Map<string, MemoryScoreEntry> {
   return new Map(Object.entries(scores.entries ?? {}));
 }
 
-function buildScoreKey(project: string, filename: string, snippet: string): string {
+export function buildScoreKey(project: string, filename: string, snippet: string): string {
   const short = (snippet || "").slice(0, 160);
   const digest = crypto.createHash("sha1").update(`${project}:${filename}:${short}`).digest("hex").slice(0, 12);
   return `${project}/${filename}:${digest}`;
 }
 
-function qualityMultiplierFromEntry(entry?: MemoryScoreEntry): number | undefined {
+export function qualityMultiplierFromEntry(entry?: MemoryScoreEntry): number | undefined {
   if (!entry) return undefined;
   const now = Date.now();
   const lastUsed = entry.lastUsedAt ? new Date(entry.lastUsedAt).getTime() : 0;
@@ -884,7 +1015,7 @@ const BUILTIN_TOPIC_KEYWORDS: Array<{ slug: string; label: string; keywords: str
   { slug: "ai_ml", label: "AI / ML", keywords: ["ai", "ml", "model", "embedding", "vector", "llm", "prompt", "token", "inference", "training", "neural", "gpt", "claude"] },
 ];
 
-function classifyFindingTopic(text: string, projectTopics?: TopicMeta[]): { slug: string; label: string } {
+export function classifyFindingTopic(text: string, projectTopics?: TopicMeta[]): { slug: string; label: string } {
   const lower = text.toLowerCase();
   let bestSlug = "general";
   let bestLabel = "General";
@@ -965,6 +1096,16 @@ function renderErrorHtml(webview: vscode.Webview, errorMessage: string): string 
 </html>`;
 }
 
+/**
+ * Test-only: render the webview HTML with a stub webview so the exact markup,
+ * CSS, and inline host script can be driven in a plain browser (mirrors the
+ * web-ui's renderPageForTests). Not used by the extension at runtime.
+ */
+export function renderGraphHtmlForTests(payload: GraphPayload): string {
+  const stub = { cspSource: "vscode-webview:", asWebviewUri: (uri: unknown) => uri } as unknown as vscode.Webview;
+  return renderGraphHtml(stub, payload);
+}
+
 function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string {
   const nonce = getNonce();
   const safePayload = JSON.stringify(payload).replace(/</g, "\\u003c");
@@ -993,16 +1134,26 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     }
     * { box-sizing: border-box; }
     body { margin: 0; height: 100vh; overflow: hidden; color: var(--ink); background: var(--vscode-editor-background); }
-    #graph-filter, #graph-project-filter, #graph-limit-row {
+    /* Full-bleed: the graph fills the whole panel and the renderer's filter bar
+       floats over the canvas (top-right), matching the immersive web-ui. The
+       old fixed 100vh-120px band left dead space below and a chrome strip on
+       top; the renderer now builds all its HUD inside #graph-filter. */
+    #graph-project-filter, #graph-limit-row { display: none; }
+    #graph-filter {
+      position: absolute;
+      top: 12px;
+      right: 70px;
+      left: auto;
+      width: min(560px, 60%);
+      z-index: 12;
       display: flex;
       gap: 8px;
-      padding: 8px 12px;
       align-items: center;
-      flex-wrap: wrap;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      background: transparent;
+      border: none;
+      padding: 0;
     }
-    .graph-shell { height: calc(100vh - 120px); position: relative; overflow: hidden; }
+    .graph-shell { height: 100vh; position: relative; overflow: hidden; }
     .graph-container { position: relative; width: 100%; height: 100%; overflow: hidden; }
     #graph-canvas { width: 100%; height: 100%; display: block; }
     #ambient-canvas { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:2; }
@@ -1071,8 +1222,23 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       left: 0;
       top: 0;
       z-index: 20;
-      max-width: min(300px, calc(100% - 24px));
+      width: min(360px, calc(100% - 24px));
+      max-width: none;
       pointer-events: none;
+    }
+    /* The 3D canvas is immersive-dark in both editor themes; the popover,
+       context menu and toast adopt the web dossier's dark-glass palette so
+       they don't clash as light VS-theme cards floating on a dark scene. */
+    #node-popover, .node-ctx-menu, .graph-toast {
+      --border: rgba(103, 232, 249, 0.22);
+      --surface: rgba(8, 10, 22, 0.92);
+      --surface-raised: rgba(22, 27, 52, 0.9);
+      --surface-sunken: rgba(5, 6, 15, 0.92);
+      --ink: #dbe4ff;
+      --muted: #8b96c9;
+      --accent: #67e8f9;
+      --danger: #ff7b93;
+      color: var(--ink);
     }
     #node-popover-card {
       position: relative;
@@ -1112,6 +1278,54 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
       place-items: center;
       z-index: 1;
     }
+    /* Contextual reading card: placed after the camera settles, adjacent to
+       the selected node and project pane. The grab handle keeps it movable. */
+    #node-popover.docked {
+      bottom: auto;
+      right: auto;
+      width: min(360px, calc(100% - 24px));
+      max-width: none;
+    }
+    #node-popover.docked #node-popover-card {
+      height: auto;
+      max-height: min(520px, calc(100vh - 88px));
+      overflow: auto;
+    }
+    #node-popover.docked #node-popover-handle { display: block; }
+    /* Edit transforms the same contextual card instead of spawning a second
+       surface in a remote corner. */
+    #node-popover.docked.editor { width:min(380px, calc(100% - 24px)); }
+    #node-popover.docked.editor #node-popover-card {
+      height: auto;
+      max-height: calc(100vh - 92px);
+      overflow: auto;
+    }
+    #node-popover.docked .dossier-resize {
+      position: absolute;
+      right: -4px;
+      top: 0;
+      bottom: 0;
+      width: 9px;
+      cursor: ew-resize;
+      z-index: 20;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    #node-popover.docked .dossier-resize::after {
+      content: "";
+      position: absolute;
+      right: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 38px;
+      border-radius: 999px;
+      background: rgba(103, 232, 249, 0.28);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    #node-popover.docked .dossier-resize:hover::after,
+    #node-popover.docked .dossier-resize.dragging::after { opacity: 1; }
     #node-popover-content {
       display: flex;
       flex-direction: column;
@@ -1245,7 +1459,7 @@ function renderGraphHtml(webview: vscode.Webview, payload: GraphPayload): string
     .graph-toast button:hover { background: var(--surface); }
   </style>
 </head>
-<body>
+<body class="phren-vscode-webview">
   <div id="graph-filter"></div>
   <div id="graph-project-filter"></div>
   <div id="graph-limit-row"></div>
@@ -1277,7 +1491,11 @@ ${graphScript}
   var payload = ${payloadJson};
   var vscode = acquireVsCodeApi();
   var nodeLookup = {};
-  for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  function rebuildNodeLookup() {
+    nodeLookup = {};
+    for (var i = 0; i < payload.nodes.length; i++) nodeLookup[payload.nodes[i].id] = payload.nodes[i];
+  }
+  rebuildNodeLookup();
 
   function esc(value) {
     return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1320,6 +1538,11 @@ ${graphScript}
     return counts;
   }
 
+  // Maps the extension payload to the shared renderer's shape and (re)mounts.
+  // Re-runs on 'graphData' messages so external refreshes swap data in place —
+  // the renderer preserves the camera pose on remount, where the old
+  // full-HTML replacement reset the whole scene.
+  function mapAndMountGraph() {
   var graphNodes = [];
   var topicMap = {};
   for (var index = 0; index < payload.nodes.length; index++) {
@@ -1349,8 +1572,29 @@ ${graphScript}
       connectedProjects: n.connectedProjects || [],
       topicSlug: n.topicSlug || '',
       topicLabel: n.topicLabel || '',
-      tagged: n.kind === 'finding'
+      tagged: n.kind === 'finding',
+      store: n.store || '',
+      findingCount: typeof n.findingCount === 'number' ? n.findingCount : undefined,
+      taskCount: typeof n.taskCount === 'number' ? n.taskCount : undefined
     });
+  }
+
+  // Project totals for tooltips/labels. Prefer API totals carried by project
+  // nodes; fall back to counting rendered nodes for older payloads.
+  var projectTotals = {};
+  for (var totalsIdx = 0; totalsIdx < graphNodes.length; totalsIdx++) {
+    var totalsNode = graphNodes[totalsIdx];
+    if (totalsNode.group === 'project' || !totalsNode.project) continue;
+    var totals = projectTotals[totalsNode.project] || (projectTotals[totalsNode.project] = { findings: 0, tasks: 0 });
+    if (totalsNode.group.indexOf('topic:') === 0) totals.findings++;
+    else if (totalsNode.group.indexOf('task-') === 0) totals.tasks++;
+  }
+  for (var projIdx = 0; projIdx < graphNodes.length; projIdx++) {
+    var projNode = graphNodes[projIdx];
+    if (projNode.group !== 'project') continue;
+    var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0, tasks: 0 };
+    if (typeof projNode.findingCount !== 'number') projNode.findingCount = projTotals.findings;
+    if (typeof projNode.taskCount !== 'number') projNode.taskCount = projTotals.tasks;
   }
 
   var topics = [];
@@ -1400,6 +1644,8 @@ ${graphScript}
         + '<div style="font-size:12px;opacity:.82">' + esc(graphMountError.message || graphMountError) + '</div></div></div>';
     }
   }
+  }
+  mapAndMountGraph();
 
   var zoomInBtn = document.getElementById('btn-zoom-in');
   var zoomOutBtn = document.getElementById('btn-zoom-out');
@@ -1418,6 +1664,8 @@ ${graphScript}
   var ctxMenu = document.getElementById('node-ctx-menu');
   var currentNode = null;
   var editMode = null;
+  var lastAnchorPoint = { x: 0, y: 0 };
+  var cardWasDragged = false;
 
   // --- Draggable popover ---
   var isDraggingPopover = false;
@@ -1427,6 +1675,7 @@ ${graphScript}
     popoverHandle.addEventListener('mousedown', function(e) {
       if (!popover) return;
       isDraggingPopover = true;
+      cardWasDragged = true;
       var container = document.querySelector('.graph-container');
       var containerRect = container ? container.getBoundingClientRect() : { left: 0, top: 0 };
       var popRect = popover.getBoundingClientRect();
@@ -1502,45 +1751,70 @@ ${graphScript}
     if (skipSelectionClear !== true) clearGraphSelection();
   }
 
+  // The dossier docks to the left edge of the graph viewport — a stable reading
+  // pane instead of a cursor-chasing popover that covered the node you clicked.
+  // The x/y hint is kept for callers but no longer used for placement.
+  function ensureDossierResize() {
+    if (!popover || popover.querySelector('.dossier-resize')) return;
+    var handle = document.createElement('div');
+    handle.className = 'dossier-resize';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.addEventListener('pointerdown', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handle.classList.add('dragging');
+      try { handle.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+      function move(e) {
+        var rect = popover.getBoundingClientRect();
+        var w = Math.max(280, Math.min(680, e.clientX - rect.left));
+        popover.style.width = w + 'px';
+        popover.style.maxWidth = 'none';
+      }
+      function up() {
+        handle.classList.remove('dragging');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+    popover.appendChild(handle);
+  }
+
   function positionPopover(x, y) {
     if (!popover || !popoverCard) return;
-    popover.style.display = 'block';
+    popover.classList.add('docked');
+    popover.classList.toggle('editor', Boolean(editMode));
     popover.setAttribute('aria-hidden', 'false');
     popover.style.visibility = 'hidden';
-    requestAnimationFrame(function() {
-      var container = document.querySelector('.graph-container');
-      var cw = container ? container.getBoundingClientRect().width : 900;
-      var ch = container ? container.getBoundingClientRect().height : 600;
-      var cardRect = popoverCard.getBoundingClientRect();
-      var cardW = cardRect.width;
-      var cardH = cardRect.height;
-      var pad = 10;
-      var gap = 12;
-      var left, top;
-
-      // Pick side with more space horizontally
-      if (x + gap + cardW + pad < cw) {
-        left = x + gap;
-      } else if (x - gap - cardW > pad) {
-        left = x - gap - cardW;
-      } else {
-        left = Math.max(pad, (cw - cardW) / 2);
-      }
-      // Pick side with more space vertically
-      if (y - cardH / 2 > pad && y + cardH / 2 < ch - pad) {
-        top = y - cardH / 2; // center vertically on click
-      } else if (y + gap + cardH + pad < ch) {
-        top = y + gap;
-      } else if (y - gap - cardH > pad) {
-        top = y - gap - cardH;
-      } else {
-        top = Math.max(pad, (ch - cardH) / 2);
-      }
-
-      popover.style.left = left + 'px';
-      popover.style.top = top + 'px';
+    popover.style.display = 'block';
+    ensureDossierResize();
+    if (cardWasDragged && popover.style.left && popover.style.top) {
       popover.style.visibility = 'visible';
-    });
+      return;
+    }
+    var container = document.querySelector('.graph-container');
+    var bounds = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+    var panel = document.querySelector('.phren-project-panel:not([hidden])');
+    var panelRect = panel ? panel.getBoundingClientRect() : null;
+    var cardRect = popover.getBoundingClientRect();
+    var width = cardRect.width || 360;
+    var height = cardRect.height || 260;
+    var paneRight = panelRect ? panelRect.right - bounds.left : 16;
+    var anchorX = x > 0 ? x : paneRight + width + 44;
+    var anchorY = y > 0 ? y : (panelRect ? panelRect.top - bounds.top + 180 : 240);
+    var gap = 26;
+    var leftOfNode = anchorX - width - gap;
+    var rightOfNode = anchorX + gap;
+    var left;
+    if (leftOfNode >= paneRight + 14) left = leftOfNode;
+    else if (rightOfNode + width <= bounds.width - 16) left = rightOfNode;
+    else left = Math.max(16, Math.min(bounds.width - width - 16, paneRight + 14));
+    var top = Math.max(64, Math.min(bounds.height - height - 16, anchorY - height / 2));
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+    popover.style.right = 'auto';
+    popover.style.visibility = 'visible';
   }
 
   function renderDocs(node) {
@@ -1551,23 +1825,25 @@ ${graphScript}
 
   function renderView(node) {
     var title = node.label || node.text || node.id;
-    var chips = [chip(nodeKindLabel(node))];
+    var chips = [];
     if (node.projectName) chips.push(chip(node.projectName));
     if (node.store) chips.push(chip(node.store));
     if (node.kind === 'task' && node.section) chips.push(chip(node.section));
     if (node.kind === 'task' && node.priority) chips.push(chip('Priority ' + node.priority));
-    if (node.kind === 'finding' && node.topicLabel) chips.push(chip(node.topicLabel));
 
     var body = '';
     var actions = [];
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
-      body += '<div class="node-grid">'
-        + '<div class="node-metric"><div class="node-metric-label">Findings</div><div class="node-metric-value">' + counts.finding + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Tasks</div><div class="node-metric-value">' + counts.task + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">Fragments</div><div class="node-metric-value">' + counts.entity + '</div></div>'
-        + '<div class="node-metric"><div class="node-metric-label">References</div><div class="node-metric-value">' + counts.reference + '</div></div>'
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky metric grid was redundant.
+      var pstat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:14px;font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:14px;padding:4px 0 2px">'
+        + pstat(counts.finding, 'findings') + pstat(counts.task, 'tasks')
+        + pstat(counts.entity, 'fragments') + pstat(counts.reference, 'refs')
         + '</div>';
       if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
     } else if (node.kind === 'finding') {
@@ -1598,17 +1874,19 @@ ${graphScript}
 
     return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(nodeKindLabel(node)) + '</div>'
       + '<div style="font-size:15px;font-weight:600;line-height:1.2">' + esc(title) + '</div>'
-      + '<div class="node-chips">' + chips.join('') + '</div>'
+      + (chips.length ? '<div class="node-chips">' + chips.join('') + '</div>' : '')
       + body
       + (actions.length ? '<div class="node-actions">' + actions.join('') + '</div>' : '');
   }
 
   function renderEdit(node) {
     var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var itemTitle = node.label || node.text || node.id;
     var section = node.section || 'Queue';
     var priority = node.priority || '';
     return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
-      + '<div style="font-size:14px;font-weight:600;line-height:1.2">' + esc(node.projectName || nodeKindLabel(node)) + '</div>'
+      + '<div style="font-size:14px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(itemTitle) + '">' + esc(itemTitle) + '</div>'
+      + (node.projectName ? '<div class="node-date">' + esc(node.projectName) + '</div>' : '')
       + '<textarea id="node-editor" class="node-editor">' + esc(node.text || node.label || '') + '</textarea>'
       + (node.kind === 'task'
         ? '<div class="node-select-grid">'
@@ -1630,14 +1908,12 @@ ${graphScript}
         var action = button.getAttribute('data-node-action');
         if (action === 'edit') {
           editMode = currentNode.kind === 'task' ? 'task' : 'finding';
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           return;
         }
         if (action === 'cancel') {
           editMode = null;
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           return;
         }
         if (action === 'save') {
@@ -1699,6 +1975,7 @@ ${graphScript}
       return;
     }
     currentNode = node;
+    if (!editMode && x > 0 && y > 0) lastAnchorPoint = { x: x, y: y };
     popoverContent.innerHTML = editMode ? renderEdit(node) : renderView(node);
     bindActions();
     positionPopover(x, y);
@@ -1719,7 +1996,12 @@ ${graphScript}
   function outsidePointer(event) {
     if (!currentNode || !popoverCard) return;
     var target = event.target;
-    if (target instanceof Node && popoverCard.contains(target)) return;
+    // Anywhere inside the popover (card OR its resize handle) is not "outside".
+    if (target instanceof Node && ((popover && popover.contains(target)) || popoverCard.contains(target))) return;
+    // Renderer-owned HUD overlays (project navigator, contents pane + its
+    // re-open tab, filter bar, zoom controls) are legitimate UI, not a
+    // click-away dismiss. The 3D background still clears via onBackgroundClick.
+    if (target && target.closest && target.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 
@@ -1770,7 +2052,11 @@ ${graphScript}
       }
       currentNode = Object.assign({}, nodeLookup[node.id] || {}, node);
       editMode = null;
-      renderPopover(currentNode, x, y);
+      cardWasDragged = false;
+      // Ordinary selection expands the matching row inside the project pane;
+      // never stack a second reading card over the graph. Explicit Edit still
+      // uses the movable editor surface.
+      hidePopover(true);
     });
   }
 
@@ -1814,6 +2100,26 @@ ${graphScript}
   window.addEventListener('message', function(event) {
     var data = event && event.data;
     if (!data) return;
+    if (data.type === 'graphData' && data.payload && data.payload.nodes) {
+      // In-place data refresh: remount the shared renderer (camera pose is
+      // preserved on remount) instead of the extension rewriting the HTML.
+      payload = data.payload;
+      rebuildNodeLookup();
+      mapAndMountGraph();
+      if (currentNode) {
+        var refreshedNode = nodeLookup[currentNode.id];
+        if (refreshedNode) {
+          Object.assign(currentNode, refreshedNode);
+          if (!editMode) {
+            renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
+          }
+        } else {
+          hidePopover(true);
+          currentNode = null;
+        }
+      }
+      return;
+    }
     if (data.type === 'nodeUpdated' && typeof data.id === 'string' && data.changes) {
       if (window.phrenGraph && typeof window.phrenGraph.updateNode === 'function') {
         window.phrenGraph.updateNode(data.id, data.changes);
@@ -1831,8 +2137,7 @@ ${graphScript}
       if (currentNode && currentNode.id === data.id) {
         Object.assign(currentNode, cached || {});
         if (!editMode) {
-          var point = currentPoint();
-          renderPopover(currentNode, point.x, point.y);
+          renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
         }
       }
       return;
@@ -1860,11 +2165,75 @@ ${graphScript}
         });
       }
     }
+    if (data.type === 'batchRemoved' && data.undo && data.undo.items && data.undo.items.length) {
+      var batch = data.undo;
+      showUndoToast(batch.label || ('Deleted ' + batch.items.length + ' items'), function() {
+        vscode.postMessage({ command: 'undoDeleteBatch', items: batch.items });
+      });
+    }
+    if (data.type === 'mergeDone' && data.undo && data.undo.merged) {
+      var mergeUndo = data.undo;
+      showUndoToast('Merged 2 findings', function() {
+        vscode.postMessage({ command: 'undoMerge', projectName: mergeUndo.projectName, merged: mergeUndo.merged, originals: mergeUndo.originals });
+      });
+    }
   });
 
   if (window.phrenGraph && window.phrenGraph.onSelectionClear) {
     window.phrenGraph.onSelectionClear(function() {
       hidePopover(true);
+    });
+  }
+
+  // Row actions fired from the contents pane (delete). Deleting a specific node
+  // (not the selected one), so post messages from the node's own fields.
+  function deleteNodeMsg(node) {
+    if (!node) return;
+    if (node.kind === 'finding') {
+      vscode.postMessage({ command: 'deleteFinding', projectName: node.projectName, text: node.text || node.fullLabel || '', nodeId: node.id });
+    } else if (node.kind === 'task') {
+      vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
+    }
+  }
+  if (window.phrenGraph && window.phrenGraph.onItemAction) {
+    window.phrenGraph.onItemAction(function(payload, action) {
+      if (action === 'delete') {
+        deleteNodeMsg(payload);
+      } else if (action === 'save-inline' && payload && !Array.isArray(payload)) {
+        var nextText = (payload.editedText || '').trim();
+        if (!nextText) return;
+        if (payload.kind === 'task') {
+          vscode.postMessage({
+            command: 'saveTaskEdit',
+            projectName: payload.projectName,
+            item: payload.taskItemId || payload.text || payload.fullLabel || '',
+            nodeId: payload.id,
+            text: nextText,
+            section: payload.editedSection || payload.section || 'Queue',
+            priority: typeof payload.editedPriority === 'string' ? payload.editedPriority : (payload.priority || '')
+          });
+        } else if (payload.kind === 'finding') {
+          vscode.postMessage({
+            command: 'saveFindingEdit',
+            projectName: payload.projectName,
+            nodeId: payload.id,
+            oldText: payload.text || payload.fullLabel || '',
+            newText: nextText
+          });
+        }
+      } else if (action === 'merge' && Array.isArray(payload) && payload.length === 2) {
+        vscode.postMessage({
+          command: 'mergeFindings',
+          projectName: payload[0].projectName,
+          text1: payload[0].text || payload[0].fullLabel || '',
+          text2: payload[1].text || payload[1].fullLabel || '',
+        });
+      } else if (action === 'delete-batch' && Array.isArray(payload)) {
+        // One message → one confirm on the extension side (not N modals).
+        vscode.postMessage({ command: 'deleteBatch', items: payload.map(function(n) {
+          return { kind: n.kind, projectName: n.projectName, text: n.text || n.fullLabel || '', item: (n.taskItemId || n.text || n.fullLabel || '') };
+        }) });
+      }
     });
   }
 

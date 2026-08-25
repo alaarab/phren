@@ -36,14 +36,14 @@ async function openGraphTab(page: Page): Promise<void> {
   await expect(page.locator(".project-card")).toHaveCount(2);
   await page.locator("button.nav-item").filter({ hasText: "Graph" }).click();
   await expect(page.locator("#graph-canvas")).toBeVisible();
-  // Wait for sigma to render and the graph to settle
+  // Wait for the 3D renderer to mount and the graph to settle
   await page.waitForFunction(() => {
     const pg = (window as any).phrenGraph;
-    return pg && pg.__renderer === "sigma" && pg.getData().nodes.length > 0;
+    return pg && pg.__renderer === "three" && pg.getData().nodes.length > 0;
   }, { timeout: 10_000 });
 }
 
-/** Get node IDs from the sigma graph API. */
+/** Get node IDs from the graph API. */
 async function getNodeIds(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const pg = (window as any).phrenGraph;
@@ -73,7 +73,7 @@ function parseNodeCount(text: string): { visible: number; total: number } {
   return { visible: Number(match[1]), total: Number(match[2]) };
 }
 
-/** Select a node via the sigma API. Returns the selected node ID or null. */
+/** Select a node via the graph API. Returns the selected node ID or null. */
 async function selectFirstNode(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const pg = (window as any).phrenGraph;
@@ -85,7 +85,7 @@ async function selectFirstNode(page: Page): Promise<string | null> {
   });
 }
 
-/** Select a node of a specific kind via the sigma API. Returns the ID or null. */
+/** Select a node of a specific kind via the graph API. Returns the ID or null. */
 async function selectNodeOfKind(page: Page, kind: string): Promise<string | null> {
   return page.evaluate((k) => {
     const pg = (window as any).phrenGraph;
@@ -144,9 +144,9 @@ test.describe.serial("graph visualization e2e", () => {
     // Container div should be visible
     await expect(page.locator("#graph-canvas")).toBeVisible();
 
-    // Sigma renderer should be active
+    // The 3D renderer should be active
     const renderer = await page.evaluate(() => (window as any).phrenGraph?.__renderer);
-    expect(renderer).toBe("sigma");
+    expect(renderer).toBe("three");
 
     // Should have loaded nodes
     const nodeIds = await getNodeIds(page);
@@ -215,28 +215,15 @@ test.describe.serial("graph visualization e2e", () => {
   test("zoom controls change the camera ratio", async ({ page }) => {
     await openGraphTab(page);
 
-    // Get initial camera ratio
-    const getRatio = () =>
-      page.evaluate(() => {
-        const pg = (window as any).phrenGraph;
-        if (!pg || !pg.__renderer) return 1;
-        // Access sigma camera ratio via the internal renderer reference
-        const renderer = (window as any).__sigmaRenderer || null;
-        // Use graphZoom/graphReset and track ratio indirectly
-        return document.querySelector("#graph-canvas canvas")
-          ? 1 // placeholder — real test is that zoom changes something
-          : 0;
-      });
-
     // Click zoom in and verify camera state changed
     await page.locator(".graph-controls button").filter({ hasText: "+" }).click();
     await page.waitForTimeout(300);
 
-    // Verify by checking that the sigma camera ratio changed
+    // Verify the renderer is still drawing after the zoom interaction
     const afterZoomIn = await page.evaluate(() => {
-      // The sigma renderer stores camera state — verify it's not at default
+      // The renderer stores camera state — verify it's not at default
       const canvases = document.querySelectorAll("#graph-canvas canvas");
-      return canvases.length > 0; // At minimum, sigma created WebGL canvases
+      return canvases.length > 0; // At minimum, the renderer created a WebGL canvas
     });
     expect(afterZoomIn).toBe(true);
 
@@ -248,8 +235,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.locator(".graph-controls button").filter({ hasText: "R" }).click();
     await page.waitForTimeout(300);
 
-    // Verify sigma is still running after zoom operations
-    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // Verify the renderer is still running after zoom operations
+    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(stillAlive).toBe(true);
   });
 
@@ -328,7 +315,7 @@ test.describe.serial("graph visualization e2e", () => {
     // Graph div should fill most of the container width
     expect(graphBox!.width).toBeGreaterThan(containerBox!.width * 0.9);
 
-    // Sigma should have created WebGL canvases inside the div
+    // The renderer should have created a WebGL canvas inside the div
     const canvasCount = await page.locator("#graph-canvas canvas").count();
     expect(canvasCount).toBeGreaterThanOrEqual(1);
   });
@@ -404,8 +391,8 @@ test.describe.serial("graph visualization e2e", () => {
     const after = await getThemeClass();
     expect(after).not.toBe(before);
 
-    // Sigma should still be running after theme change
-    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running after theme change
+    const stillAlive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(stillAlive).toBe(true);
 
     // Toggle back
@@ -455,8 +442,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.evaluate(() => (window as any).graphZoom(1.5));
     await page.waitForTimeout(300);
 
-    // Sigma should still be running
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -480,8 +467,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     await page.waitForTimeout(300);
 
-    // Sigma should still be functional after pan
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be functional after pan
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -510,8 +497,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.up();
     await page.waitForTimeout(300);
 
-    // Sigma should still be functional
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be functional
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -626,15 +613,15 @@ test.describe.serial("graph visualization e2e", () => {
     await page.mouse.wheel(0, -300);
     await page.waitForTimeout(400);
 
-    // Sigma should still be running
-    let alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // The renderer should still be running
+    let alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Scroll to zoom out
     await page.mouse.wheel(0, 600);
     await page.waitForTimeout(400);
 
-    alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // Reset
@@ -687,7 +674,7 @@ test.describe.serial("graph visualization e2e", () => {
 
     const initial = await page.evaluate(() => (window as any).phrenGraph.getData().nodes.length);
 
-    // Capture the sigma canvas element identity to prove there's no full remount
+    // Capture the canvas element identity to prove there's no full remount
     const canvasIdBefore = await page.evaluate(() => {
       const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
       if (!canvas) return null;
@@ -707,7 +694,7 @@ test.describe.serial("graph visualization e2e", () => {
     const midAnim = await page.evaluate((id: string) => {
       const pg = (window as any).phrenGraph;
       const data = pg.getData();
-      // Internal: check sigma-level attrs if still attached
+      // Internal: check node-level attrs if still attached
       return {
         stillInData: data.nodes.some((n: any) => n.id === id),
         count: data.nodes.length,
@@ -732,8 +719,8 @@ test.describe.serial("graph visualization e2e", () => {
     // Selection should be cleared (popover hidden)
     await expect(popover).toHaveCSS("display", "none");
 
-    // Sigma still alive
-    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "sigma");
+    // Renderer still alive
+    const alive = await page.evaluate(() => (window as any).phrenGraph?.__renderer === "three");
     expect(alive).toBe(true);
 
     // removeNode on an unknown id returns false
@@ -861,5 +848,496 @@ test.describe.serial("graph visualization e2e", () => {
     // Assert zero console errors through all interactions
     const errorTexts = errors.map((e) => e.text());
     expect(errorTexts).toEqual([]);
+  });
+
+  test("project labels render as CSS2D DOM with a bounded label pool", async ({ page }) => {
+    await openGraphTab(page);
+    await page.waitForTimeout(1500);
+
+    // Eager project labels are always-on DOM elements
+    await expect.poll(async () => page.locator(".phren-label--project").count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // The pool + eager labels stay hard-capped
+    const total = await page.locator(".phren-label").count();
+    expect(total).toBeLessThanOrEqual(90);
+  });
+
+  test("selecting a finding shows its complete text in the dossier", async ({ page }) => {
+    await openGraphTab(page);
+
+    const selected = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const finding = pg.getData().nodes.find((n: any) => n.kind === "finding" && (n.fullLabel || "").length > 0);
+      if (!finding) return null;
+      pg.selectNode(finding.id);
+      return { id: finding.id, fullLabel: finding.fullLabel };
+    });
+    expect(selected).toBeTruthy();
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    // The dossier body must contain the COMPLETE finding text, not a truncation
+    await expect(page.locator("#graph-node-content")).toContainText(selected!.fullLabel, { timeout: 8_000 });
+  });
+
+  test("dossier prev/next cycles findings within the project", async ({ page }) => {
+    await openGraphTab(page);
+
+    const start = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const findings = pg.getData().nodes.filter((n: any) => n.kind === "finding");
+      const byProject: Record<string, any[]> = {};
+      for (const f of findings) (byProject[f.projectName] = byProject[f.projectName] || []).push(f);
+      const project = Object.keys(byProject).find((k) => byProject[k].length > 1);
+      if (!project) return null;
+      const first = byProject[project][0];
+      pg.selectNode(first.id);
+      return first.fullLabel || first.label;
+    });
+    expect(start).toBeTruthy();
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    const nextBtn = page.locator('[data-graph-action="next-finding"]');
+    await expect(nextBtn).toBeVisible({ timeout: 8_000 });
+    await nextBtn.click();
+    // Selection flies to the sibling; the dossier re-renders with different content
+    await expect(page.locator("#graph-node-content")).not.toContainText(start!, { timeout: 8_000 });
+  });
+
+  test("search Enter flies to the best hit and opens the dossier", async ({ page }) => {
+    await openGraphTab(page);
+
+    const query = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      const finding = pg.getData().nodes.find((n: any) => n.kind === "finding");
+      // A word from a real finding guarantees a match
+      const word = String(finding?.fullLabel || finding?.label || "").split(/\s+/).find((w: string) => w.length > 4);
+      return word || null;
+    });
+    expect(query).toBeTruthy();
+
+    const searchInput = page.locator("input[data-search-filter]");
+    await searchInput.fill(query!);
+    await page.waitForTimeout(400);
+    await searchInput.press("Enter");
+
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+
+    await searchInput.fill("");
+    await page.waitForTimeout(300);
+  });
+
+  test("HUD stats readout reflects the visible graph", async ({ page }) => {
+    await openGraphTab(page);
+    const stats = page.locator(".phren-hud-stats");
+    await expect(stats).toHaveText(/\d+ NODES · \d+ LINKS · \d+ PROJECTS/, { timeout: 8_000 });
+  });
+
+  test("global review pill opens a cross-project aging list", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      const stale = new Date(Date.now() - 300 * 86400000).toISOString();
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha" },
+          { id: "project:beta", label: "beta", group: "project", project: "beta" },
+          { id: "finding:a1", label: "alpha stale one", group: "topic:general", project: "alpha", scoreKey: "ka1" },
+          { id: "finding:a2", label: "alpha healthy", group: "topic:general", project: "alpha", scoreKey: "ka2" },
+          { id: "finding:b1", label: "beta stale one", group: "topic:general", project: "beta", scoreKey: "kb1" },
+        ],
+        links: [
+          { source: "project:alpha", target: "finding:a1" },
+          { source: "project:alpha", target: "finding:a2" },
+          { source: "project:beta", target: "finding:b1" },
+        ],
+        scores: { ka1: { lastUsedAt: stale }, kb1: { lastUsedAt: stale } },
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    // The nav shows a "⚠ 2" review pill (a1 + b1 are stale; a2 is healthy).
+    const pill = page.locator(".phren-project-review");
+    await expect(pill).toBeVisible();
+    await expect(pill).toContainText("2");
+
+    await pill.click();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(".phren-pp-kind")).toContainText("Needs review");
+    // Both projects' aging findings show; the healthy one does not.
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:b1"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="finding:a2"]')).toHaveCount(0);
+    await expect(panel.locator(".phren-pp-group", { hasText: "alpha" })).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "beta" })).toBeVisible();
+  });
+
+  test("selecting a fragment shows its connected projects and references", async ({ page }) => {
+    await openGraphTab(page);
+    await page.evaluate(() => {
+      (window as any).phrenGraph.mount({
+        nodes: [
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha", findingCount: 2, taskCount: 1 },
+          { id: "project:beta", label: "beta", group: "project", project: "beta", findingCount: 1, taskCount: 0 },
+          { id: "entity:auth", label: "AuthService", group: "entity", entityType: "class", refCount: 5, connectedProjects: ["alpha", "beta"] },
+          { id: "ref:alpha/auth.ts", label: "auth.ts", group: "reference", project: "alpha" },
+        ],
+        links: [
+          { source: "entity:auth", target: "project:alpha" },
+          { source: "entity:auth", target: "project:beta" },
+          { source: "entity:auth", target: "ref:alpha/auth.ts" },
+        ],
+        topics: [],
+      });
+    });
+    await page.waitForTimeout(800);
+
+    await page.evaluate(() => (window as any).phrenGraph.selectNode("entity:auth"));
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Fragment");
+    await expect(panel.locator(".phren-pp-group", { hasText: "Connected projects" })).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:alpha"]')).toBeVisible();
+    await expect(panel.locator('.phren-pp-row[data-node-id="project:beta"]')).toBeVisible();
+    await expect(panel.locator(".phren-pp-group", { hasText: "References" })).toBeVisible();
+
+    // Clicking a connected project navigates the pane to that project.
+    await panel.locator('.phren-pp-row[data-node-id="project:alpha"]').click();
+    await expect(panel.locator(".phren-pp-kind")).toHaveText("Project");
+  });
+
+  test("remount clears stale eager project labels", async ({ page }) => {
+    await openGraphTab(page);
+    const mountPayload = (proj: string, label: string) => ({
+      nodes: [
+        { id: `project:${proj}`, label, group: "project", project: proj, findingCount: 1 },
+        { id: `finding:${proj}:0`, label: `${proj} finding`, group: "topic:general", project: proj },
+      ],
+      links: [{ source: `project:${proj}`, target: `finding:${proj}:0` }],
+      topics: [],
+    });
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("alpha", "alpha-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label--project", { hasText: "alpha-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+
+    // Remount with a different project — the previous project's label must not
+    // linger as a CSS2D ghost.
+    await page.evaluate((p) => (window as any).phrenGraph.mount(p), mountPayload("beta", "beta-proj"));
+    await expect
+      .poll(async () => page.locator(".phren-label", { hasText: "beta-proj" }).count(), { timeout: 8_000 })
+      .toBeGreaterThan(0);
+    await expect(page.locator(".phren-label", { hasText: "alpha-proj" })).toHaveCount(0);
+  });
+
+  test("project navigator dock lists projects and selects one on click", async ({ page }) => {
+    await openGraphTab(page);
+
+    // The dock renders one orb per visible project (the fixture seeds two).
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Each orb carries the project node id it targets.
+    const firstOrbId = await orbs.first().getAttribute("data-project-id");
+    expect(firstOrbId).toBeTruthy();
+    const isProjectNode = await page.evaluate((id) => {
+      const pg = (window as any).phrenGraph;
+      const node = pg.getData().nodes.find((n: any) => n.id === id);
+      return node?.kind === "project";
+    }, firstOrbId);
+    expect(isProjectNode).toBe(true);
+
+    // Clicking the orb focuses that project — no finding/task selection needed —
+    // and opens the dossier for it.
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+
+    // The clicked orb is marked active and the graph reports the focused project.
+    await expect(orbs.first()).toHaveClass(/active/);
+    const focused = await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      // getData reflects host nodes; focus is internal — assert via the active orb.
+      return document.querySelector(".phren-project-orb.active")?.getAttribute("data-project-id") || null;
+    });
+    expect(focused).toBe(firstOrbId);
+
+    // Clicking the active orb again toggles focus off (clears selection).
+    await orbs.first().click();
+    await expect(page.locator("#graph-node-popover")).toHaveCSS("display", "none");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
+  });
+
+  test("project contents pane lists items and navigates on row click", async ({ page }) => {
+    await openGraphTab(page);
+
+    const panel = page.locator(".phren-project-panel");
+    // Hidden until a project is in context.
+    await expect(panel).toBeHidden();
+
+    // Focus a project — the pane appears with its findings/tasks.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const rows = panel.locator(".phren-pp-row");
+    await expect.poll(async () => rows.count(), { timeout: 8_000 }).toBeGreaterThan(0);
+
+    // Clicking a row flies to that node and opens its dossier; the pane stays
+    // open (the item's project is still in context) with the row marked active.
+    const firstRowId = await rows.first().getAttribute("data-node-id");
+    await rows.first().click();
+    await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    await expect(panel).toBeVisible();
+    await expect(panel.locator(`.phren-pp-row.active[data-node-id="${firstRowId}"]`)).toHaveCount(1);
+
+    // The close button clears selection and hides the pane.
+    await panel.locator("[data-pp-close]").click();
+    await expect(panel).toBeHidden();
+  });
+
+  test("merge button appears only for two same-project findings", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    // Restrict to findings, enter select mode, pick all (fixture: 2 findings).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    const merge = panel.locator("[data-pp-bulk-merge]");
+    await expect(merge).toBeHidden(); // nothing picked yet
+    await panel.locator("[data-pp-bulk-all]").click();
+    await expect(merge).toBeVisible(); // exactly two same-project findings
+  });
+
+  test("merge combines two findings and undo restores them", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await openGraphTab(page);
+    const repoAFindings = () => page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    const before = await repoAFindings();
+    expect(before).toBe(2);
+
+    await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      pg.selectNode(pg.getData().nodes.find((n: any) => n.kind === "project" && n.projectName === "repo-a").id);
+    });
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    await panel.locator("[data-pp-bulk-all]").click();
+    await panel.locator("[data-pp-bulk-merge]").click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(1);
+
+    // Undo splits the merged bullet back into the two originals (net-zero).
+    await page.locator("#toast-container button", { hasText: "Undo" }).click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(2);
+  });
+
+  test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    // Enter select mode → checkboxes + a bulk bar with delete disabled.
+    await panel.locator("[data-pp-select]").click();
+    await expect(panel.locator(".phren-pp-check").first()).toBeVisible();
+    const bar = panel.locator("[data-pp-bulk]");
+    await expect(bar).toBeVisible();
+    await expect(panel.locator("[data-pp-bulk-delete]")).toBeDisabled();
+
+    // Select all → delete enabled with a count.
+    await panel.locator("[data-pp-bulk-all]").click();
+    await expect(panel.locator("[data-pp-bulk-delete]")).toBeEnabled();
+    await expect(panel.locator("[data-pp-bulk-count]")).toContainText("selected");
+    await expect(panel.locator(".phren-pp-row.picked").first()).toBeVisible();
+
+    // Done exits select mode.
+    await panel.locator("[data-pp-bulk-done]").click();
+    await expect(bar).toBeHidden();
+    await expect(panel.locator(".phren-pp-check")).toHaveCount(0);
+  });
+
+  test("left detail dossier is resizable", async ({ page }) => {
+    await openGraphTab(page);
+    const findingId = await selectNodeOfKind(page, "finding");
+    expect(findingId).toBeTruthy();
+    const pop = page.locator("#graph-node-popover");
+    await expect(pop).toBeVisible({ timeout: 8_000 });
+
+    const before = (await pop.boundingBox())!.width;
+    const handle = pop.locator(".phren-dossier-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x + 130, hb.y + hb.height / 2, { steps: 8 }); // drag outward → wider
+    await page.mouse.up();
+    const after = (await pop.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
+  test("row edit action stays inline in the project pane", async ({ page }) => {
+    await openGraphTab(page);
+    // Select a project that has findings, so the pane lists editable rows.
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    const row = panel.locator('.phren-pp-row').filter({ has: page.locator("[data-pp-edit]") }).first();
+    await row.hover();
+    await row.locator("[data-pp-edit]").click();
+    await expect(row.locator("[data-pp-editor]")).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator("#graph-node-editor")).toBeHidden();
+  });
+
+  test("row peek flies to a node without changing selection", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The focused project shows an active navigator orb; no row is selected yet.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+
+    // Peek a finding row → camera flies, but selection/focus is untouched.
+    const row = panel.locator(".phren-pp-row").first();
+    await row.hover();
+    await row.locator("[data-pp-peek]").click();
+    await page.waitForTimeout(300);
+    await expect(panel.locator(".phren-pp-row.active")).toHaveCount(0);
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
+  });
+
+  test("pane sort preference persists across reload", async ({ page }) => {
+    await openGraphTab(page);
+    let projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator("[data-pp-sort]").selectOption("recent");
+
+    // Reload the app (same origin → localStorage persists), reopen a project.
+    await openGraphTab(page);
+    projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await expect(panel.locator("[data-pp-sort]")).toHaveValue("recent");
+  });
+
+  test("contents pane is resizable via its edge handle", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const before = (await panel.boundingBox())!.width;
+    const handle = panel.locator(".phren-pp-resize");
+    const hb = (await handle.boundingBox())!;
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hb.x - 130, hb.y + hb.height / 2, { steps: 8 }); // drag inward → wider
+    await page.mouse.up();
+    const after = (await panel.boundingBox())!.width;
+    expect(after).toBeGreaterThan(before + 60);
+  });
+
+  test("bulk delete offers undo that restores the findings", async ({ page }) => {
+    page.on("dialog", (d) => d.accept());
+    await openGraphTab(page);
+    const repoAFindings = () => page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    const before = await repoAFindings();
+    expect(before).toBeGreaterThan(1);
+
+    await page.evaluate(() => {
+      const pg = (window as any).phrenGraph;
+      pg.selectNode(pg.getData().nodes.find((n: any) => n.kind === "project" && n.projectName === "repo-a").id);
+    });
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await panel.locator("[data-pp-select]").click();
+    await panel.locator("[data-pp-bulk-all]").click();
+    await panel.locator("[data-pp-bulk-delete]").click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(0);
+
+    // The undo toast restores everything (leaves the fixture as it was).
+    await page.locator("#toast-container button", { hasText: "Undo" }).click();
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(before);
+  });
+
+  test("contents pane collapses to a tab and reopens", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    await panel.locator("[data-pp-collapse]").click();
+    await expect(page.locator(".phren-pp-reopen")).toBeVisible();
+    await expect(panel).toBeHidden();
+
+    await page.locator(".phren-pp-reopen").click();
+    await expect(panel).toBeVisible();
+    await expect(page.locator(".phren-pp-reopen")).toBeHidden();
+  });
+
+  test("interacting with the contents pane keeps the project focused", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+    // The navigator orb reflects the focused project.
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+
+    // Clicking a filter chip inside the pane must not clear the graph selection.
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    await expect(panel).toBeVisible();
+  });
+
+  test("project contents pane filter narrows the list", async ({ page }) => {
+    await openGraphTab(page);
+    const projectId = await selectNodeOfKind(page, "project");
+    expect(projectId).toBeTruthy();
+    const panel = page.locator(".phren-project-panel");
+    await expect(panel).toBeVisible({ timeout: 8_000 });
+
+    const rows = panel.locator(".phren-pp-row");
+    const before = await rows.count();
+    expect(before).toBeGreaterThan(0);
+
+    // "Findings" chip restricts the list to findings only (no task rows).
+    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
+    await expect(panel.locator('.phren-pp-group', { hasText: /Tasks/ })).toHaveCount(0);
+
+    // A nonsense query empties the list.
+    await panel.locator("[data-pp-search]").fill("zzzzz-no-such-item-qqqq");
+    await expect(panel.locator(".phren-pp-empty")).toHaveCount(1);
+  });
+
+  test("arrow keys cycle project focus through the navigator", async ({ page }) => {
+    await openGraphTab(page);
+
+    const orbs = page.locator(".phren-project-nav .phren-project-orb");
+    await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(1);
+
+    // Focus the canvas (not a text field), then step forward with ArrowRight.
+    await page.locator("#graph-canvas").click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
+    const firstActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+
+    // ArrowRight again moves to a different project.
+    await page.keyboard.press("ArrowRight");
+    const secondActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+    expect(secondActive).not.toBe(firstActive);
   });
 });

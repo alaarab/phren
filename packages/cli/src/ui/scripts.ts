@@ -87,6 +87,253 @@ export function renderProfileSwitcherScript(_authToken: string): string {
 })();`;
 }
 
+export function renderFindingCaptureEnhancementScript(): string {
+  return `(function() {
+  function selectedProject() {
+    var card = document.querySelector('.project-card.selected');
+    return card ? (card.getAttribute('data-project') || '') : '';
+  }
+
+  function findingsTab() {
+    return document.querySelector('.project-detail-tab[data-file="FINDINGS.md"]');
+  }
+
+  function wireCaptureBar() {
+    var container = document.getElementById('project-content');
+    var tab = findingsTab();
+    if (!container || !tab || !tab.classList.contains('active')) return;
+
+    container.querySelectorAll('.finding-detail-card summary').forEach(function(summary) {
+      summary.textContent = (summary.textContent || '').replace(/\\s*<!--.*?-->\\s*/g, ' ').trim();
+    });
+
+    var input = document.getElementById('finding-add-input');
+    if (!input) {
+      var project = selectedProject();
+      if (!project || container.querySelector('.project-detail-empty')) return;
+      var bar = document.createElement('div');
+      bar.className = 'finding-capture-bar';
+      bar.innerHTML = '<input id="finding-add-input" type="text" placeholder="Record durable knowledge…" aria-label="Finding text">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-finding-capture-submit>Add finding</button>';
+      container.insertBefore(bar, container.firstChild);
+      input = bar.querySelector('#finding-add-input');
+    } else {
+      var existingBar = input.parentElement;
+      if (existingBar) existingBar.classList.add('finding-capture-bar');
+    }
+
+    if (!input || input.getAttribute('data-capture-wired') === 'true') return;
+    input.setAttribute('data-capture-wired', 'true');
+    input.setAttribute('placeholder', 'Record durable knowledge…');
+    input.addEventListener('keydown', function(event) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      window.phrenAddFinding(selectedProject());
+    });
+    var button = input.parentElement && input.parentElement.querySelector('button');
+    if (button) {
+      button.textContent = 'Add finding';
+      button.addEventListener('click', function(event) {
+        event.preventDefault();
+        window.phrenAddFinding(selectedProject());
+      });
+    }
+  }
+
+  window.selectProjectFile = function(file) {
+    var tab = document.querySelector('.project-detail-tab[data-file="' + file + '"]');
+    if (tab && typeof window.loadProjectFile === 'function') window.loadProjectFile(file, tab);
+  };
+
+  var baseSelectProject = window.selectProject;
+  if (typeof baseSelectProject === 'function') {
+    window.selectProject = function(name, el) {
+      baseSelectProject(name, el);
+      var header = document.querySelector('.project-detail-header');
+      if (header && !header.querySelector('.capture-finding-btn')) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm btn-primary capture-finding-btn';
+        button.textContent = '+ Add finding';
+        button.addEventListener('click', function() {
+          window.selectProjectFile('FINDINGS.md');
+          window.setTimeout(function() {
+            wireCaptureBar();
+            var input = document.getElementById('finding-add-input');
+            if (input) input.focus();
+          }, 0);
+        });
+        header.appendChild(button);
+      }
+    };
+  }
+
+  var detailArea = document.getElementById('project-detail-area');
+  if (detailArea) {
+    new MutationObserver(function() { window.setTimeout(wireCaptureBar, 0); })
+      .observe(detailArea, { childList: true, subtree: true });
+  }
+})();`;
+}
+
+export function renderNotesEnhancementScript(): string {
+  return `(function() {
+  var esc = window._phrenEsc;
+  var authUrl = window._phrenAuthUrl;
+
+  function selectedProject() {
+    var card = document.querySelector('.project-card.selected');
+    return card ? (card.getAttribute('data-project') || '') : '';
+  }
+
+  function request(project, method, values, done) {
+    window._phrenFetchCsrfToken(function(csrfToken) {
+      var body = new URLSearchParams(values || {});
+      if (csrfToken) body.set('_csrf', csrfToken);
+      fetch(authUrl('/api/notes/' + encodeURIComponent(project)), {
+        method: method,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: window._phrenAuthBody(body.toString())
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Note operation failed');
+        done(data);
+      }).catch(function(err) { alert(String(err.message || err)); });
+    });
+  }
+
+  function renderNotes(project, notes) {
+    var container = document.getElementById('project-content');
+    if (!container) return;
+    var today = new Date().toISOString().slice(0, 10);
+    var html = '<div class="notes-panel">' +
+      '<div class="note-capture">' +
+        '<textarea id="note-add-text" rows="3" placeholder="What happened today? Markdown is welcome." aria-label="Note text"></textarea>' +
+        '<div class="note-capture-actions"><input id="note-add-date" type="date" value="' + today + '" aria-label="Note date">' +
+        '<button type="button" class="btn btn-primary" data-note-action="add">Add note</button></div>' +
+      '</div>';
+    if (!notes.length) {
+      html += '<div class="project-detail-empty">No notes yet. Add a quick daily note above.</div>';
+    } else {
+      var lastDate = '';
+      notes.forEach(function(note) {
+        if (note.date !== lastDate) {
+          if (lastDate) html += '</div>';
+          lastDate = note.date;
+          html += '<div class="note-day"><div class="note-day-heading">' + esc(note.date) + '</div>';
+        }
+        html += '<article class="note-card" data-note-id="' + esc(note.id) + '">' +
+          '<div class="note-card-meta"><span>' + esc(String(note.time || '').slice(0, 5)) + '</span>' +
+          '<code>' + esc(note.id) + '</code>' +
+          (note.promoted ? '<span class="note-promoted">promoted</span>' : '') + '</div>' +
+          '<div class="note-card-text">' + esc(note.text).replace(/\\n/g, '<br>') + '</div>' +
+          '<div class="note-card-actions">' +
+            '<button type="button" class="btn btn-sm" data-note-action="edit">Edit</button>' +
+            (!note.promoted ? '<button type="button" class="btn btn-sm" data-note-action="promote">Promote to finding</button>' : '') +
+            '<button type="button" class="btn btn-sm note-remove" data-note-action="remove">Remove</button>' +
+          '</div>' +
+          '<textarea class="note-raw-text" hidden>' + esc(note.text) + '</textarea>' +
+        '</article>';
+      });
+      if (lastDate) html += '</div>';
+    }
+    container.innerHTML = html + '</div>';
+  }
+
+  function loadNotes(focusCapture) {
+    var project = selectedProject();
+    var container = document.getElementById('project-content');
+    if (!project || !container) return;
+    container.innerHTML = '<div class="project-detail-empty">Loading notes...</div>';
+    fetch(authUrl('/api/notes/' + encodeURIComponent(project)))
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) throw new Error(data.error || 'Failed to load notes');
+        renderNotes(project, (data.data && data.data.notes) || []);
+        if (focusCapture) {
+          var input = document.getElementById('note-add-text');
+          if (input) input.focus();
+        }
+      }).catch(function(err) {
+        container.innerHTML = '<div class="project-detail-empty">' + esc(err.message || err) + '</div>';
+      });
+  }
+
+  var baseSelectProject = window.selectProject;
+  if (typeof baseSelectProject === 'function') {
+    window.selectProject = function(name, el) {
+      baseSelectProject(name, el);
+      var tabs = document.querySelector('.project-detail-tabs');
+      if (tabs && !tabs.querySelector('[data-file="notes:daily"]')) {
+        var tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'project-detail-tab';
+        tab.setAttribute('data-ui-action', 'loadProjectFile');
+        tab.setAttribute('data-file', 'notes:daily');
+        tab.textContent = 'Notes';
+        var reference = tabs.querySelector('[data-file="reference:browser"]');
+        tabs.insertBefore(tab, reference);
+      }
+      var header = document.querySelector('.project-detail-header');
+      if (header && !header.querySelector('.capture-note-btn')) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm capture-note-btn';
+        button.textContent = '+ Add note';
+        button.addEventListener('click', function() {
+          window.selectProjectFile('notes:daily');
+          window.setTimeout(function() { loadNotes(true); }, 0);
+        });
+        header.appendChild(button);
+      }
+    };
+  }
+
+  var baseLoadProjectFile = window.loadProjectFile;
+  window.loadProjectFile = function(file, btn) {
+    if (file !== 'notes:daily') return baseLoadProjectFile(file, btn);
+    document.querySelectorAll('.project-detail-tab').forEach(function(tab) { tab.classList.remove('active'); });
+    var notesTab = btn || document.querySelector('.project-detail-tab[data-file="notes:daily"]');
+    if (notesTab) notesTab.classList.add('active');
+    loadNotes(false);
+  };
+
+  document.addEventListener('click', function(event) {
+    var button = event.target && event.target.closest ? event.target.closest('[data-note-action]') : null;
+    if (!button) return;
+    var project = selectedProject();
+    if (!project) return;
+    var action = button.getAttribute('data-note-action');
+    if (action === 'add') {
+      var text = document.getElementById('note-add-text');
+      var date = document.getElementById('note-add-date');
+      if (!text || !text.value.trim()) return;
+      request(project, 'POST', { text: text.value.trim(), date: date ? date.value : '' }, function() { loadNotes(true); });
+      return;
+    }
+    var card = button.closest('.note-card');
+    if (!card) return;
+    var note = card.getAttribute('data-note-id') || '';
+    var raw = card.querySelector('.note-raw-text');
+    var current = raw ? raw.value : '';
+    if (action === 'edit') {
+      var next = prompt('Edit note', current);
+      if (next === null || !next.trim() || next === current) return;
+      request(project, 'PUT', { note: note, text: next.trim() }, function() { loadNotes(false); });
+    } else if (action === 'remove') {
+      if (!confirm('Remove this note?')) return;
+      request(project, 'DELETE', { note: note }, function() { loadNotes(false); });
+    } else if (action === 'promote') {
+      var findingType = prompt('Finding type (optional): decision, pitfall, pattern, bug', '');
+      if (findingType === null) return;
+      findingType = findingType.trim().toLowerCase();
+      var valid = ['', 'decision', 'pitfall', 'pattern', 'bug'];
+      if (valid.indexOf(findingType) === -1) { alert('Unknown finding type.'); return; }
+      request(project, 'POST', { action: 'promote', note: note, finding_type: findingType }, function() { loadNotes(false); });
+    }
+  });
+})();`;
+}
+
 export function renderSkillUiEnhancementScript(_authToken: string): string {
   return `(function() {
     var _skillCurrent = null;
@@ -1772,6 +2019,36 @@ export function renderEventWiringScript(): string {
     else if (action === 'clear') { clearBatchSelection(); }
   });
 
+  // The legacy hook rows use .hook-item rather than .split-item. Their original
+  // delegated handler therefore passes null to selectHookFromEl; wire the actual
+  // row here so lifecycle hook details remain selectable.
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    var hook = target.closest('.hook-item[data-ui-action="selectHookFromEl"]');
+    if (hook && typeof selectHookFromEl === 'function') selectHookFromEl(hook);
+  });
+
+  // Keep review-card action metadata aligned with the queue line after an edit.
+  // The base submit handler sends the old line first; this listener then updates
+  // the DOM identity used by subsequent approve/reject actions.
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || form.getAttribute('data-ui-action') !== 'reviewEditSubmit') return;
+    var card = form.closest('.review-card');
+    var textarea = form.querySelector('textarea[name="new_text"]');
+    if (!card || !textarea) return;
+    var oldLine = form.getAttribute('data-line') || '';
+    var text = String(textarea.value || '').replace(/[\\r\\n]+/g, ' ').trim();
+    if (!text) return;
+    var dateMatch = oldLine.match(/^- \\[(\\d{4}-\\d{2}-\\d{2})\\]\\s*/);
+    var updatedLine = dateMatch ? '- [' + dateMatch[1] + '] ' + text : '- ' + text;
+    var project = card.getAttribute('data-project') || form.getAttribute('data-project') || '';
+    card.setAttribute('data-key', project + '\\\\x00' + updatedLine);
+    form.setAttribute('data-line', updatedLine);
+    card.querySelectorAll('[data-line]').forEach(function(el) { el.setAttribute('data-line', updatedLine); });
+  });
+
   // --- Graph controls ---
   var graphZoomIn = document.getElementById('graph-zoom-in');
   if (graphZoomIn) graphZoomIn.addEventListener('click', function() { graphZoom(1.2); });
@@ -1863,6 +2140,28 @@ export function renderGraphHostScript(): string {
     }, 2600);
   }
 
+  function graphUndoToast(message, onUndo) {
+    var container = document.getElementById('toast-container');
+    if (!container) return;
+    var toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.style.gap = '10px';
+    var msg = document.createElement('span');
+    msg.textContent = message;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Undo';
+    btn.style.cssText = 'cursor:pointer;border:1px solid var(--accent,#67e8f9);background:transparent;color:var(--accent,#67e8f9);border-radius:6px;padding:2px 10px;font:inherit;font-size:12px';
+    var remove = function() { if (toast.parentNode) toast.parentNode.removeChild(toast); };
+    btn.addEventListener('click', function() { remove(); onUndo(); });
+    toast.appendChild(msg);
+    toast.appendChild(btn);
+    container.appendChild(toast);
+    setTimeout(remove, 8000);
+  }
+
   function fetchCsrfToken() {
     return fetch(authUrl('/api/csrf-token')).then(function(r) { return r.json(); }).then(function(data) {
       return data && data.ok ? (data.token || null) : null;
@@ -1898,22 +2197,45 @@ export function renderGraphHostScript(): string {
     if (typeof window.graphClearSelection === 'function') window.graphClearSelection();
   }
 
+  // The dossier docks to the right edge of the graph viewport — a stable
+  // reading pane instead of a cursor-chasing popover. Signature kept for
+  // callers; the x/y hint is no longer needed.
+  function ensureDossierResize(popover) {
+    if (!popover || popover.querySelector('.phren-dossier-resize')) return;
+    var handle = document.createElement('div');
+    handle.className = 'phren-dossier-resize';
+    handle.setAttribute('aria-hidden', 'true');
+    handle.addEventListener('pointerdown', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      handle.classList.add('dragging');
+      try { handle.setPointerCapture(ev.pointerId); } catch (_) { /* ignore */ }
+      function move(e) {
+        var rect = popover.getBoundingClientRect();
+        var w = Math.max(280, Math.min(680, e.clientX - rect.left));
+        popover.style.width = w + 'px';
+        popover.style.maxWidth = 'none';
+      }
+      function up() {
+        handle.classList.remove('dragging');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    });
+    popover.appendChild(handle);
+  }
+
   function positionPopover(x, y) {
     var popover = document.getElementById('graph-node-popover');
-    var card = document.getElementById('graph-node-popover-card');
-    var container = document.querySelector('#tab-graph .graph-container');
-    if (!popover || !card || !container) return;
+    if (!popover) return;
+    popover.classList.add('phren-docked');
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.visibility = 'visible';
     popover.style.display = 'block';
-    popover.style.visibility = 'hidden';
-    requestAnimationFrame(function() {
-      var containerRect = container.getBoundingClientRect();
-      var cardRect = card.getBoundingClientRect();
-      var left = Math.min(Math.max(12, x + 18), Math.max(12, containerRect.width - cardRect.width - 12));
-      var top = Math.min(Math.max(12, y + 18), Math.max(12, containerRect.height - cardRect.height - 12));
-      popover.style.left = left + 'px';
-      popover.style.top = top + 'px';
-      popover.style.visibility = 'visible';
-    });
+    ensureDossierResize(popover);
   }
 
   function currentPopoverPoint() {
@@ -1964,6 +2286,68 @@ export function renderGraphHostScript(): string {
     return node.kind || 'Node';
   }
 
+  function findingSiblings(node) {
+    var data = graphData();
+    return (data.nodes || []).filter(function(candidate) {
+      return candidate.kind === 'finding' && candidate.projectName === node.projectName;
+    }).sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  }
+
+  function findingNav(node) {
+    var list = findingSiblings(node);
+    var index = -1;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === node.id) { index = i; break; }
+    }
+    return { list: list, index: index, total: list.length };
+  }
+
+  function relatedFindings(node) {
+    return findingSiblings(node).filter(function(candidate) {
+      return candidate.id !== node.id && candidate.topicSlug && candidate.topicSlug === node.topicSlug;
+    }).slice(0, 4);
+  }
+
+  // Neighbors of the node from the live graph links, scored so the panel can
+  // list "strongest relationships" like GraphRAG. Entities/findings first.
+  function strongestRelationships(node) {
+    var map = nodeMap();
+    var ids = neighborIds(node.id);
+    var out = [];
+    for (var i = 0; i < ids.length; i++) {
+      var nb = map[ids[i]];
+      if (!nb || nb.kind === 'project') continue;
+      var w = 0.6;
+      if (nb.kind === 'entity') w = 0.7 + Math.min(0.28, (nb.refCount || 0) * 0.03);
+      else if (nb.kind === 'finding') w = typeof nb.qualityScore === 'number' ? 0.55 + nb.qualityScore * 0.4 : 0.6;
+      var name = nb.displayLabel || nb.label || nb.id;
+      var sub = nb.kind === 'entity' ? ((nb.refCount || 0) + ' references') : (nb.tooltipLabel || nb.fullLabel || '');
+      if (sub === name) sub = '';
+      out.push({ id: nb.id, name: name, sub: sub, w: w });
+    }
+    // same-topic siblings that aren't already linked, as softer relationships.
+    // Dedupe by display TEXT too — stores can hold near-duplicate findings and
+    // two identical rows read as a rendering bug.
+    var seen = {}; var seenName = {};
+    out.forEach(function(r) { seen[r.id] = true; seenName[r.name.toLowerCase()] = true; });
+    relatedFindings(node).forEach(function(rel) {
+      if (seen[rel.id]) return;
+      var relName = rel.displayLabel || rel.label || rel.id;
+      if (seenName[relName.toLowerCase()]) return;
+      seenName[relName.toLowerCase()] = true;
+      var relSub = 'same topic' + (rel.projectName && rel.projectName !== node.projectName ? ' · ' + rel.projectName : '');
+      out.push({ id: rel.id, name: relName, sub: relSub, w: 0.5 });
+    });
+    out.sort(function(a, b) { return b.w - a.w; });
+    return out.slice(0, 6);
+  }
+
+  function gotoChip(label, nodeId, accent) {
+    var border = accent ? 'var(--accent)' : 'var(--border)';
+    var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
+    return '<span data-graph-goto="' + esc(nodeId) + '" role="button" tabindex="0" style="display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid ' + border + ';background:' + bg + ';font-size:11px;color:var(--ink);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(label) + '</span>';
+  }
+
   function chip(text, accent) {
     var border = accent ? 'var(--accent)' : 'var(--border)';
     var bg = accent ? 'var(--accent-dim)' : 'var(--surface-raised)';
@@ -1993,22 +2377,55 @@ export function renderGraphHostScript(): string {
     if (node.kind === 'task' && node.section) meta.push(node.section);
     if (node.kind === 'task' && node.priority) meta.push('Priority ' + node.priority);
     if (node.kind === 'finding' && node.topicLabel) meta.push(node.topicLabel);
+    if (node.kind === 'finding' && node.date) meta.push(node.date);
 
-    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
+    var header = '<div style="display:flex;flex-direction:column;gap:8px;padding-right:44px"><div class="phren-dossier-kind" style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(kindLabel(node)) + '</div><div style="font-size:var(--text-lg);font-weight:600;line-height:1.2">' + esc(title) + '</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + meta.filter(Boolean).map(function(item, index) { return chip(item, index === 0); }).join('') + scoreLine(node) + '</div></div>';
 
     var body = '';
     var actions = [];
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
-      body += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Findings</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.finding + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Tasks</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.task + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Fragments</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.entity + '</div></div>';
-      body += '<div class="card" style="padding:12px"><div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">References</div><div style="font-size:var(--text-lg);font-weight:600;margin-top:4px">' + counts.reference + '</div></div>';
-      body += '</div>';
+      // Server totals beat visible-adjacency counts (filters can hide nodes)
+      var findingTotal = typeof node.findingCount === 'number' && node.findingCount > counts.finding ? node.findingCount : counts.finding;
+      var taskTotal = typeof node.taskCount === 'number' && node.taskCount > counts.task ? node.taskCount : counts.task;
+      // Compact stat line — the detailed findings/tasks browser lives in the
+      // contents pane on the right, so the bulky card grid was redundant.
+      var stat = function(n, label) {
+        return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:var(--text-md);font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
+      };
+      body += '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:10px 0">'
+        + stat(findingTotal, 'findings') + stat(taskTotal, 'tasks')
+        + stat(counts.entity, 'fragments') + stat(counts.reference, 'refs')
+        + '</div>';
+      body += '<div class="text-muted" style="font-size:var(--text-sm)">Browse and prune this project\\'s findings and tasks in the contents pane →</div>';
     } else if (node.kind === 'finding') {
-      body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      // GraphRAG-style stats row: links / project / helpful
+      var conn = node.connections || {};
+      var helpful = node.score && typeof node.score.helpful === 'number' ? node.score.helpful : 0;
+      body += '<div class="phren-dossier-stats">'
+        + '<div><div class="k">Links</div><div class="v">' + (conn.total || 0) + '</div></div>'
+        + '<div><div class="k">Project</div><div class="v" style="font-size:11px;letter-spacing:.04em;text-transform:none">' + esc(node.projectName || '—') + '</div></div>'
+        + '<div><div class="k">Helpful</div><div class="v">' + helpful + '</div></div>'
+        + '</div>';
+      body += '<div class="phren-dossier-section">◈ Description</div>';
+      body += '<div id="graph-node-text" class="phren-dossier-text">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
+      // Strongest relationships — related same-topic findings + entity neighbors
+      var rels = strongestRelationships(node);
+      if (rels.length) {
+        body += '<div class="phren-dossier-section">⟿ Strongest relationships · ' + rels.length + '</div>';
+        body += '<div style="margin-top:8px">' + rels.map(function(r) {
+          return '<div class="phren-rel-row" data-graph-goto="' + esc(r.id) + '"><div class="n">' + esc(r.name) + (r.sub ? '<small>' + esc(r.sub) + '</small>' : '') + '</div><div class="w">' + r.w.toFixed(2) + '</div></div>';
+        }).join('') + '</div>';
+      }
+      if (node.projectName) {
+        body += '<div class="phren-dossier-section">Community</div>';
+        body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
+      }
+      var nav = findingNav(node);
+      if (nav.total > 1 && nav.index !== -1) {
+        actions.push('<span class="phren-dossier-nav"><button type="button" data-graph-action="prev-finding" title="Previous finding in project">‹</button><span>' + (nav.index + 1) + ' of ' + nav.total + '</span><button type="button" data-graph-action="next-finding" title="Next finding in project">›</button></span>');
+      }
       actions.push('<button type="button" class="btn btn-sm" data-graph-action="edit">Edit</button>');
       actions.push('<button type="button" class="btn btn-sm" data-graph-action="delete" style="border-color:var(--danger);color:var(--danger)">Delete</button>');
     } else if (node.kind === 'task') {
@@ -2120,7 +2537,8 @@ export function renderGraphHostScript(): string {
     }
     graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'PUT', {
       old_text: currentNode.tooltipLabel || currentNode.fullLabel || '',
-      new_text: nextText
+      new_text: nextText,
+      score_key: currentNode.scoreKey || ''
     }).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
       graphToast('Finding updated', 'ok');
@@ -2165,33 +2583,152 @@ export function renderGraphHostScript(): string {
     });
   }
 
-  function deleteCurrentNode() {
-    if (!currentNode) return;
-    if (!confirm('Delete this ' + (currentNode.kind || 'node') + '?')) return;
-    if (currentNode.kind === 'finding') {
-      graphRequest('/api/findings/' + encodeURIComponent(currentNode.projectName), 'DELETE', {
-        text: currentNode.tooltipLabel || currentNode.fullLabel || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Finding deleted', 'ok');
+  // Fire the delete API for one node (no confirm, no reload) — reused by single
+  // and batch delete so a bulk prune reloads the graph just once at the end.
+  function deleteNodeRequest(node) {
+    if (!node) return Promise.resolve({ ok: false, error: 'no node' });
+    if (node.kind === 'finding') {
+      return graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
+        text: node.tooltipLabel || node.fullLabel || '',
+        score_key: node.scoreKey || ''
+      });
+    }
+    if (node.kind === 'task') {
+      return graphRequest('/api/tasks/remove', 'POST', {
+        project: node.projectName,
+        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
+      });
+    }
+    return Promise.resolve({ ok: false, error: 'unsupported' });
+  }
+
+  function deleteNode(node) {
+    if (!node) return;
+    if (!confirm('Delete this ' + (node.kind || 'node') + '?')) return;
+    deleteNodeRequest(node).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
+      graphToast(node.kind === 'task' ? 'Task removed' : 'Finding deleted', 'ok');
+      return reloadGraph(null);
+    }).catch(function(err) {
+      graphToast('Delete failed: ' + err.message, 'err');
+    });
+  }
+
+  function reAddNodes(items) {
+    return Promise.all(items.map(function(it) {
+      if (it.kind === 'finding') {
+        return graphRequest('/api/findings/' + encodeURIComponent(it.projectName), 'POST', { text: it.text }).catch(function() { return { ok: false }; });
+      }
+      if (it.kind === 'task') {
+        return graphRequest('/api/tasks/add', 'POST', { project: it.projectName, item: it.item }).catch(function() { return { ok: false }; });
+      }
+      return Promise.resolve({ ok: false });
+    })).then(function() {
+      graphToast('Restored ' + items.length + ' items', 'ok');
+      return reloadGraph(null);
+    });
+  }
+
+  function deleteNodes(nodes) {
+    if (!nodes || !nodes.length) return;
+    if (nodes.length === 1) { deleteNode(nodes[0]); return; }
+    if (!confirm('Delete ' + nodes.length + ' items?')) return;
+    var undoItems = nodes.map(function(n) {
+      return {
+        kind: n.kind, projectName: n.projectName,
+        text: n.tooltipLabel || n.fullLabel || '',
+        item: n.stableId || n.id || n.tooltipLabel || n.fullLabel || n.displayLabel || ''
+      };
+    });
+    Promise.all(nodes.map(function(n) {
+      return deleteNodeRequest(n).catch(function() { return { ok: false }; });
+    })).then(function(results) {
+      var ok = results.filter(function(r) { return r && r.ok; }).length;
+      return reloadGraph(null).then(function() {
+        graphUndoToast('Deleted ' + ok + ' item' + (ok === 1 ? '' : 's'), function() { reAddNodes(undoItems); });
+      });
+    });
+  }
+
+  // Merge two same-project findings into one: remove the originals, then add
+  // their joined text as a single finding. Offers an Undo that restores the
+  // originals and removes the merged bullet.
+  function mergeNodes(nodes) {
+    if (!nodes || nodes.length !== 2) return;
+    var proj = nodes[0].projectName;
+    var t1 = nodes[0].tooltipLabel || nodes[0].fullLabel || '';
+    var t2 = nodes[1].tooltipLabel || nodes[1].fullLabel || '';
+    if (!t1 || !t2) return;
+    if (!confirm('Merge these 2 findings into one?')) return;
+    var merged = t1 + '\\n' + t2;
+    Promise.all(nodes.map(function(n) {
+      return deleteNodeRequest(n).catch(function() { return { ok: false }; });
+    })).then(function() {
+      return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: merged });
+    }).then(function(r) {
+      if (!r || !r.ok) throw new Error(r && r.error ? r.error : 'add failed');
+      return reloadGraph(null).then(function() {
+        graphUndoToast('Merged 2 findings', function() { undoMerge(proj, merged, t1, t2); });
+      });
+    }).catch(function(err) {
+      graphToast('Merge failed: ' + err.message, 'err');
+      return reloadGraph(null);
+    });
+  }
+
+  // Reverse a merge: remove the combined bullet, restore the two originals.
+  function undoMerge(proj, merged, t1, t2) {
+    graphRequest('/api/findings/' + encodeURIComponent(proj), 'DELETE', { text: merged, score_key: '' })
+      .then(function() { return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t1 }); })
+      .then(function() { return graphRequest('/api/findings/' + encodeURIComponent(proj), 'POST', { text: t2 }); })
+      .then(function() {
+        graphToast('Merge undone', 'ok');
         return reloadGraph(null);
       }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
+        graphToast('Undo failed: ' + err.message, 'err');
+        return reloadGraph(null);
       });
+  }
+
+  function deleteCurrentNode() {
+    deleteNode(currentNode);
+  }
+
+  // Persist edits made directly inside the project pane. The pane owns the
+  // editor; the host only performs the mutation and updates the rendered node.
+  function saveInlineFromPane(node) {
+    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    var nextText = (node.editedText || '').trim();
+    if (!nextText) return;
+    if (node.kind === 'finding') {
+      graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'PUT', {
+        old_text: node.tooltipLabel || node.fullLabel || '',
+        new_text: nextText,
+        score_key: node.scoreKey || ''
+      }).then(function(result) {
+        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+        var api = graphApi();
+        if (api && api.updateNode) api.updateNode(node.id, { text: nextText });
+        graphToast('Finding updated', 'ok');
+      }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
       return;
     }
-    if (currentNode.kind === 'task') {
-      graphRequest('/api/tasks/remove', 'POST', {
-        project: currentNode.projectName,
-        item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
-      }).then(function(result) {
-        if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-        graphToast('Task removed', 'ok');
-        return reloadGraph(null);
-      }).catch(function(err) {
-        graphToast('Delete failed: ' + err.message, 'err');
+    graphRequest('/api/tasks/update', 'POST', {
+      project: node.projectName,
+      item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || '',
+      text: nextText,
+      section: node.editedSection || node.section || 'Queue',
+      priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
+    }).then(function(result) {
+      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
+      var api = graphApi();
+      if (api && api.updateNode) api.updateNode(node.id, {
+        text: nextText,
+        section: node.editedSection || node.section || 'Queue',
+        priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
       });
-    }
+      graphToast('Task updated', 'ok');
+    }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
   }
 
   function completeCurrentTask() {
@@ -2241,9 +2778,28 @@ export function renderGraphHostScript(): string {
       });
     });
 
+    // Related-node chips — fly to the referenced node
+    document.querySelectorAll('[data-graph-goto]').forEach(function(chipEl) {
+      chipEl.addEventListener('click', function() {
+        var target = chipEl.getAttribute('data-graph-goto') || '';
+        var api = graphApi();
+        if (target && api && api.focusNode) api.focusNode(target);
+      });
+    });
+
     document.querySelectorAll('[data-graph-action]').forEach(function(button) {
       button.addEventListener('click', function() {
         var action = button.getAttribute('data-graph-action');
+        if (action === 'prev-finding' || action === 'next-finding') {
+          if (!currentNode) return;
+          var nav = findingNav(currentNode);
+          if (nav.total < 2 || nav.index === -1) return;
+          var step = action === 'next-finding' ? 1 : -1;
+          var nextIndex = (nav.index + step + nav.total) % nav.total;
+          var api = graphApi();
+          if (api && api.focusNode) api.focusNode(nav.list[nextIndex].id);
+          return;
+        }
         if (action === 'edit') {
           editMode = currentNode && (currentNode.kind === 'finding' || currentNode.kind === 'task') ? currentNode.kind : null;
           var point = currentPopoverPoint();
@@ -2290,6 +2846,14 @@ export function renderGraphHostScript(): string {
         if (popover) popover.style.display = 'none';
       });
     }
+    if (typeof api.onItemAction === 'function') {
+      api.onItemAction(function(payload, action) {
+        if (action === 'delete') deleteNode(payload);
+        else if (action === 'delete-batch') deleteNodes(payload);
+        else if (action === 'save-inline') saveInlineFromPane(payload);
+        else if (action === 'merge') mergeNodes(payload);
+      });
+    }
     return true;
   }
 
@@ -2297,6 +2861,9 @@ export function renderGraphHostScript(): string {
     var popover = document.getElementById('graph-node-popover-card');
     if (!currentNode || !popover) return;
     if (popover.contains(event.target)) return;
+    // Renderer-owned HUD overlays are legitimate UI, not a click-away dismiss.
+    var t = event.target;
+    if (t && t.closest && t.closest('.phren-project-panel, .phren-project-nav, .phren-pp-reopen, #graph-filter, .graph-controls, .phren-hud-legend, .phren-hud-stats')) return;
     hidePopover();
   }
 

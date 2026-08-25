@@ -44,7 +44,7 @@ export function safeProjectPath(base: string, ...segments: string[]): string | n
   return resolved;
 }
 
-const QUEUE_FILENAME = "review.md";
+export const QUEUE_FILENAME = "review.md";
 
 export function queueFilePath(phrenPath: string, project: string): string {
   if (!isValidProjectName(project)) {

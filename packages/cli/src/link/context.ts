@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "../phren-core.js";
 import { isValidProjectName } from "../utils.js";
 import { homeDir, homePath } from "../shared.js";
 import { resolveTaskFilePath } from "../data/tasks.js";
@@ -26,7 +27,7 @@ function allKnownProjects(phrenPath: string): string[] {
   const projects = new Set<string>();
   for (const f of fs.readdirSync(profilesDir)) {
     if (!f.endsWith(".yaml")) continue;
-    const data = yaml.load(fs.readFileSync(path.join(profilesDir, f), "utf8"), { schema: yaml.CORE_SCHEMA }) as { projects?: string[] } | undefined;
+    const data = loadYamlDocument<{ projects?: string[] }>(fs.readFileSync(path.join(profilesDir, f), "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     for (const p of (data?.projects ?? [])) projects.add(p);
   }
   return [...projects].sort();

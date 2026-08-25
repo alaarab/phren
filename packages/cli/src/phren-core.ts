@@ -15,7 +15,7 @@ export const UNIVERSAL_TECH_TERMS_RE =
  * Additional fragment patterns beyond CamelCase and acronyms.
  * Each pattern has a named group so callers can identify the fragment type.
  */
-export const EXTRA_ENTITY_PATTERNS: Array<{ re: RegExp; label: string }> = [
+export const EXTRA_FRAGMENT_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // Semantic version numbers: v1.2.3, 2.0.0-beta.1
   { re: /\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b/g, label: "version" },
   // Environment variable keys: PHREN_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
@@ -89,6 +89,30 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * `yaml.load` with js-yaml 4's empty-document behaviour.
+ *
+ * js-yaml 5 throws YAMLException("expected a document, but the input is empty")
+ * for input that is blank, whitespace, or comments only — where 4 returned
+ * `undefined`. phren's config files legitimately look like that: a freshly
+ * scaffolded `machines.yaml` is a single header comment, and an untouched
+ * profile can be empty. Every caller already handles `undefined`, but a throw
+ * is read as a parse failure, which would report those files as malformed —
+ * and `stores.yaml` refuses to write back over a file it could not parse, so
+ * an empty registry would have become unrepairable by the CLI.
+ *
+ * Only genuinely empty documents are absorbed. `---`, `null` and real syntax
+ * errors reach js-yaml exactly as before.
+ */
+export function loadYamlDocument<T = unknown>(
+  source: string,
+  load: (source: string) => unknown,
+): T | undefined {
+  // Strip blank and comment-only lines; anything left is a document to parse.
+  if (!source.replace(/^\s*(#.*)?$/gm, "").trim()) return undefined;
+  return load(source) as T;
+}
+
 /** Shallow-merge data onto defaults so missing keys get filled in. */
 export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T {
   const merged = { ...defaults } as Record<string, unknown>;
@@ -105,19 +129,46 @@ export function withDefaults<T extends object>(data: Partial<T>, defaults: T): T
   return merged as T;
 }
 
-/** All valid finding type tags — used for writes, search filters, and hook extraction */
-export const FINDING_TYPES = ["decision", "pitfall", "pattern", "tradeoff", "architecture", "bug"] as const;
+/**
+ * Finding types offered as an explicit choice: add_finding's findingType
+ * param, promote_note --type, and the web/iOS type pickers. Deliberately the
+ * intersection of what used to be three disjoint lists (this enum, the decay
+ * table, and the auto-detector) — "tradeoff" and "architecture" were offered
+ * here but had no decay rule and no max-age, so they never actually worked.
+ * Legacy stores may still contain those two tags; reading/searching them as
+ * plain text still works, they just aren't offered or decay-tracked anymore.
+ */
+export const FINDING_TYPES = ["decision", "pitfall", "pattern", "bug"] as const;
 export type FindingType = (typeof FINDING_TYPES)[number];
 
-/** Searchable finding tags (same set as FINDING_TYPES) */
-export const FINDING_TAGS = FINDING_TYPES;
-export type FindingTag = FindingType;
+/**
+ * Every finding tag phren can actually produce or needs to search for: the
+ * offered FINDING_TYPES above, plus tags autoDetectFindingType
+ * (content/learning.ts) writes on its own initiative — "workaround" and
+ * "context" — which aren't offered as an explicit pick but still need a
+ * decay rule (finding/lifecycle.ts's FINDING_TYPE_DECAY is typed against
+ * this exact set) and need to stay filterable via search_knowledge's `tag`
+ * param.
+ */
+export const FINDING_TAGS = [...FINDING_TYPES, "workaround", "context"] as const;
+export type FindingTag = (typeof FINDING_TAGS)[number];
 
-/** Canonical set of known observation tags — derived from FINDING_TYPES */
-export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TYPES);
+/** Canonical set of known finding tags for the "unknown tag" write-time warning — derived from FINDING_TAGS (not just FINDING_TYPES) so phren never flags its own auto-written workaround/context tags as unknown. */
+export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TAGS);
 
-/** Document types in the FTS index */
-export const DOC_TYPES = ["claude", "findings", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;
+/**
+ * Document types in the FTS index.
+ *
+ * "canonical" is `truths.md`'s type (see FILE_TYPE_MAP in shared/index.ts):
+ * the file was renamed from `canonical_memories.md` to `truths.md` in the
+ * 0.0.5 rename, but the type string was not renamed with it, so it still
+ * leaks as the literal `--type canonical` / `type: "canonical"` value across
+ * the CLI and API (docs/api-reference.md documents it as-is because that is
+ * what the index actually produces). Renaming it requires touching
+ * shared/index.ts and shared/retrieval.ts together with this file, since all
+ * three must agree on the type string.
+ */
+export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
 // ── Cache eviction helper ────────────────────────────────────────────────────

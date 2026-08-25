@@ -711,7 +711,7 @@ async function handleGetFindings(
   },
 ) {
   if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-  const resolved = resolveStoreForProject(ctx, project);
+  const resolved = resolveStoreForProject(ctx, project, "read");
   const { phrenPath } = resolved;
   const includeHistory = include_history ?? include_superseded ?? false;
   // Always read with archive so we can compute historyCount without a second read
@@ -846,7 +846,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           z.enum(FINDING_TAGS)
         )
           .optional()
-          .describe("Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug."),
+          .describe("Filter findings by type tag: decision, pitfall, pattern, bug, workaround, context."),
         since: z.string().optional().describe('Filter findings by creation date. Formats: "7d" (last 7 days), "30d" (last 30 days), "YYYY-MM" (since start of month), "YYYY-MM-DD" (since date).'),
         status: z.enum(FINDING_LIFECYCLE_STATUSES).optional().describe("Filter findings by lifecycle status: active, superseded, contradicted, stale, invalid_citation, or retracted."),
         include_history: z.boolean().optional().describe("When true, include historical findings (superseded/retracted). Default false."),

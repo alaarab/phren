@@ -1,7 +1,7 @@
 import { getPhrenPath } from "../shared.js";
 import { buildConfigView } from "../config/resolve.js";
 import { isValidProjectName } from "../utils.js";
-import { ACCESS_ROLE_KEYS, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
+import { ACCESS_ROLE_KEYS, ACL_LOCKOUT_HINT, permissionDeniedError, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import { parseProjectArg, warnIfUnregistered } from "./config-shared.js";
 
 // ── Access control ───────────────────────────────────────────────────────────
@@ -54,6 +54,13 @@ export function handleConfigAccess(args: string[]) {
     }
     if (projectArg) {
       warnIfUnregistered(phrenPath, projectArg);
+    }
+    // Rewriting the ACL is admin-only. Open mode (no ACL configured anywhere)
+    // is still permitted, so the first `phren config access set` bootstraps.
+    const denied = permissionDeniedError(phrenPath, "manage_config", projectArg);
+    if (denied) {
+      console.error(`${denied} ${ACL_LOCKOUT_HINT}`);
+      process.exit(1);
     }
     setAccessRoles(phrenPath, patch, projectArg);
     printAccessSnapshot(phrenPath, projectArg);

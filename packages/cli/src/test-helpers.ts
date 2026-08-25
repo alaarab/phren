@@ -101,15 +101,6 @@ export function resultMsg(r: PhrenResult<unknown>): string {
 
 export const CLI_PATH = path.resolve(__dirname, "../dist/index.js");
 export const REPO_ROOT = path.resolve(__dirname, "../../..");
-
-/**
- * Env forced onto every spawned CLI subprocess. `phren uninstall` shells out to
- * a real `npm uninstall -g @phren/cli` (and `code --uninstall-extension`); the
- * npm global prefix and the `code` CLI ignore a sandboxed HOME, so without this
- * a sandboxed uninstall test would delete the developer's real global install.
- * Applied after caller env so a test cannot accidentally turn it off.
- */
-const SANDBOX_GUARD_ENV = { PHREN_SKIP_GLOBAL_UNINSTALL: "1" } as const;
 const CLI_BUILD_LOCK = path.join(REPO_ROOT, ".vitest-cli-build.lock");
 const CLI_BUILD_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
@@ -183,6 +174,18 @@ export interface CliResult {
 }
 
 /**
+ * Env every spawned CLI inherits. PHREN_PATH and HOME sandbox a test's store
+ * and config, but `npm uninstall -g` resolves against the machine's real npm
+ * prefix and honors neither — so `phren uninstall` under test deleted the
+ * developer's actual global install. Guarding here rather than in the one
+ * uninstall test means no future test can reintroduce it. A caller that is
+ * specifically exercising global removal can override it in `env`.
+ */
+const CLI_TEST_ENV: Record<string, string> = {
+  PHREN_SKIP_GLOBAL_NPM_UNINSTALL: "1",
+};
+
+/**
  * Run the built CLI binary via execFileSync and return stdout/stderr/exitCode.
  * Callers that need spawnSync semantics (e.g. when expecting non-zero exits)
  * may use runCliSpawn instead.
@@ -192,7 +195,7 @@ export function runCliExec(args: string[], env: Record<string, string> = {}): Cl
     ensureCliBuilt();
     const stdout = execFileSync(process.execPath, [CLI_PATH, ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...env, ...SANDBOX_GUARD_ENV },
+      env: { ...process.env, ...CLI_TEST_ENV, ...env },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
     });
@@ -214,7 +217,7 @@ export function runCliSpawn(args: string[], env: Record<string, string> = {}): C
   ensureCliBuilt();
   const result = spawnSync(process.execPath, [CLI_PATH, ...args], {
     encoding: "utf8",
-    env: { ...process.env, ...env, ...SANDBOX_GUARD_ENV },
+    env: { ...process.env, ...CLI_TEST_ENV, ...env },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30000,
   });

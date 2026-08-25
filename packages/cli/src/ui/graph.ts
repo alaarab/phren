@@ -28,7 +28,7 @@ export function renderGraphScript(): string {
 
   return `
 (function() {
-  console.error('[phrenGraph] Bundled Sigma asset not found. Run "npm run build" in the phren repo root.');
+  console.error('[phrenGraph] Bundled graph renderer asset not found. Run "npm run build" in the phren repo root.');
   window.phrenGraph = window.phrenGraph || {
     __renderer: 'missing',
     mount: function() {},

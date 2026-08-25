@@ -21,7 +21,7 @@ import type {
   DoneEvent,
 } from "./types.js";
 import type { PermissionMode } from "../permissions/types.js";
-import { createWorktree, hasWorktreeChanges, removeWorktree, type WorktreeInfo } from "./worktree.js";
+import { createWorktree, hasWorktreeChanges, removeWorktree, } from "./worktree.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

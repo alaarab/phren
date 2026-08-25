@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (54 across 12 modules):
+MCP Tools (59 across 13 modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -14,6 +14,13 @@ MCP Tools (54 across 12 modules):
     get_project_summary(name) - project summary card and file list
     list_projects(page?, page_size?) - all projects in active profile with pagination
     get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
+
+  Daily notes (searchable, never automatically injected):
+    get_notes(project, date?, limit?) - list daily notes newest-first
+    add_note(project, text, date?) - add Markdown text to notes/YYYY-MM-DD.md
+    edit_note(project, note, text) - replace a note by stable nid or unambiguous match
+    remove_note(project, note) - remove one note
+    promote_note(project, note, findingType?) - copy a note into findings and retain its promoted source
 
   Task management:
     get_tasks(project?, id?, item?, status?, limit?, done_limit?, offset?, summary?) - read tasks with pagination, summary mode, and section filtering
@@ -25,7 +32,7 @@ MCP Tools (54 across 12 modules):
 
   Finding capture:
     add_finding(project, finding: string | string[], citation?, findingType?, sessionId?) - append one or more findings; citation/type apply to single-string mode
-      findingType: "decision" | "pitfall" | "pattern" | "tradeoff" | "architecture" | "bug"
+      findingType: "decision" | "pitfall" | "pattern" | "bug"
     supersede_finding(project, finding_text, superseded_by) - mark a finding as superseded
     retract_finding(project, finding_text, reason) - retract a finding with reason metadata
     resolve_contradiction(project, finding_text, finding_text_other, resolution) - resolve contradiction lifecycle state
@@ -270,26 +277,21 @@ Key File Locations:
   ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
   ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
   ~/.phren/.sessions/                - task checkpoint files for cross-session resume
-  ~/.phren/.governance/              - governance policy JSON files
+  ~/.phren/.config/                  - governance policy JSON: retention/workflow/index policy, access-control.json
   ~/.phren/global/skills/            - personal workflow slash commands
   ~/.phren/global/CLAUDE.md          - user-level agent instructions
 
 Finding Tags:
 
-  Findings can be tagged with one of eleven types:
+  Findings can be tagged with one of six types:
     [decision]      architectural choice with rationale — never decays
     [pattern]       reusable approach that works well
     [pitfall]       bug or failure mode to avoid
-    [observation]   time-bounded note — expires in 14 days
     [bug]           confirmed defect or failure
-    [workaround]    temporary fix or hack
-    [tooling]       tool or dependency note
-    [context]       situational note about current state
-    [anti-pattern]  approach to avoid and why
-    [tradeoff]      deliberate compromise with rationale
-    [architecture]  structural design note
-  Use findingType param in add_finding, or prefix manually: "- [pitfall] ..."
-  Tags are filterable in search_knowledge via the tag parameter.
+    [workaround]    temporary fix or hack (auto-detected only — not an explicit findingType choice)
+    [context]       situational note about current state (auto-detected only — not an explicit findingType choice)
+  Use findingType param in add_finding (decision/pattern/pitfall/bug), or prefix manually: "- [pitfall] ..."
+  Tags are filterable in search_knowledge via the tag parameter (all six).
   Auto-tagging: findings without an explicit tag are auto-detected from content
     ("We decided..." → [decision], "Watch out for..." → [pitfall], etc.).
 
@@ -315,7 +317,7 @@ Agent Support:
 
 Security and governance notes:
   Web UI security: loopback-only bind, per-run auth token, CSRF on mutations, CSP headers
-  RBAC sources: .governance/access-control.json + .runtime/access-control.local.json
+  RBAC sources: .config/access-control.json + .runtime/access-control.local.json
   Telemetry: opt-in only (`phren config telemetry on`), local storage only, no external reporting by default
 
 Docs: https://alaarab.github.io/phren/

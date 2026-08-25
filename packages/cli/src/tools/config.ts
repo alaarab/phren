@@ -28,8 +28,9 @@ import {
   type ProjectConfigOverrides,
   updateProjectConfigOverrides,
 } from "../project-config.js";
-import { isValidProjectName, safeProjectPath } from "../utils.js";
-import { ACCESS_ROLE_KEYS, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
+import { errorMessage, isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+import { ACCESS_ROLE_KEYS, ACL_LOCKOUT_HINT, permissionDeniedError, setAccessRoles, type AccessRolePatch } from "../governance/rbac.js";
 import {
   readProjectTopics,
   writeProjectTopics,
@@ -78,7 +79,7 @@ const projectParam = z.string().optional().describe(
 // ── Topic helpers (shared by get_config topic domain and set_config topic domain) ──
 
 function getTopicConfigData(phrenPath: string, project: string) {
-  const projectDir = safeProjectPath(phrenPath, project);
+  const projectDir = storeAwareProjectPath(phrenPath, project);
   if (!projectDir || !fs.existsSync(projectDir)) {
     return { ok: false as const, error: `Project "${project}" not found in phren.` };
   }
@@ -144,7 +145,7 @@ async function handleGetConfig(
     let resolvedPhrenPath = phrenPath;
     let resolvedProject = project;
     try {
-      const resolved = resolveStoreForProject(ctx, project);
+      const resolved = resolveStoreForProject(ctx, project, "read");
       resolvedPhrenPath = resolved.phrenPath;
       resolvedProject = resolved.project;
     } catch { /* fall back to primary */ }
@@ -525,6 +526,11 @@ async function handleSetConfig(
 
     // ── access ────────────────────────────────────────────────────
     case "access": {
+      // Rewriting the ACL is admin-only. Without this an actor the ACL denies
+      // every mutating action could still add itself to `admins` here.
+      const accessDenied = permissionDeniedError(phrenPath, "manage_config", project);
+      if (accessDenied) return mcpResponse({ ok: false, error: `${accessDenied} ${ACL_LOCKOUT_HINT}` });
+
       const patch: AccessRolePatch = {};
       let touched = false;
       for (const key of ACCESS_ROLE_KEYS) {
@@ -592,16 +598,20 @@ async function handleSetConfig(
       const err = validateProject(project);
       if (err) return mcpResponse({ ok: false, error: err });
 
-      // Resolve store-qualified project names for team stores
-      let topicPhrenPath = phrenPath;
-      let topicProject = project;
+      // Resolve store-qualified project names for team stores. This branch
+      // writes topic-config.json, so a failed resolution must surface instead
+      // of quietly writing into the primary store.
+      let topicPhrenPath: string;
+      let topicProject: string;
       try {
         const resolved = resolveStoreForProject(ctx, project);
         topicPhrenPath = resolved.phrenPath;
         topicProject = resolved.project;
-      } catch { /* fall back to primary */ }
+      } catch (err: unknown) {
+        return mcpResponse({ ok: false, error: errorMessage(err) });
+      }
 
-      const projectDir = safeProjectPath(topicPhrenPath, topicProject);
+      const projectDir = storeAwareProjectPath(topicPhrenPath, topicProject);
       if (!projectDir || !fs.existsSync(projectDir)) {
         return mcpResponse({ ok: false, error: `Project "${topicProject}" not found in phren.` });
       }

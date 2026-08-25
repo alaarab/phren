@@ -13,12 +13,14 @@ import {
   runtimeHealthFile,
 } from "../shared.js";
 import { migrateInvalidProjectNames, formatMigrationSummary } from "../project-migrate.js";
-import { commandVersion, versionAtLeast, nearestWritableTarget } from "../init/shared.js";
+import { ROOT_MANIFEST_FILENAME } from "../phren-paths.js";
+import { STORES_FILENAME } from "../store-registry.js";
+import { commandVersion, versionAtLeast, nearestWritableTarget, resolveEntryScript } from "../init/shared.js";
 import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
-import { detectInstalledTools } from "../hooks.js";
+import { detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
@@ -26,6 +28,7 @@ import { inspectTaskHygiene } from "../task/hygiene.js";
 import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { repairPreexistingInstall } from "../init/setup.js";
+import { getManagementPreset, resolveManagementCapabilities } from "../init/management-preset.js";
 import {
   getMachineName,
   lookupProfile,
@@ -109,6 +112,46 @@ function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok
   }
 }
 
+/**
+ * Root-level config the CLI reads straight off disk. Sparse-checkout can leave these
+ * tracked-but-unmaterialized, and both failures are silent: without the root manifest
+ * the MCP entrypoint never recognizes the store path (so MCP never starts), and without
+ * stores.yaml the registry falls back to a single implicit store, hiding every team store.
+ */
+function rootConfigStatus(
+  phrenPath: string,
+  filename: string,
+): { present: boolean; trackedInHead: boolean } {
+  if (fs.existsSync(path.join(phrenPath, filename))) {
+    return { present: true, trackedInHead: false };
+  }
+  try {
+    execFileSync("git", ["cat-file", "-e", `HEAD:${filename}`], {
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return { present: false, trackedInHead: true };
+  } catch {
+    return { present: false, trackedInHead: false };
+  }
+}
+
+/** Materialize a tracked-but-excluded root config file by widening sparse-checkout. */
+function materializeRootConfig(phrenPath: string, filename: string): boolean {
+  try {
+    execFileSync("git", ["sparse-checkout", "add", `/${filename}`], {
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return fs.existsSync(path.join(phrenPath, filename));
+  } catch (err: unknown) {
+    debugLog(`materializeRootConfig(${filename}): ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 function pushSkillMirrorChecks(
   checks: Array<{ name: string; ok: boolean; detail: string }>,
   scope: string,
@@ -175,12 +218,46 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: nodeVersion || "node not found in PATH",
   });
   const prefs = readInstallPreferences(phrenPath);
+  const managementPreset = getManagementPreset(phrenPath);
+  const caps = resolveManagementCapabilities(phrenPath);
   const gitRemote = gitRemoteStatus(phrenPath, prefs.syncIntent);
   checks.push({
     name: "git-remote",
     ok: gitRemote.ok,
     detail: gitRemote.detail,
   });
+
+  // Root config must be materialized on disk, not merely tracked in git.
+  const manifestStatus = rootConfigStatus(phrenPath, ROOT_MANIFEST_FILENAME);
+  const manifestRepaired =
+    !manifestStatus.present && manifestStatus.trackedInHead && fix
+      ? materializeRootConfig(phrenPath, ROOT_MANIFEST_FILENAME)
+      : false;
+  checks.push({
+    name: "root-manifest",
+    ok: manifestStatus.present || manifestRepaired,
+    detail: manifestStatus.present
+      ? path.join(phrenPath, ROOT_MANIFEST_FILENAME)
+      : manifestRepaired
+        ? `${ROOT_MANIFEST_FILENAME} restored (was excluded by sparse-checkout)`
+        : manifestStatus.trackedInHead
+          ? `${ROOT_MANIFEST_FILENAME} is tracked in git but excluded by sparse-checkout — MCP cannot start; run 'phren doctor --fix'`
+          : `${ROOT_MANIFEST_FILENAME} missing from ${phrenPath}`,
+  });
+
+  // stores.yaml is optional (single-store installs have none), so this is only a
+  // failure when it exists in git but was never materialized.
+  const storesStatus = rootConfigStatus(phrenPath, STORES_FILENAME);
+  if (!storesStatus.present && storesStatus.trackedInHead) {
+    const storesRepaired = fix ? materializeRootConfig(phrenPath, STORES_FILENAME) : false;
+    checks.push({
+      name: "store-registry-materialized",
+      ok: storesRepaired,
+      detail: storesRepaired
+        ? `${STORES_FILENAME} restored (was excluded by sparse-checkout)`
+        : `${STORES_FILENAME} is tracked in git but excluded by sparse-checkout — team stores are hidden; run 'phren doctor --fix'`,
+    });
+  }
 
   checks.push({
     name: "machine-registered",
@@ -259,32 +336,54 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: fs.existsSync(memoryFile) ? memoryFile : "missing generated MEMORY.md",
   });
 
-  const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
-  const globalClaudeDest = homePath(".claude", "CLAUDE.md");
-  let globalLinkOk = false;
-  try {
-    globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
-  } catch (err: unknown) {
-    debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
-    globalLinkOk = false;
+  // Under presets that don't symlink into ~/.claude, the "missing" links are
+  // expected — report them as ok with a preset note instead of failures.
+  if (caps.linkGlobalClaudeMd) {
+    const globalClaudeSrc = path.join(phrenPath, "global", "CLAUDE.md");
+    const globalClaudeDest = homePath(".claude", "CLAUDE.md");
+    let globalLinkOk = false;
+    try {
+      globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
+    } catch (err: unknown) {
+      debugLog(`doctor: global CLAUDE.md symlink check failed: ${errorMessage(err)}`);
+      globalLinkOk = false;
+    }
+    checks.push({
+      name: "global-link",
+      ok: globalLinkOk,
+      detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
+    });
+  } else {
+    checks.push({
+      name: "global-link",
+      ok: true,
+      detail: `not managed under ${managementPreset} preset (phren does not write ~/.claude/CLAUDE.md)`,
+    });
   }
-  checks.push({
-    name: "global-link",
-    ok: globalLinkOk,
-    detail: globalLinkOk ? "global CLAUDE.md symlink ok" : "global CLAUDE.md link drifted/missing",
-  });
-  pushSkillMirrorChecks(
-    checks,
-    "global",
-    buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
-    homePath(".claude", "skills"),
-  );
+  if (caps.installSkillLinks) {
+    pushSkillMirrorChecks(
+      checks,
+      "global",
+      buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
+      homePath(".claude", "skills"),
+    );
+  } else {
+    checks.push({ name: "skills-mirror:global", ok: true, detail: `skills not mirrored under ${managementPreset} preset` });
+  }
 
   for (const project of projects) {
     if (project === "global") continue;
     const config = readProjectConfig(phrenPath, project);
     const ownership = getProjectOwnershipMode(phrenPath, project, config);
     const target = findProjectDir(project);
+    if (!caps.repoMirroring) {
+      checks.push({
+        name: `ownership:${project}`,
+        ok: true,
+        detail: `repo mirrors disabled (${managementPreset} preset)`,
+      });
+      continue;
+    }
     if (ownership !== "phren-managed") {
       checks.push({
         name: `ownership:${project}`,
@@ -324,7 +423,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
 
   // Store registry health
   try {
-    const { resolveAllStores, storesFilePath } = await import("../store-registry.js");
+    const { resolveAllStores, storesFilePath, describeUnavailableStore } = await import("../store-registry.js");
     const storesFile = storesFilePath(phrenPath);
     if (fs.existsSync(storesFile)) {
       const stores = resolveAllStores(phrenPath);
@@ -335,14 +434,26 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
           ? `${stores.length} stores configured`
           : "stores.yaml exists but no stores parsed",
       });
+      // Projects claimed by a store that is not attached here cannot be written
+      // at all — phren refuses rather than diverting them to the primary store.
+      const orphanedClaims = stores
+        .filter((store) => store.available === false && store.projects?.length)
+        .map((store) => `${store.name} → ${store.projects!.join(", ")}`);
+      checks.push({
+        name: "store-claims-attached",
+        ok: orphanedClaims.length === 0,
+        detail: orphanedClaims.length === 0
+          ? "every claimed project resolves to an attached store"
+          : `projects claimed by unattached stores (writes to them will fail): ${orphanedClaims.join("; ")}`,
+      });
       for (const store of stores) {
-        const pathExists = fs.existsSync(store.path);
+        const pathExists = store.available !== false;
         const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
         if (!pathExists) {
           checks.push({
             name: `store:${store.name}`,
             ok: false,
-            detail: `store '${store.name}' path missing: ${store.path}`,
+            detail: describeUnavailableStore(store),
           });
         } else if (!gitExists) {
           checks.push({
@@ -372,21 +483,76 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   });
   let hookOk = false;
   let lifecycleOk = false;
-  try {
+  let hooksEphemeral = false;
+  let staleEntrypoints: string[] = [];
+
+  /** Every `command` string under a Claude settings.json hook event. */
+  const phrenHookCommands = (hooks: Record<string, unknown>): string[] => {
+    const commands: string[] = [];
+    for (const event of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"]) {
+      const entries = hooks[event];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!isRecord(entry) || !Array.isArray(entry.hooks)) continue;
+        for (const hook of entry.hooks) {
+          if (isRecord(hook) && typeof hook.command === "string") commands.push(hook.command);
+        }
+      }
+    }
+    return commands.filter((command) => /hook-(prompt|stop|session-start|tool)\b/.test(command));
+  };
+
+  const readHookState = () => {
     const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-    const hooks = cfg?.hooks || {};
+    const hooks = isRecord(cfg?.hooks) ? cfg.hooks as Record<string, unknown> : {};
     const promptHooks = JSON.stringify(hooks.UserPromptSubmit || []);
     const stopHooks = JSON.stringify(hooks.Stop || []);
     const startHooks = JSON.stringify(hooks.SessionStart || []);
-    hookOk = promptHooks.includes("hook-prompt");
-    const stopHookOk = stopHooks.includes("hook-stop");
-    const startHookOk = startHooks.includes("hook-session-start");
-    lifecycleOk = stopHookOk && startHookOk;
+    const commands = phrenHookCommands(hooks);
+    return {
+      hookOk: promptHooks.includes("hook-prompt"),
+      lifecycleOk: stopHooks.includes("hook-stop") && startHooks.includes("hook-session-start"),
+      // A hook command that points into the npx cache (~/.npm/_npx/<hash>/…)
+      // works until npx prunes that cache, then breaks silently.
+      ephemeral: [promptHooks, stopHooks, startHooks].some(isEphemeralNpxPath),
+      // A command whose entrypoint no longer exists is worse: it fails on every
+      // single turn with MODULE_NOT_FOUND. `npm i -g @phren/cli` moved the
+      // package entry in 0.1.40, so every upgraded install hit exactly this and
+      // doctor still reported the path as fine.
+      stale: findStaleHookEntrypoints(commands),
+    };
+  };
+
+  try {
+    const state = readHookState();
+    hookOk = state.hookOk;
+    lifecycleOk = state.lifecycleOk;
+    hooksEphemeral = state.ephemeral;
+    staleEntrypoints = state.stale;
   } catch (err: unknown) {
     debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
     hookOk = false;
     lifecycleOk = false;
   }
+
+  // Repair stale/ephemeral hook commands before reporting, so `--fix` actually
+  // fixes the thing rather than reporting it as OK and doing nothing.
+  let hookPathRepaired = false;
+  if (fix && (staleEntrypoints.length > 0 || hooksEphemeral)) {
+    try {
+      const { configureClaude } = await import("../init/config.js");
+      configureClaude(phrenPath);
+      const state = readHookState();
+      hookOk = state.hookOk;
+      lifecycleOk = state.lifecycleOk;
+      hooksEphemeral = state.ephemeral;
+      hookPathRepaired = state.stale.length === 0 && !state.ephemeral;
+      staleEntrypoints = state.stale;
+    } catch (err: unknown) {
+      debugLog(`doctor: hook path repair failed: ${errorMessage(err)}`);
+    }
+  }
+
   checks.push({
     name: "claude-hooks",
     ok: hookOk,
@@ -398,6 +564,19 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     detail: lifecycleOk
       ? "session-start + stop lifecycle hooks configured"
       : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
+  });
+  checks.push({
+    name: "hook-path-stable",
+    ok: !hooksEphemeral && staleEntrypoints.length === 0,
+    detail: staleEntrypoints.length > 0
+      ? `hook commands point at ${staleEntrypoints.length} entrypoint(s) that no longer exist: ${staleEntrypoints.join(", ")}. `
+        + `Every hook fails with MODULE_NOT_FOUND — usually after \`npm install -g @phren/cli\` moved the package entry. `
+        + `Run \`phren doctor --fix\` to repoint them at ${resolveEntryScript()}`
+      : hooksEphemeral
+        ? "hook commands point into the ephemeral npx cache (~/.npm/_npx/…); re-run `npx @phren/cli init` to repoint at the stable ~/.local/bin/phren wrapper"
+        : hookPathRepaired
+          ? "hook commands repaired to the current entrypoint"
+          : "hook commands resolve to an entrypoint that exists",
   });
 
   const runtimeHealthPath = runtimeHealthFile(phrenPath);

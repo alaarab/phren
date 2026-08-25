@@ -1,0 +1,5 @@
+{"type":"header","version":1,"sessionId":"fixture-replay-1","cwd":"/tmp","createdAt":"2026-08-14T00:00:00.000Z"}
+{"seq":0,"time":"2026-08-14T00:00:01.000Z","type":"user/message","data":{"message":{"role":"user","content":"Run echo replay-fixture-7 and report the marker."},"source":"user","turn":0}}
+{"seq":1,"time":"2026-08-14T00:00:02.000Z","type":"assistant/message","data":{"message":{"role":"assistant","content":[{"type":"tool_use","id":"call_fixture_1","name":"shell","input":{"command":"echo replay-fixture-7"}}]},"stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":20},"turn":0}}
+{"seq":2,"time":"2026-08-14T00:00:03.000Z","type":"tool/results","data":{"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_fixture_1","content":"replay-fixture-7"}]},"turn":0}}
+{"seq":3,"time":"2026-08-14T00:00:04.000Z","type":"assistant/message","data":{"message":{"role":"assistant","content":[{"type":"text","text":"Replay complete: the marker is replay-fixture-7"}]},"stop_reason":"end_turn","usage":{"input_tokens":150,"output_tokens":15},"turn":0}}

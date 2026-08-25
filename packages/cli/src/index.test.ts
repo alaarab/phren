@@ -629,7 +629,7 @@ describe("memory maintenance", () => {
 
     const result = pruneDeadMemories(phrenDir, project);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toContain("Pruned");
+    if (result.ok) expect(result.data.message).toContain("Pruned");
     const next = fs.readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8");
     expect(next).not.toContain("- Old bullet");
     expect(next).toContain("- Fresh bullet");

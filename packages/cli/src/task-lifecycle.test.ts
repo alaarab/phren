@@ -278,6 +278,69 @@ describe("task lifecycle", () => {
   });
 });
 
+// Auto-capture echoed the raw prompt onto the task and its `Context:` line. In real stores
+// 94% (arc), 100% (intranet2) and 68% (ogrid) of captured tasks were verbatim prompt echoes.
+describe("task auto-capture prompt gate", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const project = "demo";
+
+  beforeEach(() => {
+    tmp = makeTempDir("task-prompt-gate-");
+    grantAdmin(tmp.path);
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  function capture(prompt: string, sessionId: string) {
+    return handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt,
+      project,
+      sessionId,
+      intent: "build",
+    });
+  }
+
+  function taskCount(): number {
+    const tasks = readTasks(tmp.path, project);
+    if (!tasks.ok) return -1;
+    return tasks.data.items.Active.length + tasks.data.items.Queue.length;
+  }
+
+  // Each sample carries a signal word or URL, so it clears the substance floor and only the
+  // pasted-content / filler gates can stop it.
+  const rejected: Array<[string, string]> = [
+    ["pasted GitHub page", "Skip to content admenergy arc Repository navigation Code Issues Pull requests Actions Projects Wiki Security Insights https://github.com/admenergy/arc"],
+    ["pasted PowerShell banner", "Windows PowerShell Copyright (C) Microsoft Corporation. Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows PS C:\\Users\\alaarab> git status"],
+    ["single character", "3"],
+    ["chat reaction", "Its literally just the start of the day LMAO I havent run anything yet"],
+    ["opinion commentary", "I dont like three sources of truth idk why you did that that was u basically i feel thats slop in a way, check the docs"],
+  ];
+
+  for (const [label, prompt] of rejected) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("still captures a real request", () => {
+    const result = capture("Fix the retry backoff in the sync worker", "session-real");
+    expect(result.noticeLines.join("\n")).toContain("Active task");
+    expect(taskCount()).toBe(1);
+  });
+});
+
 describe("progressive task model", () => {
   let tmp: { path: string; cleanup: () => void };
   const project = "demo";

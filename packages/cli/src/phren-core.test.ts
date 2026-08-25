@@ -1,16 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  UNIVERSAL_TECH_TERMS_RE,
-  EXTRA_ENTITY_PATTERNS,
-  phrenOk,
-  phrenErr,
-  forwardErr,
-  parsePhrenErrorCode,
-  isRecord,
-  withDefaults,
-  capCache,
-  PhrenError,
-} from "./phren-core.js";
+import * as yaml from "js-yaml";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_FRAGMENT_PATTERNS, phrenOk, phrenErr, forwardErr, parsePhrenErrorCode, isRecord, withDefaults, capCache, PhrenError, loadYamlDocument } from "./phren-core.js";
 
 // ── UNIVERSAL_TECH_TERMS_RE ─────────────────────────────────────────────────
 
@@ -51,11 +41,11 @@ describe("UNIVERSAL_TECH_TERMS_RE", () => {
   });
 });
 
-// ── EXTRA_ENTITY_PATTERNS ───────────────────────────────────────────────────
+// ── EXTRA_FRAGMENT_PATTERNS ───────────────────────────────────────────────────
 
-describe("EXTRA_ENTITY_PATTERNS", () => {
+describe("EXTRA_FRAGMENT_PATTERNS", () => {
   function matchPattern(label: string, text: string): string[] {
-    const pat = EXTRA_ENTITY_PATTERNS.find((p) => p.label === label);
+    const pat = EXTRA_FRAGMENT_PATTERNS.find((p) => p.label === label);
     if (!pat) throw new Error(`No pattern with label: ${label}`);
     const re = new RegExp(pat.re.source, pat.re.flags);
     const matches: string[] = [];
@@ -153,7 +143,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
   });
 
   it("handles empty input for all patterns", () => {
-    for (const { re, label } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re, label } of EXTRA_FRAGMENT_PATTERNS) {
       const matches = "".match(new RegExp(re.source, re.flags));
       expect(matches, `${label} should return null on empty input`).toBeNull();
     }
@@ -161,7 +151,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
 
   it("handles very long strings without hanging", () => {
     const longText = "PHREN_DEBUG ".repeat(10000) + "v1.0.0";
-    for (const { re } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re } of EXTRA_FRAGMENT_PATTERNS) {
       const regex = new RegExp(re.source, re.flags);
       // Should complete without hanging
       const matches: string[] = [];
@@ -173,7 +163,7 @@ describe("EXTRA_ENTITY_PATTERNS", () => {
 
   it("handles Unicode text without false positives", () => {
     const text = "使用 Python 和 日本語テスト";
-    for (const { re, label } of EXTRA_ENTITY_PATTERNS) {
+    for (const { re, label } of EXTRA_FRAGMENT_PATTERNS) {
       const matches = text.match(new RegExp(re.source, re.flags));
       // None of the extra patterns should match CJK characters
       if (matches) {
@@ -300,5 +290,35 @@ describe("capCache", () => {
     expect(cache.has("k0")).toBe(false);
     expect(cache.has("k99")).toBe(false);
     expect(cache.has("k100")).toBe(true);
+  });
+});
+
+describe("loadYamlDocument", () => {
+  const load = (text: string) => yaml.load(text, { schema: yaml.CORE_SCHEMA });
+
+  // js-yaml 5 throws YAMLException on these; js-yaml 4 returned undefined, and
+  // every caller in the CLI reads undefined as "nothing configured yet". A
+  // scaffolded machines.yaml really is one header comment.
+  it.each([
+    ["empty", ""],
+    ["whitespace", "   "],
+    ["blank lines", "\n\n"],
+    ["one comment", "# machine-name: profile-name\n"],
+    ["several comments", "# a\n# b\n"],
+    ["indented comment", "  # x\n\n"],
+  ])("returns undefined for %s", (_label, source) => {
+    expect(loadYamlDocument(source, load)).toBeUndefined();
+  });
+
+  it("parses real documents, including ones with leading comments", () => {
+    expect(loadYamlDocument("a: 1\n", load)).toEqual({ a: 1 });
+    expect(loadYamlDocument("# lead\na: 1\n", load)).toEqual({ a: 1 });
+    expect(loadYamlDocument("[]\n", load)).toEqual([]);
+  });
+
+  it("does not absorb an explicit null document or a syntax error", () => {
+    expect(loadYamlDocument("---\n", load)).toBeNull();
+    expect(loadYamlDocument("null\n", load)).toBeNull();
+    expect(() => loadYamlDocument("a: [\n", load)).toThrow();
   });
 });

@@ -20,6 +20,10 @@ export interface AgentConfig {
   hooks?: TurnHooks;
   /** Session ID for /session commands */
   sessionId?: string | null;
+  /** Durable event log for the session (in-memory when absent). */
+  sessionLog?: SessionLog;
+  /** LLM compaction overrides (thresholds, disable flag). */
+  compaction?: Partial<import("../context/compactor.js").CompactionConfig>;
 }
 
 export interface AgentResult {
@@ -28,15 +32,22 @@ export interface AgentResult {
   toolCalls: number;
   totalCost?: string;
   messages: LlmMessage[];
+  /** The session the run used — lets callers flush session-scoped state at exit. */
+  session: AgentSession;
 }
 
 export interface AgentSession {
-  messages: LlmMessage[];
+  /** Append-only event log — the source of truth for model-visible history. */
+  log: SessionLog;
+  /** The projected message array the model sees (derived from the log). */
+  readonly messages: LlmMessage[];
   turns: number;
   toolCalls: number;
   captureState: CaptureState;
   antiPatterns: AntiPatternTracker;
   flushConfig: FlushConfig;
+  /** Repeat-call guard chain (reset on direct user input). */
+  repeatChain: RepeatChainState;
 }
 
 export interface TurnResult {
@@ -49,6 +60,10 @@ export interface TurnResult {
 export interface TurnHooks {
   /** Streaming text token. Default: process.stdout.write(text) */
   onTextDelta?: (text: string) => void;
+  /** Streaming reasoning/thinking token. Default: dim stderr in verbose mode, hidden otherwise. */
+  onReasoningDelta?: (text: string) => void;
+  /** A reasoning segment finished (full text). Default: no-op. */
+  onReasoningDone?: (text: string) => void;
   /** Final newline after a streaming text block. Default: write "\n" if needed */
   onTextDone?: (text: string) => void;
   /** Non-streaming text block output. Default: process.stdout.write */
@@ -70,14 +85,28 @@ export interface TurnHooks {
 
 // Re-import LlmMessage for the AgentResult/AgentSession interfaces
 import type { LlmMessage } from "../providers/types.js";
+import { SessionLog } from "../session/log.js";
+import { createRepeatChain, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
+import { randomUUID } from "crypto";
 
-export function createSession(contextLimit?: number): AgentSession {
+export function createSession(contextLimit?: number, options?: { log?: SessionLog }): AgentSession {
+  const log =
+    options?.log ??
+    new SessionLog({
+      sessionId: `mem-${randomUUID()}`,
+      cwd: process.cwd(),
+      createdAt: new Date().toISOString(),
+    });
   return {
-    messages: [],
+    log,
+    get messages() {
+      return log.getMessages();
+    },
     turns: 0,
     toolCalls: 0,
     captureState: createCaptureState(),
     antiPatterns: new AntiPatternTracker(),
     flushConfig: createFlushConfig(contextLimit ?? 200_000),
+    repeatChain: createRepeatChain(),
   };
 }

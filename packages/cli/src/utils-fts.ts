@@ -1,9 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
+import { loadYamlDocument } from "./phren-core.js";
 import { fileURLToPath } from "url";
 import { findPhrenPath } from "./phren-paths.js";
-import { isValidProjectName, safeProjectPath } from "./utils-paths.js";
+import { isValidProjectName } from "./utils-paths.js";
+import { storeAwareProjectPath } from "./store-routing.js";
 
 // Lazy import of logDebug to break circular dependency:
 // utils.ts -> phren-paths.ts -> logger.ts -> phren-paths.ts -> utils.ts
@@ -129,7 +131,7 @@ function mergeSynonymMaps(...maps: Array<Record<string, string[]>>): Record<stri
 function parseSynonymsYaml(filePath: string): Record<string, string[]> {
   if (!fs.existsSync(filePath)) return {};
   try {
-    const parsed = yaml.load(fs.readFileSync(filePath, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(filePath, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
 
     const loaded: Record<string, string[]> = {};
@@ -188,7 +190,7 @@ function parseLearnedSynonymsJson(filePath: string): Record<string, string[]> {
 
 export function learnedSynonymsPath(phrenPath: string, project: string): string | null {
   if (!isValidProjectName(project)) return null;
-  return safeProjectPath(phrenPath, project, LEARNED_SYNONYMS_FILE);
+  return storeAwareProjectPath(phrenPath, project, LEARNED_SYNONYMS_FILE);
 }
 
 export function loadLearnedSynonyms(project?: string | null, phrenPath?: string | null): Record<string, string[]> {

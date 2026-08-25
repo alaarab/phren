@@ -19,17 +19,7 @@ import { runSearch, runFragmentSearch, parseFragmentSearchArgs, runRelatedDocs, 
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { getProjectConsolidationStatus, CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import { listAllSessions } from "../tools/session.js";
-
-function resolveProjectStorePath(phrenPath: string, project: string): string {
-  try {
-    const { getNonPrimaryStores } = require("../store-registry.js");
-    if (fs.existsSync(path.join(phrenPath, project))) return phrenPath;
-    for (const store of getNonPrimaryStores(phrenPath)) {
-      if (fs.existsSync(path.join(store.path, project))) return store.path;
-    }
-  } catch { /* fall through */ }
-  return phrenPath;
-}
+import { resolveProjectStorePath } from "./namespaces-utils.js";
 
 async function runAndPrint(fn: () => Promise<{ lines: string[]; exitCode: number }>) {
   const result = await fn();
@@ -303,13 +293,21 @@ export async function handleQualityFeedback(args: string[]) {
 }
 
 export async function handleMemoryUi(args: string[]) {
-  const portArg = args.find((arg) => arg.startsWith("--port="));
+  // Accept both `--port=N` and `--port N`. The registry documents the
+  // space-separated form (`phren web-ui [--port <n>]`), which silently fell
+  // through to the default before — the flag looked accepted and was ignored.
+  const eqArg = args.find((arg) => arg.startsWith("--port="));
+  const spaceIdx = args.indexOf("--port");
+  const rawPort = eqArg
+    ? eqArg.slice("--port=".length)
+    : (spaceIdx !== -1 ? args[spaceIdx + 1] : undefined);
+  const portRequested = rawPort !== undefined;
   const noOpen = args.includes("--no-open");
-  const port = portArg ? Number.parseInt(portArg.slice("--port=".length), 10) : 3499;
+  const port = portRequested ? Number.parseInt(rawPort, 10) : 3499;
   const safePort = Number.isNaN(port) ? 3499 : port;
   await startWebUi(getPhrenPath(), safePort, resolveRuntimeProfile(getPhrenPath()), {
     autoOpen: !noOpen,
-    allowPortFallback: !portArg,
+    allowPortFallback: !portRequested,
   });
 }
 

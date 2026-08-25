@@ -50,6 +50,17 @@ const WEAK_CROSS_PROJECT_OVERLAP_MAX = 0.18;
 const WEAK_CROSS_PROJECT_OVERLAP_PENALTY = 0.75;
 const LOW_FOCUS_SNIPPET_SCORE = 0.3;
 const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
+
+/**
+ * Per-snippet overhead charged against the token budget: the header line
+ * (`[<source key>] (<type>) fb:<score key>`) plus its blank separator.
+ *
+ * Selection and rendering MUST charge the same amount. When they drifted
+ * apart, `selectSnippets` admitted a snippet on one estimate and
+ * `buildHookOutput` re-checked it against a larger one, silently dropping a
+ * middle snippet that legitimately fit.
+ */
+export const SNIPPET_OVERHEAD_TOKENS = 24;
 const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
 const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
 /** Query-relevance floor (see applyRelevanceFloor). A doc with no structural
@@ -95,15 +106,34 @@ function intentBoost(intent: string, docType: string): number {
   return 0;
 }
 
+// fileRelevanceBoost runs once per candidate doc during ranking, all sharing the
+// same changedFiles Set. Cache the normalized view (keyed by the Set instance) so
+// path normalization happens once per ranking pass instead of once per doc.
+const _normalizedChangedFiles = new WeakMap<Set<string>, { basenames: Set<string>; paths: string[] }>();
+function normalizeChangedFiles(changedFiles: Set<string>): { basenames: Set<string>; paths: string[] } {
+  let cached = _normalizedChangedFiles.get(changedFiles);
+  if (cached) return cached;
+  const basenames = new Set<string>();
+  const paths: string[] = [];
+  for (const cf of changedFiles) {
+    const n = cf.replace(/\\/g, "/");
+    basenames.add(path.basename(n));
+    paths.push(n);
+  }
+  cached = { basenames, paths };
+  _normalizedChangedFiles.set(changedFiles, cached);
+  return cached;
+}
+
 export function fileRelevanceBoost(filePath: string, changedFiles: Set<string>): number {
   if (changedFiles.size === 0) return 0;
   const normalized = filePath.replace(/\\/g, "/");
   const docBasename = path.basename(normalized);
-  for (const cf of changedFiles) {
-    const n = cf.replace(/\\/g, "/");
-    // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
-    if (path.basename(n) === docBasename) return 3;
-    // Also match if the full changed-file path is a suffix of the doc path
+  const { basenames, paths } = normalizeChangedFiles(changedFiles);
+  // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
+  if (basenames.has(docBasename)) return 3;
+  // Also match if the full changed-file path is a suffix of the doc path
+  for (const n of paths) {
     if (normalized.endsWith(`/${n}`)) return 3;
   }
   return 0;
@@ -680,14 +710,42 @@ export async function searchFederatedStores(
 
 // ── Trust filter ─────────────────────────────────────────────────────────────
 
-const TRUST_FILTERED_TYPES = new Set(["findings", "reference", "knowledge"]);
+// "knowledge" was a doc type until the 0.0.x renames; classifyFile can no
+// longer produce it, so listing it here was dead weight that made the set
+// read as broader than it is.
+const TRUST_FILTERED_TYPES = new Set(["findings", "reference"]);
+
+/**
+ * Doc types that must never be pushed into an agent's prompt automatically.
+ *
+ * - `notes` — personal scratch context; the user's, not the agent's.
+ * - `review-queue` — review.md, which is a *quarantine*. Its entries are candidates
+ *   nobody has approved yet, and the trust filter does not even look at them (they are
+ *   not in TRUST_FILTERED_TYPES), so an unreviewed line would reach a prompt with no
+ *   staleness, confidence, or citation checks at all. Injecting the queue would also
+ *   defeat the point of having a queue: approve/reject would decide nothing, because
+ *   the content is already in play.
+ *
+ * Both remain indexed and reachable through explicit `search_knowledge` — a pull the
+ * caller asked for, tagged with its doc type — which is how a user answers "why is this
+ * in my review queue?" without the content leaking into every prompt.
+ */
+export const NON_INJECTABLE_TYPES = new Set(["notes", "review-queue"]);
+
+/** True when a doc type is allowed on the automatic injection path. */
+export function isInjectableDocType(type: string): boolean {
+  return !NON_INJECTABLE_TYPES.has(type);
+}
 
 export type TrustFilterQueueItem = { project: string; section: "Stale" | "Conflicts"; items: string[] };
 
 export type TrustFilterResult = { rows: DocRow[]; queueItems: TrustFilterQueueItem[]; auditEntries: string[] };
 
 /** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
- * by the caller — retrieval itself should remain side-effect-free. */
+ * by the caller — retrieval itself should remain side-effect-free.
+ *
+ * This runs only on the automatic injection path, so it is also where non-injectable
+ * doc types (notes, review-queue) are dropped. */
 export function applyTrustFilter(
   rows: DocRow[],
   ttlDays: number,
@@ -700,6 +758,7 @@ export function applyTrustFilter(
   const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
 
   const filtered = rows
+    .filter((doc) => isInjectableDocType(doc.type))
     .map((doc) => {
       if (!TRUST_FILTERED_TYPES.has(doc.type)) return doc;
       const trust = filterTrustedFindingsDetailed(doc.content, {
@@ -1057,6 +1116,10 @@ export function selectSnippets(
   }
 
   for (const doc of rows) {
+    // Last gate before content becomes prompt text. Quarantined and personal doc types
+    // never get this far on the normal path, but this is the only place that is
+    // unconditionally true of everything injected, so it is checked here too.
+    if (!isInjectableDocType(doc.type)) continue;
     let snippet = compactSnippet(extractSnippet(doc.content, keywords, 8), lineBudget, charBudget);
     if (!snippet.trim()) continue;
     // Mark findings with stale citations before injection
@@ -1078,14 +1141,14 @@ export function selectSnippets(
         ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
         : focusScore;
     }
-    let est = approximateTokens(snippet) + 14;
+    let est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
     if (selected.length > 0 && focusScore < VERY_LOW_FOCUS_SNIPPET_SCORE && usedTokens + est > Math.floor(tokenBudget * 0.8)) {
       continue;
     }
     if (selected.length > 0 && usedTokens + est > tokenBudget) break;
     if (selected.length === 0 && usedTokens + est > tokenBudget) {
       snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
-      est = approximateTokens(snippet) + 14;
+      est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
     }
     const key = entryScoreKey(doc.project, doc.filename, doc.content);
     selected.push({ doc, snippet, key });
@@ -1096,7 +1159,7 @@ export function selectSnippets(
   // rounding / compaction producing more tokens than estimated during selection)
   while (selected.length > 1 && usedTokens > tokenBudget) {
     const removed = selected.pop()!;
-    usedTokens -= approximateTokens(removed.snippet) + 14;
+    usedTokens -= approximateTokens(removed.snippet) + SNIPPET_OVERHEAD_TOKENS;
   }
   return { selected, usedTokens };
 }

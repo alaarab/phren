@@ -13,6 +13,7 @@ import { registerFindingCommands } from "./commands/finding-commands";
 import { registerTaskCommands } from "./commands/task-commands";
 import { registerProjectCommands } from "./commands/project-commands";
 import { registerMachineCommands } from "./commands/machine-commands";
+import { registerNoteCommands } from "./commands/note-commands";
 
 let client: PhrenClient | undefined;
 let outputChannel: vscode.OutputChannel;
@@ -111,6 +112,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // --- Register all commands from modules ---
   context.subscriptions.push(
     ...registerFindingCommands(extCtx),
+    ...registerNoteCommands(extCtx),
     ...registerTaskCommands(extCtx),
     ...registerProjectCommands(extCtx),
     ...registerMachineCommands(extCtx),

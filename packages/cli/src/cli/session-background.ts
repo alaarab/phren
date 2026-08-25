@@ -13,6 +13,7 @@ import {
 } from "./hooks-context.js";
 import { qualityMarkers } from "../shared.js";
 import { spawnDetachedChild } from "../shared/process.js";
+import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { logger } from "../logger.js";
 
 const SYNC_LOCK_STALE_MS = 10 * 60 * 1000; // 10 minutes
@@ -65,6 +66,8 @@ export function scheduleBackgroundSync(phrenPathLocal: string): boolean {
 
 export function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: string): boolean {
   if (!isFeatureEnabled("PHREN_FEATURE_DAILY_MAINTENANCE", true)) return false;
+  // Lifecycle automations (daily maintenance) are off under the manual preset.
+  if (!resolveManagementCapabilities(phrenPathLocal).lifecycleAutomations) return false;
   const markers = qualityMarkers(phrenPathLocal);
   if (fs.existsSync(markers.done)) return false;
   if (fs.existsSync(markers.lock)) {
@@ -103,9 +106,10 @@ export function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: 
       fs.closeSync(fd);
     }
     if (project) spawnArgs.push(project);
-    const logDir = path.join(phrenPathLocal, ".config");
-    fs.mkdirSync(logDir, { recursive: true });
-    const logPath = path.join(logDir, "background-maintenance.log");
+    // Keep this log under .runtime/ (gitignored), matching background-sync.log.
+    // Writing it under .config/ makes it a tracked file that diverges per machine
+    // and breaks the Stop-hook pull-rebase.
+    const logPath = runtimeFile(phrenPathLocal, "background-maintenance.log");
     const logFd = fs.openSync(logPath, "a");
     fs.writeSync(
       logFd,
@@ -141,10 +145,8 @@ export function scheduleBackgroundMaintenance(phrenPathLocal: string, project?: 
   } catch (err: unknown) {
     const errMsg = errorMessage(err);
     try {
-      const logDir = path.join(phrenPathLocal, ".config");
-      fs.mkdirSync(logDir, { recursive: true });
       fs.appendFileSync(
-        path.join(logDir, "background-maintenance.log"),
+        runtimeFile(phrenPathLocal, "background-maintenance.log"),
         `[${new Date().toISOString()}] spawn failed: ${errMsg}\n`
       );
     } catch (err: unknown) {

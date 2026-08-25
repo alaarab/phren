@@ -69,7 +69,10 @@ export {
   ensurePhrenPath,
   findPhrenPathWithArg,
   normalizeProjectNameForCreate,
+  projectSlugFromPath,
+  canonicalProjectKey,
   findProjectNameCaseInsensitive,
+  findProjectNamesByCanonicalKey,
   findArchivedProjectNameCaseInsensitive,
   getProjectDirs,
   listInvalidProjectDirs,
@@ -78,6 +81,9 @@ export {
   getPhrenPath,
   qualityMarkers,
   atomicWriteText,
+  ensurePrivateDir,
+  ftsCacheRoot,
+  ensureFtsCacheRootPrivate,
 } from "./phren-paths.js";
 
 export {

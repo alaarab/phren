@@ -5,6 +5,467 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-08-24
+
+### Fixed
+
+- **The interactive shell dropped input and tore its frames.** The shell compared an
+  entire stdin chunk against a single key, but Node delivers whatever bytes arrived in
+  one read, not one keypress: arrow autorepeat arrives as `\x1b[B\x1b[B\x1b[B`, fast
+  typing as `ub`, paste as the whole string — none matched a branch, so they repainted
+  with no state change. Three coalesced downs moved the cursor one row; typing "hub"
+  into the filter left "h". Chunks are now decoded into discrete keys (CSI, SS3, bare
+  ESC, grapheme-safe) and drained through one pump, repaints from the three independent
+  sources are single-flight, and each frame is emitted in one synchronized-update write
+  with the cursor hidden and autowrap off.
+- **The startup splash drew over itself.** The intro painted a frame taller than the
+  terminal — a blank line, twelve rows of character art, the hint block, a trailing
+  blank and a trailing newline. Everything past the last row scrolls the alternate
+  buffer, and once it has scrolled every cursor-home repaint lands on shifted rows, so
+  each animation frame drew over the last: ghost logo rows, a doubled tagline, a
+  doubled "Loading shell…", at any height of 17 rows or less. `paintFrame` now clips a
+  frame to the terminal's rows, which covers the dashboard too — it was overflowing by
+  a line at ten rows. The intro also carried its own copy of the side-by-side layout
+  and ignored terminal width entirely, so below about 72 columns the tagline was
+  chopped mid-word; and it aligned its two columns with `String.padEnd` on art lines
+  full of truecolor escapes, which counts escape bytes as width and therefore padded
+  nothing. Both paths now share one layout that measures display cells and steps down
+  through smaller arrangements — art beside logo, art alone, logo alone, wordmark —
+  according to the space actually available. Verified against the real CLI through a
+  pty from 36x20 to 200x60: no scroll at any size.
+- **Team-store projects were invisible in the shell.** `listProjectCards` walked the
+  team stores and then filtered what it found through the active profile's project
+  list. A profile only ever names projects in the primary store, so nothing from a team
+  store could pass and every shared project was missing — on a two-team-store machine
+  the Projects view showed 2 entries instead of 24. Team stores already carry their own
+  subscription list in `StoreEntry.projects`, so the profile filter was redundant as
+  well as fatal. Project rows now also show which store they came from, and `global` is
+  no longer listed twice when the active profile names it.
+- **The Windows test suite passes again.** CI had been red on `windows-latest`
+  for every run since 0.1.43 — 9 failures across 5 files, four distinct causes.
+  The TypeScript and Swift suites read one committed fixture corpus and compare
+  it byte for byte, which is the whole proof that both implementations agree on
+  the store format; with no `.gitattributes`, git's autocrlf rewrote those bytes
+  on a Windows checkout, so findings dates parsed as `unknown` and a rendered
+  `tasks.md` was compared LF against a CRLF fixture. `fragment-graph` built the
+  `CLAUDE.md` path by concatenating with `/`, which Node accepts on Windows but
+  which yields a mixed-separator string no other path in the process matches. A
+  read-counting test mock derived a basename with `lastIndexOf("/")`, which
+  returns -1 on Windows. And the extract-proactivity tests pointed the store at
+  a filesystem-root path that is unwritable on Unix — so state that was supposed
+  to persist failed silently and each test started clean by accident, while on
+  Windows the same path is a writable drive root and the state leaked between
+  tests (and onto the developer's drive).
+
+## [0.1.43] - 2026-08-02
+
+### Removed
+
+- **Two orphaned duplicate modules.** `src/init-uninstall.ts` and
+  `src/init-walkthrough.ts` were unreferenced copies of the live modules under
+  `src/init/` — every import resolves inside that directory — but both still compiled
+  into `dist` and shipped in the tarball. They had also diverged from the live versions,
+  which is worse than dead weight: a fix applied to the wrong copy looks correct and does
+  nothing. 1,195 lines of source and ~40 KB of published JavaScript removed.
+
+### Fixed
+
+- **`phren init` promised slash-commands in a directory it created empty.** `setup.ts`
+  provisions skills from `starter/global/skills/`, which shipped containing only
+  `CLAUDE.md` — so every install created `~/.phren/global/skills`, left it empty, and then
+  printed `ln -s ~/.phren/global/skills/phren-sync ~/.claude/skills/phren-sync`, a symlink
+  to nothing. The five `phren-*` skills (sync, init, discover, consolidate, profiles) now
+  ship there. Verified end to end from a packed tarball installed to a clean prefix:
+  `phren init` populates the store and the managed preset symlinks them into
+  `~/.claude/skills`, so the advertised path resolves to a real `SKILL.md`.
+- **`memory_feedback` silently discarded feedback that used the printed key.** Snippet
+  headers advertise the score key as `fb:<key>`; a caller passing that token whole wrote
+  a journal entry under a key no `entryScoreKey` can produce — `ok: true`, no effect,
+  which is the exact silent failure printing the key was meant to end. Both spellings now
+  normalize to the same entry. The key also reaches the progressive-disclosure index,
+  which the tool description had always claimed unconditionally.
+- **Snippet selection and rendering disagreed about per-snippet token cost.** Selection
+  charged 14 tokens of header overhead, rendering re-checked at 24, so a snippet that
+  legitimately fit the budget could be dropped during the final layout pass. Both now
+  use one exported `SNIPPET_OVERHEAD_TOKENS`.
+- **iOS: a partial push followed by a conflict stranded work in "Needs attention".** With
+  whole-queue plans, a plan spans several files; if an earlier file's PUT landed and a
+  later one hit a sha conflict, recovery re-applied the ops that had *already* shipped.
+  Replaying a landed `approve` throws "queue item not found", so those ops parked — and
+  `retryFailed` re-parked them forever, with discard the only escape. A failed write now
+  reports which paths committed, and recovery retires them along with every op they
+  completed. (New in the unreleased whole-queue batching; never shipped.)
+- **iOS: the secondary-before-primary write order broke when one file was both.** `reject`
+  mirrors into `FINDINGS.md` while `addFinding` owns it; classifying by "is a primary for
+  some op" pushed `review.md` first, inverting the property that lets refetch-and-replay
+  still find the queue lines it addresses. Paths are now classified by whether they are a
+  secondary for *any* op.
+- **Running the test suite uninstalled your phren.** `cli.test.ts` spawns the real
+  `phren uninstall` against temp directories, but `npm uninstall -g` resolves against
+  the machine's actual npm prefix and honors neither `PHREN_PATH` nor `HOME` — so every
+  full `pnpm test` run deleted the developer's globally installed `@phren/cli`, leaving
+  the `~/.local/bin/phren` wrapper to fall back to its pinned `npx` copy. A new
+  `PHREN_SKIP_GLOBAL_NPM_UNINSTALL=1` guard is honored by the uninstaller and set by the
+  shared CLI test helpers, so no test that spawns the CLI can reach the machine's global
+  install; a regression test asserts it.
+- **A malformed `stores.yaml` can no longer be silently discarded — or destroyed.**
+  One invalid entry (a typo'd role, a missing field) used to null out the *entire*
+  registry with nothing logged: every team store vanished from search, injection, and
+  sync, and auto-capture fell back to the personal store. Worse, `phren store add`
+  treated that null as "first install" and overwrote the user's file with a fresh
+  single-store registry. Now invalid entries are skipped individually with a loud
+  stderr warning naming the entry and the reason; `role: secondary` is read as `team`
+  (with a note) instead of rejected; and every registry mutation refuses to write back
+  over a file that could not be fully parsed — fix the file by hand, keep your entries.
+  `readStoreRegistryDetailed` exposes the problems for doctor/status surfaces.
+- **`memory_feedback` is reachable at last.** The feedback loop (score journal →
+  quality multiplier → injection ranking) has been wired end-to-end for months, but the
+  key it scores was never printed anywhere an agent could see. Injected snippet headers
+  now carry it as `fb:<project>/<file>:<digest>`, and the tool description says to pass
+  it verbatim.
+- **iOS: a batch approve is now one commit per file, and never an empty one.** The
+  flush grouped only *consecutive* ops on the same file, so a store-wide triage session
+  interleaving several projects' `review.md` files shattered into one commit per run —
+  41 commits in one observed session, 21 of them empty, because later groups re-PUT
+  byte-identical content the first push already carried (GitHub records those as empty
+  commits). The whole pending queue now flushes as a single plan (one Contents PUT per
+  distinct file, cross-project commit message: `phren: proja(update x3) projb(task) via
+  ios`), and the engine skips any PUT whose bytes already match the remote blob sha.
+- **Docs and capability manifests stopped lying about shipped behavior.**
+  `manage_review_item`'s description and the API reference still described pre-0.1.41
+  approve semantics (approve *promotes* into FINDINGS.md now); the web-UI capability
+  manifest was four releases stale, denying finding/task CRUD and profile switching the
+  UI has had for months, with handler paths into a file that no longer exists; the VS
+  Code manifest claimed fragment-search and related-docs client methods that were never
+  written; `docs/agent.md` told users to `npm i -g @phren/agent`, a package that was
+  never published — it now says experimental/unpublished and documents the checkout
+  workflow; and `docs/store-format.md` §7 under-reported its own conformance coverage
+  (the five fixture gaps are covered, testing is bidirectional, the generator is
+  deterministic — the remaining honest gap, regeneration not being a CI gate, is now
+  called out as such). `TRUST_FILTERED_TYPES` also dropped `"knowledge"`, a doc type
+  nothing can produce anymore.
+
+## [0.1.42] - 2026-08-02
+
+### Fixed
+
+- **The data layer now resolves projects across all registered stores.** Every path
+  builder behind the MCP data tools — `ensureProject`, the task file/lock/archive paths,
+  findings and review-queue paths, and the finding writers — resolved against the primary
+  store only, while `list_projects` used the store-aware resolver. A project living in a
+  secondary store got `No project "X" found` from `get_tasks`, `add_task`, `add_finding`,
+  and everything routed through them; worse, once a same-named directory existed in the
+  primary store, writes landed there and reported success — leaking team content into the
+  personal store. All of these now resolve through the store registry: the primary store
+  wins a name collision, and a project claimed by multiple secondary stores fails with the
+  existing disambiguation error. Task mutators also validate the project exists *before*
+  taking the file lock, which previously mkdir'd an orphan project directory for any
+  typo'd name.
+- **The CLI's store-path fallback was dead code.** `resolveProjectStorePath` (behind
+  `phren truths` and other per-project CLI reads) loaded the store registry with a bare
+  `require()` in an ESM package; the ReferenceError was swallowed by its catch and every
+  lookup silently fell back to the primary store. It now uses a static import, and the
+  duplicate copy in `cli/actions.ts` was removed in favor of the shared one. The web UI
+  had five more of the same dead `require()` calls — listing and switching profiles and
+  every retention/workflow policy update from the settings page threw and surfaced as
+  generic endpoint errors. All are static imports now.
+- **The rest of the per-project path builders are store-aware too.** Beyond the data
+  layer, a shared `storeAwareProjectPath` now backs reference-topic consolidation,
+  cap-triggered finding archiving, semantic dedup/conflict reads, finding lifecycle
+  operations (supersede/retract/link), extraction's already-processed memory, extracted
+  facts, learned synonyms, per-project config, retention pruning, and the search-index
+  refresh after finding writes — so none of them can read from or write to a phantom
+  primary-store path for a project living in a secondary store.
+- **The secret scanner no longer rejects slash-joined identifier chains.** The generic
+  base64 rule matched any 40+ run of letters and slashes, so prose naming a few functions
+  (`addFooToBar/addFoosToBar/upsertBaz`) was discarded as a "long base64 secret." The rule
+  now also requires a digit, which random base64 of that length lacks ~0.1% of the time
+  while camelCase identifier chains never contain one.
+
+## [0.1.41] - 2026-08-02
+
+### Security
+
+- **Provider credentials are no longer written into a committed directory.** `phren auth`
+  stored API keys and OAuth refresh tokens at `.config/auth-profiles.json`, and `.config/`
+  is tracked and pushed — so every user of `phren auth` published their credentials to
+  their store remote. Storage moved to the gitignored `.runtime/`, with a one-time
+  migration. A `.gitignore` entry alone would not have been enough: once a file is
+  tracked, ignoring it neither untracks it nor stops `git add -A` from staging future
+  writes. Both `git add -A` paths (`session-stop`'s auto-save and the `push_changes` tool)
+  now carry unstage guards.
+- **Writes to a team-claimed project no longer fall back to the personal store.**
+  When `stores.yaml` claimed a project for a store that was not present on this machine,
+  the write silently landed in the primary store — which is how employer content reached
+  a personal repository. Writes now fail loudly, naming the store, its expected path, and
+  how to attach it. Reads still degrade gracefully. `add_project` carried a second copy of
+  the same fall-through and was fixed with it.
+- **The FTS snapshot cache was world-readable.** Cache directories and the SQLite
+  snapshots inside them — the full text of every indexed finding, note, and reference doc —
+  were created `0755`/`0644`. On macOS the per-user `$TMPDIR` parent hid this; on Linux
+  `os.tmpdir()` is `/tmp`, so any local account could read a user's whole knowledge base.
+  Now `0700`/`0600`, set at creation.
+- **One store's index could be served into another store's prompts.** The stale-cache
+  fallback picked the most recently modified `.db` in a per-*user* cache directory with no
+  check that it belonged to the requesting store. Snapshots are now namespaced per
+  `(store, profile)`.
+- **`review.md` is no longer injectable.** The review queue was FTS-indexed and absent from
+  the trust-filtered types, so unreviewed, quarantined content could be injected into an
+  agent's prompt. It remains searchable on explicit request.
+- **Store `.gitignore` templates never covered `.env`.**
+- Five dependency advisories closed (three high). Two existing `pnpm.overrides` entries had
+  gone stale against newer advisories and were permitting the vulnerable versions they were
+  meant to exclude.
+
+### Fixed
+
+- **Approving a review item now promotes it.** `approveQueueItem` only spliced a line out of
+  `review.md`; it never wrote a finding. Extraction queues candidates that were never in
+  `FINDINGS.md`, so approving one silently discarded it — and `rejectQueueItem` could not
+  reach content that consolidation had moved to `reference/topics/`, so it reported success
+  while deleting nothing. For one real store, 153 of 163 queue items were unreachable by
+  both verbs, making approve and reject the same no-op. Approve now promotes through the
+  normal add path (fid, dedup, cap-triggered archive all identical), reject reaches archived
+  content or fails loudly, and each reports which of its outcomes actually occurred. Both
+  verbs now locate and act *before* dequeuing, so a failed operation leaves the item queued.
+- **The index freshness sentinel never fired.** `_buildIndexGuarded` created and removed its
+  own lock file inside `.runtime` *after* writing the sentinel, so the directory's mtime was
+  always newer than the stamp — the fast path was structurally unreachable and had zero hits.
+  Excluding `.runtime` alone would have been a bug, since writing a file does not change its
+  parent directory's mtime and the fast path would then serve stale results after every edit;
+  freshness is now proven by a directory-mtime scan plus a re-hash of the recorded file list.
+- **A stalled embedding backend killed the prompt hook entirely.** `PHREN_OLLAMA_URL`
+  defaults to `localhost:11434`, so every install has a backend "configured". Against a
+  socket that accepts and never answers, the hook sat on a 10-second abort while
+  UserPromptSubmit is registered with a 10-second timeout — the hook was killed and the
+  prompt received no context at all. Reachability is now probed with an 800 ms budget and
+  cached briefly.
+- **Vector search could accept a permanently incomplete index.** `ensure()` stamped a fresh
+  file-stat onto tables built from the caller's in-memory entries, so a long-lived server
+  could seal a stale entry list under a newer revision and every later process would treat
+  it as current, leaving documents unreachable by semantic search.
+- **The Stop hook reported success when the pull leg had failed**, overwriting the previous
+  run's real status each turn so failures never accumulated. Sync failures now persist,
+  unrelated histories are detected specifically, and a degraded store is surfaced.
+- **`doctor` reported `hook-path-stable` as OK without checking the entrypoint exists.**
+  Upgrading via npm moved the package entry and left every hook command pointing at a
+  missing file; `doctor --fix` repaired nothing and reported green.
+- Git worktrees were registered as separate top-level projects; the same repository could be
+  registered twice under two different slugs.
+- VS Code: a failed mutation reported success, because the `ok:false` rejection sat inside a
+  try/catch intended only for `JSON.parse`. The client also never reconnected after a spawn
+  `error` (only after `exit`), leaving it permanently wedged.
+- **`maintain extract` is now idempotent per source commit.** Every sync run re-queued the
+  same commits because the review queue only deduped on rendered text, which drifts. One
+  store had 224 review items from 84 distinct commits, twenty of them appended eight times.
+  Extraction now keys on the `(source commit <hash>)` marker — reading review.md,
+  FINDINGS.md, the finding journal, and a per-project processed set — and additionally
+  dedups on normalized subject text so rebased history can't smuggle the same commit
+  message back in under a new hash.
+- **Capture-quality gate for findings.** Transient shell/tool failure logs
+  (`[bug] command '…' failed: EACCES …`), machine-generated diff-scrape templates
+  (`… error handling added near "…"`), non-prose fragments, and phren's own prompt text
+  are now rejected before they reach the review queue. The `maintain govern` low-value
+  filter and the PostToolUse hook share one predicate (`content/quality.ts`).
+- **Task auto-capture no longer echoes raw prompts.** Pasted web pages and terminal
+  banners ("Skip to content … Repository navigation", "Windows PowerShell Copyright (C)
+  Microsoft Corporation") and chat filler no longer become tasks.
+- **TTL → Stale promotion runs during nightly maintenance.** The promotion lived in the
+  `phren maintain prune` CLI handler, so background maintenance — which calls
+  `pruneDeadMemories` directly — never performed it and `## Stale` stayed empty while
+  `## Review` filled up. It now lives in `pruneDeadMemories`, so both callers get it.
+
+### Performance
+
+- **Cold index build: 9,970 ms → 806 ms** on a 1,892-file store, and 60,180 file reads →
+  3,594. Reference documents were being read 36 times each because topic detection re-read
+  and re-tokenised the project's entire corpus once per reference document.
+- **Warm index stage: 147 ms → 47 ms**; sentinel hit rate 0/4 → 4/4 (see above).
+- **Prompt hook with an unreachable embedding backend: 10,376 ms → 305 ms.**
+- **`impact.jsonl` handling: 9.4 ms → 2.7 ms per prompt.** The existing in-process cache
+  never helped, because each prompt runs in a fresh process; the aggregate is now persisted
+  and folded forward on append rather than re-derived from a 1.9 MB log.
+- `experimental/agent` no longer builds or tests by default.
+
+### Added
+
+- `docs/store-format.md` — the store markdown format specified as a contract, including its
+  known rough edges, now that a second implementation exists.
+- A `CONTRIBUTING.md` rule that a rename is not complete until the old name is retired or
+  documented as a legacy read path, plus a guard test pinning the documented MCP tool count
+  to the number actually registered.
+
+### Removed
+
+- `cli-hooks-git.ts`, of whose sixteen exports fourteen were unreachable and two were
+  byte-identical duplicates of live functions in `cli/session-git.ts`.
+- Three bundled starter sample projects (60 KB shipped in every install) that an
+  unconditional guard in `phren init` had always skipped copying.
+
+### Changed
+
+- The three disjoint finding-type vocabularies — offered, decay-table, and auto-detected —
+  reconciled. `[tradeoff]` and `[architecture]` were offered everywhere but had no decay
+  rule; `[workaround]` and `[context]` were written by phren but could not be filtered for.
+  Legacy tags still parse on read.
+
+
+## [0.1.40] - 2026-07-23
+
+### Added
+
+- **Management presets (`managed` / `assisted` / `manual`).** Choose how much phren
+  wires into your environment. `managed` (default) is the flagship experience — phren
+  registers MCP + hooks, symlinks `~/.claude/CLAUDE.md` and skills, installs
+  `~/.local/bin` wrappers, and self-heals all of it every session. `assisted` keeps
+  MCP + hooks (ambient context injection, auto-capture, store git sync) but never
+  writes outside its own store and your agent's settings, printing a self-wiring
+  snippet instead. `manual` turns off hooks and lifecycle automation entirely. Set at
+  install with `phren init --preset <name>`, switch anytime with `phren preset <name>`,
+  and inspect the current footprint with `phren status`. See `docs/footprint.md`.
+- Assisted and manual presets default new installs to detached project ownership so
+  phren never writes into your repos.
+
+### Fixed
+
+- Fixed flaky Windows CI failures by retrying destructive filesystem operations during
+  the build.
+- Fixed a test-isolation defect where `phren init`'s store-path resolution used an
+  import-frozen default path. Test suites that repoint `HOME` at a temp directory could
+  resolve to the developer's real `~/.phren` and mutate their live install; init now
+  resolves the default store path from `HOME` at call time.
+
+## [0.1.39] - 2026-07-20
+
+### Changed
+
+- **The graph project pane is now the single reading and editing surface.** Selecting
+  a finding or task expands its complete text inline; Edit opens controls in that same
+  row instead of spawning a second dossier. Task status and priority are editable
+  inline, while finding topic and health remain visible for context.
+- The project pane is draggable in VS Code, starts taller, persists its position and
+  dimensions, and supports independent width/height resizing plus a diagonal corner
+  handle. Select now shares the filter row, and Select all toggles to Unselect all when
+  every visible item is selected.
+- Filters use an unambiguous cyan selected state, project rows show longer readable
+  previews, and graph scrollbars and HUD spacing are less visually intrusive.
+
+### Fixed
+
+- Removed the yellow radiating selection effect from projects, findings, tasks, and
+  other graph nodes.
+- Fixed project counts that stopped at exactly 50. The VS Code extension now requests
+  up to 200 findings and preserves the API's actual total rather than presenting the
+  first page length as the project total.
+- Fixed pane/card placement races after graph animations, overlapping graph controls,
+  inactive Edit actions, unclear health/filter selection, and saved inline edits not
+  refreshing in the project pane.
+- Released the coordinated VS Code extension patch as `0.6.2`.
+
+## [0.1.38] - 2026-07-20
+
+### Added
+
+- **First-class daily notes across CLI, MCP, web UI, and VS Code.** Notes live in
+  per-project daily Markdown files, support add/list/edit/remove operations, and can be
+  promoted into durable typed findings when they become reusable knowledge.
+- Notes are explicitly searchable and sync with team stores while remaining excluded
+  from automatic hook injection and the knowledge graph, keeping lightweight working
+  context separate from curated findings.
+- Project-level **Add finding** and **Add note** operations are now directly available
+  in both the web UI and VS Code activity bar, including multiline capture and complete
+  note management in the project view.
+- `phren doctor` now checks that root config is materialized on disk, not merely tracked
+  in git, and distinguishes sparse-checkout exclusion from an outright missing file.
+  `phren doctor --fix` repairs it by widening the sparse-checkout patterns.
+
+### Fixed
+
+- **Sparse-checkout no longer hides root config, which silently broke MCP and team
+  stores.** `setupSparseCheckout` omitted `phren.root.yaml` and `stores.yaml` from its
+  always-include list, leaving them tracked in git but absent from the working tree on
+  any profile-linked store. Both failures were silent: the MCP entrypoint gates on
+  reading the root manifest, so a missing one made `phren <store-path>` fall through to
+  "Unknown command" and exit — surfacing in clients as `Cannot call write after a stream
+  was destroyed` — while a missing `stores.yaml` made the registry fall back to a single
+  implicit store, hiding every configured team store.
+- `phren store list` reported `projects: 0` for every store. `countStoreProjects` used a
+  CommonJS `require()` inside an ESM module, which always threw `ReferenceError` into a
+  bare `catch` that returned `0`.
+- Web UI lifecycle hook rows are selectable again, hook config reads remain constrained
+  to the exact supported config files, and edited review items now retain working
+  approve/reject actions.
+
+## [0.1.37] - 2026-07-19
+
+### Added
+
+- **The 3D memory viewer is now a full navigation and maintenance surface** (shared
+  by the web UI Graph tab and the VS Code webview; see `docs/graph-viewer.md`):
+  - Project navigator dock: click an orb (or use `←`/`→`) to jump to any project
+    without hunting for its node.
+  - Contents pane: a right-docked, filterable, sortable index of the in-context
+    project's findings and tasks, with health tinting, a healthy/decaying/stale
+    bar, keyboard review (`↑`/`↓`/`Enter`/`Delete`), collapse, resize, and
+    preferences that persist across reloads.
+  - Row actions: peek (fly to a node without opening its dossier), edit
+    (open the dossier straight in edit mode), and delete.
+  - Select mode with bulk delete, plus Merge for two same-project findings —
+    both with an Undo toast that restores the previous state.
+  - A cross-project "needs review" pane (via the `⚠ N` navigator pill) listing
+    every decaying/stale finding, grouped by project, for store-wide pruning.
+  - Fragment context: selecting a fragment lists its connected projects and
+    reference docs.
+
+### Changed
+
+- **VS Code node dossier docks to the left edge** as a stable reading pane
+  instead of popping up over the clicked node and cursor, and is resizable —
+  matching the web UI (left = detail, right = contents).
+- The project dossier's stat-card grid was replaced with a compact one-line
+  stat; browsable detail lives in the contents pane.
+
+### Fixed
+
+- Stale project labels no longer linger as ghosts after the graph remounts
+  (e.g. following a delete).
+- Clicking the viewer's HUD overlays (navigator, contents pane, filters) no
+  longer clears the current selection in the VS Code webview.
+
+## [0.1.36] - 2026-07-16
+
+### Fixed
+
+- **Hooks no longer break when the npx cache is pruned.** `phren init` wired Claude
+  Code's lifecycle hooks to the path of the running script, which under
+  `npx @phren/cli init` resolves into the ephemeral npx download cache
+  (`~/.npm/_npx/<hash>/…`). npx prunes that cache and the hash changes between
+  versions, so every hook would silently fail once it was gone — context stopped
+  injecting and phren appeared broken until init was re-run. Init now installs the
+  stable `~/.local/bin/phren` wrapper *before* writing hook commands, and
+  `buildLifecycleCommands` refuses to bake an npx-cache path into a fallback-less
+  `node <entry>` hook, dropping to the self-healing `npx -y` last resort instead.
+
+### Added
+
+- **`doctor` check `hook-path-stable`.** Flags hook commands still pointing into the
+  npx cache so the regression above is detected instead of failing silently.
+
+## [0.1.34] - 2026-06-27
+
+### Changed
+
+- **Contradiction detection surfaces candidates instead of auto-marking.** Potential
+  contradictions are now reported to the agent for review rather than being marked
+  automatically, and the detector's false-positive rate was reduced.
+- **Faster retrieval and indexing.** Scoring and retrieval hot paths were deduped and
+  optimized, with additional CLI reliability hardening and faster incremental indexing.
+
+### Security
+
+- Patched all known dependency vulnerabilities and refreshed dependencies. Removed an
+  orphaned `packages/vscode` lockfile that was triggering Dependabot alerts.
+
 ## [0.1.33] - 2026-05-31
 
 ### Changed

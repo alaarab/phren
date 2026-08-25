@@ -14,10 +14,12 @@ import {
 import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared/index.js";
 import { mergeConfig, getWorkflowPolicy } from "./shared/governance.js";
 import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
+import { getManagementPreset, resolveManagementCapabilities } from "./init/management-preset.js";
 import { getTelemetrySummary } from "./telemetry.js";
 import { runGit as runGitShared, errorMessage } from "./utils.js";
 import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
+import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
@@ -119,11 +121,22 @@ export async function runStatus() {
     console.log(`  ${DIM}profile${RESET}  ${profile}`);
   }
 
-  // MCP + hooks status
+  // Management preset + MCP + hooks status
+  const preset = getManagementPreset(phrenPath);
+  const caps = resolveManagementCapabilities(phrenPath);
   const mcpEnabled = getMcpEnabledPreference(phrenPath);
   const hooksEnabled = getHooksEnabledPreference(phrenPath);
+  console.log(`  ${DIM}preset${RESET}   ${preset}`);
   console.log(`  ${DIM}mcp${RESET}      ${mcpEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
   console.log(`  ${DIM}hooks${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+  // What phren touches on this machine under the current preset.
+  const touches = [
+    caps.linkGlobalClaudeMd ? "~/.claude/CLAUDE.md" : null,
+    caps.installSkillLinks ? "~/.claude/skills" : null,
+    caps.installWrappers ? "~/.local/bin wrappers" : null,
+    caps.repoMirroring ? "repo mirrors" : null,
+  ].filter(Boolean) as string[];
+  console.log(`  ${DIM}touches${RESET}  ${touches.length ? touches.join(", ") : `${DIM}store only${RESET}`}`);
 
   // Hook health: check ~/.claude/settings.json
   let hooksInstalled = false;
@@ -299,9 +312,18 @@ export async function runStatus() {
       if (readonlyCount > 0) roleParts.push(`${readonlyCount} readonly`);
       console.log(`\n  ${BOLD}Stores${RESET} ${DIM}(${stores.length} stores: ${roleParts.join(", ")})${RESET}`);
       for (const store of stores) {
-        const exists = fs.existsSync(store.path);
+        const exists = store.available !== false;
         const existsLabel = exists ? `${GREEN}yes${RESET}` : `${RED}no${RESET}`;
         console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${store.remote ? ` remote=${DIM}${store.remote}${RESET}` : ""}`);
+      }
+      // A store declared in stores.yaml but absent here is not cosmetic: any
+      // project it claims cannot be written until it is attached.
+      const { describeUnavailableStore } = await import("./store-registry.js");
+      for (const store of stores.filter((s) => s.available === false)) {
+        console.log(`    ${YELLOW}! ${describeUnavailableStore(store)}${RESET}`);
+        if (store.projects?.length) {
+          console.log(`      ${YELLOW}writes to ${store.projects.join(", ")} will fail until it is attached${RESET}`);
+        }
       }
     }
   } catch (err: unknown) {
@@ -340,8 +362,15 @@ export async function runStatus() {
     console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
     console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
     console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    if (runtime.lastSync?.lastSuccessfulPushAt) {
+      console.log(`           last successful push ${runtime.lastSync.lastSuccessfulPushAt}`);
+    }
     if (runtime.lastSync?.lastPushDetail) {
       console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
+    }
+    const outage = assessSyncOutage(runtime.lastSync);
+    if (outage.degraded) {
+      console.log(`           ${RED}! ${outage.summary}${RESET}`);
     }
   }
 

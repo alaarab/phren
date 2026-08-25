@@ -83,7 +83,11 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     expect(filtered.rows[0].content).toContain("Findings");
   });
 
-  it("filters stale entries from knowledge type docs", () => {
+  it("does not filter retired types like knowledge", () => {
+    // "knowledge" was a doc type until the 0.0.x renames; classifyFile can no
+    // longer produce it, and it was removed from TRUST_FILTERED_TYPES. A row
+    // carrying the retired type (e.g. from a stale index) passes through
+    // untouched rather than being half-filtered by dead configuration.
     const staleContent = [
       "# Findings",
       "",
@@ -94,9 +98,8 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
 
     const rows: DocRow[] = [makeDocRow("knowledge", staleContent)];
     const filtered = applyTrustFilter(rows, 90, 0.35, {});
-    // The stale bullet is removed but the heading "# Findings" remains
     expect(filtered.rows.length).toBe(1);
-    expect(filtered.rows[0].content).not.toContain("Ancient knowledge entry");
+    expect(filtered.rows[0].content).toContain("Ancient knowledge entry");
   });
 
   it("does not filter non-trust types like claude or task", () => {

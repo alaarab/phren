@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Static, Box, Text, useApp, useInput } from "ink";
 import { Banner } from "./Banner.js";
 import { ToolCall, type ToolCallProps } from "./ToolCall.js";
 import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
-import { StatusBar } from "./StatusBar.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
@@ -65,6 +64,8 @@ export interface AppProps {
   state: AppState;
   completedMessages: CompletedMessage[];
   streamingText: string;
+  /** Live reasoning/thinking text for the current turn (rendered dim, tail only). */
+  reasoningText?: string;
   completedToolCalls: ToolCallProps[];
   activeTool: ActiveToolInfo | null;
   thinking: boolean;
@@ -95,6 +96,7 @@ export function App({
   state,
   completedMessages,
   streamingText,
+  reasoningText,
   completedToolCalls,
   activeTool,
   thinking,
@@ -401,6 +403,16 @@ export function App({
           {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
         </Box>
       )}
+
+      {/* Live reasoning — dim tail of the model's current thinking */}
+      {reasoningText ? (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text dimColor italic wrap="wrap">
+            {"✴ "}
+            {reasoningText.length > 400 ? `…${reasoningText.slice(-400)}` : reasoningText}
+          </Text>
+        </Box>
+      ) : null}
 
       {/* Active streaming text — render markdown live during streaming */}
       {streamingText !== "" && (

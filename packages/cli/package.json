@@ -1,11 +1,13 @@
 {
   "name": "@phren/cli",
-  "version": "0.1.33",
+  "version": "0.1.44",
   "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
     "phren": "dist/index.js"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,6 +29,26 @@
       "types": "./dist/shared/retrieval.d.ts",
       "default": "./dist/shared/retrieval.js"
     },
+    "./shared/content": {
+      "types": "./dist/shared/content.d.ts",
+      "default": "./dist/shared/content.js"
+    },
+    "./shared/governance": {
+      "types": "./dist/shared/governance.d.ts",
+      "default": "./dist/shared/governance.js"
+    },
+    "./skill/registry": {
+      "types": "./dist/skill/registry.d.ts",
+      "default": "./dist/skill/registry.js"
+    },
+    "./cli/extract": {
+      "types": "./dist/cli/extract.d.ts",
+      "default": "./dist/cli/extract.js"
+    },
+    "./store-routing": {
+      "types": "./dist/store-routing.d.ts",
+      "default": "./dist/store-routing.js"
+    },
     "./data/access": {
       "types": "./dist/data/access.d.ts",
       "default": "./dist/data/access.js"
@@ -35,9 +57,17 @@
       "types": "./dist/data/tasks.d.ts",
       "default": "./dist/data/tasks.js"
     },
+    "./data/notes": {
+      "types": "./dist/data/notes.d.ts",
+      "default": "./dist/data/notes.js"
+    },
     "./core/finding": {
       "types": "./dist/core/finding.d.ts",
       "default": "./dist/core/finding.js"
+    },
+    "./core/note": {
+      "types": "./dist/core/note.d.ts",
+      "default": "./dist/core/note.js"
     },
     "./auth/profiles": {
       "types": "./dist/auth/profiles.d.ts",
@@ -74,14 +104,11 @@
     "preuninstall": "node scripts/preuninstall.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "chalk": "^5.6.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "chalk": "^6.0.0",
     "glob": "^13.0.6",
-    "graphology": "^0.26.0",
-    "graphology-layout-forceatlas2": "^0.10.1",
-    "inquirer": "^14.0.2",
-    "js-yaml": "^4.2.0",
-    "sigma": "^3.0.3",
+    "inquirer": "^14.1.0",
+    "js-yaml": "^5.3.0",
     "sql.js-fts5": "^1.4.0",
     "zod": "^4.4.3"
   },
@@ -101,5 +128,12 @@
     "type": "git",
     "url": "git+https://github.com/alaarab/phren.git",
     "directory": "packages/cli"
+  },
+  "devDependencies": {
+    "3d-force-graph": "^1.80.0",
+    "three": "^0.185.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

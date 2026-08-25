@@ -36,6 +36,11 @@ describe("hooks", () => {
     });
 
     it("does not detect cursor from a bare ~/.cursor config directory", () => {
+      // Skip when Cursor is genuinely installed — detection keys on the
+      // `cursor` binary, so a real install *should* be detected and the
+      // negative assertion below would be testing the wrong machine. Mirrors
+      // the copilot guard directly beneath this.
+      if (commandExists("cursor")) return;
       const cursorDir = path.join(os.homedir(), ".cursor");
       if (fs.existsSync(cursorDir)) {
         const tools = detectInstalledTools();
@@ -663,6 +668,41 @@ describe("hooks", () => {
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0].message).toContain("pre-save");
       expect(result.errors[0].code).toBe("VALIDATION_ERROR");
+    });
+
+    // A failing hook's message is composed from the hook's own command plus
+    // the child's stderr, and it goes to two places: .runtime/hook-errors.log
+    // and the MCP response — i.e. straight into the agent's context and its
+    // transcript. Hook commands legitimately carry inline credentials;
+    // validateCustomHookCommand rejects shell metacharacters, not tokens.
+    it("redacts a credential in a failing hook's command from the error and the log", () => {
+      const token = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: `curl -H "Authorization: Bearer ${token}" https://127.0.0.1:1/nope` },
+          ],
+        }));
+
+      const result = runCustomHooks(phrenPath, "pre-save");
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).not.toContain(token);
+      expect(result.errors[0].message).toContain("redacted");
+
+      const logPath = path.join(phrenPath, ".runtime", "hook-errors.log");
+      const logContent = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
+      expect(logContent).not.toContain(token);
+    });
+
+    it("keeps an ordinary failure message readable", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: "exit 7" },
+          ],
+        }));
+      const result = runCustomHooks(phrenPath, "pre-save");
+      expect(result.errors[0].message).toContain("pre-save");
+      expect(result.errors[0].message).toContain("exit 7");
+      expect(result.errors[0].message).not.toContain("redacted");
     });
 
     it("runCustomHooks returns 0 when no hooks match the event", () => {

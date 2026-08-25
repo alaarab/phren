@@ -68,6 +68,8 @@ type NativeHandlerName =
   | "runVerifyCommand"
   | "runMcpModeCommand"
   | "runHooksModeCommand"
+  | "runPresetCommand"
+  | "runSnippetCommand"
   | "runLinkRemovedNotice";
 
 function native(fn: NativeHandlerName): RunFn {
@@ -96,6 +98,7 @@ export const ENV_HELP = `Environment variables:
   PHREN_HOOK_TIMEOUT_MS       Hook subprocess timeout in ms (default: 14000)
 
   Feature flags:
+  PHREN_FEATURE_TOOL_HOOK=0          Skip the PostToolUse subprocess (perf)
   PHREN_FEATURE_AUTO_EXTRACT=0       Disable auto memory extraction
   PHREN_FEATURE_AUTO_CAPTURE=1       Extract insights from conversations
   PHREN_FEATURE_SEMANTIC_DEDUP=1     LLM-based dedup on add_finding
@@ -181,7 +184,7 @@ export const REGISTRY: Command[] = [
   {
     name: "init",
     topic: "setup",
-    usage: "phren init [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
+    usage: "phren init [--preset managed|assisted|manual] [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
     cheatUsage: "phren init",
     summary: "Set up phren",
     featured: true,
@@ -371,6 +374,25 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "note",
+    aliases: ["notes"],
+    topic: "core",
+    usage: "phren note <add|list|edit|remove|promote>",
+    summary: "Manage lightweight daily notes",
+    subcommands: [
+      { name: "add", usage: 'phren note add <project> "<text>" [--date YYYY-MM-DD]', summary: "Add a daily note" },
+      { name: "list", usage: "phren note list <project> [--date YYYY-MM-DD]", summary: "List notes" },
+      { name: "edit", usage: 'phren note edit <project> <nid> "<text>"', summary: "Edit a note" },
+      { name: "remove", usage: "phren note remove <project> <nid>", summary: "Remove a note" },
+      { name: "promote", usage: "phren note promote <project> <nid> [--type <type>]", summary: "Promote a note to a finding" },
+    ],
+    featured: true,
+    run: async (args, ctx) => {
+      const { handleNoteNamespace } = await import("./cli/namespaces.js");
+      await handleNoteNamespace(args, ctx.profile());
+    },
+  },
+  {
     name: "search-fragments",
     topic: "core",
     usage: "phren search-fragments <query>",
@@ -509,6 +531,20 @@ export const REGISTRY: Command[] = [
     run: native("runHooksModeCommand"),
   },
   {
+    name: "preset",
+    topic: "setup",
+    usage: "phren preset [status|managed|assisted|manual] [-y]",
+    summary: "Set the management preset (how much phren wires up)",
+    run: native("runPresetCommand"),
+  },
+  {
+    name: "snippet",
+    topic: "setup",
+    usage: "phren snippet",
+    summary: "Print the self-wiring snippet for assisted/manual presets",
+    run: native("runSnippetCommand"),
+  },
+  {
     name: "verify",
     topic: "setup",
     usage: "phren verify",
@@ -645,6 +681,17 @@ export const REGISTRY: Command[] = [
     run: async (args) => {
       const { handleBackgroundMaintenance } = await import("./cli/govern.js");
       await handleBackgroundMaintenance(args[0]);
+    },
+  },
+  {
+    name: "background-reindex",
+    topic: "core",
+    usage: "phren background-reindex",
+    summary: "Internal: rebuild the FTS index off the hook path",
+    hidden: true,
+    run: async (_args, ctx) => {
+      const { buildIndex } = await import("./shared/index.js");
+      await buildIndex(ctx.phrenPath(), ctx.profile());
     },
   },
   {

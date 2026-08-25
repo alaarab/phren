@@ -1,0 +1,14 @@
+# Check every text file out with LF, on Windows too.
+#
+# The TypeScript and Swift test suites read the same committed fixtures under
+# apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/ and compare them byte for
+# byte — that shared corpus is the whole proof that both implementations agree
+# on the store format. Git's default autocrlf rewrites those bytes on a Windows
+# checkout, so the fixtures stopped matching what either implementation writes:
+# findings dates parsed as "unknown", and a rendered tasks.md compared LF against
+# a CRLF fixture. Store files phren itself writes are LF everywhere as well.
+* text=auto eol=lf
+
+*.png binary
+*.gif binary
+*.pdf binary

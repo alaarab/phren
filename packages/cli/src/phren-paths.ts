@@ -4,7 +4,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import * as yaml from "js-yaml";
 import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
-import { PhrenError, isRecord, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
+import { PhrenError, isRecord, loadYamlDocument, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
 import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
 import { FINDINGS_FILENAME } from "./data/access.js";
 
@@ -51,16 +51,60 @@ export function rootManifestPath(phrenPath: string): string {
   return path.join(phrenPath, ROOT_MANIFEST_FILENAME);
 }
 
-export function atomicWriteText(filePath: string, content: string): void {
+export interface AtomicWriteOptions {
+  /**
+   * POSIX mode for the written file, applied to the temp file *before* the
+   * rename. Callers writing secrets must pass this rather than chmod-ing after
+   * the fact: a post-rename chmod leaves the file readable at the default
+   * umask-derived mode (0644 on a stock install) for the whole write window,
+   * which is exactly long enough for another local user to read it.
+   */
+  mode?: number;
+}
+
+export function atomicWriteText(filePath: string, content: string, opts: AtomicWriteOptions = {}): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
-  fs.writeFileSync(tmpPath, content);
+  fs.writeFileSync(tmpPath, content, opts.mode !== undefined ? { mode: opts.mode } : undefined);
   try {
+    // writeFileSync's mode is masked by umask, so re-assert it explicitly. The
+    // temp name is unguessable and freshly created, so this happens before any
+    // other process can have the file open under its final name.
+    if (opts.mode !== undefined && process.platform !== "win32") fs.chmodSync(tmpPath, opts.mode);
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch {}
     throw err;
   }
+}
+
+/**
+ * Create (or tighten) a directory that holds per-user private data — runtime
+ * logs, session transcripts, credential stores.
+ *
+ * Plain `fs.mkdirSync(dir, { recursive: true })` yields 0755 under the stock
+ * 0022 umask, which makes every file inside world-listable and world-readable
+ * on a shared machine. Passing `mode` to mkdirSync is not enough on its own:
+ * mkdirSync's mode applies only to directories it actually *creates*, so a
+ * directory that some earlier code path already made at 0755 keeps that mode
+ * forever. That is not hypothetical — `runtimeFile()` created `~/.phren/.runtime`
+ * with no mode long before `auth/profiles.ts` ever asked for 0700, so the
+ * credential directory shipped world-readable in practice.
+ *
+ * Only ever narrows: if the directory is already 0700 or tighter it is left
+ * alone. Best-effort — a chmod failure (foreign filesystem, Windows) must not
+ * break the caller, since the directory itself is usable either way.
+ */
+export function ensurePrivateDir(dir: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  if (process.platform === "win32") return dir;
+  try {
+    const current = fs.statSync(dir).mode & 0o777;
+    if ((current & 0o077) !== 0) fs.chmodSync(dir, 0o700);
+  } catch {
+    // best-effort hardening; the directory is still usable
+  }
+  return dir;
 }
 
 export function isInstallMode(value: unknown): value is InstallMode {
@@ -110,7 +154,7 @@ export function readRootManifest(phrenPath: string): PhrenRootManifest | null {
   const manifestFile = rootManifestPath(phrenPath);
   if (!fs.existsSync(manifestFile)) return null;
   try {
-    const parsed = yaml.load(fs.readFileSync(manifestFile, "utf8"), { schema: yaml.CORE_SCHEMA });
+    const parsed = loadYamlDocument(fs.readFileSync(manifestFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
     return normalizeManifest(parsed);
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`readRootManifest: ${errorMessage(err)}`);
@@ -266,14 +310,74 @@ export function sessionsDir(phrenPath: string): string {
   return path.join(phrenPath, ".sessions");
 }
 
+// `.runtime` holds debug.log, hook-errors.log, memory-usage.log,
+// lookup-events.jsonl and the auth profile store — i.e. verbatim knowledge-base
+// content plus plaintext API keys. It is per-user runtime state, never shared,
+// so it gets 0700. Because ensurePrivateDir also tightens a directory that
+// already exists, this repairs the 0755 `.runtime` that shipped installs have.
 const runtimeDirsMade = new Set<string>();
 export function runtimeFile(phrenPath: string, name: string): string {
   const dir = runtimeDir(phrenPath);
   if (!runtimeDirsMade.has(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    ensurePrivateDir(dir);
     runtimeDirsMade.add(dir);
   }
   return path.join(dir, name);
+}
+
+/**
+ * Per-user root for the FTS snapshot cache: `os.tmpdir()/phren-fts-<uid>`.
+ *
+ * Canonical definition of the path lives here, with every other phren path
+ * helper. `shared/index.ts` currently has its own private copy — see
+ * ensureFtsCacheRootPrivate() for why that matters and what still needs to
+ * change there.
+ */
+export function ftsCacheRoot(): string {
+  let userSuffix: string;
+  try {
+    userSuffix = String(os.userInfo().uid);
+  } catch {
+    userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
+  }
+  return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+
+/**
+ * Make the FTS snapshot cache root private, creating it if needed.
+ *
+ * The snapshot is a SQLite export of the *entire* indexed store — the full
+ * text of every finding, note, task and reference doc. It was being written
+ * as an 0644 file inside an 0755 directory:
+ *
+ *   drwxr-xr-x  $TMPDIR/phren-fts-501
+ *   -rw-r--r--  $TMPDIR/phren-fts-501/<storeKey>/<hash>.db
+ *
+ * On macOS `os.tmpdir()` is a per-user `/var/folders/…/T` at 0700, which is
+ * the only reason this is not already a leak there. On Linux and WSL
+ * `os.tmpdir()` is `/tmp` — mode 1777, world-readable — so any local account
+ * can read another user's whole knowledge base. phren ships cross-platform on
+ * npm, so that is a live exposure, not a theoretical one.
+ *
+ * A 0700 root closes it completely: POSIX denies traversal into the directory,
+ * so the modes of the per-store subdirectory and the .db files inside it stop
+ * being reachable at all. Called once per process from the CLI and MCP-server
+ * entrypoints, which both creates it correctly on a clean machine and repairs
+ * the 0755 root on machines that already have one.
+ *
+ * Still worth doing for defence in depth, in the file that actually writes
+ * them: `shared/index.ts` should pass `{ recursive: true, mode: 0o700 }` to
+ * the `fs.mkdirSync(cacheDir, …)` calls and `{ mode: 0o600 }` to the
+ * `fs.writeFileSync(cacheFile, db.export())` calls. That file is owned by
+ * another change in flight, so it is reported rather than edited here.
+ */
+export function ensureFtsCacheRootPrivate(): string {
+  try {
+    return ensurePrivateDir(ftsCacheRoot());
+  } catch {
+    // Never let cache hardening break startup; the cache itself is optional.
+    return ftsCacheRoot();
+  }
 }
 
 export function installPreferencesFile(phrenPath: string): string {
@@ -309,9 +413,10 @@ export function lookupEventsLogFile(phrenPath: string): string {
   return path.join(runtimeDir(phrenPath), "lookup-events.jsonl");
 }
 
+// `.sessions` holds session transcripts and per-session message artifacts —
+// raw conversation content. Same treatment as `.runtime`.
 export function sessionMarker(phrenPath: string, name: string): string {
-  const dir = sessionsDir(phrenPath);
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = ensurePrivateDir(sessionsDir(phrenPath));
   return path.join(dir, name);
 }
 
@@ -341,9 +446,25 @@ export function errorLog(tool: string, msg: string): void {
   }
 }
 
+/**
+ * Truncate an append-only .jsonl to its last `keepLines` lines once it exceeds
+ * `maxBytes`. Best-effort: any IO error (including ENOENT) is ignored so callers
+ * never fail on rotation.
+ */
+export function rotateJsonlIfLarge(filePath: string, maxBytes = 2_000_000, keepLines = 2000): void {
+  try {
+    if (fs.statSync(filePath).size <= maxBytes) return;
+    const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+    fs.writeFileSync(filePath, lines.slice(-keepLines).join("\n"));
+  } catch {
+    // no file yet or IO error — nothing to rotate
+  }
+}
+
 export function appendIndexEvent(phrenPath: string, event: Record<string, unknown>): void {
   try {
     const file = runtimeFile(phrenPath, "index-events.jsonl");
+    rotateJsonlIfLarge(file);
     fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
   } catch (err: unknown) {
     if ((process.env.PHREN_DEBUG)) stderrLog(`appendIndexEvent: ${errorMessage(err)}`);
@@ -389,6 +510,32 @@ export function normalizeProjectNameForCreate(name: string): string {
   return name.trim().toLowerCase();
 }
 
+/**
+ * The single source of truth for turning a source directory into a project
+ * slug. Previously copy-pasted at five call sites, which is how the same repo
+ * could end up registered twice under near-identical names.
+ *
+ * Runs of non-slug characters collapse to one hyphen and leading/trailing
+ * hyphens are trimmed, so `My.App`, `My..App` and `My App` all yield `my-app`
+ * instead of the old `my-app` / `my--app` / `my-app` split.
+ */
+export function projectSlugFromPath(sourcePath: string): string {
+  return path.basename(path.resolve(sourcePath))
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Collapse a project name to the key used for duplicate detection: lowercase
+ * with every separator removed. `Max4LivePlugins`, `max4liveplugins` and
+ * `max4live-plugins` all map to `max4liveplugins`, so the second spelling of a
+ * repo can be recognized as the project that already exists.
+ */
+export function canonicalProjectKey(name: string): string {
+  return name.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
 export function findProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
   const needle = name.toLowerCase();
   try {
@@ -400,6 +547,26 @@ export function findProjectNameCaseInsensitive(phrenPath: string, name: string):
     if ((process.env.PHREN_DEBUG)) stderrLog(`findProjectNameCaseInsensitive: ${errorMessage(err)}`);
   }
   return null;
+}
+
+/**
+ * Existing project directories whose name canonicalizes to the same key as
+ * `name` (see {@link canonicalProjectKey}). Exact matches are returned first so
+ * callers can prefer them.
+ */
+export function findProjectNamesByCanonicalKey(phrenPath: string, name: string): string[] {
+  const needle = canonicalProjectKey(name);
+  if (!needle) return [];
+  const matches: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+      if (!isProjectDirEntry(entry)) continue;
+      if (canonicalProjectKey(entry.name) === needle) matches.push(entry.name);
+    }
+  } catch (err: unknown) {
+    if ((process.env.PHREN_DEBUG)) stderrLog(`findProjectNamesByCanonicalKey: ${errorMessage(err)}`);
+  }
+  return matches.sort((a, b) => (a === name ? -1 : b === name ? 1 : a.localeCompare(b)));
 }
 
 export function findArchivedProjectNameCaseInsensitive(phrenPath: string, name: string): string | null {
@@ -444,7 +611,7 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
       return [];
     }
     try {
-      const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA });
+      const data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
       const projects = isRecord(data) ? data.projects : undefined;
       if (!Array.isArray(projects)) {
         errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);

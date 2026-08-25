@@ -12,7 +12,7 @@ import {
 import { isFeatureEnabled, errorMessage } from "../utils.js";
 import { annotateStale } from "./hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "../shared/retrieval.js";
-import { approximateTokens, fileRelevanceBoost, branchMatchBoost } from "../shared/retrieval.js";
+import { approximateTokens, fileRelevanceBoost, branchMatchBoost, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { logger } from "../logger.js";
 
 // ── Progressive disclosure helpers ────────────────────────────────────────────
@@ -27,10 +27,13 @@ function buildOneLiner(snippet: string): string {
 
 function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string): string[] {
   const lines: string[] = [];
-  for (const { doc, snippet } of selected) {
+  for (const { doc, snippet, key } of selected) {
     const id = `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
     const summary = buildOneLiner(snippet);
-    lines.push(`[${id}] ${doc.type}: ${summary}`);
+    // The fb: key rides here too. memory_feedback's description promises it
+    // appears in injected headers without qualification, and this path renders
+    // instead of the full one whenever progressive disclosure is enabled.
+    lines.push(`[${id}] fb:${key} ${doc.type}: ${summary}`);
   }
   return lines;
 }
@@ -102,13 +105,14 @@ export function buildHookOutput(
       let totalTokens = 36; // base overhead
       const keep: boolean[] = ordered.map(() => true);
       for (let i = 0; i < ordered.length; i++) {
-        totalTokens += approximateTokens(ordered[i].snippet) + 14;
+        // 24 ≈ header line ([source key] (type) fb:key) + blank separator.
+        totalTokens += approximateTokens(ordered[i].snippet) + SNIPPET_OVERHEAD_TOKENS;
       }
       // Trim from the middle (indices 1..N-2) if over budget
       if (totalTokens > tokenBudget) {
         for (let i = ordered.length - 2; i >= 1; i--) {
           if (totalTokens <= tokenBudget) break;
-          totalTokens -= approximateTokens(ordered[i].snippet) + 14;
+          totalTokens -= approximateTokens(ordered[i].snippet) + SNIPPET_OVERHEAD_TOKENS;
           keep[i] = false;
         }
         ordered = ordered.filter((_, i) => keep[i]);
@@ -132,7 +136,12 @@ export function buildHookOutput(
       } catch (err: unknown) {
         logger.debug("hooks-output", `injectContext recordRetrievalOrdered: ${errorMessage(err)}`);
       }
-      parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type})`);
+      // `fb:` is the memory_feedback handle. The tool scores entryScoreKey
+      // (project/filename:digest) — NOT the mem: source key and NOT an fid —
+      // and this header was the only place the injection pipeline had the
+      // key in hand; before it was printed here, the feedback loop was
+      // built, wired into ranking, and unreachable.
+      parts.push(`[${getDocSourceKey(doc, phrenPathLocal)}] (${doc.type}) fb:${key}`);
       parts.push(annotateStale(snippet));
       parts.push("");
     }

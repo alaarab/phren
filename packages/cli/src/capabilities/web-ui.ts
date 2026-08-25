@@ -2,68 +2,68 @@ import type { CapabilityManifest } from "./types.js";
 
 export const webUiManifest: CapabilityManifest = {
   surface: "web-ui",
-  version: "0.1.17",
+  version: "0.1.42",
   actions: {
     // Finding management
-    "finding.add": { implemented: false, reason: "Web UI is read-only for findings (review queue only)" },
-    "finding.remove": { implemented: false, reason: "Web UI is read-only for findings" },
-    "finding.list": { implemented: true, handler: "memory-ui-server.ts:/api/project-content" },
+    "finding.add": { implemented: true, handler: "ui/server.ts:POST /api/findings/<project>" },
+    "finding.remove": { implemented: true, handler: "ui/server.ts:DELETE /api/findings/<project>" },
+    "finding.list": { implemented: true, handler: "ui/server.ts:/api/findings/<project> + /api/project-content" },
     "finding.filter_by_date": { implemented: false, reason: "No date filter in web UI API" },
-    "finding.pin": { implemented: false, reason: "No pin action in web UI" },
+    "finding.pin": { implemented: false, reason: "Pinning to truths.md is CLI/MCP-only" },
 
     // Task management
-    "task.add": { implemented: false, reason: "No task creation in web UI" },
-    "task.complete": { implemented: false, reason: "No task completion in web UI" },
-    "task.remove": { implemented: false, reason: "No task deletion in web UI" },
-    "task.update": { implemented: false, reason: "No task update in web UI" },
-    "task.list": { implemented: true, handler: "memory-ui-server.ts:/api/tasks" },
-    "task.pin": { implemented: false, reason: "No task pinning in web UI" },
-    "task.github_link": { implemented: false, reason: "No GitHub link in web UI" },
+    "task.add": { implemented: true, handler: "ui/server.ts:POST /api/tasks/add" },
+    "task.complete": { implemented: true, handler: "ui/server.ts:POST /api/tasks/complete" },
+    "task.remove": { implemented: true, handler: "ui/server.ts:POST /api/tasks/remove" },
+    "task.update": { implemented: true, handler: "ui/server.ts:POST /api/tasks/update" },
+    "task.list": { implemented: true, handler: "ui/server.ts:/api/tasks" },
+    "task.pin": { implemented: false, reason: "No task pinning in web UI (pinned flag is displayed read-only)" },
+    "task.github_link": { implemented: false, reason: "Issue links display in the task list; creating them is MCP/VS Code-only" },
 
     // Hook management
-    "hook.list": { implemented: true, handler: "memory-ui-server.ts:/api/hooks" },
-    "hook.toggle": { implemented: true, handler: "memory-ui-server.ts:/api/hook-toggle" },
+    "hook.list": { implemented: true, handler: "ui/server.ts:/api/hooks" },
+    "hook.toggle": { implemented: true, handler: "ui/server.ts:POST /api/hook-toggle" },
     "hook.toggle_per_project": { implemented: false, reason: "Per-project hook toggle not exposed in web UI" },
     "hook.custom_crud": { implemented: false, reason: "Custom hooks CRUD not exposed in web UI" },
     "hook.errors": { implemented: false, reason: "Hook errors not exposed in web UI" },
 
     // Search
-    "search.fts": { implemented: true, handler: "memory-ui-server.ts:/api/search" },
+    "search.fts": { implemented: true, handler: "ui/server.ts:/api/search" },
     "search.fragment": { implemented: false, reason: "No fragment search in web UI" },
     "search.related_docs": { implemented: false, reason: "No related docs in web UI" },
     "search.history": { implemented: false, reason: "No search history in web UI" },
 
     // Graph
-    "graph.read": { implemented: true, handler: "memory-ui-server.ts:/api/graph" },
-    "graph.visualize": { implemented: true, handler: "memory-ui-graph-app.ts:graph tab (Sigma.js v3 + ForceAtlas2)" },
+    "graph.read": { implemented: true, handler: "ui/server.ts:/api/graph" },
+    "graph.visualize": { implemented: true, handler: "ui/graph.ts:graph tab (browser/graph bundle — store>project>finding cages, Three.js / 3d-force-graph, CSS2D labels)" },
     "graph.link_findings": { implemented: false, reason: "No link findings action in web UI" },
 
     // Config
-    "config.get": { implemented: true, handler: "memory-ui-server.ts:/api/settings (read)" },
-    "config.set": { implemented: true, handler: "memory-ui-server.ts:/api/settings (workflow policy, task mode)" },
+    "config.get": { implemented: true, handler: "ui/server.ts:/api/settings + /api/config" },
+    "config.set": { implemented: true, handler: "ui/server.ts:POST /api/settings/* (workflow policy, task mode, proactivity, finding sensitivity, index policy, auto-capture, mcp-enabled, project overrides, RBAC via /api/settings/access)" },
 
     // Health / Sync / Session
-    "health.check": { implemented: true, handler: "memory-ui-server.ts:/api/runtime-health" },
+    "health.check": { implemented: true, handler: "ui/server.ts:/api/runtime-health" },
     "health.doctor_fix": { implemented: false, reason: "Doctor --fix is CLI-only" },
-    "health.sync": { implemented: true, handler: "memory-ui-server.ts:/api/sync" },
+    "health.sync": { implemented: true, handler: "ui/server.ts:POST /api/sync" },
     "session.start": { implemented: false, reason: "Session lifecycle is not web UI driven" },
     "session.end": { implemented: false, reason: "Session lifecycle is not web UI driven" },
 
     // Skill management
-    "skill.list": { implemented: true, handler: "memory-ui-server.ts:/api/skills" },
-    "skill.read": { implemented: true, handler: "memory-ui-server.ts:/api/skill-content" },
-    "skill.enable": { implemented: true, handler: "memory-ui-server.ts:/api/skill-toggle" },
-    "skill.write": { implemented: true, handler: "memory-ui-server.ts:/api/skill-save" },
+    "skill.list": { implemented: true, handler: "ui/server.ts:/api/skills" },
+    "skill.read": { implemented: true, handler: "ui/server.ts:/api/skill-content" },
+    "skill.enable": { implemented: true, handler: "ui/server.ts:POST /api/skill-toggle" },
+    "skill.write": { implemented: true, handler: "ui/server.ts:POST /api/skill-save" },
 
     // Project management
-    "project.list": { implemented: true, handler: "memory-ui-server.ts:/api/projects" },
+    "project.list": { implemented: true, handler: "ui/server.ts:/api/projects" },
     "project.manage": { implemented: false, reason: "No archive/unarchive in web UI" },
-    "project.summary": { implemented: true, handler: "memory-ui-server.ts:/api/project-content" },
+    "project.summary": { implemented: true, handler: "ui/server.ts:/api/project-content" },
     "export.project": { implemented: false, reason: "Export/import not exposed in web UI" },
     "import.project": { implemented: false, reason: "Export/import not exposed in web UI" },
 
     // Profile / Machine
-    "profile.switch": { implemented: false, reason: "No profile switching in web UI" },
-    "profile.list": { implemented: false, reason: "No profile listing in web UI" },
+    "profile.switch": { implemented: true, handler: "ui/server.ts:POST /api/profile" },
+    "profile.list": { implemented: true, handler: "ui/server.ts:/api/profiles" },
   },
 };

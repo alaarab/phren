@@ -10,6 +10,13 @@ import {
 } from "../shared/governance.js";
 import { upsertCanonical } from "../shared/content.js";
 import { isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+
+/** truths.md path via the same store-aware routing upsertCanonical writes with. */
+function truthsFilePath(phrenPath: string, project: string): string {
+  return storeAwareProjectPath(phrenPath, project, "truths.md")
+    ?? path.join(phrenPath, project, "truths.md");
+}
 
 
 
@@ -41,8 +48,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         const result = upsertCanonical(phrenPath, project, memory);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
-        const canonicalPath = path.join(phrenPath, project, "truths.md");
-        updateFileInIndex(canonicalPath);
+        updateFileInIndex(truthsFilePath(phrenPath, project));
         return mcpResponse({ ok: true, message: result.data, data: { project, memory } });
       });
     }
@@ -62,14 +68,14 @@ export function register(server: McpServer, ctx: McpContext): void {
       let phrenPath: string;
       let project: string;
       try {
-        const resolved = resolveStoreForProject(ctx, projectInput);
+        const resolved = resolveStoreForProject(ctx, projectInput, "read");
         phrenPath = resolved.phrenPath;
         project = resolved.project;
       } catch (err: unknown) {
         return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
       }
       if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
-      const truthsPath = path.join(phrenPath, project, "truths.md");
+      const truthsPath = truthsFilePath(phrenPath, project);
       if (!fs.existsSync(truthsPath)) {
         return mcpResponse({ ok: true, message: `No truths pinned for "${project}" yet.`, data: { project, truths: [], count: 0 } });
       }
@@ -91,9 +97,12 @@ export function register(server: McpServer, ctx: McpContext): void {
     "memory_feedback",
     {
       title: "◆ phren · feedback",
-      description: "Record feedback on whether an injected memory was helpful or noisy/regressive.",
+      description:
+        "Record feedback on whether an injected memory was helpful or noisy/regressive. " +
+        "The key is printed in <phren-context> snippet headers as `fb:<project>/<file>:<digest>` — pass that token (with or without the `fb:` prefix). " +
+        "Feedback adjusts that memory's ranking weight in future injections.",
       inputSchema: z.object({
-        key: z.string().describe("Memory key to score."),
+        key: z.string().describe("Feedback key from an injected snippet header, e.g. `fb:myproj/FINDINGS.md:a1b2c3d4e5f6` or `myproj/FINDINGS.md:a1b2c3d4e5f6`."),
         feedback: z.enum(["helpful", "reprompt", "regression"]).describe("Feedback type."),
       }),
     },

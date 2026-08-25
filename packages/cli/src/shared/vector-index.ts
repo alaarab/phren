@@ -11,6 +11,7 @@ const VECTOR_INDEX_TARGET_MULTIPLIER = 8;
 const VECTOR_INDEX_MIN_CANDIDATES = 24;
 const VECTOR_INDEX_FALLBACK_CAP = 64;
 
+/** Mirrors `EmbeddingSourceMarker`; kept structural so the modules stay decoupled. */
 interface SourceMarker {
   mtimeMs: number;
   size: number;
@@ -166,12 +167,26 @@ class PersistentVectorIndex {
     }
   }
 
-  ensure(entries: EmbeddingEntryLike[]): void {
+  /**
+   * Build (or reuse) the LSH tables for `entries`.
+   *
+   * `entriesSource` is the embeddings.json revision `entries` was read from.
+   * It matters because the caller's entry list can lag the file on disk: a
+   * long-lived MCP server loads the embedding cache once, while hooks and
+   * background reindexes keep rewriting embeddings.json underneath it. Statting
+   * the file here instead would stamp the *current* revision onto tables built
+   * from the *older* entry list, and every later process would then accept that
+   * index as fresh — permanently invisible documents, not a rebuild loop.
+   *
+   * Callers that genuinely hold the file's current contents may omit it; the
+   * marker then falls back to a stat, which is what it always was.
+   */
+  ensure(entries: EmbeddingEntryLike[], entriesSource?: SourceMarker | null): void {
     this.loadFromDisk();
-    const currentSource = readSourceMarker(this.phrenPath);
-    if (markersMatch(this.source, currentSource) && Object.keys(this.models).length > 0) return;
+    const source = entriesSource !== undefined ? entriesSource : readSourceMarker(this.phrenPath);
+    if (markersMatch(this.source, source) && Object.keys(this.models).length > 0) return;
     this.models = buildVectorIndexData(entries);
-    this.source = currentSource;
+    this.source = source;
     this.saveToDisk();
   }
 

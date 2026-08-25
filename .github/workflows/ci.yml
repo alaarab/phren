@@ -40,6 +40,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
+  agent-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # turbo's test task depends on build -> ^build, which produces the
+      # packages/cli dist output the agent's tests import at runtime.
+      - run: pnpm exec turbo run test --filter=@phren/agent
+
   validate-docs:
     runs-on: ubuntu-latest
     steps:

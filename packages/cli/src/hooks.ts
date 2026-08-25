@@ -11,6 +11,10 @@ import { hookConfigPath } from "./provider-adapters.js";
 import { PACKAGE_SPEC } from "./package-metadata.js";
 import { logger } from "./logger.js";
 import { withFileLock } from "./shared/governance.js";
+import { resolveManagementCapabilities } from "./init/management-preset.js";
+// Dependency-free leaf module — hooks.ts runs in a per-PostToolUse subprocess
+// and must not pull in content/dedup.ts's import graph.
+import { redactSecretsForLog } from "./content/secrets.js";
 
 export interface HookError {
   code: PhrenErrorCode;
@@ -74,6 +78,105 @@ function resolveCliEntryScript(): string | null {
   return fs.existsSync(local) ? local : null;
 }
 
+/**
+ * True if a path lives inside an ephemeral npx download cache
+ * (`~/.npm/_npx/<hash>/…`). Baking such a path into a hook command that has no
+ * self-healing fallback is fragile: npx prunes that cache and the `<hash>`
+ * segment changes between versions, silently breaking every phren hook. Hook
+ * commands that resolve here must fall back to `npx -y <spec>` (which
+ * re-resolves on every run) or the ~/.local/bin/phren wrapper instead.
+ */
+export function isEphemeralNpxPath(p: string): boolean {
+  return /(^|[/\\])_npx[/\\]/.test(p);
+}
+
+/** Split a hook command into tokens, honouring single and double quotes. */
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let started = false;
+
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (started || current) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (started || current) tokens.push(current);
+  return tokens;
+}
+
+function isPathLike(token: string): boolean {
+  return token.startsWith("/")
+    || token.startsWith("~/")
+    || token.startsWith("\\\\")
+    || /^[A-Za-z]:[\\/]/.test(token);
+}
+
+/**
+ * The local file a hook command depends on — the `~/.local/bin/phren` wrapper,
+ * or the script passed to `node`.
+ *
+ * Returns `null` for commands that re-resolve themselves on every run
+ * (`npx -y @phren/cli …`), which cannot go stale, and for commands with no
+ * recognisable path.
+ *
+ * Why this matters: `npm install -g @phren/cli` can move the package entry
+ * between versions (0.1.40 moved it from `mcp/dist/index.js` to
+ * `dist/index.js`). Hook commands in settings.json keep the old absolute path
+ * and every hook then dies with MODULE_NOT_FOUND on every prompt and every
+ * Stop — silently, because hook failures are not surfaced.
+ */
+export function extractHookScriptPath(command: string): string | null {
+  if (!command) return null;
+  // `npx` re-resolves the package each run, so it is never stale.
+  if (/(^|\s)npx(\.cmd)?(\s|$)/.test(command)) return null;
+
+  const tokens = tokenizeCommand(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    // Skip shell scaffolding: `set`, `&&`, and `VAR=value` assignments.
+    if (token === "&&" || token === "set" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
+    if (/^node(\.exe)?$/i.test(token)) {
+      const next = tokens[i + 1];
+      return next && isPathLike(next) ? next : null;
+    }
+    if (isPathLike(token)) return token;
+  }
+  return null;
+}
+
+/**
+ * Hook commands whose entrypoint no longer exists on disk. Deduplicated, so an
+ * upgrade that breaks all four lifecycle hooks reports one path, not four.
+ */
+export function findStaleHookEntrypoints(commands: readonly string[]): string[] {
+  const stale = new Set<string>();
+  for (const command of commands) {
+    const scriptPath = extractHookScriptPath(command);
+    if (!scriptPath) continue;
+    const expanded = scriptPath.startsWith("~/") ? homePath(scriptPath.slice(2)) : scriptPath;
+    if (!fs.existsSync(expanded)) stale.add(scriptPath);
+  }
+  return [...stale];
+}
+
 function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
@@ -113,7 +216,12 @@ export function buildLifecycleCommands(
   phrenPath: string,
   options: BuildLifecycleOptions = {},
 ): LifecycleCommands {
-  const entry = resolveCliEntryScript();
+  const rawEntry = resolveCliEntryScript();
+  // A bare `node <entry>` hook has no fallback if <entry> disappears. When the
+  // package is running from the npx cache, that entry path is ephemeral, so we
+  // drop it here and let resolution fall through to the ~/.local/bin/phren
+  // wrapper (preferred) or the self-healing `npx -y <spec>` last resort.
+  const entry = rawEntry && !isEphemeralNpxPath(rawEntry) ? rawEntry : null;
   const nativeWindows = process.platform === "win32" && !options.forcePosix;
   const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const quotedPhren = shellEscape(phrenPath);
@@ -771,9 +879,25 @@ export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
   }
 }
 
+/**
+ * Every path that reports a custom-hook failure funnels through here and
+ * through buildHookErrorMessage below, so redaction happens in one place.
+ *
+ * The composed message is the hook's own command plus the child's stderr.
+ * Hook commands legitimately carry inline credentials — `curl -H
+ * "Authorization: Bearer …"` contains none of the shell metacharacters
+ * validateCustomHookCommand rejects — and a failing child prints whatever it
+ * wants to stderr, which execFileSync appends to the thrown error's message.
+ * That string was going verbatim into .runtime/hook-errors.log *and* back to
+ * the MCP caller, i.e. into the agent's context and transcript.
+ */
+function buildHookErrorMessage(event: string, command: string, detail: string): string {
+  return redactSecretsForLog(`${event}: ${command}: ${detail}`);
+}
+
 function appendHookErrorLog(phrenPath: string, event: string, message: string): void {
   const logPath = runtimeFile(phrenPath, "hook-errors.log");
-  const line = `[${new Date().toISOString()}] [${event}] ${message}\n`;
+  const line = `[${new Date().toISOString()}] [${event}] ${redactSecretsForLog(message)}\n`;
   try {
     withFileLock(logPath, () => {
       fs.appendFileSync(logPath, line);
@@ -875,7 +999,7 @@ export function runCustomHooks(
         stdio: ["ignore", "ignore", "pipe"],
       });
     } catch (err: unknown) {
-      const message = `${event}: ${hook.command}: ${errorMessage(err)}`;
+      const message = buildHookErrorMessage(event, hook.command, errorMessage(err));
       debugLog(`runCustomHooks: ${message}`);
       errors.push({ code: PhrenError.VALIDATION_ERROR, message });
       try {
@@ -983,7 +1107,7 @@ export function runPrePromptHooks(
       const trimmed = (result ?? "").trim();
       if (trimmed) outputs.push(trimmed);
     } catch (err: unknown) {
-      const message = `pre-prompt: ${hook.command}: ${errorMessage(err)}`;
+      const message = buildHookErrorMessage("pre-prompt", hook.command, errorMessage(err));
       debugLog(`runPrePromptHooks: ${message}`);
       try {
         appendHookErrorLog(phrenPath, "pre-prompt", errorMessage(err));
@@ -999,6 +1123,12 @@ export function runPrePromptHooks(
 export interface HookConfigOptions {
   tools?: Set<string>;
   allTools?: boolean;
+  /**
+   * Whether to install ~/.local/bin session wrappers. Defaults to the current
+   * management preset's `installWrappers` capability. Assisted/manual presets
+   * skip wrappers (hooks fall back to node/npx invocation).
+   */
+  installWrappers?: boolean;
 }
 
 export function configureAllHooks(phrenPath: string, options: HookConfigOptions = {}): string[] {
@@ -1008,6 +1138,9 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     : options.allTools
       ? new Set(["copilot", "cursor", "codex"])
       : detectInstalledTools();
+
+  const installWrappers = options.installWrappers
+    ?? resolveManagementCapabilities(phrenPath).installWrappers;
 
   const lifecycle = buildLifecycleCommands(phrenPath);
 
@@ -1037,7 +1170,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: copilot hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
   }
 
   // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
@@ -1064,7 +1197,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: cursor hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
   }
 
   // ── Codex (codex.json in phren path) ─────────────────────────────────────
@@ -1090,7 +1223,7 @@ export function configureAllHooks(phrenPath: string, options: HookConfigOptions 
     } catch (err: unknown) {
       console.warn(`configureAllHooks: codex hook config failed: ${errorMessage(err)}`);
     }
-    if (isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
+    if (installWrappers && isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
   }
 
   return configured;

@@ -1,9 +1,10 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
+import { appendAuditLog, debugLog, getProjectDirs, isRecord, runtimeDir, runtimeHealthFile, withDefaults, phrenErr, PhrenError, phrenOk, type PhrenResult, resolveFindingsPath } from "../shared.js";
 import { withFileLock, isFiniteNumber, hasValidSchemaVersion } from "../shared/governance.js";
-import { errorMessage, isValidProjectName, safeProjectPath } from "../utils.js";
+import { errorMessage, isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { readProjectConfig, type ProjectConfigOverrides } from "../project-config.js";
 import { getActiveProfileDefaults, type ProfilePolicyDefaults } from "../profile-store.js";
 import { runCustomHooks } from "../hooks.js";
@@ -47,6 +48,49 @@ export interface IndexPolicy {
   includeHidden: boolean;
 }
 
+/**
+ * Outcome of the push leg of a sync.
+ *
+ * `saved-local` means "committed, nothing to push or no remote" — a success.
+ * It used to double as the report for a *failed* push, which is how a store
+ * could go two months without syncing while every Stop hook looked healthy.
+ * Failures now get their own values:
+ *
+ * - `pull-failed`          — the pull/rebase leg failed, so push never ran
+ * - `push-failed`          — push was attempted and rejected
+ * - `unrelated-histories`  — local and remote share no merge base; no amount of
+ *                            retrying will fix it, so it is called out by name
+ */
+export type PushStatus =
+  | "saved-local"
+  | "saved-pushed"
+  | "no-upstream"
+  | "pull-failed"
+  | "push-failed"
+  | "unrelated-histories"
+  | "error";
+
+export const PUSH_STATUSES: readonly PushStatus[] = [
+  "saved-local", "saved-pushed", "no-upstream", "pull-failed", "push-failed", "unrelated-histories", "error",
+];
+
+/** Push statuses that mean the store is NOT in sync with its remote. */
+export const FAILED_PUSH_STATUSES: ReadonlySet<PushStatus> = new Set<PushStatus>([
+  "pull-failed", "push-failed", "unrelated-histories", "error",
+]);
+
+export type AutoSaveStatus =
+  | "clean"
+  | "saved-local"
+  | "saved-pushed"
+  | "no-upstream"
+  | "sync-failed"
+  | "error";
+
+export const AUTO_SAVE_STATUSES: readonly AutoSaveStatus[] = [
+  "clean", "saved-local", "saved-pushed", "no-upstream", "sync-failed", "error",
+];
+
 export interface RuntimeHealth {
   schemaVersion?: number;
   lastSessionStartAt?: string;
@@ -54,7 +98,7 @@ export interface RuntimeHealth {
   lastStopAt?: string;
   lastAutoSave?: {
     at: string;
-    status: "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    status: AutoSaveStatus;
     detail?: string;
   };
   lastGovernance?: {
@@ -68,9 +112,17 @@ export interface RuntimeHealth {
     lastPullDetail?: string;
     lastSuccessfulPullAt?: string;
     lastPushAt?: string;
-    lastPushStatus?: "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    lastPushStatus?: PushStatus;
     lastPushDetail?: string;
     unsyncedCommits?: number;
+    /**
+     * Consecutive sync attempts that failed to reach the remote. Reset to 0 on
+     * any successful push. This is what turns "one flaky push" into "this store
+     * has been broken for weeks" without needing to keep a history.
+     */
+    consecutiveFailures?: number;
+    /** Last time a push actually reached the remote. */
+    lastSuccessfulPushAt?: string;
   };
 }
 
@@ -85,6 +137,8 @@ export interface BuildSyncStatusOpts {
   pullDetail?: string;
   successfulPullAt?: string;
   unsyncedCommits?: number;
+  consecutiveFailures?: number;
+  successfulPushAt?: string;
 }
 
 export function buildSyncStatus(opts: BuildSyncStatusOpts): SyncStatus {
@@ -97,6 +151,59 @@ export function buildSyncStatus(opts: BuildSyncStatusOpts): SyncStatus {
     lastPushStatus: opts.pushStatus,
     ...(opts.pushDetail !== undefined ? { lastPushDetail: opts.pushDetail } : {}),
     ...(opts.unsyncedCommits !== undefined ? { unsyncedCommits: opts.unsyncedCommits } : {}),
+    ...(opts.consecutiveFailures !== undefined ? { consecutiveFailures: opts.consecutiveFailures } : {}),
+    ...(opts.successfulPushAt !== undefined ? { lastSuccessfulPushAt: opts.successfulPushAt } : {}),
+  };
+}
+
+/** Warn after this many consecutive failed syncs. */
+export const SYNC_FAILURE_WARN_RUNS = 3;
+/** ...or after this many days without a successful push, whichever comes first. */
+export const SYNC_FAILURE_WARN_DAYS = 3;
+
+export interface SyncOutageAssessment {
+  /** True when the store has been failing long enough to tell the user. */
+  degraded: boolean;
+  consecutiveFailures: number;
+  daysSinceSuccess: number | null;
+  /** One-line, user-facing explanation. Empty when not degraded. */
+  summary: string;
+}
+
+/**
+ * Decide whether a store's sync failures have gone on long enough to warrant a
+ * visible warning. Pure so both the Stop hook and `phren status` can ask the
+ * same question and get the same answer.
+ */
+export function assessSyncOutage(sync: SyncStatus | undefined, nowMs: number = Date.now()): SyncOutageAssessment {
+  const consecutiveFailures = sync?.consecutiveFailures ?? 0;
+  const failingNow = sync?.lastPushStatus !== undefined && FAILED_PUSH_STATUSES.has(sync.lastPushStatus);
+
+  let daysSinceSuccess: number | null = null;
+  const successAt = sync?.lastSuccessfulPushAt;
+  if (successAt) {
+    const parsed = Date.parse(successAt);
+    if (!Number.isNaN(parsed)) daysSinceSuccess = (nowMs - parsed) / 86_400_000;
+  }
+
+  const staleTooLong = failingNow && daysSinceSuccess !== null && daysSinceSuccess >= SYNC_FAILURE_WARN_DAYS;
+  const degraded = (failingNow && consecutiveFailures >= SYNC_FAILURE_WARN_RUNS) || staleTooLong;
+  if (!degraded) return { degraded: false, consecutiveFailures, daysSinceSuccess, summary: "" };
+
+  const parts: string[] = [];
+  if (consecutiveFailures > 0) parts.push(`${consecutiveFailures} consecutive failed sync${consecutiveFailures === 1 ? "" : "s"}`);
+  if (daysSinceSuccess !== null) parts.push(`last successful push ${Math.floor(daysSinceSuccess)}d ago`);
+  if (sync?.unsyncedCommits) parts.push(`${sync.unsyncedCommits} unpushed commit(s)`);
+
+  const cause = sync?.lastPushStatus === "unrelated-histories"
+    ? "local and remote histories are unrelated — the remote was most likely re-initialized"
+    : (sync?.lastPushDetail || sync?.lastPullDetail || "see `phren status` for details");
+
+  return {
+    degraded: true,
+    consecutiveFailures,
+    daysSinceSuccess,
+    summary: `phren has not synced (${parts.join(", ")}): ${cause}`,
   };
 }
 
@@ -256,10 +363,10 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
   if (typeof data.lastSessionStartAt === "string") normalized.lastSessionStartAt = data.lastSessionStartAt;
   if (typeof data.lastPromptAt === "string") normalized.lastPromptAt = data.lastPromptAt;
   if (typeof data.lastStopAt === "string") normalized.lastStopAt = data.lastStopAt;
-  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && ["clean", "saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastAutoSave.status))) {
+  if (isRecord(data.lastAutoSave) && typeof data.lastAutoSave.at === "string" && (AUTO_SAVE_STATUSES as readonly string[]).includes(String(data.lastAutoSave.status))) {
     normalized.lastAutoSave = {
       at: data.lastAutoSave.at,
-      status: data.lastAutoSave.status as "clean" | "saved-local" | "saved-pushed" | "no-upstream" | "error",
+      status: data.lastAutoSave.status as AutoSaveStatus,
       detail: typeof data.lastAutoSave.detail === "string" ? data.lastAutoSave.detail : undefined,
     };
   }
@@ -277,9 +384,11 @@ function normalizeRuntimeHealth(data: Record<string, unknown>): RuntimeHealth {
     if (typeof data.lastSync.lastPullDetail === "string") normalized.lastSync.lastPullDetail = data.lastSync.lastPullDetail;
     if (typeof data.lastSync.lastSuccessfulPullAt === "string") normalized.lastSync.lastSuccessfulPullAt = data.lastSync.lastSuccessfulPullAt;
     if (typeof data.lastSync.lastPushAt === "string") normalized.lastSync.lastPushAt = data.lastSync.lastPushAt;
-    if (["saved-local", "saved-pushed", "no-upstream", "error"].includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as "saved-local" | "saved-pushed" | "no-upstream" | "error";
+    if ((PUSH_STATUSES as readonly string[]).includes(String(data.lastSync.lastPushStatus))) normalized.lastSync.lastPushStatus = data.lastSync.lastPushStatus as PushStatus;
     if (typeof data.lastSync.lastPushDetail === "string") normalized.lastSync.lastPushDetail = data.lastSync.lastPushDetail;
     if (isFiniteNumber(data.lastSync.unsyncedCommits)) normalized.lastSync.unsyncedCommits = data.lastSync.unsyncedCommits;
+    if (isFiniteNumber(data.lastSync.consecutiveFailures)) normalized.lastSync.consecutiveFailures = data.lastSync.consecutiveFailures;
+    if (typeof data.lastSync.lastSuccessfulPushAt === "string") normalized.lastSync.lastSuccessfulPushAt = data.lastSync.lastSuccessfulPushAt;
   }
   return normalized;
 }
@@ -741,26 +850,76 @@ export function normalizeQueueEntryText(
   });
 }
 
+/**
+ * A queue entry that carries structured provenance alongside its text.
+ *
+ * `meta` is a pre-rendered run of HTML comments (e.g. `<!-- source:extract -->
+ * <!-- phren:cite {...} -->`) appended verbatim to the queue line. It exists so a
+ * queued candidate stays *promotable*: `approveQueueItem` reads it back and hands
+ * the same repo/commit/source provenance to the normal add-finding path, which
+ * makes a promoted finding indistinguishable from one added directly.
+ *
+ * Producers build the comments themselves (this module deliberately does not import
+ * the citation helpers, to keep governance free of a content-layer import cycle).
+ */
+export interface ReviewQueueEntry {
+  text: string;
+  meta?: string;
+}
+
+export type ReviewQueueEntryInput = string | ReviewQueueEntry;
+
+/** Matches a string made up entirely of HTML comments (and whitespace). */
+const QUEUE_META_ONLY_RE = /^(?:\s*<!--(?:(?!-->)[\s\S])*?-->)+\s*$/;
+
+/** Strip every HTML comment from a line. */
+function stripQueueComments(line: string): string {
+  return line.replace(/<!--(?:(?!-->)[\s\S])*?-->/g, " ");
+}
+
+/**
+ * Identity key for queue dedup: the entry's visible text with the date prefix,
+ * bullet marker, and metadata comments removed. Comment-insensitive so a line
+ * that gained provenance metadata still dedups against the same text queued
+ * before metadata existed.
+ */
+function queueDedupKey(line: string): string {
+  return stripQueueComments(line.trim())
+    .replace(/^-\s*/, "")
+    .replace(/^\[\d{4}-\d{2}-\d{2}\]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function appendReviewQueue(
   phrenPath: string,
   project: string,
   section: "Review" | "Stale" | "Conflicts",
-  entries: string[],
+  entries: ReviewQueueEntryInput[],
 ): PhrenResult<number> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir || !fs.existsSync(resolvedDir)) return phrenErr(`Project "${project}" not found in phren.`, PhrenError.PROJECT_NOT_FOUND);
   const queuePath = path.join(resolvedDir, "review.md");
   const today = new Date().toISOString().slice(0, 10);
 
-  const normalized: string[] = [];
+  const normalized: Array<{ text: string; meta: string }> = [];
   for (const entry of entries) {
-    const sanitized = normalizeQueueEntryText(normalizeBulletForQueue(entry), { truncate: true });
+    const rawText = typeof entry === "string" ? entry : entry.text;
+    const rawMeta = typeof entry === "string" ? "" : (entry.meta ?? "");
+    const sanitized = normalizeQueueEntryText(normalizeBulletForQueue(rawText), { truncate: true });
     if (!sanitized.ok) continue;
     if (sanitized.data.truncated) {
       debugLog(`appendReviewQueue: truncated oversized queue entry for ${project}`);
     }
-    normalized.push(sanitized.data.text);
+    // Metadata must be comments only and single-line — anything else would leak
+    // producer-controlled markup into a file humans read and agents may render.
+    const meta = rawMeta.replace(/[\r\n]+/g, " ").trim();
+    const safeMeta = meta && QUEUE_META_ONLY_RE.test(meta) ? meta : "";
+    if (meta && !safeMeta) {
+      debugLog(`appendReviewQueue: dropped non-comment queue metadata for ${project}`);
+    }
+    normalized.push({ text: sanitized.data.text, meta: safeMeta });
   }
   if (normalized.length === 0) return phrenOk(0);
 
@@ -783,15 +942,15 @@ export function appendReviewQueue(
     let insertAt = secIdx + 1;
     while (insertAt < lines.length && !lines[insertAt].startsWith("## ")) insertAt++;
 
-    const existing = new Set(lines.map((line) => line.trim()));
-    // Dedup by entry text only (strip leading date prefix) so the same finding isn't added every day.
-    const existingTexts = new Set(
-      lines.map((line) => line.trim().replace(/^-\s*\[\d{4}-\d{2}-\d{2}\]\s*/, "").trim())
-    );
+    // Dedup by entry text only (date prefix and metadata comments stripped) so the
+    // same finding isn't queued again every day.
+    const existingKeys = new Set(lines.filter((line) => line.trim().startsWith("- ")).map(queueDedupKey));
     const toInsert: string[] = [];
     for (const entry of normalized) {
-      const line = `- [${today}] ${entry}`;
-      if (!existing.has(line) && !existingTexts.has(entry.trim())) toInsert.push(line);
+      const key = queueDedupKey(entry.text);
+      if (!key || existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      toInsert.push(`- [${today}] ${entry.text}${entry.meta ? ` ${entry.meta}` : ""}`);
     }
     if (!toInsert.length) return phrenOk(0);
 
@@ -801,12 +960,99 @@ export function appendReviewQueue(
   });
 }
 
-export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<string> {
+export interface PruneMemoriesResult {
+  /** Human-readable summary (plus dry-run detail lines), ready to print. */
+  message: string;
+  /** Entries deleted for exceeding the retention window. */
+  pruned: number;
+  /** TTL-expired entries promoted into review.md's `## Stale` section. */
+  ttlExpired: number;
+}
+
+/**
+ * Read the retrieval log once and index the most recent retrieval per document key.
+ * Keys match what cli-hooks-output's recordRetrieval writes: `<project>/FINDINGS.md:<type>`.
+ */
+function lastRetrievalByDocument(phrenPath: string): Map<string, number> {
+  const byKey = new Map<string, number>();
+  const logPath = path.join(runtimeDir(phrenPath), "retrieval-log.jsonl");
+  if (!fs.existsSync(logPath)) return byKey;
+  try {
+    for (const line of fs.readFileSync(logPath, "utf8").split("\n")) {
+      if (!line) continue;
+      let entry: { file?: unknown; section?: unknown; retrievedAt?: unknown };
+      try {
+        entry = JSON.parse(line) as { file?: unknown; section?: unknown; retrievedAt?: unknown };
+      } catch {
+        continue;
+      }
+      if (typeof entry.file !== "string" || typeof entry.retrievedAt !== "string") continue;
+      const ts = Date.parse(entry.retrievedAt);
+      if (Number.isNaN(ts)) continue;
+      const key = `${entry.file}:${entry.section}`;
+      if (ts > (byKey.get(key) || 0)) byKey.set(key, ts);
+    }
+  } catch (err: unknown) {
+    debugLog(`pruneDeadMemories: retrieval log unreadable: ${errorMessage(err)}`);
+  }
+  return byKey;
+}
+
+/**
+ * Findings past their TTL that haven't been retrieved recently, rendered for the queue.
+ * Entries without a `<!-- created: -->` stamp are skipped defensively.
+ */
+function collectTtlExpiredEntries(
+  file: string,
+  project: string,
+  ttlDays: number,
+  lastRetrieval: Map<string, number>,
+): string[] {
+  const retrievalGraceDays = Math.floor(ttlDays / 2);
+  const now = Date.now();
+  const expired: string[] = [];
+  let content: string;
+  try {
+    content = fs.readFileSync(file, "utf8");
+  } catch (err: unknown) {
+    debugLog(`pruneDeadMemories: ${file} unreadable for TTL scan: ${errorMessage(err)}`);
+    return expired;
+  }
+
+  for (const line of content.split("\n")) {
+    if (!line.startsWith("- ")) continue;
+    const createdMatch = line.match(/<!--\s*created:\s*(\d{4}-\d{2}-\d{2})\s*-->/);
+    if (!createdMatch) continue;
+    const createdDate = createdMatch[1];
+    const createdMs = Date.parse(`${createdDate}T00:00:00Z`);
+    if (Number.isNaN(createdMs)) continue;
+    if (Math.floor((now - createdMs) / 86_400_000) <= ttlDays) continue;
+
+    // Retrieval is logged at document level, so look up the document key rather than
+    // the bullet.
+    const retrievedAt = lastRetrieval.get(`${project}/${path.basename(file)}:findings`) || 0;
+    const daysSinceRetrieval = retrievedAt ? Math.floor((now - retrievedAt) / 86_400_000) : Infinity;
+    if (daysSinceRetrieval <= retrievalGraceDays) continue;
+
+    expired.push(`[ttl-expired: ${createdDate}] ${line.slice(2).trim()}`);
+  }
+  return expired;
+}
+
+/**
+ * Delete entries past the retention window and promote TTL-expired entries into review.md.
+ *
+ * TTL promotion lives here rather than in the CLI handler so that nightly maintenance
+ * (`handleBackgroundMaintenance`, which calls this directly) gets it too — previously it
+ * only ran on a manual `phren maintain prune`, leaving `## Stale` empty while `## Review`
+ * filled up.
+ */
+export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: boolean): PhrenResult<PruneMemoriesResult> {
   const policy = getRetentionPolicy(phrenPath);
   if (project && !isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}".`, PhrenError.INVALID_PROJECT_NAME);
   const dirs = project
     ? (() => {
-      const resolvedProject = safeProjectPath(phrenPath, project);
+      const resolvedProject = storeAwareProjectPath(phrenPath, project);
       return resolvedProject ? [resolvedProject] : [];
     })()
     : getProjectDirs(phrenPath).filter((dir) => path.basename(dir) !== "global");
@@ -870,13 +1116,41 @@ export function pruneDeadMemories(phrenPath: string, project?: string, dryRun?: 
     });
   }
 
-  if (dryRun) {
-    const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
-    return phrenOk(dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary);
+  // TTL enforcement: promote entries older than ttlDays that haven't been retrieved recently.
+  const lastRetrieval = lastRetrievalByDocument(phrenPath);
+  let ttlExpired = 0;
+  for (const dir of dirs) {
+    const file = resolveFindingsPath(dir);
+    if (!file) continue;
+    const projectName = path.basename(dir);
+    const expiredEntries = collectTtlExpiredEntries(file, projectName, policy.ttlDays, lastRetrieval);
+    if (!expiredEntries.length) continue;
+    ttlExpired += expiredEntries.length;
+    if (dryRun) {
+      for (const entry of expiredEntries) {
+        dryRunDetails.push(`[dry-run] [${projectName}] Would move to review queue: ${entry.slice(0, 120)}`);
+      }
+      continue;
+    }
+    appendReviewQueue(phrenPath, projectName, "Stale", expiredEntries);
   }
 
-  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned}`);
-  return phrenOk(`Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`);
+  const ttlLine = ttlExpired > 0
+    ? `\n${dryRun ? "Would move" : "Moved"} ${ttlExpired} TTL-expired entr${ttlExpired === 1 ? "y" : "ies"} to review.md`
+    : "";
+
+  if (dryRun) {
+    const summary = `[dry-run] Would prune ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.`;
+    const detail = dryRunDetails.length ? `${summary}\n${dryRunDetails.join("\n")}` : summary;
+    return phrenOk({ message: `${detail}${ttlLine}`, pruned, ttlExpired });
+  }
+
+  appendAuditLog(phrenPath, "prune_memories", `project=${project || "all"} pruned=${pruned} ttl_expired=${ttlExpired}`);
+  return phrenOk({
+    message: `Pruned ${pruned} stale memory entr${pruned === 1 ? "y" : "ies"}.${ttlLine}`,
+    pruned,
+    ttlExpired,
+  });
 }
 
 function mergeLifecycleAndIdComments(primary: string, fallback: string): string {

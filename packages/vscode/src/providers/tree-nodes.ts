@@ -40,12 +40,15 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const reviewBadge: string[] = [];
       if (element.conflictCount && element.conflictCount > 0) reviewBadge.push(`⚠ ${element.conflictCount}`);
       else if (element.reviewCount && element.reviewCount > 0) reviewBadge.push(`${element.reviewCount} review`);
-      const badgeSuffix = reviewBadge.length > 0 ? `  ${reviewBadge.join(" · ")}` : "";
+      const reviewBadgeText = reviewBadge.join(" · ");
       if (element.active) {
-        item.description = `★${badgeSuffix}${element.brief ? ` ${truncate(element.brief, 50)}` : ""}`;
+        // Two-space gap sets the badge off from the star; only meaningful when
+        // there's a star preceding it, so it lives here rather than in the
+        // shared badge text (see the non-active branch below).
+        item.description = `★${reviewBadgeText ? `  ${reviewBadgeText}` : ""}${element.brief ? ` ${truncate(element.brief, 50)}` : ""}`;
         item.iconPath = themeIcon("star-full", "list.highlightForeground");
       } else {
-        item.description = badgeSuffix || (element.brief ? truncate(element.brief, 72) : undefined);
+        item.description = reviewBadgeText || (element.brief ? truncate(element.brief, 72) : undefined);
         item.iconPath = element.conflictCount ? themeIcon("warning") : themeIcon("folder");
       }
       item.id = `phren.project.${element.projectName}`;
@@ -54,7 +57,7 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
     }
     case "category": {
       const cat = element.category ?? "unknown";
-      const categoryLabels: Record<string, string> = { findings: "Findings", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", hooks: "Hooks", reference: "Reference" };
+      const categoryLabels: Record<string, string> = { findings: "Findings", notes: "Notes", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", hooks: "Hooks", reference: "Reference" };
       let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
       if (cat === "findings" && dateFilter) {
         categoryLabel += ` [${dateFilter.label}]`;
@@ -64,6 +67,8 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       item.id = `phren.category.${element.projectName}.${cat}`;
       if (cat === "findings") {
         item.contextValue = "phren.category.findings";
+      } else if (cat === "notes") {
+        item.contextValue = "phren.category.notes";
       }
       return item;
     }
@@ -73,6 +78,13 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       item.description = `${element.count}`;
       item.iconPath = themeIcon("calendar");
       item.id = `phren.findingDateGroup.${element.projectName}.${element.date}`;
+      return item;
+    }
+    case "noteDateGroup": {
+      const item = new vscode.TreeItem(formatDateLabel(element.date), vscode.TreeItemCollapsibleState.Collapsed);
+      item.description = `${element.count}`;
+      item.iconPath = themeIcon("calendar");
+      item.id = `phren.noteDateGroup.${element.projectName}.${element.date}`;
       return item;
     }
     case "sessionDateGroup": {
@@ -121,6 +133,16 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
         title: "Open Finding",
         arguments: [element],
       };
+      return item;
+    }
+    case "note": {
+      const item = new vscode.TreeItem(truncate(element.text, 120), vscode.TreeItemCollapsibleState.None);
+      item.description = `${element.time.slice(0, 5)}${element.promoted ? " · promoted" : ""}`;
+      item.tooltip = `${element.date} ${element.time.slice(0, 5)} · ${element.id}\n${element.text}${element.promoted ? "\nPromoted to findings" : ""}`;
+      item.iconPath = themeIcon(element.promoted ? "pass-filled" : "note");
+      item.id = `phren.note.${element.projectName}.${element.id}`;
+      item.contextValue = element.promoted ? "phren.note.promoted" : "phren.note";
+      item.command = { command: "phren.openNote", title: "Open Note", arguments: [element] };
       return item;
     }
     case "globalTaskSectionGroup": {

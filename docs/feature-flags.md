@@ -1,6 +1,36 @@
 # Feature Flags
 
-phren uses environment variables as feature flags to control optional behaviors. All flags are enabled by default. Set to `0`, `false`, `off`, or `no` to disable.
+phren uses environment variables as feature flags to control optional behaviors. Defaults are mixed — some flags ship on, some ship off; each section below states its own default. A flag that defaults to enabled is turned off by setting it to `0`, `false`, `off`, or `no`; a flag that defaults to disabled is turned on by setting it to `1` (or any value other than that disable list).
+
+## Precedence with management presets
+
+The [management preset](footprint.md) is the coarse control; these flags are the fine control. When they disagree, precedence (strongest first) is:
+
+1. `PHREN_FEATURE_*` env vars and `~/.phren/.env` lines — always win at runtime for the automations they gate.
+2. Explicit per-capability booleans in `install-preferences.json`.
+3. The preset bundle (`managed` / `assisted` / `manual`).
+4. Built-in `managed` defaults (when no preset is set).
+
+The `manual` preset writes `PHREN_FEATURE_AUTO_CAPTURE=0`, `PHREN_FEATURE_AUTO_EXTRACT=0`, and `PHREN_FEATURE_DAILY_MAINTENANCE=0` into `~/.phren/.env` at install so its automations stay off; you can flip any of them back on individually there.
+
+## PHREN_FEATURE_TOOL_HOOK
+
+**Default:** enabled
+
+**Read this one even if you skip the rest — it's the flag most likely to affect day-to-day performance.** It controls whether phren registers Claude Code's `PostToolUse` hook at all. With it enabled (the default), phren spawns a `phren hook-tool` subprocess after every `Read`, `Write`, `Edit`, `Bash`, `Glob`, and `Grep` tool call in the session (`cli/session-tool-hook.ts`'s `handleHookTool`), to log tool activity and opportunistically scrape explicit `[type] ...`-tagged findings out of tool output into the review queue.
+
+Because those six tools make up the bulk of tool calls in most coding sessions, this means a subprocess spawn on nearly every turn. The other three lifecycle hooks (`UserPromptSubmit`, `Stop`, `SessionStart`) are unaffected by this flag and keep running either way.
+
+**This flag is read when phren (re)writes your hook configuration, not live per tool call.** Set it before running `phren init`, or change it and run `phren hooks-mode on` afterward to force an unconditional hook re-sync — toggling the env var after the `PostToolUse` entry is already in `settings.json` has no effect until the hook list is regenerated. (`phren doctor --fix` only rewrites hooks when it separately detects stale/ephemeral entrypoints, so it isn't a reliable way to pick up this change on its own.)
+
+**When to disable:**
+- Sessions with heavy tool-call volume where subprocess-spawn latency adds up
+- You don't rely on passive tool-output scraping and only ever add findings explicitly (`add_finding`, `phren add-finding`)
+
+```bash
+export PHREN_FEATURE_TOOL_HOOK=0
+phren hooks-mode on   # force a hook re-sync so the change takes effect
+```
 
 ## PHREN_FEATURE_AUTO_EXTRACT
 
@@ -62,6 +92,35 @@ When enabled, the `hook-prompt` lifecycle hook uses a 3-layer progressive disclo
 export PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1
 ```
 
+## PHREN_FEATURE_GIT_CONTEXT_FILTER
+
+**Default:** disabled
+
+When enabled, `rankResults` (`shared/retrieval.ts`) sorts documents whose file matches one of the current git diff's changed files (staged or unstaged) ahead of everything else, before the usual findings-first / recency / score ordering. Git context (current branch and changed files) comes from `getGitContext` (`cli/session-git.ts`).
+
+**When to enable:**
+- Large multi-project stores where hook-prompt or search results are dominated by content unrelated to what you're actively editing
+
+```bash
+export PHREN_FEATURE_GIT_CONTEXT_FILTER=1
+```
+
+## PHREN_FEATURE_HYBRID_SEARCH
+
+**Default:** enabled
+
+Controls the TF-IDF cosine-similarity fallback (`shared/search-fallback.ts`'s `cosineFallback`). When FTS5 full-text search returns fewer than 3 results for a query, phren additionally scores the corpus (capped at 10,000 docs for latency) by cosine similarity over TF-IDF vectors and folds in matches above a 0.15 similarity threshold. This catches near-miss lexical matches FTS5's ranking alone doesn't surface, with no embedding endpoint or Ollama required.
+
+This is independent from the embedding-based semantic fallback documented right below: hybrid search is local and lexical (TF-IDF), the embedding fallback is model-based and requires an endpoint.
+
+**When to disable:**
+- Very large corpora where scoring the full doc set adds latency you'd rather avoid (the 10,000-doc cap limits this, but it's still extra work on every sparse query)
+- If cosine-fallback matches are lower signal than just returning fewer results for your workflow
+
+```bash
+export PHREN_FEATURE_HYBRID_SEARCH=0
+```
+
 ## PHREN_EMBEDDING_API_URL
 
 **Default:** unset (disabled)
@@ -83,6 +142,21 @@ Embedding results are cached in `.runtime/embed-cache.db` keyed by SHA-256 hash 
 export PHREN_EMBEDDING_API_URL=https://api.openai.com/v1
 export PHREN_EMBEDDING_API_KEY=sk-...
 export PHREN_EMBEDDING_MODEL=text-embedding-3-small  # optional
+```
+
+## PHREN_FEATURE_QUERY_CORRELATION
+
+**Default:** disabled
+
+When enabled, phren logs which queries led to which documents being selected (and later marked "helpful" via feedback) to `.runtime/query-correlations.jsonl` (a rolling last-500-entry window). Future queries that share at least 2 overlapping tokens (3+ characters each) with a past query get those historically-correlated documents surfaced; entries previously marked helpful count double toward the correlation score.
+
+This is a lightweight, local, no-LLM alternative for recurring query patterns — it does not require an embedding endpoint or Ollama.
+
+**When to enable:**
+- Repetitive query patterns in a project, where the same handful of documents keep being relevant to similarly-worded prompts
+
+```bash
+export PHREN_FEATURE_QUERY_CORRELATION=1
 ```
 
 ## PHREN_FEATURE_SEMANTIC_DEDUP
@@ -117,6 +191,22 @@ With this flag, when fragment extraction finds a shared fragment between new and
 ```bash
 export PHREN_FEATURE_SEMANTIC_CONFLICT=1
 export PHREN_LLM_KEY=sk-...
+```
+
+## PHREN_FEATURE_FACT_EXTRACT
+
+**Default:** disabled
+
+When enabled, every new finding (`add_finding`) is passed to an LLM (`PHREN_LLM_ENDPOINT`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`, checked in that order) to extract a single structured preference or fact — "prefers X", "uses Y", "avoids Z", or "decided to X because Y" — stored in the project's `preferences.json` and surfaced in `session_start`. Unlike `PHREN_FEATURE_SEMANTIC_DEDUP`/`PHREN_FEATURE_SEMANTIC_CONFLICT` above (which only call an LLM on a narrow band of ambiguous cases), this calls an LLM on **every** finding — a real per-write cost, not a cached edge-case check.
+
+If enabled without any of the LLM env vars set, this is a silent no-op rather than an error.
+
+**When to enable:**
+- You want a running, queryable summary of stated preferences/decisions, separate from FINDINGS.md prose
+
+```bash
+export PHREN_FEATURE_FACT_EXTRACT=1
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / PHREN_LLM_ENDPOINT
 ```
 
 ## PHREN_FEATURE_GH_MINING
@@ -169,6 +259,6 @@ export PHREN_FEATURE_AUTO_CAPTURE=1
 
 ## How Feature Flags Work
 
-The `isFeatureEnabled` function in `cli.ts` reads the named environment variable. If the value is `0`, `false`, `off`, or `no` (case-insensitive, trimmed), the feature is disabled. Any other value, or if the variable is not set, means the feature is enabled.
+The `isFeatureEnabled(envName, defaultValue)` helper (`utils-helpers.ts`, re-exported via `utils.ts`) reads the named environment variable. If the value is `0`, `false`, `off`, or `no` (case-insensitive, trimmed), the feature is disabled regardless of `defaultValue`. If the variable is not set at all, the feature falls back to `defaultValue` — `true` for flags that ship on, `false` for flags that ship off (see each flag's **Default** above).
 
-This convention applies to all `PHREN_FEATURE_*` variables.
+This convention applies to all `PHREN_FEATURE_*` variables. `PHREN_FEATURE_HYBRID_SEARCH` (`shared/search-fallback.ts`) implements the same on/off check inline instead of calling the shared helper, but follows the identical `0`/`false`/`off`/`no`-disables, default-otherwise convention.

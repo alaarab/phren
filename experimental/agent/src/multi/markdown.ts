@@ -13,8 +13,8 @@ const DIM = `${ESC}2m`;
 const ITALIC = `${ESC}3m`;
 const CYAN = `${ESC}36m`;
 const YELLOW = `${ESC}33m`;
-const GREEN = `${ESC}32m`;
-const MAGENTA = `${ESC}35m`;
+const _GREEN = `${ESC}32m`;
+const _MAGENTA = `${ESC}35m`;
 const INVERSE = `${ESC}7m`;
 
 const MAX_WIDTH = Math.min(process.stdout.columns || 80, 120);

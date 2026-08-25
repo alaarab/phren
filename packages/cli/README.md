@@ -4,11 +4,12 @@ MCP server that indexes your personal phren and exposes it to AI agents via full
 
 On startup it walks your phren directory, reads all `.md` files, and builds an in-memory SQLite FTS5 index.
 
-Public surface: 54 MCP tools across 12 modules (search, tasks, findings, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
+Public surface: 59 MCP tools across 13 modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
 - finding lifecycle tools: `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`
 - finding provenance: `add_finding.source` (`human|agent|hook|extract|consolidation|unknown`)
+- lightweight daily notes: CRUD in `<project>/notes/YYYY-MM-DD.md`, explicit search, and promotion to findings without automatic prompt injection
 - cross-session continuity: task checkpoints + `session_history`
 - finding impact scoring from injected-context outcomes
 - skill registry behavior: scope precedence, alias-collision handling, visibility gating, generated `skill-manifest.json`
@@ -94,7 +95,7 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames and directories: `CLAUDE.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 

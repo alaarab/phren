@@ -15,7 +15,7 @@ import {
   mergeConfig,
 } from "../shared/governance.js";
 import {
-  buildIndex,
+  loadIndexForHook,
   detectProject,
 } from "../shared/index.js";
 import { isProjectHookEnabled } from "../project-config.js";
@@ -106,7 +106,7 @@ import {
   getGitContext,
   trackSessionMetrics,
 } from "./hooks-session.js";
-import { approximateTokens } from "../shared/retrieval.js";
+import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
 
@@ -205,10 +205,11 @@ export async function handleHookPrompt() {
   }
 
   const tIndex0 = Date.now();
-  const db = await buildIndex(getPhrenPath(), profile);
+  // Never block the prompt on a rebuild: serve the current/stale snapshot and
+  // refresh in a detached process (see loadIndexForHook).
+  const db = await loadIndexForHook(getPhrenPath(), profile);
   stage.indexMs = Date.now() - tIndex0;
 
-  const gitCtx = getGitContext(cwd);
   const intent = detectTaskIntent(prompt);
   const detectedProject = cwd ? detectProject(getPhrenPath(), cwd, profile) : null;
   if (detectedProject) debugLog(`Detected project: ${detectedProject}`);
@@ -217,6 +218,10 @@ export async function handleHookPrompt() {
     appendAuditLog(getPhrenPath(), "hook_prompt", `status=project_disabled project=${detectedProject}`);
     process.exit(0);
   }
+
+  // Resolve git context AFTER the enabled check — it spawns 3 git processes and is
+  // wasted work when the project has hooks disabled.
+  const gitCtx = getGitContext(cwd);
 
   const resolvedConfig = mergeConfig(getPhrenPath(), detectedProject ?? undefined);
 
@@ -241,6 +246,9 @@ export async function handleHookPrompt() {
       getPhrenPath()
     );
     rows = trustResult.rows;
+    // Notes are intentionally available to explicit search, but are personal scratch
+    // context and should never be injected into an agent prompt automatically.
+    rows = rows.filter((row) => row.type !== "notes");
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
@@ -308,7 +316,7 @@ export async function handleHookPrompt() {
       const kept: SelectedSnippet[] = [];
       let runningTokens = 36;
       for (const s of sorted) {
-        const est = approximateTokens(s.snippet) + 14;
+        const est = approximateTokens(s.snippet) + SNIPPET_OVERHEAD_TOKENS;
         if (runningTokens + est <= maxInjectTokens) {
           kept.push(s);
           runningTokens += est;

@@ -1,10 +1,22 @@
 import { decodeStringRow } from "./index.js";
 import type { SqlJsDatabase } from "./index.js";
 import * as fs from "fs";
+import * as path from "path";
 import { runtimeFile } from "../shared.js";
 import { logger } from "../logger.js";
 import { UNIVERSAL_TECH_TERMS_RE } from "../phren-core.js";
 import { errorMessage } from "../utils.js";
+
+// NOTE on naming: "entity" was renamed to "fragment" everywhere user-facing
+// (CHANGELOG 0.0.5) — tool names, titles, and descriptions in tools/graph.ts
+// all say "fragment" now. The underlying SQLite tables (`entities`,
+// `entity_links`, `global_entities`, created in shared/index.ts) and the
+// on-disk `.runtime/manual-links.json` format (`{entity, entityType, ...}`)
+// were never renamed to match. Both are effectively rebuilt/local-runtime
+// state rather than synced source-of-truth files, so a rename would not need
+// a store migration in the git-history sense, but it does require touching
+// shared/index.ts (which creates the tables and reads manual-links.json) —
+// out of scope for a change confined to this file.
 
 /** @internal Exported for tests. */
 export function escapeRegex(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -183,8 +195,12 @@ function readUserDefinedFragmentsFromDisk(claudeMdPath: string): { mtime: number
 export function beginUserFragmentBuildCache(phrenPath: string, projects: Iterable<string>): void {
   _activeBuildCacheKeyPrefix = `${phrenPath}/`;
   for (const project of projects) {
+    // The cache key stays a slash-joined string — it is only ever compared
+    // against other keys built the same way. The file path is a real path, so
+    // it goes through path.join: concatenating with "/" reads fine on Windows
+    // but produces a mixed-separator string that no other code path matches.
     const cacheKey = `${phrenPath}/${project}`;
-    const claudeMdPath = `${phrenPath}/${project}/CLAUDE.md`;
+    const claudeMdPath = path.join(phrenPath, project, "CLAUDE.md");
     try {
       const loaded = readUserDefinedFragmentsFromDisk(claudeMdPath);
       if (!loaded) {
@@ -210,7 +226,7 @@ export function endUserFragmentBuildCache(phrenPath: string): void {
 }
 
 function parseUserDefinedFragments(phrenPath: string, project: string): string[] {
-  const claudeMdPath = `${phrenPath}/${project}/CLAUDE.md`;
+  const claudeMdPath = path.join(phrenPath, project, "CLAUDE.md");
   const cacheKey = `${phrenPath}/${project}`;
   try {
     // Active build path: no sync I/O in per-file extraction.

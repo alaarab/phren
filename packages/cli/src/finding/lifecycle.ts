@@ -1,11 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
-import { PhrenError, phrenErr, phrenOk, type PhrenResult } from "../phren-core.js";
+import { PhrenError, phrenErr, phrenOk, type PhrenResult, type FindingTag } from "../phren-core.js";
 
 // Phren lifecycle comment prefix. No backward compat.
 const LIFECYCLE_PREFIX = "phren";
 import { withFileLock } from "../shared/governance.js";
-import { isValidProjectName, safeProjectPath } from "../utils.js";
+import { isValidProjectName } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import {
   isArchiveEnd,
   isArchiveStart,
@@ -21,17 +22,34 @@ import {
 } from "../content/metadata.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 
-export const FINDING_TYPE_DECAY: Record<string, { maxAgeDays: number; decayMultiplier: number }> = {
-  'pattern':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay, long-lived
-  'decision':     { maxAgeDays: Infinity, decayMultiplier: 1.0 }, // Never decays
-  'pitfall':      { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay
-  'anti-pattern': { maxAgeDays: Infinity, decayMultiplier: 1.0 }, // Never decays
-  'observation':  { maxAgeDays: 14, decayMultiplier: 0.7 },    // Fast decay, short-lived
-  'workaround':   { maxAgeDays: 60, decayMultiplier: 0.85 },   // Medium decay
-  'bug':          { maxAgeDays: 30, decayMultiplier: 0.8 },     // Medium-fast decay
-  'tooling':      { maxAgeDays: 180, decayMultiplier: 0.95 },  // Medium-slow decay
-  'context':      { maxAgeDays: 30, decayMultiplier: 0.75 },   // Fast decay (contextual facts)
-};
+interface FindingDecayConfig {
+  maxAgeDays: number;
+  decayMultiplier: number;
+}
+
+/**
+ * Decay rule per finding tag. Keyed with `satisfies Record<FindingTag, ...>`
+ * so this object is required to have exactly one row per tag in FINDING_TAGS
+ * (phren-core.ts) — no more, no less. Add a tag there and TypeScript forces a
+ * decay row here; remove one and the corresponding row becomes a compile
+ * error instead of silently-dead data.
+ *
+ * Previously this table had 9 rows against a 6-entry offered enum that
+ * disagreed with it in both directions: `anti-pattern`, `observation`, and
+ * `tooling` had rows here but nothing ever wrote those tags, while
+ * `tradeoff` and `architecture` were offered/writable but had no row here
+ * (so they never decayed and had no max-age). The exported type stays
+ * `Record<string, FindingDecayConfig>` so existing string-keyed lookups
+ * (e.g. content/citation.ts) don't need to change.
+ */
+export const FINDING_TYPE_DECAY: Record<string, FindingDecayConfig> = {
+  'pattern':    { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay, long-lived
+  'decision':   { maxAgeDays: Infinity, decayMultiplier: 1.0 }, // Never decays
+  'pitfall':    { maxAgeDays: 365, decayMultiplier: 1.0 },   // Slow decay
+  'workaround': { maxAgeDays: 60, decayMultiplier: 0.85 },   // Medium decay
+  'bug':        { maxAgeDays: 30, decayMultiplier: 0.8 },    // Medium-fast decay
+  'context':    { maxAgeDays: 30, decayMultiplier: 0.75 },   // Fast decay (contextual facts)
+} satisfies Record<FindingTag, FindingDecayConfig>;
 
 export function extractFindingType(line: string): string | null {
   const match = line.match(/\[(\w[\w-]*)\]/);
@@ -265,7 +283,7 @@ function matchFinding(lines: string[], match: string): PhrenResult<MatchedFindin
 
 function findingsPathForProject(phrenPath: string, project: string): PhrenResult<string> {
   if (!isValidProjectName(project)) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
-  const projectDir = safeProjectPath(phrenPath, project);
+  const projectDir = storeAwareProjectPath(phrenPath, project);
   if (!projectDir) return phrenErr(`Invalid project name: "${project}"`, PhrenError.INVALID_PROJECT_NAME);
   if (!fs.existsSync(projectDir)) return phrenErr(`Project "${project}" not found.`, PhrenError.PROJECT_NOT_FOUND);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);

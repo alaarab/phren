@@ -4,10 +4,12 @@ import {
   phrenErr,
   PhrenError,
   phrenOk,
+  parsePhrenErrorCode,
   type PhrenResult,
 } from "../shared.js";
 import { withFileLock as withFileLockRaw } from "./governance.js";
 import { isValidProjectName, safeProjectPath, errorMessage } from "../utils.js";
+import { resolveProject } from "../store-routing.js";
 
 export function withSafeLock<T>(filePath: string, fn: () => PhrenResult<T>): PhrenResult<T> {
   try {
@@ -50,8 +52,15 @@ export function ensureProject(phrenPath: string, project: string): PhrenResult<s
   if (!isValidProjectName(project)) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   const dir = safeProjectPath(phrenPath, project);
   if (!dir) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
-  if (!fs.existsSync(dir)) {
+  if (fs.existsSync(dir)) return phrenOk(dir);
+  // Not in the primary store — the project may live in a registered secondary store.
+  try {
+    return phrenOk(resolveProject(phrenPath, project).projectDir);
+  } catch (err: unknown) {
+    const msg = errorMessage(err);
+    if (parsePhrenErrorCode(msg) === PhrenError.VALIDATION_ERROR) {
+      return phrenErr(msg.replace(/^[A-Z_]+:\s*/, ""), PhrenError.VALIDATION_ERROR);
+    }
     return phrenErr(`No project "${project}" found. Add it with 'cd ~/your-project && phren add'.`, PhrenError.PROJECT_NOT_FOUND);
   }
-  return phrenOk(dir);
 }

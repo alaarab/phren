@@ -1,7 +1,7 @@
 # User-level instructions
 
 <!-- Copy this file to your personal phren instance's global/CLAUDE.md and fill in your own preferences. -->
-<!-- This becomes ~/.claude/CLAUDE.md after syncing. Claude reads it at the start of every session. -->
+<!-- Under the default (managed) preset this is symlinked to ~/.claude/CLAUDE.md so Claude reads it every session. Under the assisted/manual presets phren does not symlink it — reference it from your own ~/.claude/CLAUDE.md (run `phren snippet`). -->
 
 ## Memory
 

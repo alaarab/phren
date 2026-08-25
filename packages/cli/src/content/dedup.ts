@@ -2,8 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, runtimeFile, KNOWN_OBSERVATION_TAGS } from "../shared.js";
-import { isFeatureEnabled, safeProjectPath, errorMessage } from "../utils.js";
-import { UNIVERSAL_TECH_TERMS_RE, EXTRA_ENTITY_PATTERNS } from "../phren-core.js";
+import { isFeatureEnabled, errorMessage } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+import { UNIVERSAL_TECH_TERMS_RE, EXTRA_FRAGMENT_PATTERNS } from "../phren-core.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { logger } from "../logger.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
@@ -321,7 +322,7 @@ function extractProseEntities(text: string, dynamicEntities?: Set<string>): stri
   while ((m = re.exec(text)) !== null) found.add(m[0].toLowerCase());
 
   // Match additional fragment patterns (versions, env keys, file paths, error codes, dates)
-  for (const { re: pattern } of EXTRA_ENTITY_PATTERNS) {
+  for (const { re: pattern } of EXTRA_FRAGMENT_PATTERNS) {
     const pRe = new RegExp(pattern.source, pattern.flags);
     let pm: RegExpExecArray | null;
     while ((pm = pRe.exec(text)) !== null) found.add(pm[0].toLowerCase());
@@ -347,6 +348,27 @@ function learningPolarity(text: string): "positive" | "negative" | "neutral" {
   return "neutral";
 }
 
+// Minimum topical overlap (Jaccard over substantive tokens, with observation tags
+// and metadata stripped) required before two findings that share an entity and have
+// opposing polarity are treated as a contradiction. The bare "one shared entity +
+// opposite polarity" rule fires on unrelated findings that merely mention the same
+// tool or word (e.g. a git-workflow decision and a security decision that both say
+// "GitHub"); requiring genuine subject-matter overlap removes that false-positive
+// class while keeping real same-topic contradictions.
+const CONFLICT_MIN_TOPIC_OVERLAP = 0.12;
+
+/** Strip observation tags like [decision] so a shared tag is not counted as shared topic. */
+function stripObservationTags(text: string): string {
+  return text.replace(/\[[a-zA-Z_-]+\]/g, " ");
+}
+
+/** Jaccard overlap of the substantive tokens of two findings (tags + metadata removed). */
+function topicalOverlap(a: string, b: string): number {
+  const ta = jaccardTokenize(stripObservationTags(stripMetadata(a)));
+  const tb = jaccardTokenize(stripObservationTags(stripMetadata(b)));
+  return jaccardSimilarity(ta, tb);
+}
+
 /** Returns existing learning lines that appear to conflict with newFinding. */
 export function detectConflicts(newFinding: string, existingLines: string[], dynamicEntities?: Set<string>): string[] {
   const newEntities = extractProseEntities(newFinding, dynamicEntities);
@@ -361,9 +383,11 @@ export function detectConflicts(newFinding: string, existingLines: string[], dyn
     const shared = lineEntities.filter((e) => newEntities.includes(e));
     if (shared.length === 0) continue;
     const linePol = learningPolarity(line);
-    if (linePol !== "neutral" && linePol !== newPol) {
-      conflicts.push(line);
-    }
+    if (linePol === "neutral" || linePol === newPol) continue;
+    // Require genuine topical overlap, not just one incidental shared entity, before
+    // flagging. Unrelated findings that happen to share a tool name fall below this bar.
+    if (topicalOverlap(newFinding, line) < CONFLICT_MIN_TOPIC_OVERLAP) continue;
+    conflicts.push(line);
   }
   return conflicts;
 }
@@ -450,49 +474,11 @@ export function normalizeObservationTags(text: string): { text: string; warning?
   return { text: normalized, warning };
 }
 
-/**
- * Scan text for secrets and PII patterns. Returns the type of secret found, or null if clean.
- */
-export function scanForSecrets(text: string): string | null {
-  // AWS Access Key
-  if (/AKIA[0-9A-Z]{16}/.test(text)) return 'AWS access key';
-  // AWS Secret Access Key (variable assignment pattern)
-  if (/(?:aws[_-]?secret|AWS_SECRET)[_-]?(?:access[_-]?)?key[_-]?(?:id)?['":\s]+[A-Za-z0-9/+=]{40}/i.test(text)) return 'AWS secret access key';
-  // JWT token
-  if (/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text)) return 'JWT token';
-  // Long base64-encoded secret-like blob (requires base64 chars including +/= and must not be
-  // a plain hex digest like a git commit SHA — 40-char lowercase hex is explicitly exempt).
-  if (!/^[0-9a-f]{40}$/.test(text) && /(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}/.test(text.replace(/[0-9a-f]{40}/g, ""))) return 'long base64 secret';
-  // Connection string with credentials
-  if (/(mongodb|postgres|mysql|redis):\/\/[^@\s]+:[^@\s]+@/i.test(text)) return 'connection string with credentials';
-  // SSH private key
-  if (/-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----/.test(text)) return 'SSH private key';
-  // Anthropic API key
-  if (/sk-ant-api\d{2}-[A-Za-z0-9_\-]{10,}/.test(text)) return 'Anthropic API key';
-  // OpenAI API key
-  if (/sk-proj-[A-Za-z0-9_\-]{30,}/.test(text)) return 'OpenAI API key';
-  // GitHub PAT classic
-  if (/ghp_[A-Za-z0-9]{36}/.test(text)) return 'GitHub personal access token';
-  // GitHub OAuth token
-  if (/gho_[A-Za-z0-9]{36}/.test(text)) return 'GitHub OAuth token';
-  // GitHub tokens (classic, OAuth, user, org, server)
-  if (/gh[pousr]_[A-Za-z0-9]{36}/.test(text)) return 'GitHub token';
-  // Slack bot token
-  if (/xoxb-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack bot token';
-  // Slack user token
-  if (/xoxp-[0-9]+-[A-Za-z0-9-]+/.test(text)) return 'Slack user token';
-  // Stripe secret key
-  if (/sk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe secret key';
-  // Stripe publishable key
-  if (/pk_live_[A-Za-z0-9]{24,}/.test(text)) return 'Stripe publishable key';
-  // npm access token
-  if (/npm_[A-Za-z0-9]{36}/.test(text)) return 'npm access token';
-  // GCP service account
-  if (/"private_key_id"\s*:\s*"[^"]{20,}"/.test(text)) return 'GCP service account key';
-  // Generic API key (only when variable name suggests it)
-  if (/['"]?(api_?key|secret|token|password)['"]?\s*[=:]\s*['"]?[a-zA-Z0-9_\-\.]{20,}/i.test(text)) return 'API key or secret';
-  return null;
-}
+// Credential detection lives in a dependency-free leaf module so hooks.ts can
+// use it without dragging in this file's import graph. Re-exported here
+// because content/learning.ts, data/notes.ts and shared/content.ts all import
+// scanForSecrets from dedup.
+export { looksLikePlaceholderSecret, scanForSecrets, redactSecretsForLog } from "./secrets.js";
 
 /**
  * Resolve coreferences in learning text by replacing vague pronouns with concrete names.
@@ -538,7 +524,7 @@ export async function checkSemanticDedup(
 ): Promise<boolean> {
   if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", false)) return false;
 
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return false;
   const findingsPath = path.join(resolvedDir, FINDINGS_FILENAME);
   if (!fs.existsSync(findingsPath)) return false;
@@ -594,7 +580,7 @@ export async function checkSemanticConflicts(
 ): Promise<{ annotations: string[]; checked: boolean }> {
   if (!isFeatureEnabled("PHREN_FEATURE_SEMANTIC_CONFLICT", false)) return { annotations: [], checked: false };
 
-  const resolvedDir = safeProjectPath(phrenPath, project);
+  const resolvedDir = storeAwareProjectPath(phrenPath, project);
   if (!resolvedDir) return { annotations: [], checked: false };
 
   const newEntities = extractProseEntities(newFinding);

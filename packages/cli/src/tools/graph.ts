@@ -9,7 +9,14 @@ import { runtimeFile } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { logger } from "../logger.js";
 
-
+// NOTE on naming: titles/descriptions below all say "fragment" (the entity ->
+// fragment rename, CHANGELOG 0.0.5), but the actual input schema key on
+// get_related_docs, link_findings, and cross_project_fragments is still
+// `entity` / `entity_type` — renaming it is a breaking change to a live MCP
+// tool contract, plus link_findings persists that same shape to
+// .runtime/manual-links.json (read back in shared/index.ts), so it is not a
+// same-PR-safe rename. Left as-is; flagged for a product decision rather than
+// changed unilaterally.
 
 export function register(server: McpServer, ctx: McpContext): void {
 
@@ -112,7 +119,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const docProject = doc.split("/")[0];
         let docPhrenPath = ctx.phrenPath;
         try {
-          docPhrenPath = resolveStoreForProject(ctx, docProject).phrenPath;
+          docPhrenPath = resolveStoreForProject(ctx, docProject, "read").phrenPath;
         } catch { /* fall back to primary */ }
         const docRow = queryDocBySourceKey(db, docPhrenPath, doc);
         const snippet = docRow?.content ? docRow.content.slice(0, 200) : "";

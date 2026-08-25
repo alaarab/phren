@@ -97,9 +97,15 @@ describe("mcp-search: lookup-event recording", () => {
 
     const dir = path.join(tmp.path, "app");
     fs.mkdirSync(dir, { recursive: true });
+    // Date the finding as *today* so it stays inside the retention TTL window
+    // (default 120 days). A hard-coded absolute date silently rots: once it ages
+    // past the TTL, the trust filter strips the bullet body — leaving only the
+    // "# app Findings" header — so bestFindingNodeId can no longer resolve a
+    // finding node and the nodeId assertion below fails purely due to wall-clock.
+    const today = new Date().toISOString().slice(0, 10);
     writeFile(
       path.join(dir, "FINDINGS.md"),
-      "# app Findings\n\n## 2026-03-01\n\n- Redis caching uses a TTL of 300 seconds\n- Authentication uses JWT tokens\n",
+      `# app Findings\n\n## ${today}\n\n- Redis caching uses a TTL of 300 seconds\n- Authentication uses JWT tokens\n`,
     );
 
     db = await buildIndex(tmp.path);

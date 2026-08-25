@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "./test-helpers.js";
 import {
   readStoreRegistry,
+  readStoreRegistryDetailed,
   writeStoreRegistry,
   resolveAllStores,
   getPrimaryStore,
@@ -15,6 +16,8 @@ import {
   generateStoreId,
   readTeamBootstrap,
   storesFilePath,
+  getUnavailableStores,
+  describeUnavailableStore,
   type StoreRegistry,
   type StoreEntry,
 } from "./store-registry.js";
@@ -247,6 +250,86 @@ stores:
       const stores = resolveAllStores(phrenDir);
       expect(stores).toHaveLength(1); // just implicit primary
     });
+
+    it("marks each store with whether its path exists on this machine", () => {
+      const presentDir = path.join(tmp.path, "present");
+      fs.mkdirSync(presentDir, { recursive: true });
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "bbb22222", name: "present", path: presentDir, role: "team", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git" },
+        ],
+      });
+
+      const stores = resolveAllStores(phrenDir);
+      expect(stores.find((s) => s.name === "present")!.available).toBe(true);
+      expect(stores.find((s) => s.name === "absent")!.available).toBe(false);
+    });
+
+    it("still returns declared stores that are absent locally", () => {
+      // Filtering them out would be worse than useless: write routing could no
+      // longer tell "no store claims this" from "the claiming store is missing".
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git", projects: ["arc"] },
+        ],
+      });
+
+      const stores = resolveAllStores(phrenDir);
+      expect(stores).toHaveLength(2);
+      expect(stores.find((s) => s.name === "absent")!.projects).toEqual(["arc"]);
+    });
+  });
+
+  // ── availability helpers ─────────────────────────────────────────────────
+
+  describe("getUnavailableStores / describeUnavailableStore", () => {
+    it("lists only the stores that are missing locally", () => {
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [
+          { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git" },
+        ],
+      });
+
+      const missing = getUnavailableStores(phrenDir);
+      expect(missing).toHaveLength(1);
+      expect(missing[0].name).toBe("absent");
+    });
+
+    it("describes the store, its expected path, and the remedy", () => {
+      const store: StoreEntry = {
+        id: "ccc33333",
+        name: "work-shared",
+        path: "/nope/.phren-work-shared",
+        role: "team",
+        sync: "managed-git",
+        remote: "git@github.com:acme/shared.git",
+        available: false,
+      };
+      const detail = describeUnavailableStore(store);
+      expect(detail).toContain("work-shared");
+      expect(detail).toContain("/nope/.phren-work-shared");
+      expect(detail).toContain("git@github.com:acme/shared.git");
+    });
+  });
+
+  // ── availability must not leak into the shared file ───────────────────────
+
+  describe("writeStoreRegistry", () => {
+    it("never persists the computed `available` flag to stores.yaml", () => {
+      // stores.yaml is shared across machines via git; availability is local.
+      writeStoreRegistry(phrenDir, {
+        version: 1,
+        stores: [{ id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git", available: true }],
+      });
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).not.toContain("available");
+    });
   });
 
   // ── getPrimaryStore / getReadableStores / getNonPrimaryStores ────────────
@@ -388,6 +471,129 @@ stores:
 
     it("throws when no stores.yaml exists", () => {
       expect(() => removeStoreFromRegistry(phrenDir, "team")).toThrow(/No stores.yaml/);
+    });
+  });
+
+  // ── registry hardening ───────────────────────────────────────────────────
+
+  describe("malformed registries stay loud and are never rewritten", () => {
+    /** Two-store registry with one invalid role — the 2026-08-01 field bug. */
+    const oneBadRole = () => `version: 1
+stores:
+  - id: "aaa11111"
+    name: personal
+    path: "${phrenDir.replace(/\\/g, "/")}"
+    role: primary
+    sync: managed-git
+  - id: "bbb22222"
+    name: work
+    path: "${path.join(tmp.path, "work").replace(/\\/g, "/")}"
+    role: sidecar
+    sync: managed-git
+`;
+
+    it("skips only the invalid entry instead of discarding the whole registry", () => {
+      fs.writeFileSync(storesFilePath(phrenDir), oneBadRole());
+
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.registry).not.toBeNull();
+      expect(result.registry!.stores.map((s) => s.name)).toEqual(["personal"]);
+      expect(result.lossy).toBe(true);
+      expect(result.problems.join(" ")).toMatch(/"work".*valid role.*sidecar.*skipped/s);
+    });
+
+    it("reads role \"secondary\" as \"team\" with a warning, not as a broken entry", () => {
+      fs.writeFileSync(
+        storesFilePath(phrenDir),
+        oneBadRole().replace("role: sidecar", "role: secondary")
+      );
+
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.registry!.stores.map((s) => [s.name, s.role])).toEqual([
+        ["personal", "primary"],
+        ["work", "team"],
+      ]);
+      expect(result.lossy).toBe(false);
+      expect(result.problems.join(" ")).toMatch(/secondary.*reading it as "team"/);
+    });
+
+    it("readStoreRegistry warns on stderr instead of failing silently", () => {
+      fs.writeFileSync(storesFilePath(phrenDir), oneBadRole());
+      const warnings: string[] = [];
+      const spy = vi.spyOn(console, "warn").mockImplementation((msg: unknown) => {
+        warnings.push(String(msg));
+      });
+      try {
+        readStoreRegistry(phrenDir);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(warnings.join("\n")).toMatch(/stores\.yaml: store "work"/);
+    });
+
+    it("addStoreToRegistry refuses to bootstrap over a malformed stores.yaml", () => {
+      // The regression this guards: a lossy read used to look like "no
+      // registry", and store add would overwrite the user's file with a
+      // fresh single-store registry — destroying every other entry.
+      const original = oneBadRole();
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      expect(() =>
+        addStoreToRegistry(phrenDir, {
+          id: "ccc33333",
+          name: "another",
+          path: path.join(tmp.path, "another"),
+          role: "team",
+          sync: "managed-git",
+        })
+      ).toThrow(/could not be fully read.*refusing to rewrite/is);
+
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("addStoreToRegistry refuses when stores.yaml is unparsable YAML", () => {
+      const original = "not: valid: yaml: [";
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      expect(() =>
+        addStoreToRegistry(phrenDir, {
+          id: "ccc33333",
+          name: "another",
+          path: path.join(tmp.path, "another"),
+          role: "team",
+          sync: "managed-git",
+        })
+      ).toThrow(/refusing to rewrite/i);
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("removeStoreFromRegistry refuses to persist a lossy read", () => {
+      const original = oneBadRole();
+      fs.writeFileSync(storesFilePath(phrenDir), original);
+
+      // "personal" parsed fine — but writing the registry back would drop
+      // the skipped "work" entry, so the mutation must refuse.
+      expect(() => removeStoreFromRegistry(phrenDir, "personal")).toThrow(/refusing to rewrite/i);
+      expect(fs.readFileSync(storesFilePath(phrenDir), "utf8")).toBe(original);
+    });
+
+    it("a valid registry stays non-lossy and mutable", () => {
+      fs.writeFileSync(
+        storesFilePath(phrenDir),
+        oneBadRole().replace("role: sidecar", "role: team")
+      );
+      const result = readStoreRegistryDetailed(phrenDir);
+      expect(result.lossy).toBe(false);
+      expect(result.problems).toEqual([]);
+
+      addStoreToRegistry(phrenDir, {
+        id: "ccc33333",
+        name: "another",
+        path: path.join(tmp.path, "another"),
+        role: "readonly",
+        sync: "pull-only",
+      });
+      expect(readStoreRegistry(phrenDir)!.stores).toHaveLength(3);
     });
   });
 

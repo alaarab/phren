@@ -216,6 +216,26 @@ describe("detectConflicts", () => {
     const conflicts = detectConflicts("Never use Git for version control", existing);
     expect(conflicts.length).toBe(1);
   });
+
+  it("does not flag unrelated findings that merely share one incidental entity", () => {
+    // Regression: a git-workflow decision and a security decision both mention GitHub and
+    // have opposite polarity, but are about completely different topics. The bare
+    // shared-entity + polarity rule used to false-flag these as contradictions.
+    const existing = ["- [decision] GitHub branch protection on the auth gateway must never be disabled"];
+    const conflicts = detectConflicts(
+      "[decision] For GitHub pushes always commit direct to main and prefer the merge workflow",
+      existing,
+    );
+    expect(conflicts).toEqual([]);
+  });
+
+  it("still flags same-topic opposite-polarity conflicts even when both carry the same tag", () => {
+    // The shared [decision] tag must not, by itself, count as topical overlap — but genuine
+    // subject-matter overlap should still trip detection.
+    const existing = ["- [decision] Always use Docker for production deployments"];
+    const conflicts = detectConflicts("[decision] Never use Docker for production deployments", existing);
+    expect(conflicts.length).toBeGreaterThan(0);
+  });
 });
 
 // ── normalizeObservationTags ────────────────────────────────────────────────

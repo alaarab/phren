@@ -41,6 +41,31 @@ const CONVERSATIONAL_NOISE_RE = /^(ok|okay|yeah|yep|nah|nope|hi|hey|ss|bro|lol|l
 // Raw system/SQL error fragment signals — patterns that only appear in error output, never real task requests.
 // Intentionally does NOT include "line \d+" or "incorrect syntax" alone (too broad — they appear in dev prompts).
 const RAW_MESSAGE_SIGNALS_RE = /\b(msg \d+, level \d+|cannot insert the value null|insufficient result space|uniqueidentifier value to char|pgevision-prod|task-notification|tool-use-id|toolu_0[a-z0-9])\b/i;
+// Pasted terminal banners and web-page chrome. Observed verbatim as committed tasks: a whole
+// GitHub page starting "Skip to content ... Repository navigation Code Issues Pull requests",
+// and "Windows PowerShell Copyright (C) Microsoft Corporation". None of it is a request.
+const PASTED_CONTENT_RE = new RegExp([
+  // Web page chrome
+  "^\\s*skip to (?:main )?content\\b",
+  "\\brepository navigation\\b",
+  "\\bjump to (?:content|bottom)\\b",
+  "\\byou signed (?:in|out) with another tab\\b",
+  "\\bcode\\s+issues\\s+pull requests\\b",
+  // Terminal banners and prompts
+  "^\\s*windows powershell\\b",
+  "\\bcopyright \\(c\\) microsoft corporation\\b",
+  "\\bmicrosoft windows \\[version\\b",
+  "\\ball rights reserved\\b",
+  "\\bps [a-z]:\\\\",
+  "^[a-z]:\\\\[^\\n]*>",
+  "\\blast login: \\w{3} \\w{3}",
+  "npm ERR!",
+  "Traceback \\(most recent call last\\)",
+].join("|"), "i");
+// Chat filler markers. Unlike CONVERSATIONAL_NOISE_RE these match anywhere in the prompt,
+// because the observed echoes wrap filler around an incidental verb — "Its literally just the
+// start of the day LMAO" clears the substance floor on "start" but is not a task.
+const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ngl|smh|wtf|meh|yolo)\b/i;
 const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
 const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
 const GITHUB_URL_RE = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+(?:[?#][^\s]*)?/g;
@@ -142,6 +167,10 @@ function isActionablePrompt(prompt: string, intent: string): boolean {
   // Always reject conversational noise and raw system/SQL fragments regardless of intent.
   if (CONVERSATIONAL_NOISE_RE.test(normalized)) return false;
   if (RAW_MESSAGE_SIGNALS_RE.test(normalized)) return false;
+  // Task auto-capture writes the prompt verbatim onto a `Context:` line, so anything that is
+  // not a request becomes a permanent task. Pasted pages/terminals and chat filler never are.
+  if (PASTED_CONTENT_RE.test(normalized)) return false;
+  if (CONVERSATIONAL_FILLER_RE.test(normalized)) return false;
   // Substance floor — independent of intent / proactivity. Short utterances without
   // any actionable signal are conversational fragments, not tasks.
   if (!hasMinimumTaskSubstance(normalized)) return false;
