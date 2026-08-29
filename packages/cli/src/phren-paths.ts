@@ -207,7 +207,11 @@ export function findNearestPhrenPath(startDir: string = process.cwd()): string |
   let current = path.resolve(startDir);
   while (true) {
     const localCandidate = path.join(current, ".phren");
-    if (isPhrenRootCandidate(localCandidate)) return localCandidate;
+    // Only a manifest counts on the cwd walk. Loose install markers are
+    // enough for the user's own ~/.phren or an explicit PHREN_PATH, but a
+    // cloned repo could ship `.phren/global/` and become the store — with
+    // its `.env` loaded — just by being cd'd into.
+    if (hasRootManifest(localCandidate)) return localCandidate;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;

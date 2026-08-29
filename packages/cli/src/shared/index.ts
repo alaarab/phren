@@ -756,7 +756,7 @@ function endTopicBuildCache(): void {
 
 function readProjectTopicsForBuild(phrenPath: string, project: string): ReturnType<typeof readProjectTopics> {
   if (!_buildTopicCacheActive) return readProjectTopics(phrenPath, project);
-  const key = `${phrenPath} ${project}`;
+  const key = `${phrenPath}\u0000${project}`;
   const hit = _buildTopicCache.get(key);
   if (hit) return hit;
   const resolved = readProjectTopics(phrenPath, project);

@@ -128,7 +128,9 @@ async function main() {
       indexReady = false;
       db = await buildIndex(phrenPath, profile);
       indexReady = true;
-      try { oldDb?.close(); } catch (err: unknown) {
+      // buildIndex() hands back its cached handle inside the debounce
+      // window, so oldDb can be the very database we just installed.
+      try { if (oldDb && oldDb !== db) oldDb.close(); } catch (err: unknown) {
         logger.warn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
       }
     } catch (err) {

@@ -14,6 +14,7 @@
 
 import { execFileSync } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
@@ -23,7 +24,30 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 const CLI_PATH = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
+let sandboxHome: string | null = null;
+
+/**
+ * Point HOME (and USERPROFILE) at a throwaway directory for the whole run.
+ *
+ * `pool: "forks"` workers inherit this process's env, and on Linux/macOS
+ * `os.homedir()` reads $HOME too, so this covers every route the CLI uses to
+ * find the user's home. Without it, isolation depends on each test
+ * remembering to override HOME — and the ones that forgot (e.g. the web-ui
+ * readiness test) re-pointed the developer's real ~/.claude/CLAUDE.md and
+ * ~/.claude/skills/phren-* at temp dirs that were deleted seconds later.
+ */
+function sandboxHomeDir(): void {
+  sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "phren-test-home-"));
+  process.env.HOME = sandboxHome;
+  process.env.USERPROFILE = sandboxHome;
+}
+
+export async function teardown(): Promise<void> {
+  if (sandboxHome) fs.rmSync(sandboxHome, { recursive: true, force: true });
+}
+
 export async function setup(): Promise<void> {
+  sandboxHomeDir();
   if (fs.existsSync(CLI_PATH)) {
     // Dist already present — skip build. This is the common path when
     // `npm test` is used (pretest already built it) or during watch mode

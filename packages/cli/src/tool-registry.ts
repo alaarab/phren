@@ -14,6 +14,7 @@ const CATEGORY_BY_MODULE: Record<string, string> = {
   "search": "Search and browse",
   "tasks": "Task management",
   "finding": "Finding capture",
+  "notes": "Notes",
   "memory": "Memory quality",
   "data": "Data management",
   "graph": "Fragments and graph",
