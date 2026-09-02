@@ -293,7 +293,7 @@ export const REGISTRY: Command[] = [
   {
     name: "shell",
     topic: "core",
-    usage: "phren shell",
+    usage: "phren shell [--view <view>] [--project <name>] [--here]",
     summary: "Interactive memory shell",
     featured: true,
     run: async (args, ctx) => {

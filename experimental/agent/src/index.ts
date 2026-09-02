@@ -355,6 +355,22 @@ export async function runAgentCli(raw: string[]) {
     if (!isTTY) {
       session = await (await import("./repl.js")).startRepl(agentConfig);
     } else {
+      // The phren splash (mascot + wordmark reveal) before the TUI mounts.
+      // Cosmetic only: any failure is swallowed, and PHREN_INTRO=off skips it.
+      if (process.env.PHREN_INTRO !== "off") {
+        try {
+          const { playSplash } = await import("@phren/cli/shell/intro");
+          const model = (provider as { model?: string }).model;
+          await playSplash({
+            version: VERSION,
+            tagline: `agent · ${provider.name}${model ? ` · ${model}` : ""}`,
+            hint: "starting agent…",
+            reveal: true,
+            dwellMs: 600,
+            fullscreen: true,
+          });
+        } catch { /* best effort */ }
+      }
       // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
       const { AgentSpawner } = await import("./multi/spawner.js");
       const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");

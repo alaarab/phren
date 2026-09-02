@@ -12,6 +12,7 @@ export const TAB_ICONS: Record<string, string> = {
   Skills:        "◆",
   Hooks:         "⚡",
   Health:        "♡",
+  Graph:         "❖",
 };
 
 export interface UndoEntry {

@@ -311,8 +311,12 @@ export async function handleMemoryUi(args: string[]) {
   });
 }
 
-export async function handleShell(_args: string[], profile: string) {
-  await startShell(getPhrenPath(), profile);
+export async function handleShell(args: string[], profile: string) {
+  const phrenPath = getPhrenPath();
+  const { parseShellArgs, resolveShellStartup } = await import("../shell/startup.js");
+  const { startup, warnings } = resolveShellStartup(parseShellArgs(args), { phrenPath, profile });
+  if (warnings.length) startup.notice = warnings.join(" ");
+  await startShell(phrenPath, profile, startup);
 }
 
 export async function handleUpdate(args: string[]) {

@@ -148,11 +148,17 @@ export function resolvePreferredHomeDir(phrenPath: string): string {
     if (scoreAgentFootprint(resolvedUserProfile) > 0) return resolvedUserProfile;
   }
 
+  // An explicit HOME/USERPROFILE is authoritative. Only fall back to
+  // os.homedir() and the store's parent when neither is set — otherwise a
+  // caller that deliberately points HOME elsewhere (the test suite, a
+  // sandbox) loses the footprint contest to the developer's real home and
+  // we write symlinks into it.
   const candidates = [
     resolvedHome,
     resolvedUserProfile,
-    path.resolve(os.homedir()),
-    path.resolve(path.dirname(phrenPath)),
+    ...(resolvedHome || resolvedUserProfile
+      ? []
+      : [path.resolve(os.homedir()), path.resolve(path.dirname(phrenPath))]),
   ].filter((entry): entry is string => Boolean(entry && entry.trim()));
   const unique = [...new Set(candidates)];
 

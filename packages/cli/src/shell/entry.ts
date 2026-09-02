@@ -10,16 +10,14 @@ import {
   paintFrame,
   enterFullscreen,
   exitFullscreen,
-  shellStartupFrames,
-  composeStartupFrame,
-  fitFrame,
 } from "./render.js";
 import { KeyDecoder, ESC_FLUSH_MS } from "./keys.js";
-import { createPhrenAnimator } from "../phren-art.js";
+import { playSplash, type KeypressWaiter } from "./intro.js";
 import { errorMessage } from "../utils.js";
 import { computePhrenLiveStateToken } from "../shared.js";
 import { VERSION } from "../init/shared.js";
 import { loadShellState, saveShellState } from "./state-store.js";
+import type { ShellStartup } from "./startup.js";
 
 const LIVE_STATE_POLL_MS = 2000;
 
@@ -36,14 +34,6 @@ interface StartupIntroPlan {
   markSeen: boolean;
 }
 
-function renderIntroFrame(lines: string[]): void {
-  paintFrame(fitFrame(lines));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * The intro used to attach its own stdin listener while the shell's key handler
  * was already live, so the keypress that dismissed the splash was *also* fed to
@@ -51,7 +41,7 @@ function sleep(ms: number): Promise<void> {
  * animation frames raced the first dashboard repaint. Key delivery is now owned
  * by startShell, which hands the intro a one-shot waiter that consumes the key.
  */
-export type KeypressWaiter = () => Promise<void>;
+export type { KeypressWaiter } from "./intro.js";
 
 const noopWaiter: KeypressWaiter = () => Promise.resolve();
 
@@ -84,43 +74,17 @@ async function playStartupIntro(
 ): Promise<void> {
   if (!process.stdout.isTTY || plan.variant === "skip") return;
 
-  const frames = shellStartupFrames(VERSION);
-  const renderHint = plan.holdForKeypress
-    ? `${style.dim("Press any key to enter")}`
-    : `${style.dim("Loading shell…")}`;
-
-  if (plan.variant === "full") {
-    for (const frame of frames.slice(0, -1)) {
-      renderIntroFrame(frame.split("\n"));
-      await sleep(160);
-    }
-  }
-
-  // Start animated phren during loading
-  const animator = createPhrenAnimator({ facing: "right" });
-  animator.start();
-
-  function renderAnimatedFrame(hint?: string): void {
-    renderIntroFrame(composeStartupFrame(animator.getFrame(), VERSION, hint));
-  }
-
-  // Animate during dwell/loading period
-  if (plan.holdForKeypress) {
-    const animInterval = setInterval(() => renderAnimatedFrame(renderHint), 200);
-    renderAnimatedFrame(renderHint);
-    await waitForAnyKeypress();
-    clearInterval(animInterval);
-  } else if (plan.dwellMs > 0) {
-    const startTime = Date.now();
-    while (Date.now() - startTime < plan.dwellMs) {
-      renderAnimatedFrame(renderHint);
-      await sleep(200);
-    }
-  } else {
-    renderAnimatedFrame(renderHint);
-  }
-
-  animator.stop();
+  // The shell is already on the alternate screen; the splash paints in place.
+  // A full intro plays the wordmark reveal, a repeat launch opens on the
+  // finished wordmark, and either way the shimmer runs until dismissed.
+  await playSplash({
+    version: VERSION,
+    hint: plan.holdForKeypress ? "Press any key to enter" : "Loading shell…",
+    reveal: plan.variant === "full",
+    dwellMs: plan.dwellMs,
+    waitForKeypress: plan.holdForKeypress ? waitForAnyKeypress : undefined,
+    fullscreen: false,
+  });
 
   if (plan.markSeen) {
     markStartupIntroSeen(phrenPath);
@@ -172,8 +136,8 @@ export function startLiveStatePoller({
   };
 }
 
-export async function startShell(phrenPath: string, profile: string): Promise<void> {
-  const shell = new PhrenShell(phrenPath, profile);
+export async function startShell(phrenPath: string, profile: string, startup: ShellStartup = {}): Promise<void> {
+  const shell = new PhrenShell(phrenPath, profile, undefined, startup);
 
   if (!process.stdin.isTTY) {
     const { createInterface } = await import("readline");
@@ -221,6 +185,9 @@ export async function startShell(phrenPath: string, profile: string): Promise<vo
       painting = false;
     }
   };
+  // The graph view animates (layout settle, fly-to) and finishes builds off
+  // the key path; give the shell a way to repaint without a keypress.
+  shell.setRepaintHandler(() => { if (!exiting && !introActive) void repaint(); });
 
   let done!: () => void;
   const exitPromise = new Promise<void>((resolve) => { done = resolve; });

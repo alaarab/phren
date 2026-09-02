@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.45] - 2026-09-01
+
+### Added
+
+- **A knowledge-graph view in the shell.** `phren shell --view graph` (or `g`, or
+  `:graph`) draws the same graph as the web UI and VS Code viewer in the terminal:
+  a deterministic force layout on a braille canvas, coloured by topic and kind,
+  with a details pane beside it (a strip below it under 100 columns). Walk it with
+  the arrows, `1`–`9` to jump to a neighbour, `/` to search and fly to the best
+  hit, `f` to cycle filter presets, `[`/`]` to focus a project, `+`/`-`/`0` to
+  zoom and fit, `r` to re-lay out. The layout settles with an animation on open,
+  fly-to moves are eased, and the view rebuilds in the background when the store
+  changes, warm-starting from the previous positions. `PHREN_ICONS=nerd` swaps the
+  node glyphs for Nerd Font icons.
+- **Richer edges for the graph.** `buildGraph()` can now emit fragment↔fragment
+  co-mention edges and finding→finding `supersedes` / `contradicts` edges
+  (`includeFragmentEdges`, `includeLifecycleEdges`). Both are opt-in; the web
+  payload is unchanged.
+- **A shared graph model.** `src/graph-core/` holds the host-agnostic model logic
+  (payload types, palette, kind/health derivation, filters, ranking, search) that
+  the browser viewer, the VS Code webview and the terminal view now share.
+- **Splash text effects.** The shell wordmark is revealed with a decrypt scramble
+  that settles into the exact block letters, and a light beam shimmers across it
+  while the splash holds. The splash is exported as `@phren/cli/shell/intro`
+  (`playSplash`); `phren-agent -i` plays it before its TUI starts
+  (`PHREN_INTRO=off` skips it).
+- **Herdr plugin** in `integrations/herdr/`: a keybinding that opens
+  `phren shell --here` in a pane, plus `--view` / `--project` / `--here` deep
+  links on `phren shell`.
+
+### Changed
+
+- The shell's `/` key searches the graph while the Graph view is active and
+  filters lists everywhere else; the bottom bar now advertises `g graph`.
+
 ## [0.1.44] - 2026-08-24
 
 ### Fixed

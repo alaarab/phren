@@ -25,3 +25,10 @@ pnpm --filter @phren/agent lint
 Note: the test suite imports `@phren/cli` subpath exports that resolve to
 `packages/cli/dist/`, so a bare `pnpm --filter @phren/agent test` on a clean
 checkout fails until the CLI is built — prefer the turbo invocation.
+
+## Splash
+
+Interactive sessions (`phren-agent -i`, `--multi`, `--team`) open with the
+phren splash — mascot plus the wordmark text effect — using the CLI's
+`@phren/cli/shell/intro` export, with the provider and model in the tagline.
+Set `PHREN_INTRO=off` to skip it.

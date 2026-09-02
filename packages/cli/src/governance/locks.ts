@@ -46,7 +46,13 @@ function acquireFileLock(lockPath: string): void {
           }
           if (!ownerAlive) {
             try { fs.unlinkSync(lockPath); } catch { /* already gone */ }
+            continue;
           }
+          // Owner is alive and legitimately holding a long lock: back off
+          // like every other retry path, or this loop spins at 100% CPU
+          // and `maxWait` never fires.
+          sleep(pollInterval);
+          waited += pollInterval;
           continue;
         }
       } catch (statErr: unknown) {

@@ -5,6 +5,8 @@ The memory viewer renders your store as a 3D graph — projects as containment f
 - the **web UI** Graph tab (`phren web-ui`)
 - the **VS Code extension** webview (Phren Fragment Graph panel)
 
+The same graph is also drawn in the terminal by the interactive shell's Graph view (`phren shell --view graph`, or `g` inside the shell) — see [shell.md](shell.md#graph-g). The three hosts share one model layer, `packages/cli/src/graph-core/` (node kinds, health, filters, ranking, search), on top of the payload built by `buildGraph()`; only the renderers differ.
+
 Beyond navigating the graph itself, the viewer is a maintenance surface: find memories, review aging ones, and edit, merge, or prune them without leaving the view.
 
 ## Layout

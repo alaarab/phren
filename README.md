@@ -10,8 +10,10 @@
 </p>
 
 <p align="center">
-Persistent memory for AI agents. Findings, tasks, and patterns live in markdown files in a git repo you control. No database, no vendor lock-in. Works with Claude, Copilot, Cursor, and Codex.
+Persistent memory for AI agents. Findings, tasks, and patterns live in markdown files in a git repo you control. No database, no vendor lock-in. Works with Claude, Copilot, Cursor, and Codex — and you can browse the same store from a terminal shell, a 3D web graph, VS Code, an iOS app, or a Herdr pane.
 </p>
+
+<p align="center"><img src="docs/shell-graph-search.png" width="820" alt="phren shell, Graph view: the knowledge graph drawn in the terminal with a search lit up"></p>
 
 ---
 
@@ -49,10 +51,33 @@ One command. Sets up `~/.phren`, wires up MCP for your tools, installs hooks. Ne
 
 ---
 
+## Interfaces
+
+One store, six ways in. Every surface reads and writes the same markdown files, so nothing you do in one is invisible to the others.
+
+| Surface | Open it | What it is for |
+|---------|---------|----------------|
+| **Terminal shell** | `phren shell` (or just `phren`) | Full-screen dashboard: projects, tasks, findings, review queue, skills, hooks, health. Deep-link with `--view tasks --here`. |
+| **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. |
+| **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings/tasks/fragments inside, a contents pane to review, edit, merge, and prune. |
+| **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
+| **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |
+| **Herdr plugin** | `herdr plugin install alaarab/phren/integrations/herdr` | A keybinding that pops the shell over your Herdr layout for whatever project the pane is in. |
+
+<p align="center"><img src="docs/webui-graph.png" width="820" alt="phren web UI: the 3D memory viewer with a project focused and its contents pane open"></p>
+
+The shell opens with a short splash: the phren mascot beside the wordmark, which is revealed with a decrypt text effect on the first launch of a new version and shimmers while it waits for a key.
+
+<p align="center"><img src="docs/splash.gif" width="700" alt="phren splash: the wordmark decrypts into place"></p>
+
+There is also an **experimental coding agent**, `phren-agent`, in [`experimental/agent`](experimental/agent): a standalone binary (not published, not wired into `phren`) that starts every session already knowing the project's gotchas, tasks, and decisions. It opens with the same splash. See [docs/agent.md](docs/agent.md).
+
+---
+
 ## Key features
 
 ### Fragment graph
-Explore connections visually. Drag nodes to reorganize; graph auto-settles. Click a fragment to see every finding linked to it across all projects.
+Explore connections visually, in the browser or in the terminal. Drag nodes to reorganize in the web UI; the terminal layout is deterministic so the same store always draws the same map. Click a fragment to see every finding linked to it across all projects. The terminal graph also draws edges the browser does not: fragments co-mentioned by the same documents, and `supersedes` / `contradicts` links between findings.
 
 ### Finding lifecycle
 - **Supersede**: "Finding X is obsoleted by finding Y"
@@ -86,9 +111,17 @@ Optional: enable LLM-based duplicate detection and contradiction flagging on `ad
 ### Skills & hooks
 Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user prompt, tool use, and session events — wire phren into your own workflows.
 
+### Herdr plugin
+Working inside [Herdr](https://herdr.dev)? `herdr plugin install alaarab/phren/integrations/herdr` binds the dashboard to a key: tasks, findings, and the review queue for whatever project the pane is sitting in, popped over your layout and gone again when you close it. See [integrations/herdr](integrations/herdr).
+
+### iOS app
+[`apps/ios`](apps/ios) is a native SwiftUI app: sign in with GitHub, pick your store repo, and review what your agents learned from your phone — findings, daily notes, tasks, and the review queue, refreshed within seconds of a hook pushing a commit. Home Screen and Lock Screen widgets, and "Hey Siri, add a task to phren". No backend: the token stays in the Keychain and the app talks to GitHub directly.
+
 ---
 
 ## CLI quick reference
+
+`phren` has 59 registered commands: 40 you will use (setup, projects, core, skills, hooks, config, maintain, stores, team) and 19 internal ones that hooks and background jobs call. `phren --help` prints the cheat sheet; `phren help <command>` the details.
 
 ```bash
 phren                                   Interactive memory shell
@@ -100,7 +133,9 @@ phren session_start <project>           Start a session
 phren store list                        List personal + team stores
 phren team init <name> --remote <url>
 phren team join <url>                   Join a team store
-phren web-ui [--port 3499]              Launch the web UI
+phren shell --view tasks --here         Open the shell on this project's tasks
+phren shell --view graph                Walk the knowledge graph in the terminal
+phren web-ui [--port 3499]              Launch the web UI (3D graph, dashboard)
 phren doctor                            Health check & auto-fix
 ```
 
@@ -118,10 +153,14 @@ Each team store can be configured with per-project subscriptions so people only 
 
 ## Platforms
 
+Agents that write to the store:
+
 - **Claude Code** (VS Code, Web, Desktop) — MCP hooks + CLI
 - **Copilot** (VS Code, GitHub.com) — MCP hooks
 - **Cursor** (IDE) — MCP hooks + built-in skill system
 - **Codex** (Claude Agent SDK) — MCP tools + hooks
+
+Ways to read it: the terminal shell and graph, the web UI, the VS Code extension, the iOS app, and the Herdr plugin (see [Interfaces](#interfaces)).
 
 All use the same phren store. No vendor lock-in.
 
@@ -131,8 +170,11 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 tools, FTS5, hooks) |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 commands, 59 MCP tools, FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
+| [`apps/ios`](apps/ios) | phren for iOS: native SwiftUI app + widgets + Siri intents (not on npm; built with XcodeGen) |
+| [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
+| [`experimental/agent`](experimental/agent) | `phren-agent`, an experimental coding agent with phren memory (unpublished) |
 
 ---
 
