@@ -247,8 +247,7 @@
       <a href="#how" class="nav-link">How it works</a>
       <a href="#hooks" class="nav-link">Hooks</a>
       <a href="#why" class="nav-link">Why</a>
-      <a href="#demo" class="nav-link">Shell</a>
-      <a href="#web-ui" class="nav-link">Graph</a>
+      <a href="#surfaces" class="nav-link">Surfaces</a>
       <a href="#teams" class="nav-link">Teams</a>
       <a href="docs.html" class="nav-link">Docs</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
@@ -486,7 +485,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
           <div class="step-title">Browse it all</div>
-          <p class="step-desc">Interactive shell, web UI, and VS Code sidebar. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects.</p>
+          <p class="step-desc">Terminal shell and graph, web UI, VS Code sidebar, iOS app. Browse <span class="kw-finding">findings</span>, <span class="kw-fragment">fragments</span>, and the full <span class="kw-memory">knowledge</span> graph. Search across projects.</p>
         </div>
       </div>
     </div>
@@ -775,268 +774,169 @@
     </div>
   </section>
 
-  <!-- TERMINAL DEMO -->
-  <section class="demo-section" id="demo">
-    <div class="container">
-      <div class="demo-header reveal">
-        <div class="section-label">Phren's shell</div>
-        <h2 class="section-title">Access phren directly.</h2>
-        <p class="section-sub" style="margin-top:12px">Browse what phren knows. Check on <span class="kw-task">tasks</span>. Review the queue. Type <code style="font-size:14px;color:var(--copper-mid)">:</code> for the command palette.</p>
-      </div>
-      <div class="demo-terminal reveal">
-        <div class="terminal-bar">
-          <div class="terminal-dot terminal-dot-red"></div>
-          <div class="terminal-dot terminal-dot-yellow"></div>
-          <div class="terminal-dot terminal-dot-green"></div>
-          <span class="terminal-title">phren shell</span>
-        </div>
-        <div class="demo-terminal-body" id="demo-terminal-body"></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- WEB UI -->
-  <section class="web-ui-section" id="web-ui">
-    <div class="container">
-      <div class="web-ui-header reveal" style="text-align:left;max-width:100%;margin-bottom:32px">
-        <div class="section-label">Phren's brain map</div>
-        <h2 class="section-title">See everything phren holds.</h2>
-        <p class="section-sub" style="margin-top:12px;max-width:100%;text-align:left">Run <code style="font-size:14px;color:var(--copper-mid)">phren web-ui</code> to open a visual map of everything phren holds. <span class="kw-finding">Findings</span>, connections, quality scores, and what needs your attention.</p>
-      </div>
-      <div class="rui-mock reveal">
-        <div class="rui-mock-chrome">
-          <div class="rui-mock-dots">
-            <span class="rui-dot rui-dot-r"></span>
-            <span class="rui-dot rui-dot-y"></span>
-            <span class="rui-dot rui-dot-g"></span>
-          </div>
-          <div class="rui-mock-urlbar">localhost:3499 &nbsp;&middot;&nbsp; phren web-ui</div>
-        </div>
-        <div class="rui-mock-body">
-          <div class="rui-mock-sidebar">
-            <div class="rui-sb-hdr">Projects</div>
-            <div class="rui-sb-item rui-sb-item--on">
-              <span class="rui-sb-dot rui-sb-dot--1"></span>
-              <span class="rui-sb-name">web-project-1</span>
-              <span class="rui-sb-cnt">97</span>
-            </div>
-            <div class="rui-sb-item">
-              <span class="rui-sb-dot rui-sb-dot--2"></span>
-              <span class="rui-sb-name">api-service</span>
-              <span class="rui-sb-cnt">41</span>
-            </div>
-            <div class="rui-sb-item">
-              <span class="rui-sb-dot rui-sb-dot--3"></span>
-              <span class="rui-sb-name">mobile-app</span>
-              <span class="rui-sb-cnt">23</span>
-            </div>
-            <div class="rui-sb-item">
-              <span class="rui-sb-dot rui-sb-dot--4"></span>
-              <span class="rui-sb-name">art-project-1</span>
-              <span class="rui-sb-cnt">19</span>
-            </div>
-            <div class="rui-sb-item rui-sb-item--global">
-              <span class="rui-sb-dot rui-sb-dot--g"></span>
-              <span class="rui-sb-name">global</span>
-            </div>
-            <div class="rui-sb-divider"></div>
-            <div class="rui-sb-section">Views</div>
-            <div class="rui-sb-item rui-sb-item--view rui-sb-item--view-on">Graph</div>
-            <div class="rui-sb-item rui-sb-item--view">Queue</div>
-            <div class="rui-sb-item rui-sb-item--view">Task</div>
-          </div>
-          <div class="rui-mock-graph">
-            <svg id="rui-graph-svg" viewBox="0 0 710 480" xmlns="http://www.w3.org/2000/svg">
-
-              <!-- Project → finding edges -->
-              <!-- web-project-1 (blue) -->
-              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="62" y2="170"/>
-              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="168" y2="152"/>
-              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="85" y2="245"/>
-              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="175" y2="220"/>
-              <line class="rg-edge rg-edge-p1" x1="115" y1="90" x2="48" y2="112"/>
-              <!-- api-service (purple) -->
-              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="400" y2="145"/>
-              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="478" y2="130"/>
-              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="365" y2="125"/>
-              <line class="rg-edge rg-edge-p2" x1="430" y1="65" x2="495" y2="80"/>
-              <!-- mobile-app (teal) -->
-              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="618" y2="112"/>
-              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="685" y2="140"/>
-              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="668" y2="270"/>
-              <line class="rg-edge rg-edge-p3" x1="635" y1="185" x2="590" y2="280"/>
-              <!-- art-project-1 (green) -->
-              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="108" y2="318"/>
-              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="230" y2="340"/>
-              <line class="rg-edge rg-edge-p4" x1="175" y1="375" x2="155" y2="430"/>
-              <!-- global (copper dashed) -->
-              <line class="rg-edge rg-edge-pg" x1="530" y1="390" x2="468" y2="335"/>
-              <line class="rg-edge rg-edge-pg" x1="530" y1="390" x2="572" y2="340"/>
-
-              <!-- Finding → fragment edges (dashed copper) -->
-              <line class="rg-edge rg-edge-ent" x1="62" y1="170" x2="218" y2="195"/>
-              <line class="rg-edge rg-edge-ent" x1="168" y1="152" x2="218" y2="195"/>
-              <line class="rg-edge rg-edge-ent" x1="168" y1="152" x2="368" y2="230"/>
-              <line class="rg-edge rg-edge-ent" x1="175" y1="220" x2="310" y2="325"/>
-              <line class="rg-edge rg-edge-ent" x1="85" y1="245" x2="140" y2="295"/>
-              <line class="rg-edge rg-edge-ent" x1="400" y1="145" x2="475" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="478" y1="130" x2="475" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="365" y1="125" x2="368" y2="230"/>
-              <line class="rg-edge rg-edge-ent" x1="495" y1="80" x2="475" y2="178"/>
-              <line class="rg-edge rg-edge-ent" x1="618" y1="112" x2="560" y2="225"/>
-              <line class="rg-edge rg-edge-ent" x1="685" y1="140" x2="560" y2="225"/>
-              <line class="rg-edge rg-edge-ent" x1="668" y1="270" x2="140" y2="295"/>
-              <line class="rg-edge rg-edge-ent" x1="590" y1="280" x2="560" y2="225"/>
-              <line class="rg-edge rg-edge-ent" x1="108" y1="318" x2="140" y2="295"/>
-              <line class="rg-edge rg-edge-ent" x1="230" y1="340" x2="310" y2="325"/>
-              <line class="rg-edge rg-edge-ent" x1="468" y1="335" x2="310" y2="325"/>
-              <line class="rg-edge rg-edge-ent" x1="572" y1="340" x2="368" y2="230"/>
-
-              <!-- Cross-fragment links -->
-              <line class="rg-edge rg-edge-cross" x1="218" y1="195" x2="368" y2="230"/>
-              <line class="rg-edge rg-edge-cross" x1="368" y1="230" x2="310" y2="325"/>
-              <line class="rg-edge rg-edge-cross" x1="475" y1="178" x2="560" y2="225"/>
-              <line class="rg-edge rg-edge-cross" x1="140" y1="295" x2="310" y2="325"/>
-
-              <!-- Selected ring -->
-              <circle cx="168" cy="152" r="14" class="rg-selected-ring"/>
-
-              <!-- Fragment nodes (drawn before findings so findings sit on top) -->
-              <g transform="translate(218,195)">
-                <circle r="26" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">auth</text>
-              </g>
-              <g transform="translate(368,230)">
-                <circle r="24" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">build</text>
-              </g>
-              <g transform="translate(140,295)">
-                <circle r="20" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">React</text>
-              </g>
-              <g transform="translate(475,178)">
-                <circle r="22" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">API</text>
-              </g>
-              <g transform="translate(310,325)">
-                <circle r="20" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">TypeScript</text>
-              </g>
-              <g transform="translate(560,225)">
-                <circle r="19" class="rg-ent-circle"/>
-                <text class="rg-ent-label" dy="4">perf</text>
-              </g>
-
-              <!-- Finding nodes (small squares) -->
-              <!-- web-project-1 findings -->
-              <g transform="translate(62,170)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(168,152)"><rect x="-8" y="-8" width="16" height="16" rx="3" class="rg-finding-rect-sel"/></g>
-              <g transform="translate(85,245)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(175,220)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(48,112)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-              <!-- api-service findings -->
-              <g transform="translate(400,145)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(478,130)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(365,125)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(495,80)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-              <!-- mobile-app findings -->
-              <g transform="translate(618,112)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(685,140)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(668,270)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(590,280)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-              <!-- art-project-1 findings -->
-              <g transform="translate(108,318)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(230,340)"><rect x="-7" y="-7" width="14" height="14" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(155,430)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-              <!-- global findings -->
-              <g transform="translate(468,335)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-              <g transform="translate(572,340)"><rect x="-6" y="-6" width="12" height="12" rx="3" class="rg-finding-rect"/></g>
-
-              <!-- Project nodes (drawn last, on top) -->
-              <g transform="translate(115,90)">
-                <circle r="30" class="rg-proj-circle rg-proj-circle--1"/>
-                <text class="rg-proj-label" dy="-3">web-</text>
-                <text class="rg-proj-label" dy="9">project-1</text>
-              </g>
-              <g transform="translate(430,65)">
-                <circle r="26" class="rg-proj-circle rg-proj-circle--2"/>
-                <text class="rg-proj-label" dy="4">api-service</text>
-              </g>
-              <g transform="translate(635,185)">
-                <circle r="26" class="rg-proj-circle rg-proj-circle--3"/>
-                <text class="rg-proj-label" dy="-3">mobile-</text>
-                <text class="rg-proj-label" dy="9">app</text>
-              </g>
-              <g transform="translate(175,375)">
-                <circle r="22" class="rg-proj-circle rg-proj-circle--4"/>
-                <text class="rg-proj-label" dy="-3">art-</text>
-                <text class="rg-proj-label" dy="9">project-1</text>
-              </g>
-              <g transform="translate(530,390)">
-                <circle r="20" class="rg-proj-circle rg-proj-circle--g"/>
-                <text class="rg-proj-label" dy="4">global</text>
-              </g>
-            </svg>
-          </div>
-          <div class="rui-mock-detail">
-            <div class="rui-d-badge">pattern</div>
-            <div class="rui-d-text">Turbo family builds avoid false dist races</div>
-            <div class="rui-d-rule"></div>
-            <div class="rui-d-row"><span class="rui-d-key">project</span><span class="rui-d-val">web-project-1</span></div>
-            <div class="rui-d-row"><span class="rui-d-key">machine</span><span class="rui-d-val">dev-laptop</span></div>
-            <div class="rui-d-row"><span class="rui-d-key">created</span><span class="rui-d-val">2026-03-07</span></div>
-            <div class="rui-d-rule"></div>
-            <div class="rui-d-conf-label">confidence</div>
-            <div class="rui-d-conf-bar"><div class="rui-d-conf-fill" style="width:84%"></div></div>
-            <div class="rui-d-conf-val">84%</div>
-            <div class="rui-d-rule"></div>
-            <div class="rui-d-link-label">linked fragment</div>
-            <div class="rui-d-link-item">
-              <span class="rui-d-link-icon">◈</span>build
-            </div>
-            <div class="rui-d-link-label" style="margin-top:10px">linked task</div>
-            <div class="rui-d-link-item rui-d-link-item--bl">
-              <span class="rui-d-link-icon">▤</span>b4 <span class="dot-sep">·</span> Eliminate Angular dev-server linker gap
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- VS CODE EXTENSION -->
-  <section class="bento-section" id="vscode">
+  <!-- SURFACES: every way to look at the store, one tabbed explorer -->
+  <section class="surfaces-section" id="surfaces">
+    <span id="demo" class="surface-anchor" aria-hidden="true"></span>
+    <span id="web-ui" class="surface-anchor" aria-hidden="true"></span>
+    <span id="vscode" class="surface-anchor" aria-hidden="true"></span>
     <div class="container">
       <div class="bento-header reveal" style="text-align:center;">
-        <div class="section-label">VS Code extension</div>
-        <h2 class="section-title">Browse phren without leaving your editor.</h2>
-        <div style="margin:20px auto 0;max-width:640px;">
-          <img src="phren-graph-walk.gif" alt="Phren walking the knowledge graph" style="width:100%;border-radius:12px;border:1px solid var(--border);" loading="lazy"/>
-        </div>
-        <p class="section-sub" style="max-width:560px;margin:16px auto 0;"><span class="kw-memory">Projects</span>, <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span>, <span class="kw-fragment">fragments</span>, <span class="kw-skill">skills</span>, <span class="kw-hook">hooks</span>, <span class="kw-session">sessions</span>, and the interactive knowledge graph. Search, add, review, and push. All from the sidebar.</p>
+        <div class="section-label">Every surface, one store</div>
+        <h2 class="section-title">Look at what phren knows, wherever you are.</h2>
+        <p class="section-sub" style="max-width:600px;margin:16px auto 0;">Terminal, browser, editor, phone. Same markdown, same <span class="kw-finding">findings</span>, same <span class="kw-task">tasks</span>. Pick a way in.</p>
       </div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap;margin-top:32px;" class="reveal">
-        <div class="bento-card" style="padding:20px 24px;text-align:center;flex:1;min-width:200px;max-width:280px;">
-          <div style="font-size:24px;margin-bottom:8px;">&#9776;</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Activity bar tree</div>
-          <p style="font-size:12px;color:var(--text-muted);font-family:sans-serif;">Projects, findings, tasks, skills, hooks, sessions. All browsable.</p>
+
+      <div class="surfaces reveal">
+        <div class="surface-tabs" role="tablist" aria-label="phren surfaces">
+          <button class="surface-tab active" role="tab" data-surface="terminal" data-hash="demo"><span class="surface-tab-icon">◉</span>Terminal</button>
+          <button class="surface-tab" role="tab" data-surface="graph" data-hash="graph"><span class="surface-tab-icon">❖</span>Graph</button>
+          <button class="surface-tab" role="tab" data-surface="webui" data-hash="web-ui"><span class="surface-tab-icon">◈</span>Web UI</button>
+          <button class="surface-tab" role="tab" data-surface="vscode" data-hash="vscode"><span class="surface-tab-icon">▤</span>VS Code</button>
+          <button class="surface-tab" role="tab" data-surface="ios" data-hash="ios"><span class="surface-tab-icon">▮</span>iOS</button>
+          <button class="surface-tab" role="tab" data-surface="herdr" data-hash="herdr"><span class="surface-tab-icon">⚡</span>Herdr</button>
+          <button class="surface-tab" role="tab" data-surface="agent" data-hash="agent"><span class="surface-tab-icon">✦</span>Agent</button>
         </div>
-        <div class="bento-card" style="padding:20px 24px;text-align:center;flex:1;min-width:200px;max-width:280px;">
-          <div style="font-size:24px;margin-bottom:8px;">&#9670;</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Fragment graph</div>
-          <p style="font-size:12px;color:var(--text-muted);font-family:sans-serif;">Interactive webview. Click nodes, explore connections, edit findings in-graph.</p>
-        </div>
-        <div class="bento-card" style="padding:20px 24px;text-align:center;flex:1;min-width:200px;max-width:280px;">
-          <div style="font-size:24px;margin-bottom:8px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+
+        <!-- Terminal shell -->
+        <div class="surface-panel active" role="tabpanel" data-surface="terminal">
+          <div class="surface-media">
+            <div class="demo-terminal">
+              <div class="terminal-bar">
+                <div class="terminal-dot terminal-dot-red"></div>
+                <div class="terminal-dot terminal-dot-yellow"></div>
+                <div class="terminal-dot terminal-dot-green"></div>
+                <span class="terminal-title">phren shell</span>
+              </div>
+              <div class="demo-terminal-body" id="demo-terminal-body"></div>
+            </div>
           </div>
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Ctrl+Shift+K</div>
-          <p style="font-size:12px;color:var(--text-muted);font-family:sans-serif;">Search phren's knowledge base without leaving your editor.</p>
+          <div class="surface-copy">
+            <div class="surface-badge">In the terminal</div>
+            <h3>Access phren directly.</h3>
+            <p>Browse what phren knows. Check on <span class="kw-task">tasks</span>. Review the queue. Type <code>:</code> for the command palette. Deep-link a keybinding straight to a view.</p>
+            <div class="surface-cmd">phren shell --view tasks --here</div>
+            <img src="splash.gif" alt="phren splash: the wordmark decrypts into place" class="surface-inline-media" loading="lazy">
+            <p class="surface-note">Opens with a splash: the mascot beside the wordmark, revealed with a decrypt effect and a light beam.</p>
+            <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/shell.md">Shell guide →</a>
+          </div>
+        </div>
+
+        <!-- Terminal graph -->
+        <div class="surface-panel" role="tabpanel" data-surface="graph">
+          <div class="surface-media">
+            <img src="shell-graph-search.png" alt="phren shell Graph view: the knowledge graph drawn in the terminal, with a search for retry lit up and the RetryPolicy fragment selected" loading="lazy">
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge">In the terminal</div>
+            <h3>Walk the knowledge graph without leaving the shell.</h3>
+            <p>The same graph as the web viewer, drawn on a braille canvas. <span class="kw-memory">Projects</span> cluster, <span class="kw-finding">findings</span> take their topic colour, <span class="kw-fragment">fragments</span> bridge projects. The layout is deterministic, so the same store always draws the same map.</p>
+            <div class="surface-cmd">phren shell --view graph</div>
+            <div class="surface-keys">
+              <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span><span>walk to the connected node that way</span>
+              <span><kbd>1</kbd>–<kbd>9</kbd></span><span>jump to a numbered neighbour</span>
+              <span><kbd>/</kbd> <kbd>n</kbd></span><span>search, fly to the best hit, cycle hits</span>
+              <span><kbd>[</kbd> <kbd>]</kbd> <kbd>f</kbd></span><span>focus a project, cycle filter presets</span>
+            </div>
+            <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/shell.md#graph-g">Graph keys →</a>
+          </div>
+        </div>
+
+        <!-- Web UI -->
+        <div class="surface-panel" role="tabpanel" data-surface="webui">
+          <div class="surface-media">
+            <img src="webui-graph.png" alt="phren web UI, Graph tab: projects as wireframe orbs with findings inside, the hub project focused, and the contents pane listing its findings" loading="lazy">
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge">In the browser</div>
+            <h3>See everything phren holds.</h3>
+            <p>Run <code>phren web-ui</code> for the 3D map: projects as containment fields, <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span> and <span class="kw-fragment">fragments</span> inside them, quality scores, and what needs your attention. Review, edit, merge and prune from the contents pane.</p>
+            <div class="surface-cmd">phren web-ui</div>
+            <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/graph-viewer.md">Memory viewer guide →</a>
+          </div>
+        </div>
+
+        <!-- VS Code -->
+        <div class="surface-panel" role="tabpanel" data-surface="vscode">
+          <div class="surface-media">
+            <img src="phren-graph-walk.gif" alt="Phren walking the knowledge graph in the VS Code webview" loading="lazy">
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge">In your editor</div>
+            <h3>Browse phren without leaving VS Code.</h3>
+            <p><span class="kw-memory">Projects</span>, <span class="kw-finding">findings</span>, <span class="kw-task">tasks</span>, <span class="kw-fragment">fragments</span>, <span class="kw-skill">skills</span>, <span class="kw-hook">hooks</span> and <span class="kw-session">sessions</span> in the activity bar, the same interactive graph as a webview, and <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> to search. Add, review and push from the sidebar.</p>
+            <div class="surface-cmd">ext install phren-vscode</div>
+            <a class="surface-link" href="https://github.com/alaarab/phren/tree/main/packages/vscode">Extension →</a>
+          </div>
+        </div>
+
+        <!-- iOS -->
+        <div class="surface-panel" role="tabpanel" data-surface="ios">
+          <div class="surface-media surface-media--center">
+            <div class="phone-mock" aria-label="phren for iOS, review queue">
+              <div class="phone-notch"></div>
+              <div class="phone-screen">
+                <div class="phone-topbar"><span class="phone-title">Review</span><span class="phone-live"><span class="phone-live-dot"></span>live</span></div>
+                <div class="phone-store">alaarab/phren-store · main</div>
+                <div class="phone-item">
+                  <div class="phone-item-tag">pattern · web-app</div>
+                  <div class="phone-item-text">Route handlers return typed Result objects so the RateLimiter middleware can short-circuit cleanly</div>
+                  <div class="phone-item-actions"><span class="phone-btn phone-btn-ok">Approve</span><span class="phone-btn">Edit</span><span class="phone-btn phone-btn-no">Reject</span></div>
+                </div>
+                <div class="phone-item">
+                  <div class="phone-item-tag">pitfall · api-service</div>
+                  <div class="phone-item-text">Pino redaction paths must list nested headers explicitly or bearer tokens leak into logs</div>
+                  <div class="phone-item-actions"><span class="phone-btn phone-btn-ok">Approve</span><span class="phone-btn">Edit</span><span class="phone-btn phone-btn-no">Reject</span></div>
+                </div>
+                <div class="phone-item phone-item--dim">
+                  <div class="phone-item-tag">decision · mobile-app</div>
+                  <div class="phone-item-text">Offline queue persists to SQLite and replays through the same RetryPolicy</div>
+                </div>
+                <div class="phone-tabs"><span>Projects</span><span class="on">Review</span><span>Tasks</span><span>Search</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge">On your phone</div>
+            <h3>Review what your agents learned, from anywhere.</h3>
+            <p>A native SwiftUI app. Sign in with GitHub, pick your store repo, and the <span class="kw-finding">findings</span>, notes, <span class="kw-task">tasks</span> and review queue appear within seconds of a hook pushing a commit. Approve, edit, or throw out what is wrong. Widgets for the Home and Lock Screen, and “Hey Siri, add a task to phren”.</p>
+            <p class="surface-note">Serverless: the app talks to the GitHub REST API only, and the token never leaves the Keychain.</p>
+            <a class="surface-link" href="https://github.com/alaarab/phren/tree/main/apps/ios">phren for iOS →</a>
+          </div>
+        </div>
+
+        <!-- Herdr -->
+        <div class="surface-panel" role="tabpanel" data-surface="herdr">
+          <div class="surface-media">
+            <div class="pane-mock">
+              <div class="pane-mock-bar"><span>herdr</span><span class="pane-mock-key">⌘⇧P → phren</span></div>
+              <img src="shell-tasks.png" alt="phren shell popped over a Herdr layout, showing this project's tasks" loading="lazy">
+            </div>
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge">In your workspace manager</div>
+            <h3>One key. This project's phren.</h3>
+            <p>The Herdr plugin binds the shell to a keybinding: <span class="kw-task">tasks</span>, <span class="kw-finding">findings</span> and the review queue for whatever project the pane is sitting in, popped over your layout and gone again when you close it.</p>
+            <div class="surface-cmd">herdr plugin install alaarab/phren/integrations/herdr</div>
+            <a class="surface-link" href="https://github.com/alaarab/phren/tree/main/integrations/herdr">Herdr plugin →</a>
+          </div>
+        </div>
+
+        <!-- Agent -->
+        <div class="surface-panel" role="tabpanel" data-surface="agent">
+          <div class="surface-media">
+            <img src="splash.gif" alt="phren-agent opening with the phren splash" loading="lazy">
+          </div>
+          <div class="surface-copy">
+            <div class="surface-badge surface-badge--warn">Experimental</div>
+            <h3>An agent that starts every session already knowing.</h3>
+            <p><code>phren-agent</code> is a coding agent with phren as its memory: it opens with the project's gotchas, active <span class="kw-task">tasks</span> and past decisions loaded, writes new <span class="kw-finding">findings</span> as it works, and triages the review queue with you. It lives in the monorepo, is not on npm, and is maintained at a lower bar than the CLI.</p>
+            <div class="surface-cmd">phren-agent -i</div>
+            <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/agent.md">Agent guide →</a>
+          </div>
         </div>
       </div>
     </div>
   </section>
-
 
   <!-- TEAM STORES -->
   <section class="bento-section" id="teams">
@@ -1244,7 +1144,7 @@
       <span class="dot-sep">&#9829;</span>
       <span>made with love by <a href="https://github.com/alaarab" style="color:var(--text-muted);text-decoration:none;">@alaarab</a> &amp; claude</span>
       <span class="dot-sep">•</span>
-      <span style="opacity:0.5;font-size:11px">v0.1.34</span>
+      <span style="opacity:0.5;font-size:11px">v0.1.45</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>
@@ -1257,9 +1157,7 @@
       <span class="dot-sep">•</span>
       <a href="#why">Why</a>
       <span class="dot-sep">•</span>
-      <a href="#demo">Shell</a>
-      <span class="dot-sep">•</span>
-      <a href="#web-ui">Graph</a>
+      <a href="#surfaces">Surfaces</a>
       <span class="dot-sep">•</span>
       <a href="#teams">Teams</a>
       <span class="dot-sep">•</span>

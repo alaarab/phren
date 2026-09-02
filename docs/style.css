@@ -2297,3 +2297,119 @@ a:focus-visible, button:focus-visible {
   }
   .docs-content { padding: 24px 16px; }
 }
+
+/* ─── Surfaces explorer: one tabbed section for every way to look at the store ─── */
+.surfaces-section { padding: 96px 0; position: relative; }
+.surface-anchor { position: absolute; top: -72px; }
+.surfaces {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-1);
+  overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+}
+.surface-tabs {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.surface-tabs::-webkit-scrollbar { display: none; }
+.surface-tab {
+  flex: 1 0 auto;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 18px;
+  background: transparent; border: none; border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.surface-tab:last-child { border-right: none; }
+.surface-tab:hover { color: var(--text); background: rgba(58, 123, 174, 0.05); }
+.surface-tab.active { color: var(--text); background: rgba(58, 123, 174, 0.08); box-shadow: inset 0 -2px 0 var(--indigo); }
+.surface-tab-icon { font-family: 'SF Mono', 'Fira Code', monospace; color: var(--indigo); font-size: 13px; }
+.surface-panel {
+  display: none;
+  padding: 28px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.85fr);
+  gap: 32px;
+  align-items: center;
+  animation: fadeIn 0.25s ease;
+}
+.surface-panel.active { display: grid; }
+.surface-panel--wide { grid-template-columns: 1fr; }
+.surface-panel--wide .surface-copy { max-width: 720px; }
+.surface-media { min-width: 0; }
+.surface-media > img, .pane-mock img {
+  display: block; width: 100%;
+  border-radius: 12px; border: 1px solid var(--border);
+}
+.surface-media--center { display: flex; justify-content: center; }
+.surface-media .demo-terminal { max-width: none; }
+.surface-copy h3 { font-size: 22px; line-height: 1.25; letter-spacing: -0.02em; margin: 0 0 10px; color: var(--text); }
+.surface-copy p { color: var(--text-muted); font-size: 14px; line-height: 1.65; margin: 0 0 12px; }
+.surface-copy p code { font-size: 13px; color: var(--copper-mid); }
+.surface-note { font-size: 12.5px !important; color: var(--text-dim) !important; }
+.surface-badge {
+  display: inline-block; margin-bottom: 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--indigo); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
+}
+.surface-badge--warn { color: #ffd166; }
+.surface-cmd {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 13px;
+  color: var(--indigo); background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+  margin: 8px 0 14px; overflow-x: auto; white-space: nowrap;
+}
+.surface-keys {
+  display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; align-items: center;
+  font-size: 12.5px; color: var(--text-muted); margin: 0 0 14px;
+}
+.surface-keys kbd, .surface-copy kbd {
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11.5px; color: var(--text);
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; margin-right: 2px;
+}
+.surface-inline-media { display: block; width: 100%; border-radius: 10px; border: 1px solid var(--border); margin: 6px 0 8px; }
+.surface-link { color: var(--indigo); font-size: 13px; text-decoration: none; }
+.surface-link:hover { text-decoration: underline; }
+@media (max-width: 880px) {
+  .surface-panel.active { grid-template-columns: 1fr; }
+  .surface-panel { padding: 20px; }
+}
+
+/* Live demo: the Graph scene shows a real capture of the terminal graph */
+.demo-shell-graph { display: block; width: 100%; max-height: 268px; object-fit: cover; object-position: left top; border-radius: 6px; }
+
+/* Phone mock for the iOS tab */
+.phone-mock {
+  width: 262px; border-radius: 38px; border: 6px solid #1a1a36; background: #0a0a1c;
+  padding: 12px 10px 14px; box-shadow: 0 24px 60px rgba(0,0,0,0.5); position: relative;
+  font-family: -apple-system, 'SF Pro Text', 'Inter', sans-serif;
+}
+.phone-notch { width: 96px; height: 22px; border-radius: 12px; background: #1a1a36; margin: 0 auto 10px; }
+.phone-screen { display: flex; flex-direction: column; gap: 8px; }
+.phone-topbar { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; }
+.phone-title { font-size: 20px; font-weight: 700; color: var(--text); }
+.phone-live { font-size: 11px; color: #3ae374; display: inline-flex; align-items: center; gap: 5px; }
+.phone-live-dot { width: 7px; height: 7px; border-radius: 50%; background: #3ae374; box-shadow: 0 0 8px #3ae374; animation: phone-pulse 1.6s ease-in-out infinite; }
+@keyframes phone-pulse { 50% { opacity: 0.4; } }
+.phone-store { font-size: 11px; color: var(--text-dim); padding: 0 4px 2px; }
+.phone-item { background: #12122a; border: 1px solid var(--border-subtle); border-radius: 12px; padding: 10px 11px; }
+.phone-item--dim { opacity: 0.55; }
+.phone-item-tag { font-size: 10.5px; color: var(--indigo); letter-spacing: 0.02em; margin-bottom: 4px; }
+.phone-item-text { font-size: 12px; line-height: 1.4; color: var(--text); }
+.phone-item-actions { display: flex; gap: 6px; margin-top: 8px; }
+.phone-btn { font-size: 10.5px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); }
+.phone-btn-ok { color: #3ae374; border-color: rgba(58,227,116,0.4); }
+.phone-btn-no { color: #ff5470; border-color: rgba(255,84,112,0.4); }
+.phone-tabs { display: flex; justify-content: space-around; font-size: 10.5px; color: var(--text-dim); padding: 8px 0 0; border-top: 1px solid var(--border-subtle); margin-top: 4px; }
+.phone-tabs .on { color: var(--indigo); }
+
+/* Pane mock for the Herdr tab */
+.pane-mock { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg-2); }
+.pane-mock-bar { display: flex; justify-content: space-between; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11.5px; color: var(--text-muted); padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.pane-mock-key { color: var(--indigo); }
+.pane-mock img { border: none; border-radius: 0; }

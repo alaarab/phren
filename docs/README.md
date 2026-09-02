@@ -21,7 +21,10 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/governance.md`: Governance model, review flows, and access controls.
 - `docs/ide-setup.md`: IDE and editor integration setup notes.
 - `docs/performance.md`: Retrieval and indexing performance notes.
-- `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands.
+- `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands, the terminal Graph view, the splash.
 - `docs/graph-viewer.md`: The 3D memory viewer (web UI Graph tab and VS Code webview): navigation, contents pane, review mode, bulk actions.
+- `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
+- `apps/ios/README.md`: phren for iOS (SwiftUI app, widgets, Siri intents) and its App Store material.
+- Screenshots used by the site and README: `shell-*.png` (terminal), `webui-*.png` (web UI), `splash.gif`, `phren-graph-walk.gif` (VS Code).
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).
 - `docs/faq.md`: Common setup and workflow questions.
