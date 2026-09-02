@@ -50,6 +50,8 @@ import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "..
 import { getScopedSkills } from "../skill/registry.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import type { GraphController } from "./graph/controller.js";
+import { renderGraphView } from "./graph/graph-view.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -59,6 +61,8 @@ export interface ViewContext {
   currentCursor: () => number;
   currentScroll: () => number;
   setScroll: (n: number) => void;
+  /** The knowledge-graph view's controller (created on first use). Absent in hosts that only render menus. */
+  graph?: () => GraphController;
 }
 
 /** Resolve which store (primary or team) contains a project */
@@ -79,6 +83,11 @@ function renderTabBar(state: ShellState): string {
 
   if (state.view === "Health") {
     const label = `${TAB_ICONS.Health} Health`;
+    return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
+  }
+
+  if (state.view === "Graph") {
+    const label = `${TAB_ICONS.Graph} Graph`;
     return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
   }
 
@@ -124,6 +133,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
       add: "add task",
       "learn-add": "add finding",
       "skill-add": "new skill name",
+      "graph-search": "search graph",
     };
     const label = labels[inputCtx] || inputCtx;
     return `${sep}\n  ${style.boldCyan(label + " ›")} ${inputBuf}${style.cyan("█")}`;
@@ -137,16 +147,21 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Skills: [`${k("a")} ${d("add")}`, `${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
     Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("f")} ${d("filter")}`, `${k("[ ]")} ${d("project")}`, `${k("esc")} ${d("back")}`],
   };
 
   const extra = viewHints[state.view] ?? [];
-  const isSubView = state.view !== "Projects" && state.view !== "Health";
+  const isSubView = state.view !== "Projects" && state.view !== "Health" && state.view !== "Graph";
   const nav = isSubView
     ? [`${k("←→")} ${d("tabs")}`, `${k("↑↓")} ${d("move")}`, `${k("esc")} ${d("back")}`]
-    : state.view === "Health"
+    : state.view === "Health" || state.view === "Graph"
       ? []
       : [`${k("↑↓")} ${d("move")}`];
-  const tail = [`${k("h")} ${d("health")}`, `${k("/")} ${d("filter")}`, `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`];
+  const tail = [
+    state.view === "Graph" ? `${k("h")} ${d("health")}` : `${k("g")} ${d("graph")}`,
+    `${k("/")} ${d(state.view === "Graph" ? "search" : "filter")}`,
+    `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`,
+  ];
 
   const hints = [...nav, ...extra, ...tail];
   return `${sep}\n${wrapSegments(hints, cols, {
@@ -935,6 +950,13 @@ export async function renderShell(
         const result = renderHealthView(ctx.phrenPath, doctor, cursor, height, ctx.currentScroll(), ctx.setScroll);
         contentLines = result.lines;
         setHealthLineCount(result.lineCount);
+        break;
+      }
+      case "Graph": {
+        if (!ctx.graph) { contentLines = ["  The graph view needs the interactive shell — run `phren shell`."]; break; }
+        const controller = ctx.graph();
+        await controller.ensureData();
+        contentLines = renderGraphView(controller, renderWidth(), height);
         break;
       }
       default:

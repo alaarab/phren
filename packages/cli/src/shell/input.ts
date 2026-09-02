@@ -51,6 +51,7 @@ import {
 } from "./palette.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import type { GraphController } from "./graph/controller.js";
 
 /** Interface for the shell methods that executePalette needs */
 interface PaletteHost {
@@ -80,6 +81,8 @@ export interface NavigationHost extends PaletteHost {
   prevHealthView: ShellView | undefined;
   filter: string | undefined;
   setFilter(value: string): void;
+  /** The knowledge-graph view's controller (created on first use). */
+  graph(): GraphController;
 }
 
 function taskFileForProject(phrenPath: string, project: string): string {
@@ -111,6 +114,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     host.setMessage(`  ${TAB_ICONS.Health} Health`);
     return;
   }
+  if (command === "graph" || command === "map") { host.setView("Graph"); host.setMessage(`  ${TAB_ICONS.Graph} Graph`); return; }
 
   if (command === "open") {
     const project = parts[1];
@@ -469,7 +473,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health",
+    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health", "graph",
     "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
     "work next", "tidy", "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
     "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
@@ -486,7 +490,7 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, phrenPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health",
+    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health", ":graph",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":machine map",
@@ -581,6 +585,9 @@ export function getListItems(
     }
     case "Health":
       return Array.from({ length: Math.max(1, healthLineCount) }, (_, i) => ({ id: String(i) }));
+    case "Graph":
+      // The graph manages its own selection; the list cursor has nothing to walk.
+      return [];
     default:
       return [];
   }
@@ -725,6 +732,7 @@ export function applyViewShortcut(host: NavigationHost, key: string): boolean {
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
   if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
   if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
+  if (key === "g") { host.setView("Graph"); host.setMessage(`  ${TAB_ICONS.Graph} Graph  ${style.dim("↑↓←→ walk · / search · esc back")}`); return true; }
   return false;
 }
 
@@ -734,6 +742,12 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
   // Terminals in application-cursor mode send SS3 (ESC O A) instead of CSI
   // (ESC [ A) for the arrow keys; normalise so both spellings navigate.
   const key = /^\x1bO[A-D]$/.test(rawKey) ? `\x1b[${rawKey[2]}` : rawKey;
+  // The graph view owns arrows, Enter, /, Esc-layering and its own letters;
+  // anything it declines (q, :, ?, view shortcuts, a final Esc) falls through.
+  if (host.state.view === "Graph") {
+    const handled = host.graph().handleKey(key, host);
+    if (handled !== undefined) return handled;
+  }
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
   if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }
@@ -771,14 +785,14 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
 function nextTab(host: NavigationHost): void {
-  if (host.state.view === "Projects" || host.state.view === "Health") return;
+  if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
   const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
   const next = SUB_VIEWS[(idx + 1) % SUB_VIEWS.length];
   if (next) { host.setView(next); host.setMessage(`  ${TAB_ICONS[next]} ${next}`); }
 }
 
 function prevTab(host: NavigationHost): void {
-  if (host.state.view === "Projects" || host.state.view === "Health") return;
+  if (host.state.view === "Projects" || host.state.view === "Health" || host.state.view === "Graph") return;
   const idx = SUB_VIEWS.indexOf(host.state.view as typeof SUB_VIEWS[number]);
   const prev = SUB_VIEWS[(idx - 1 + SUB_VIEWS.length) % SUB_VIEWS.length];
   if (prev) { host.setView(prev); host.setMessage(`  ${TAB_ICONS[prev]} ${prev}`); }

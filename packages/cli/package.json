@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
@@ -84,6 +84,10 @@
     "./shell/render-api": {
       "types": "./dist/shell/render-api.d.ts",
       "default": "./dist/shell/render-api.js"
+    },
+    "./shell/intro": {
+      "types": "./dist/shell/intro.d.ts",
+      "default": "./dist/shell/intro.js"
     },
     "./phren-art": {
       "types": "./dist/phren-art.d.ts",

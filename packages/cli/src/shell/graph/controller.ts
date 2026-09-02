@@ -1,0 +1,640 @@
+/**
+ * State + interaction for the terminal graph view.
+ *
+ * The controller is the terminal-side analogue of the browser's
+ * `browser/graph/state.ts` + `interactions.ts`: it owns the payload built by
+ * `buildGraph`, the normalized model from `graph-core`, the force layout, a 2D
+ * camera, selection/search/focus, and the key map. Rendering lives in
+ * `graph-view.ts`; this module never writes to the terminal.
+ */
+
+import { computePhrenLiveStateToken } from "../../phren-paths.js";
+import { buildGraph } from "../../ui/data.js";
+import {
+  StoreColorAssigner,
+  bestSearchMatch,
+  buildFullAdjacency,
+  buildVisibleData,
+  nodeDetail,
+  nodeRank,
+  normalizeNode,
+  recomputeSearchMatches,
+} from "../../graph-core/model.js";
+import type { GraphFilters, GraphModel, VisibleData } from "../../graph-core/model.js";
+import type { GraphPayload, NodeDetail, NodeKind, RawLink, RuntimeNode } from "../../graph-core/types.js";
+import { errorMessage } from "../../utils.js";
+import { logger } from "../../logger.js";
+import { style } from "../render.js";
+import { ForceSim, bounds, type LayoutNode, type Point } from "./layout.js";
+
+/** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
+export const TUI_NODE_LIMIT = 350;
+
+export type GraphStatus = "idle" | "loading" | "ready" | "empty" | "error";
+
+export interface FilterPreset {
+  name: string;
+  types: Partial<Record<NodeKind, boolean>>;
+  health: string;
+}
+
+const ALL_TYPES: Partial<Record<NodeKind, boolean>> = { project: true, finding: true, task: true, entity: true, reference: true };
+
+export const FILTER_PRESETS: FilterPreset[] = [
+  { name: "all", types: ALL_TYPES, health: "all" },
+  { name: "findings", types: { project: true, finding: true }, health: "all" },
+  { name: "tasks", types: { project: true, task: true }, health: "all" },
+  { name: "fragments", types: { project: true, entity: true, reference: true }, health: "all" },
+  { name: "aging", types: ALL_TYPES, health: "aging" },
+];
+
+export interface Camera {
+  /** World coordinates at the centre of the viewport. */
+  cx: number;
+  cy: number;
+  /** Braille dots per world unit. */
+  scale: number;
+}
+
+export interface SearchState {
+  query: string;
+  matchIds: Set<string>;
+  results: RuntimeNode[];
+  /** Cursor into results; -1 when nothing is active. */
+  index: number;
+}
+
+/** What the controller needs from the shell when a key lands. */
+export interface GraphKeyHost {
+  setMessage(msg: string): void;
+  startInput(ctx: string, initial: string): void;
+}
+
+/** Injected so tests can feed a fixture instead of scanning a store. */
+export type GraphBuilder = (phrenPath: string, profile: string) => Promise<GraphPayload>;
+
+export interface GraphControllerOptions {
+  builder?: GraphBuilder;
+  tokenOf?: (phrenPath: string) => string;
+  /** Animation frame period; the tests shrink it. */
+  frameMs?: number;
+}
+
+const DIRECTIONS: Record<string, Point> = {
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+};
+
+function normalizeArrow(rawKey: string): string {
+  return /^\x1bO[A-D]$/.test(rawKey) ? `\x1b[${rawKey[2]}` : rawKey;
+}
+
+const ARROW_DIRECTION: Record<string, keyof typeof DIRECTIONS> = {
+  "\x1b[A": "up",
+  "\x1b[B": "down",
+  "\x1b[D": "left",
+  "\x1b[C": "right",
+};
+
+/** Shift+arrow in the CSI 1;2 form most terminals emit. */
+const SHIFT_ARROW_DIRECTION: Record<string, keyof typeof DIRECTIONS> = {
+  "\x1b[1;2A": "up",
+  "\x1b[1;2B": "down",
+  "\x1b[1;2D": "left",
+  "\x1b[1;2C": "right",
+};
+
+const PAN_LETTER_DIRECTION: Record<string, keyof typeof DIRECTIONS> = { K: "up", J: "down", H: "left", L: "right" };
+
+export class GraphController {
+  status: GraphStatus = "idle";
+  errorText = "";
+  /** A rebuild is running while the previous picture stays on screen. */
+  get refreshing(): boolean { return this.building !== null && this.payload !== null; }
+
+  payload: GraphPayload | null = null;
+  model: GraphModel = { rawNodes: [], rawLinks: [], nodeById: new Map(), fullAdjacency: new Map(), visibleAdjacency: new Map(), scores: {} };
+  filters: GraphFilters = {
+    filterTypes: { ...ALL_TYPES },
+    filterTopics: {},
+    filterHealth: "all",
+    filterProject: "all",
+    filterStore: "all",
+    searchQuery: "",
+    nodeLimit: TUI_NODE_LIMIT,
+  };
+  visible: VisibleData = { nodes: [], links: [], visibleAdjacency: new Map() };
+  /** Project nodes in display order for `[`/`]`. */
+  projects: RuntimeNode[] = [];
+  presetIndex = 0;
+  selectedId: string | null = null;
+  search: SearchState = { query: "", matchIds: new Set(), results: [], index: -1 };
+  camera: Camera = { cx: 0, cy: 0, scale: 2 };
+
+  private sim: ForceSim | null = null;
+  private lastPositions: Map<string, Point> = new Map();
+  private viewport = { width: 160, height: 80 };
+  private dataToken = "";
+  private building: Promise<void> | null = null;
+  private repaintHook: (() => void) | null = null;
+  private timer: NodeJS.Timeout | null = null;
+  private cameraTarget: Point | null = null;
+  /** Re-frame once the intro settle finishes so the whole map is in view. */
+  private fitOnSettle = false;
+  /** Set by pan/zoom; until then a resize re-fits the whole map. */
+  private userMoved = false;
+  private readonly builder: GraphBuilder;
+  private readonly tokenOf: (phrenPath: string) => string;
+  private readonly frameMs: number;
+
+  constructor(readonly phrenPath: string, readonly profile: string, opts: GraphControllerOptions = {}) {
+    this.builder = opts.builder ?? ((p, prof) => buildGraph(p, prof, undefined, null, { includeFragmentEdges: true, includeLifecycleEdges: true }));
+    this.tokenOf = opts.tokenOf ?? computePhrenLiveStateToken;
+    this.frameMs = opts.frameMs ?? 50;
+  }
+
+  // ── Data ────────────────────────────────────────────────────────────────
+
+  /**
+   * Let the shell trigger a repaint on its own (settle animation, fly-to,
+   * a build finishing). Without it the controller blocks the first render on
+   * the build and snaps every camera move.
+   */
+  setRepaintHook(hook: (() => void) | null): void {
+    this.repaintHook = hook;
+  }
+
+  get positions(): Map<string, Point> {
+    return this.sim ? this.sim.positions : this.lastPositions;
+  }
+
+  private lastToken = "";
+  private lastTokenAt = 0;
+
+  /** The store token, re-read at most every 2s: animation repaints must not stat the whole store. */
+  private currentToken(): string {
+    const now = Date.now();
+    if (now - this.lastTokenAt < 2000 && this.lastToken) return this.lastToken;
+    try { this.lastToken = this.tokenOf(this.phrenPath); } catch { this.lastToken = `err:${now}`; }
+    this.lastTokenAt = now;
+    return this.lastToken;
+  }
+
+  /**
+   * Make sure a payload matching the store is loaded, or on its way. Blocks
+   * only on the very first build when there is no repaint hook to come back
+   * through; otherwise the old picture stays up with a refreshing badge.
+   */
+  async ensureData(): Promise<void> {
+    const token = this.currentToken();
+    if (this.payload && token === this.dataToken) return;
+    if (!this.building) {
+      if (!this.payload) this.status = "loading";
+      this.building = this.build(token).finally(() => { this.building = null; });
+    }
+    if (!this.payload && !this.repaintHook) await this.building;
+  }
+
+  private async build(token: string): Promise<void> {
+    try {
+      const payload = await this.builder(this.phrenPath, this.profile);
+      this.dataToken = token;
+      this.adopt(payload);
+    } catch (err: unknown) {
+      this.errorText = errorMessage(err);
+      this.status = "error";
+      logger.debug("shell", `graph build failed: ${this.errorText}`);
+    } finally {
+      this.repaintHook?.();
+    }
+  }
+
+  /** Load a payload directly (tests, or a host that already has one). */
+  adopt(payload: GraphPayload): void {
+    this.payload = payload;
+    const scores = payload.scores ?? {};
+    const storeColors = new StoreColorAssigner();
+    const rawNodes = (payload.nodes ?? []).map((node) => normalizeNode(node, scores, (s) => storeColors.color(s)));
+    const rawLinks = payload.links ?? [];
+    this.model = {
+      rawNodes,
+      rawLinks,
+      nodeById: new Map(rawNodes.map((node) => [node.id, node] as const)),
+      fullAdjacency: buildFullAdjacency(rawNodes, rawLinks),
+      visibleAdjacency: new Map(),
+      scores,
+    };
+    this.projects = rawNodes.filter((node) => node.kind === "project").sort((a, b) => a.label.localeCompare(b.label));
+    if (this.filters.filterProject !== "all" && !this.projects.some((p) => (p.project || p.id) === this.filters.filterProject)) {
+      this.filters.filterProject = "all";
+    }
+    if (this.selectedId && !this.model.nodeById.has(this.selectedId)) this.selectedId = null;
+    this.status = rawNodes.length ? "ready" : "empty";
+    this.applyFilters(true);
+  }
+
+  // ── Filters / layout ────────────────────────────────────────────────────
+
+  get preset(): FilterPreset {
+    return FILTER_PRESETS[this.presetIndex] ?? FILTER_PRESETS[0];
+  }
+
+  get focusedProject(): string | null {
+    return this.filters.filterProject === "all" ? null : this.filters.filterProject;
+  }
+
+  private applyFilters(warm: boolean): void {
+    this.visible = buildVisibleData(this.model, this.filters, this.selectedId);
+    this.model.visibleAdjacency = this.visible.visibleAdjacency;
+    const visibleIds = new Set(this.visible.nodes.map((node) => node.id));
+    if (this.selectedId && !visibleIds.has(this.selectedId)) this.selectedId = null;
+    this.rebuildLayout(warm);
+    this.refreshSearch();
+  }
+
+  private rebuildLayout(warm: boolean): void {
+    if (this.sim) this.lastPositions = new Map([...this.sim.positions].map(([id, p]) => [id, { ...p }]));
+    const nodes: LayoutNode[] = this.visible.nodes.map((node) => ({ id: node.id, kind: node.kind, project: node.project, size: node.size }));
+    const links: RawLink[] = this.visible.links;
+    this.sim = new ForceSim(nodes, links);
+    if (warm && this.lastPositions.size) this.sim.warmStart(this.lastPositions);
+    const fresh = !warm || !this.lastPositions.size;
+    if (this.repaintHook) {
+      this.sim.tick(warm ? 12 : 40);
+      if (fresh) { this.fitAll(); this.fitOnSettle = true; }
+      this.startAnimation();
+    } else {
+      this.sim.settle();
+      if (fresh) this.fitAll();
+    }
+  }
+
+  /**
+   * The view reports its canvas size (in dots) before projecting. The first
+   * fit happens before any frame is drawn, so a size change re-fits unless
+   * the user has taken the camera over.
+   */
+  setViewport(width: number, height: number): void {
+    if (width === this.viewport.width && height === this.viewport.height) return;
+    this.viewport = { width: Math.max(2, width), height: Math.max(4, height) };
+    if (!this.userMoved) { const keepFlag = this.fitOnSettle; this.fitAll(); this.fitOnSettle = keepFlag; }
+    else if (this.selectedId) this.keepInView(this.selectedId);
+  }
+
+  get viewportSize(): { width: number; height: number } {
+    return this.viewport;
+  }
+
+  /** World → dot coordinates for the current camera. */
+  project(p: Point): Point {
+    return {
+      x: (p.x - this.camera.cx) * this.camera.scale + this.viewport.width / 2,
+      y: (p.y - this.camera.cy) * this.camera.scale + this.viewport.height / 2,
+    };
+  }
+
+  fitAll(): void {
+    const box = bounds(this.positions.values());
+    this.cameraTarget = null;
+    this.fitOnSettle = false;
+    this.userMoved = false;
+    if (!box) { this.camera = { cx: 0, cy: 0, scale: 2 }; return; }
+    const w = Math.max(1, box.maxX - box.minX);
+    const h = Math.max(1, box.maxY - box.minY);
+    const pad = 0.86;
+    const scale = Math.min((this.viewport.width * pad) / w, (this.viewport.height * pad) / h);
+    this.camera = { cx: (box.minX + box.maxX) / 2, cy: (box.minY + box.maxY) / 2, scale: Math.max(0.2, Math.min(scale, 12)) };
+  }
+
+  zoom(factor: number): void {
+    this.userMoved = true;
+    this.camera.scale = Math.max(0.2, Math.min(24, this.camera.scale * factor));
+  }
+
+  pan(direction: keyof typeof DIRECTIONS): void {
+    const d = DIRECTIONS[direction];
+    const stepX = (this.viewport.width * 0.12) / this.camera.scale;
+    const stepY = (this.viewport.height * 0.12) / this.camera.scale;
+    this.userMoved = true;
+    this.cameraTarget = null;
+    this.camera.cx += d.x * stepX;
+    this.camera.cy += d.y * stepY;
+  }
+
+  /** Centre the camera on a node, eased when animation is available. */
+  flyTo(nodeId: string): void {
+    const p = this.positions.get(nodeId);
+    if (!p) return;
+    if (this.repaintHook) {
+      this.cameraTarget = { x: p.x, y: p.y };
+      this.startAnimation();
+    } else {
+      this.camera.cx = p.x;
+      this.camera.cy = p.y;
+    }
+  }
+
+  /** Fly only when the node sits outside the middle band of the viewport. */
+  private keepInView(nodeId: string): void {
+    const p = this.positions.get(nodeId);
+    if (!p) return;
+    const d = this.project(p);
+    const { width, height } = this.viewport;
+    if (d.x < width * 0.18 || d.x > width * 0.82 || d.y < height * 0.18 || d.y > height * 0.82) this.flyTo(nodeId);
+  }
+
+  relayout(): void {
+    this.lastPositions = new Map();
+    this.cameraTarget = null;
+    this.rebuildLayout(false);
+    this.fitAll();
+  }
+
+  // ── Animation ───────────────────────────────────────────────────────────
+
+  private startAnimation(): void {
+    if (this.timer || !this.repaintHook) return;
+    this.timer = setInterval(() => this.animationFrame(), this.frameMs);
+    this.timer.unref?.();
+  }
+
+  stopAnimation(): void {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+  }
+
+  get animating(): boolean {
+    return this.timer !== null;
+  }
+
+  private animationFrame(): void {
+    let busy = false;
+    if (this.sim && !this.sim.settled) {
+      this.sim.tick(3);
+      busy = true;
+      if (this.sim.settled && this.fitOnSettle && !this.cameraTarget) { this.fitAll(); this.fitOnSettle = false; }
+    }
+    if (this.cameraTarget) {
+      const t = this.cameraTarget;
+      this.camera.cx += (t.x - this.camera.cx) * 0.35;
+      this.camera.cy += (t.y - this.camera.cy) * 0.35;
+      if (Math.abs(t.x - this.camera.cx) < 0.05 && Math.abs(t.y - this.camera.cy) < 0.05) {
+        this.camera.cx = t.x;
+        this.camera.cy = t.y;
+        this.cameraTarget = null;
+      } else {
+        busy = true;
+      }
+    }
+    if (!busy) this.stopAnimation();
+    this.repaintHook?.();
+  }
+
+  /** Called by the shell when the view changes away or the shell closes. */
+  dispose(): void {
+    this.stopAnimation();
+  }
+
+  // ── Selection / search / focus ──────────────────────────────────────────
+
+  detail(nodeId: string): NodeDetail | null {
+    return nodeDetail(this.model, nodeId);
+  }
+
+  /** Visible neighbours of a node, best first — what the pane numbers 1-9. */
+  neighborsOf(nodeId: string): RuntimeNode[] {
+    const ids = this.model.visibleAdjacency.get(nodeId);
+    if (!ids) return [];
+    const nodes: RuntimeNode[] = [];
+    ids.forEach((id) => { const node = this.model.nodeById.get(id); if (node) nodes.push(node); });
+    return nodes.sort((a, b) => nodeRank(b, this.filters, this.model.scores) - nodeRank(a, this.filters, this.model.scores));
+  }
+
+  select(nodeId: string | null, opts: { fly?: boolean } = {}): void {
+    this.selectedId = nodeId;
+    if (nodeId) {
+      if (opts.fly) this.flyTo(nodeId);
+      else this.keepInView(nodeId);
+    }
+  }
+
+  private nearestToCenter(): RuntimeNode | null {
+    let best: RuntimeNode | null = null;
+    let bestDist = Infinity;
+    const center = { x: this.viewport.width / 2, y: this.viewport.height / 2 };
+    for (const node of this.visible.nodes) {
+      const p = this.positions.get(node.id);
+      if (!p) continue;
+      const d = this.project(p);
+      const dist = (d.x - center.x) ** 2 + (d.y - center.y) ** 2;
+      if (dist < bestDist) { bestDist = dist; best = node; }
+    }
+    return best;
+  }
+
+  /**
+   * Arrow-key traversal: prefer a connected neighbour in that direction; if
+   * there is none, take the nearest visible node in that half-plane so the
+   * walk never dead-ends on a leaf.
+   */
+  walk(direction: keyof typeof DIRECTIONS): RuntimeNode | null {
+    if (!this.selectedId) {
+      const start = this.nearestToCenter();
+      if (start) this.select(start.id);
+      return start;
+    }
+    const from = this.positions.get(this.selectedId);
+    if (!from) return null;
+    const dir = DIRECTIONS[direction];
+    const pick = (candidates: Iterable<string>, minCos: number): { id: string; score: number } | null => {
+      let best: { id: string; score: number } | null = null;
+      for (const id of candidates) {
+        if (id === this.selectedId) continue;
+        const p = this.positions.get(id);
+        if (!p) continue;
+        const dx = p.x - from.x;
+        const dy = p.y - from.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len === 0) continue;
+        const cos = (dx * dir.x + dy * dir.y) / len;
+        if (cos <= minCos) continue;
+        const score = len / Math.max(cos, 0.15);
+        if (!best || score < best.score) best = { id, score };
+      }
+      return best;
+    };
+    const neighbors = this.model.visibleAdjacency.get(this.selectedId) ?? new Set<string>();
+    const target = pick(neighbors, 0.1) ?? pick(this.visible.nodes.map((node) => node.id), 0.3);
+    if (!target) return null;
+    this.select(target.id);
+    return this.model.nodeById.get(target.id) ?? null;
+  }
+
+  private refreshSearch(): void {
+    const matches = recomputeSearchMatches(this.visible.nodes, this.search.query, this.filters, this.model.scores);
+    this.search.matchIds = matches.matchIds;
+    this.search.results = matches.results;
+    if (this.search.index >= matches.results.length) this.search.index = matches.results.length ? 0 : -1;
+  }
+
+  /** Set the query, light up matches, and fly to the best one. */
+  applySearch(query: string): RuntimeNode | null {
+    this.search.query = query.trim();
+    this.filters.searchQuery = this.search.query;
+    this.refreshSearch();
+    if (!this.search.query) { this.search.index = -1; return null; }
+    const best = bestSearchMatch(this.search.results);
+    this.search.index = best ? 0 : -1;
+    if (best) this.select(best.id, { fly: true });
+    return best;
+  }
+
+  clearSearch(): void {
+    this.applySearch("");
+  }
+
+  stepSearch(delta: number): RuntimeNode | null {
+    const results = this.search.results;
+    if (!results.length) return null;
+    this.search.index = ((this.search.index + delta) % results.length + results.length) % results.length;
+    const node = results[this.search.index];
+    this.select(node.id, { fly: true });
+    return node;
+  }
+
+  cyclePreset(delta = 1): FilterPreset {
+    this.presetIndex = ((this.presetIndex + delta) % FILTER_PRESETS.length + FILTER_PRESETS.length) % FILTER_PRESETS.length;
+    const preset = this.preset;
+    this.filters.filterTypes = { ...preset.types };
+    this.filters.filterHealth = preset.health;
+    this.applyFilters(true);
+    return preset;
+  }
+
+  /** Focus one project (name) or all (null). */
+  focusProject(name: string | null): void {
+    this.filters.filterProject = name ?? "all";
+    this.applyFilters(true);
+    // Either way the visible set just changed shape: frame it, then keep the
+    // project selected so its neighbours are numbered.
+    this.cameraTarget = null;
+    this.fitAll();
+    if (name) {
+      const node = this.projects.find((p) => (p.project || p.id) === name);
+      if (node) this.selectedId = node.id;
+    }
+  }
+
+  cycleProject(delta: number): string | null {
+    if (!this.projects.length) return null;
+    const names = this.projects.map((p) => p.project || p.id);
+    const current = this.focusedProject ? names.indexOf(this.focusedProject) : -1;
+    // Slot -1 is "all projects"; the cycle runs all → first … last → all.
+    const slots = names.length + 1;
+    const next = (((current + 1 + delta) % slots) + slots) % slots - 1;
+    const name = next < 0 ? null : names[next];
+    this.focusProject(name);
+    return name;
+  }
+
+  jumpToNeighbor(n: number): RuntimeNode | null {
+    if (!this.selectedId) return null;
+    const node = this.neighborsOf(this.selectedId)[n - 1];
+    if (!node) return null;
+    this.select(node.id);
+    return node;
+  }
+
+  // ── Keys ────────────────────────────────────────────────────────────────
+
+  /**
+   * Returns true when the key was consumed, undefined to let the shell's
+   * generic handler have it (q, :, ?, view shortcuts, final Esc).
+   */
+  handleKey(rawKey: string, host: GraphKeyHost): true | undefined {
+    const key = normalizeArrow(rawKey);
+    if (this.status !== "ready") {
+      if (key === "r") { this.dataToken = ""; host.setMessage("  Rebuilding graph…"); return true; }
+      return undefined;
+    }
+    const arrow = ARROW_DIRECTION[key];
+    if (arrow) {
+      const node = this.walk(arrow);
+      host.setMessage(node ? this.describe(node) : `  ${style.dim("nothing further that way")}`);
+      return true;
+    }
+    const shifted = SHIFT_ARROW_DIRECTION[key] ?? PAN_LETTER_DIRECTION[key];
+    if (shifted) { this.pan(shifted); return true; }
+    if (key === "+" || key === "=") { this.zoom(1.25); return true; }
+    if (key === "-" || key === "_") { this.zoom(1 / 1.25); return true; }
+    if (key === "0") { this.fitAll(); host.setMessage(`  ${style.dim("fit to screen")}`); return true; }
+    if (key === "r") { this.relayout(); host.setMessage(`  ${style.dim("re-laid out")}`); return true; }
+    if (key === "\r" || key === "\n") {
+      if (!this.selectedId) {
+        const node = this.nearestToCenter();
+        if (node) { this.select(node.id); host.setMessage(this.describe(node)); }
+        return true;
+      }
+      const node = this.model.nodeById.get(this.selectedId);
+      if (node?.kind === "project") {
+        const name = node.project || node.id;
+        const next = this.focusedProject === name ? null : name;
+        this.focusProject(next);
+        host.setMessage(next ? `  ${style.boldCyan("❖")} ${style.boldCyan(next)}  ${style.dim("focused — ↵ again to release")}` : `  ${style.dim("all projects")}`);
+      } else if (node) {
+        this.flyTo(node.id);
+        host.setMessage(this.describe(node));
+      }
+      return true;
+    }
+    if (/^[1-9]$/.test(key)) {
+      const node = this.jumpToNeighbor(Number(key));
+      if (node) host.setMessage(this.describe(node));
+      else host.setMessage(`  ${style.dim(this.selectedId ? "no such neighbour" : "select a node first (↵)")}`);
+      return true;
+    }
+    if (key === "/") { host.startInput("graph-search", this.search.query); return true; }
+    if (key === "n" || key === "N") {
+      const node = this.stepSearch(key === "n" ? 1 : -1);
+      host.setMessage(node
+        ? `  ${style.yellow(`${this.search.index + 1}/${this.search.results.length}`)}  ${this.describe(node).trimStart()}`
+        : `  ${style.dim("no search — press / first")}`);
+      return true;
+    }
+    if (key === "f") {
+      const preset = this.cyclePreset(1);
+      host.setMessage(`  ${style.boldCyan("filter")} ${preset.name}  ${style.dim(`${this.visible.nodes.length} nodes`)}`);
+      return true;
+    }
+    if (key === "F") {
+      const preset = this.cyclePreset(-1);
+      host.setMessage(`  ${style.boldCyan("filter")} ${preset.name}  ${style.dim(`${this.visible.nodes.length} nodes`)}`);
+      return true;
+    }
+    if (key === "]" || key === "[") {
+      const name = this.cycleProject(key === "]" ? 1 : -1);
+      host.setMessage(name ? `  ${style.boldCyan("❖")} ${style.boldCyan(name)}` : `  ${style.dim("all projects")}`);
+      return true;
+    }
+    if (key === "o") {
+      host.setMessage(`  ${style.dim("open the 3D viewer in a browser:")} ${style.boldCyan("phren web-ui")}`);
+      return true;
+    }
+    if (key === "\x1b") {
+      if (this.search.query) { this.clearSearch(); host.setMessage(`  ${style.dim("search cleared")}`); return true; }
+      if (this.selectedId) { this.select(null); host.setMessage(`  ${style.dim("selection cleared")}`); return true; }
+      if (this.focusedProject) { this.focusProject(null); host.setMessage(`  ${style.dim("all projects")}`); return true; }
+      return undefined;
+    }
+    return undefined;
+  }
+
+  /** One-line description for the message bar. */
+  describe(node: RuntimeNode): string {
+    const label = node.fullLabel || node.label;
+    const short = label.length > 70 ? `${label.slice(0, 68)}…` : label;
+    const where = node.project && node.kind !== "project" ? `  ${style.dim("·")} ${style.cyan(node.project)}` : "";
+    return `  ${style.dim(node.kind)} ${short}${where}`;
+  }
+}

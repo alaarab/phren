@@ -10,16 +10,23 @@ import type {
   ScoreEntry,
   SelectCallback,
 } from "./types.js";
-import { KIND_COLORS, STORE_COLORS, TOPIC_COLORS } from "./types.js";
+import * as core from "../../src/graph-core/model.js";
 
-let _storeColorMap: Map<string, string> | null = null;
+// Pure, context-free helpers are shared verbatim with the terminal graph view.
+export {
+  clamp,
+  hashString,
+  seeded,
+  deriveKind,
+  topicColor,
+  inferHealth,
+  searchTextForNode,
+  nodeRadius,
+} from "../../src/graph-core/model.js";
+
+const storeColors = new core.StoreColorAssigner();
 export function storeColor(storeName?: string): string | null {
-  if (!storeName || storeName === "primary") return null;
-  if (!_storeColorMap) _storeColorMap = new Map();
-  if (_storeColorMap.has(storeName)) return _storeColorMap.get(storeName)!;
-  const idx = (_storeColorMap.size + 1) % STORE_COLORS.length;
-  _storeColorMap.set(storeName, STORE_COLORS[idx]);
-  return STORE_COLORS[idx];
+  return storeColors.color(storeName);
 }
 
 export type FocusMode = "idle" | "hover" | "selected" | "project" | "search";
@@ -82,26 +89,24 @@ export const state = {
   cleanupFns: [] as Array<() => void>,
 };
 
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+/** The shared-model view of the browser state (the `state` object already satisfies `GraphFilters`). */
+function scores(): core.ScoreMap {
+  return state.payload?.scores || {};
+}
+function model(): core.GraphModel {
+  return {
+    rawNodes: state.rawNodes,
+    rawLinks: state.rawLinks,
+    nodeById: state.nodeById,
+    fullAdjacency: state.fullAdjacency,
+    visibleAdjacency: state.visibleAdjacency,
+    scores: scores(),
+  };
 }
 
 export function currentTheme(): "dark" | "light" {
   const theme = document.documentElement.getAttribute("data-theme");
   return theme === "light" ? "light" : "dark";
-}
-
-export function hashString(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-export function seeded(value: string, salt: string): number {
-  return (hashString(`${salt}:${value}`) % 10000) / 10000;
 }
 
 export function esc(value: unknown): string {
@@ -112,114 +117,24 @@ export function esc(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-export function deriveKind(node: RawNode): RuntimeNode["kind"] {
-  if (node.group === "project") return "project";
-  if (node.group === "entity") return "entity";
-  if (node.group === "reference") return "reference";
-  if (node.group.startsWith("task-")) return "task";
-  if (node.group.startsWith("topic:")) return "finding";
-  return "other";
-}
-
-export function topicColor(slug?: string): string {
-  if (!slug) return KIND_COLORS.other;
-  return TOPIC_COLORS[slug] || TOPIC_COLORS.general;
-}
-
 export function scoreForNode(node: RawNode): ScoreEntry | undefined {
-  const scores = state.payload?.scores || {};
-  if (node.scoreKey && scores[node.scoreKey]) return scores[node.scoreKey];
-  if (node.scoreKeys) {
-    for (const key of node.scoreKeys) {
-      if (scores[key]) return scores[key];
-    }
-  }
-  if (node.refDocs) {
-    for (const ref of node.refDocs) {
-      if (ref.scoreKey && scores[ref.scoreKey]) return scores[ref.scoreKey];
-    }
-  }
-  return undefined;
-}
-
-export function inferHealth(score?: ScoreEntry): RuntimeNode["health"] {
-  if (!score || !score.lastUsedAt) return "healthy";
-  const ageMs = Date.now() - new Date(score.lastUsedAt).getTime();
-  const ageDays = Number.isFinite(ageMs) ? ageMs / 86400000 : 0;
-  const penalties = (score.repromptPenalty || 0) + (score.regressionPenalty || 0) * 2;
-  if (ageDays > 150 || penalties >= 4) return "stale";
-  if (ageDays > 60 || penalties >= 2) return "decaying";
-  return "healthy";
+  return core.scoreForNode(node, scores());
 }
 
 export function qualityScore(node: RawNode): number | null {
-  const score = scoreForNode(node);
-  if (!score) return null;
-  const helpful = score.helpful || 0;
-  const impressions = score.impressions || 0;
-  const penalties = (score.repromptPenalty || 0) + (score.regressionPenalty || 0) * 2;
-  const raw = 0.55 + helpful * 0.1 + Math.min(0.2, impressions * 0.02) - penalties * 0.08;
-  return clamp(raw, 0.1, 1);
+  return core.qualityScore(node, scores());
 }
 
 export function baseColorForNode(node: RawNode): string {
-  const kind = deriveKind(node);
-  if (kind === "finding") return topicColor(node.topicSlug || node.group.slice(6));
-  if (kind === "task") {
-    if (node.section === "Done" || node.group === "task-done") return KIND_COLORS["task-done"];
-    if (node.section === "Active" || node.group === "task-active") return KIND_COLORS["task-active"];
-    return KIND_COLORS["task-queue"];
-  }
-  if (kind === "project") return storeColor(node.store) || KIND_COLORS.project;
-  if (kind === "entity") return KIND_COLORS.entity;
-  if (kind === "reference") return KIND_COLORS.reference;
-  return KIND_COLORS.other;
+  return core.baseColorForNode(node, storeColor);
 }
 
 export function sizeForNode(node: RawNode): number {
-  const kind = deriveKind(node);
-  const refCount = Math.max(0, node.refCount || 0);
-  const score = scoreForNode(node);
-  const helpful = Math.max(0, score?.helpful || 0);
-  if (kind === "project") return clamp(20 + Math.sqrt(refCount + 4) * 4, 24, 38);
-  if (kind === "entity") return clamp(8 + Math.sqrt(refCount + 1) * 2.3, 10, 22);
-  if (kind === "finding") return clamp(7.5 + Math.sqrt(helpful + 1) * 1.8 + (node.tagged ? 1.4 : 0), 9, 18);
-  if (kind === "task") return clamp(8 + (node.section === "Active" ? 2 : 0) + (node.priority === "high" ? 1 : 0), 8, 15);
-  if (kind === "reference") return clamp(7 + Math.sqrt(refCount + 1) * 1.2, 7, 12);
-  return 9;
-}
-
-export function nodeRadius(node: RuntimeNode): number {
-  return clamp(node.size * 0.5, 4, 18);
-}
-
-export function searchTextForNode(node: RawNode): string {
-  return [
-    node.label,
-    node.fullLabel,
-    node.project,
-    node.entityType,
-    node.section,
-    node.priority,
-    node.topicSlug,
-    node.topicLabel,
-    ...(node.connectedProjects || []),
-    ...(node.refDocs || []).map((ref) => ref.doc),
-  ].join(" ").toLowerCase();
+  return core.sizeForNode(node, scores());
 }
 
 export function normalizeNode(node: RawNode): RuntimeNode {
-  const score = scoreForNode(node);
-  const kind = deriveKind(node);
-  return {
-    ...node,
-    kind,
-    searchText: searchTextForNode(node),
-    health: inferHealth(score),
-    baseColor: baseColorForNode(node),
-    size: sizeForNode(node),
-    forceLabel: kind === "project" || (kind === "entity" && (node.refCount || 0) >= 12),
-  };
+  return core.normalizeNode(node, scores(), storeColor);
 }
 
 export function ensureTopicFilters(): void {
@@ -229,60 +144,20 @@ export function ensureTopicFilters(): void {
 }
 
 export function buildFullAdjacency(): void {
-  state.fullAdjacency = new Map();
-  for (const node of state.rawNodes) state.fullAdjacency.set(node.id, new Set());
-  for (const link of state.rawLinks) {
-    if (!state.fullAdjacency.has(link.source) || !state.fullAdjacency.has(link.target)) continue;
-    state.fullAdjacency.get(link.source)!.add(link.target);
-    state.fullAdjacency.get(link.target)!.add(link.source);
-  }
+  state.fullAdjacency = core.buildFullAdjacency(state.rawNodes, state.rawLinks);
 }
 
 export function connectionCounts(nodeId: string): NodeDetail["connections"] {
-  const counts = { total: 0, projects: 0, findings: 0, tasks: 0, entities: 0, references: 0 };
-  const adjacency = state.fullAdjacency.get(nodeId);
-  if (!adjacency) return counts;
-  counts.total = adjacency.size;
-  adjacency.forEach((neighborId) => {
-    const neighbor = state.nodeById.get(neighborId);
-    if (!neighbor) return;
-    if (neighbor.kind === "project") counts.projects++;
-    else if (neighbor.kind === "finding") counts.findings++;
-    else if (neighbor.kind === "task") counts.tasks++;
-    else if (neighbor.kind === "entity") counts.entities++;
-    else if (neighbor.kind === "reference") counts.references++;
-  });
-  return counts;
+  return core.connectionCounts(state, nodeId);
 }
 
 /** Check if a node is in a project's direct network (1-hop neighbors). */
 export function isInProjectNetwork(nodeId: string, projectId: string): boolean {
-  if (nodeId === projectId) return true;
-  const neighbors = state.visibleAdjacency.get(projectId);
-  if (neighbors?.has(nodeId)) return true;
-  const nodeNeighbors = state.visibleAdjacency.get(nodeId);
-  if (nodeNeighbors) {
-    for (const nn of nodeNeighbors) {
-      if (neighbors?.has(nn)) return true;
-    }
-  }
-  return false;
+  return core.isInProjectNetwork(state.visibleAdjacency, nodeId, projectId);
 }
 
 export function nodeDetail(nodeId: string): NodeDetail | null {
-  const node = state.nodeById.get(nodeId);
-  if (!node) return null;
-  return {
-    ...node,
-    displayLabel: node.label,
-    tooltipLabel: node.fullLabel || node.label,
-    text: node.fullLabel || node.label,
-    docs: (node.refDocs || []).map((ref) => ref.doc),
-    projectName: node.project || "",
-    qualityScore: qualityScore(node),
-    connections: connectionCounts(nodeId),
-    score: scoreForNode(node),
-  };
+  return core.nodeDetail(model(), nodeId);
 }
 
 /**
@@ -291,83 +166,17 @@ export function nodeDetail(nodeId: string): NodeDetail | null {
  * graph keeps its shape while matches light up.
  */
 export function nodeMatchesFilters(node: RuntimeNode): boolean {
-  if (!state.filterTypes[node.kind]) return false;
-  if (node.kind === "finding" && node.topicSlug && state.filterTopics[node.topicSlug] === false) return false;
-  if (state.filterHealth !== "all" && node.health !== state.filterHealth) return false;
-  if (state.filterStore !== "all" && node.store && node.store !== state.filterStore) return false;
-
-  if (state.filterProject !== "all") {
-    const project = state.filterProject;
-    const connectedProjects = new Set<string>();
-    if (node.project) connectedProjects.add(node.project);
-    (node.connectedProjects || []).forEach((name) => connectedProjects.add(name));
-    (node.refDocs || []).forEach((ref) => {
-      if (ref.project) connectedProjects.add(ref.project);
-      else if (ref.doc.includes("/")) connectedProjects.add(ref.doc.slice(0, ref.doc.indexOf("/")));
-    });
-    if (node.kind === "project") {
-      if ((node.project || "") !== project) return false;
-    } else if (!connectedProjects.has(project)) {
-      return false;
-    }
-  }
-  return true;
+  return core.nodeMatchesFilters(node, state);
 }
 
 export function nodeRank(node: RuntimeNode): number {
-  let rank = 0;
-  if (node.kind === "project") rank += 2000;
-  if (node.kind === "entity") rank += 800 + (node.refCount || 0) * 8;
-  if (node.kind === "finding") rank += 600 + (scoreForNode(node)?.helpful || 0) * 14 + (node.tagged ? 45 : 0);
-  if (node.kind === "task") rank += node.section === "Active" ? 540 : 470;
-  if (node.kind === "reference") rank += 180 + (node.refCount || 0) * 3;
-  if (node.priority === "high") rank += 60;
-  if (node.health === "healthy") rank += 24;
-  if (node.health === "decaying") rank -= 12;
-  if (node.health === "stale") rank -= 25;
-  if (state.filterProject !== "all" && node.project === state.filterProject) rank += 80;
-  if (state.filterStore !== "all" && node.store === state.filterStore) rank += 40;
-  if (state.searchQuery && node.searchText.includes(state.searchQuery.toLowerCase())) rank += 120;
-  return rank;
+  return core.nodeRank(node, state, scores());
 }
 
 export function buildVisibleData(): { nodes: RuntimeNode[]; links: RawLink[] } {
-  const filteredNodes = state.rawNodes.filter(nodeMatchesFilters);
-  const selectedId = state.selectedNodeId;
-  let limitedNodes = filteredNodes.slice();
-  if (limitedNodes.length > state.nodeLimit) {
-    const sorted = limitedNodes.slice().sort((a, b) => nodeRank(b) - nodeRank(a));
-    const keepIds = new Set<string>();
-    for (const node of sorted) {
-      if (keepIds.size >= state.nodeLimit) break;
-      keepIds.add(node.id);
-    }
-    state.rawNodes.forEach((node) => {
-      if (node.kind === "project") keepIds.add(node.id);
-    });
-    if (selectedId) keepIds.add(selectedId);
-    limitedNodes = filteredNodes.filter((node) => keepIds.has(node.id));
-  }
-
-  const visibleIds = new Set(limitedNodes.map((node) => node.id));
-  const visibleLinks = state.rawLinks.filter((link) => visibleIds.has(link.source) && visibleIds.has(link.target));
-
-  state.visibleAdjacency = new Map();
-  limitedNodes.forEach((node) => state.visibleAdjacency.set(node.id, new Set()));
-  visibleLinks.forEach((link) => {
-    state.visibleAdjacency.get(link.source)!.add(link.target);
-    state.visibleAdjacency.get(link.target)!.add(link.source);
-  });
-
-  const connectedIds = new Set<string>();
-  visibleLinks.forEach((link) => {
-    connectedIds.add(link.source);
-    connectedIds.add(link.target);
-  });
-  const prunedNodes = limitedNodes.filter((node) =>
-    node.kind !== "project" || connectedIds.has(node.id) || (node.project || "") === state.filterProject || state.filterTypes.project
-  );
-  return { nodes: prunedNodes, links: visibleLinks };
+  const visible = core.buildVisibleData(model(), state, state.selectedNodeId);
+  state.visibleAdjacency = visible.visibleAdjacency;
+  return { nodes: visible.nodes, links: visible.links };
 }
 
 export function rebuildHostNodes(): void {
@@ -378,26 +187,9 @@ export function rebuildHostNodes(): void {
 
 /** Recompute the set of visible nodes matching the current search query. */
 export function recomputeSearchMatches(): void {
-  state.searchMatchIds = new Set();
-  state.searchResults = [];
-  const query = state.searchQuery.trim().toLowerCase();
-  if (!query) return;
-  const matched: RuntimeNode[] = [];
-  for (const node of state.visibleNodes) {
-    if (node.searchText.includes(query)) {
-      state.searchMatchIds.add(node.id);
-      matched.push(node);
-    }
-  }
-  matched.sort((a, b) => matchRank(b, query) - matchRank(a, query));
-  state.searchResults = matched;
-}
-
-/** Score a match the way Enter-to-fly ranks: label prefix > substring > deep text. */
-function matchRank(node: RuntimeNode, query: string): number {
-  const label = node.label.toLowerCase();
-  const score = label.startsWith(query) ? 3 : label.includes(query) ? 2 : 1;
-  return score * 100000 + nodeRank(node);
+  const matches = core.recomputeSearchMatches(state.visibleNodes, state.searchQuery, state, scores());
+  state.searchMatchIds = matches.matchIds;
+  state.searchResults = matches.results;
 }
 
 /** The active focus mode, in priority order. */
@@ -413,5 +205,5 @@ export function focusMode(): FocusMode {
  * substring beats deep-text substring; nodeRank breaks ties.
  */
 export function bestSearchMatch(): RuntimeNode | null {
-  return state.searchResults.length ? state.searchResults[0] : null;
+  return core.bestSearchMatch(state.searchResults);
 }

@@ -7,7 +7,7 @@ import { logger } from "../logger.js";
 
 export interface ShellState {
   version: number;
-  view: "Projects" | "Tasks" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health";
+  view: "Projects" | "Tasks" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health" | "Graph";
   project?: string;
   filter?: string;
   page?: number;
@@ -17,7 +17,7 @@ export interface ShellState {
 }
 
 const SHELL_STATE_VERSION = 3;
-const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health"]);
+const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health", "Graph"]);
 
 export function loadShellState(phrenPath: string): ShellState {
   const file = shellStateFile(phrenPath);

@@ -207,16 +207,8 @@ export function wrapSegments(
 
 // ── Phren theme ────────────────────────────────────────────────────────────
 
-// Neural gradient palette: purple → blue → cyan (256-color ANSI)
-const PHREN_GRADIENT = [
-  "\x1b[38;5;93m",   // vivid purple
-  "\x1b[38;5;99m",   // purple-blue
-  "\x1b[38;5;105m",  // blue-purple
-  "\x1b[38;5;111m",  // sky blue
-  "\x1b[38;5;75m",   // dodger blue
-  "\x1b[38;5;81m",   // cyan-blue
-  "\x1b[38;5;87m",   // bright cyan
-];
+// The wordmark and its gradient live with the splash text effects.
+import { PHREN_GRADIENT, PHREN_LOGO } from "./logo-fx.js";
 
 // Apply gradient coloring across non-whitespace characters
 export function gradient(text: string, colors: string[] = PHREN_GRADIENT): string {
@@ -237,16 +229,6 @@ export function gradient(text: string, colors: string[] = PHREN_GRADIENT): strin
   }
   return result + RESET;
 }
-
-// Block-letter logo for startup animation
-const PHREN_LOGO = [
-  "██████╗ ██╗  ██╗██████╗ ███████╗███╗   ██╗",
-  "██╔══██╗██║  ██║██╔══██╗██╔════╝████╗  ██║",
-  "██████╔╝███████║██████╔╝█████╗  ██╔██╗ ██║",
-  "██╔═══╝ ██╔══██║██╔══██╗██╔══╝  ██║╚██╗██║",
-  "██║     ██║  ██║██║  ██║███████╗██║ ╚████║",
-  "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝",
-];
 
 import { PHREN_ART as PHREN_STARTUP_ART } from "../phren-art.js";
 
@@ -394,8 +376,8 @@ const LOGO_WIDTH = Math.max(...PHREN_LOGO.map(displayWidth));
  * The wordmark line, split onto two rows when the terminal is too narrow to
  * carry the tagline alongside the version badge.
  */
-function startupInfoLines(version: string, available: number): string[] {
-  const tagline = style.dim("local memory for working agents");
+function startupInfoLines(version: string, available: number, taglineText = "local memory for working agents"): string[] {
+  const tagline = style.dim(taglineText);
   const head = `${gradient("◆")} ${style.bold("phren")}  ${badge(`v${version}`, style.boldBlue)}`;
   const single = `${head}  ${tagline}`;
   return displayWidth(single) <= available ? [single] : [head, tagline];
@@ -413,19 +395,20 @@ function startupInfoLines(version: string, available: number): string[] {
  * scrolls every later cursor-home repaint lands on shifted rows, stacking the
  * frames on top of each other.
  */
-export function composeStartupFrame(artLines: string[], version: string, hint?: string): string[] {
+export function composeStartupFrame(artLines: string[], version: string, hint?: string, logo?: string[], tagline?: string): string[] {
   const cols = renderWidth();
   const rows = process.stdout.rows || 24;
-  const logoLines = PHREN_LOGO.map(line => gradient(line));
+  // A text-effect frame of the wordmark may be supplied; otherwise the plain gradient.
+  const logoLines = logo ?? PHREN_LOGO.map(line => gradient(line));
   const hintLines = hint ? ["", `  ${hint}`] : [];
   // One blank line above, one below, plus the hint block.
   const budget = rows - 2 - hintLines.length;
 
-  const stackedInfo = startupInfoLines(version, cols - 2).map(line => `  ${line}`);
+  const stackedInfo = startupInfoLines(version, cols - 2, tagline).map(line => `  ${line}`);
 
   const sideBySide = (): string[] => {
     // Logo is 6 lines; the leading blanks centre it against the character.
-    const rightSide = ["", "", ...logoLines, "", ...startupInfoLines(version, cols - ART_WIDTH - ART_GAP)];
+    const rightSide = ["", "", ...logoLines, "", ...startupInfoLines(version, cols - ART_WIDTH - ART_GAP, tagline)];
     const lines: string[] = [];
     for (let i = 0; i < Math.max(artLines.length, rightSide.length); i++) {
       // padToWidth measures display cells; String.padEnd counts the art's ANSI
@@ -462,17 +445,17 @@ export function fitFrame(lines: string[]): string {
     .join("\n");
 }
 
-export function shellStartupFrames(version: string): string[] {
+export function shellStartupFrames(version: string, tagline?: string): string[] {
   const cols = process.stdout.columns || 80;
 
   if (cols >= 44) {
-    return [fitFrame(composeStartupFrame(PHREN_STARTUP_ART, version))];
+    return [fitFrame(composeStartupFrame(PHREN_STARTUP_ART, version, undefined, undefined, tagline))];
   }
 
   // Narrow terminal: progressive text reveal with gradient
   const stages = ["p", "phr", "phren"];
   const spinners = ["◜", "◠", "◝"];
-  const infoLines = startupInfoLines(version, renderWidth() - 2).map(line => `  ${line}`);
+  const infoLines = startupInfoLines(version, renderWidth() - 2, tagline).map(line => `  ${line}`);
   return stages.map((stage, i) => fitFrame([
     "",
     `  ${gradient(stage)} ${style.dim(spinners[i])}`,

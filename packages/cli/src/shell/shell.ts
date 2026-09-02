@@ -38,6 +38,8 @@ import {
   type NavigationHost,
 } from "./input.js";
 import { errorMessage } from "../utils.js";
+import type { ShellStartup } from "./startup.js";
+import { GraphController } from "./graph/controller.js";
 
 /** Remove the final character, keeping surrogate pairs and combining marks intact. */
 function dropLastCharacter(s: string): string {
@@ -67,6 +69,8 @@ export class PhrenShell {
   private viewScrollMap: Partial<Record<string, number>> = {};
   private healthLineCount = 0;
   private _subsectionsCache: SubsectionsCache | null = null;
+  private _graph?: GraphController;
+  private repaintHandler: (() => void) | null = null;
 
   get mode(): "navigate" | "input" { return this.navMode; }
   get inputBuffer(): string { return this.inputBuf; }
@@ -81,16 +85,40 @@ export class PhrenShell {
       runHooks: defaultRunHooks,
       runUpdate: defaultRunUpdate,
     },
+    startup: ShellStartup = {},
   ) {
     this.state = loadShellState(phrenPath);
-    this.state.view = "Projects";
-    this.message = this.state.project
+    // A deep link (`phren shell --view tasks --here`) wins over the view the
+    // last session happened to leave behind; without one we always land home.
+    if (startup.project) this.state.project = startup.project;
+    this.state.view = startup.view ?? "Projects";
+    this.message = startup.notice
+      ? `  ${style.yellow("⚠")}  ${startup.notice}`
+      : this.state.project
       ? `  Dashboard ready — active context ${style.boldCyan(this.state.project)}`
       : `  Dashboard ready — choose a project with ${style.boldCyan("↵")} or stay global`;
   }
 
-  close(): void { saveShellState(this.phrenPath, this.state); }
+  close(): void { this._graph?.dispose(); saveShellState(this.phrenPath, this.state); }
   setMessage(msg: string): void { this.message = msg; }
+
+  /**
+   * Let the host (entry.ts) hand over a way to repaint on the shell's own
+   * initiative — the graph view uses it to animate its layout settling and
+   * to show a build that finished while nothing was typed.
+   */
+  setRepaintHandler(handler: (() => void) | null): void {
+    this.repaintHandler = handler;
+    this._graph?.setRepaintHook(handler);
+  }
+
+  graph(): GraphController {
+    if (!this._graph) {
+      this._graph = new GraphController(this.phrenPath, this.profile);
+      this._graph.setRepaintHook(this.repaintHandler);
+    }
+    return this._graph;
+  }
 
   confirmThen(label: string, action: () => void): void {
     this.pendingConfirm = { label, action };
@@ -98,6 +126,7 @@ export class PhrenShell {
   }
 
   setView(view: ShellView): void {
+    if (this.state.view === "Graph" && view !== "Graph") this._graph?.stopAnimation();
     this.state.view = view;
     this.viewScrollMap[view] = 0;
     saveShellState(this.phrenPath, this.state);
@@ -160,9 +189,16 @@ export class PhrenShell {
     const buf = this.inputBuf;
     const ctx = this.inputCtx;
     this.navMode = "navigate"; this.inputBuf = ""; this.inputCtx = "";
-    if (!buf.trim() && ctx !== "command") { this.setMessage("  Nothing entered."); return; }
+    if (!buf.trim() && ctx !== "command" && ctx !== "graph-search") { this.setMessage("  Nothing entered."); return; }
     switch (ctx) {
       case "filter": this.setFilter(buf); break;
+      case "graph-search": {
+        const graph = this.graph();
+        const best = graph.applySearch(buf);
+        if (best) this.setMessage(`  ${style.yellow(`1/${graph.search.results.length}`)}  ${graph.describe(best).trimStart()}`);
+        else this.setMessage(buf.trim() ? `  ${style.dim("no matches for")} ${style.yellow(buf.trim())}` : `  ${style.dim("search cleared")}`);
+        break;
+      }
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
       case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.phrenPath, p, buf))}`); break; }
       case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.phrenPath, p, buf))}`); break; }
@@ -229,6 +265,7 @@ export class PhrenShell {
       phrenPath: this.phrenPath, profile: this.profile, state: this.state,
       currentCursor: () => this.currentCursor(), currentScroll: () => this.currentScroll(),
       setScroll: (n) => this.setScroll(n),
+      graph: () => this.graph(),
     };
     return renderShell(ctx, this.navMode, this.inputCtx, this.inputBuf, this.showHelp, this.message,
       () => this.doctorSnapshot(), this._subsectionsCache,
@@ -258,6 +295,7 @@ export class PhrenShell {
       moveCursor: (delta) => this.moveCursor(delta),
       getListItems: () => this.getListItems(),
       startInput: (ctx, initial) => this.startInput(ctx, initial),
+      graph: () => this.graph(),
     };
   }
 
@@ -294,3 +332,4 @@ export class PhrenShell {
 }
 
 export { startShell } from "./entry.js";
+export type { ShellStartup } from "./startup.js";

@@ -1,0 +1,89 @@
+# Phren for Herdr
+#
+# Puts phren's dashboard — projects, tasks, findings, review queue — one
+# keypress away from whatever pane you are in, scoped to that pane's project.
+#
+#   herdr plugin install alaarab/phren/integrations/herdr
+#
+# See README.md for the keybinding to add to ~/.config/herdr/config.toml.
+
+id = "phren"
+name = "Phren"
+version = "0.1.0"
+description = "Phren memory in a pane: tasks, findings, and the review queue for the project the pane is sitting in."
+min_herdr_version = "0.8.0"
+platforms = ["linux", "macos"]
+
+# ── Panes ────────────────────────────────────────────────────────────────────
+# Every pane runs the phren shell. The pane inherits the calling pane's cwd, so
+# `--here` resolves the project the way phren's own hooks do.
+
+[[panes]]
+id = "dashboard"
+title = "phren"
+description = "Full phren dashboard: projects, tasks, findings, review queue, skills, hooks"
+placement = "popup"
+width = "90%"
+height = "88%"
+command = ["bin/phren-pane.sh", "dashboard"]
+
+[[panes]]
+id = "tasks"
+title = "phren tasks"
+description = "Phren tasks for this pane's project"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["bin/phren-pane.sh", "tasks"]
+
+[[panes]]
+id = "dock"
+title = "phren"
+description = "Dock the phren task list beside the current pane"
+placement = "split"
+command = ["bin/phren-pane.sh", "tasks"]
+
+[[panes]]
+id = "web"
+title = "phren web-ui"
+description = "Run the phren web UI (3D graph) and open it in a browser; close the pane to stop the server"
+placement = "split"
+command = ["bin/phren-web.sh"]
+
+# ── Actions ──────────────────────────────────────────────────────────────────
+# Bind these to keys with [[keys.command]] type = "plugin_action" — see README.
+
+[[actions]]
+id = "dashboard"
+title = "Phren dashboard"
+description = "Open the phren dashboard over this pane"
+contexts = ["global", "pane", "workspace"]
+command = ["bin/open-pane.sh", "dashboard"]
+
+[[actions]]
+id = "tasks"
+title = "Phren tasks"
+description = "Open phren tasks for this pane's project"
+contexts = ["global", "pane", "workspace"]
+command = ["bin/open-pane.sh", "tasks"]
+
+[[actions]]
+id = "dock"
+title = "Dock phren"
+description = "Split phren tasks in beside the current pane"
+contexts = ["global", "pane", "workspace"]
+command = ["bin/open-pane.sh", "dock"]
+
+[[actions]]
+id = "web"
+title = "Phren web UI"
+description = "Start the phren web UI and open it in a browser"
+contexts = ["global", "workspace"]
+command = ["bin/open-pane.sh", "web"]
+
+[[actions]]
+id = "check"
+title = "Phren plugin check"
+description = "Report which phren binary this plugin resolves to (read it with: herdr plugin log list --plugin phren)"
+contexts = ["global"]
+command = ["bin/phren-check.sh"]
