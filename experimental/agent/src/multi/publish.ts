@@ -70,8 +70,10 @@ export function createAgentPublisher(phrenPath: string | undefined, pid = proces
     },
   };
 
-  // A crash still leaves the file behind, which is why the reader treats
-  // anything it has not seen touched for a few minutes as gone.
-  process.once("exit", remove);
+  // Deliberately no process-level exit hook. Registering one per publisher put
+  // filesystem work on the exit path, which is enough to stop a process
+  // finishing when the path is unwritable, and it is redundant besides: the
+  // caller removes the file in a finally, and a crash is already covered by the
+  // reader treating anything untouched for a few minutes as gone.
   return publisher;
 }

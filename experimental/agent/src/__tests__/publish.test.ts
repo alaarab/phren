@@ -58,7 +58,10 @@ describe("createAgentPublisher", () => {
 
   it("is inert without a store, and never throws when the path is unusable", () => {
     expect(() => createAgentPublisher(undefined).publish([entry()])).not.toThrow();
-    const p = createAgentPublisher("/proc/nonexistent/nope", 9);
+    // A file where a directory should be: mkdir fails immediately with ENOTDIR.
+    // Do not reach for a /proc path here — recursive mkdir under /proc does not
+    // return on Linux, which hangs the worker rather than failing the test.
+    const p = createAgentPublisher(path.join(os.devNull, "nope"), 9);
     expect(() => p.publish([entry()])).not.toThrow();
     expect(() => p.stop()).not.toThrow();
   });
