@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.48] - 2026-09-03
+
 ### Added
 
 - **phren walks the terminal graph.** The web viewer has always had him; now the
@@ -14,6 +16,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Focusing a project no longer bounces on arrival.** `[` and `]` warm-started
+  a force simulation, framed the half-settled positions, then let the physics
+  play out under a fixed camera, so the whole cluster jiggled for a second every
+  time and could end up off-centre. The layout now settles before it is drawn
+  and the focus is a clean cut; only camera flights animate. Settling is under
+  10 ms for a couple of hundred nodes.
 - **Selecting a project no longer turns its whole cluster yellow.** Every edge
   touching the selection was painted solid amber, so the more a node connected,
   the less the highlight said — a project with thirty findings became a solid

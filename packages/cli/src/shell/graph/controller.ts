@@ -160,7 +160,6 @@ export class GraphController {
   private timer: NodeJS.Timeout | null = null;
   private cameraTarget: Point | null = null;
   /** Re-frame once the intro settle finishes so the whole map is in view. */
-  private fitOnSettle = false;
   /** Set by pan/zoom; until then a resize re-fits the whole map. */
   private userMoved = false;
   private readonly builder: GraphBuilder;
@@ -373,15 +372,18 @@ export class GraphController {
     this.sim = new ForceSim(nodes, links, undefined, this.viewport.width / Math.max(1, this.viewport.height));
     if (warm && this.lastPositions.size) this.sim.warmStart(this.lastPositions);
     this.mascot.reset();
-    const fresh = !warm || !this.lastPositions.size;
-    if (this.repaintHook) {
-      this.sim.tick(warm ? 12 : 40);
-      if (fresh) { this.fitAll(); this.fitOnSettle = true; }
-      this.startAnimation();
-    } else {
-      this.sim.settle();
-      if (fresh) this.fitAll();
-    }
+    // Settle before anyone sees it. Animating the relaxation instead — ticking
+    // a few steps, framing the half-settled positions, then letting the rest
+    // play out under a fixed camera — read as the whole cluster bouncing for a
+    // second every time a project came into focus. A layout change is a cut,
+    // not a motion; the camera flights are the only thing meant to move. It
+    // is cheap enough not to notice: under 10ms for a couple of hundred nodes,
+    // and the focused subset that [ ] shows is far smaller than that.
+    this.sim.settle();
+    if (!warm || !this.lastPositions.size) this.fitAll();
+    // One frame through the loop repaints, then it stops itself unless the
+    // mascot, a flight or watch mode has something to show.
+    if (this.repaintHook) this.startAnimation();
   }
 
   /**
@@ -392,7 +394,7 @@ export class GraphController {
   setViewport(width: number, height: number): void {
     if (width === this.viewport.width && height === this.viewport.height) return;
     this.viewport = { width: Math.max(2, width), height: Math.max(4, height) };
-    if (!this.userMoved) { const keepFlag = this.fitOnSettle; this.fitAll(); this.fitOnSettle = keepFlag; }
+    if (!this.userMoved) this.fitAll();
     else if (this.selectedId) this.keepInView(this.selectedId);
   }
 
@@ -411,7 +413,6 @@ export class GraphController {
   fitAll(): void {
     const box = bounds(this.positions.values());
     this.cameraTarget = null;
-    this.fitOnSettle = false;
     this.userMoved = false;
     if (!box) { this.camera = { cx: 0, cy: 0, scaleX: 2, scaleY: 2 }; return; }
     const w = Math.max(1, box.maxX - box.minX);
@@ -500,10 +501,11 @@ export class GraphController {
     if (this.mascot.step()) busy = true;
     if (this.mascot.arrivalGlow() > 0) busy = true;
     if (this.mascot.maybeWander(this.visible.nodes.map((node) => node.id), this.positions)) busy = true;
+    // Only a graph too large to settle within the tick budget gets here; it
+    // finishes relaxing quietly under whatever camera it was given.
     if (this.sim && !this.sim.settled) {
       this.sim.tick(3);
       busy = true;
-      if (this.sim.settled && this.fitOnSettle && !this.cameraTarget) { this.fitAll(); this.fitOnSettle = false; }
     }
     if (this.cameraTarget) {
       const t = this.cameraTarget;

@@ -245,16 +245,19 @@ describe("keys", () => {
 });
 
 describe("animation", () => {
-  it("settles through the repaint hook and stops on its own", async () => {
+  it("arrives already settled, repaints once, and stops on its own", async () => {
     const { controller } = make();
     controllers.push(controller);
     const repaints: number[] = [];
     controller.setRepaintHook(() => repaints.push(Date.now()));
     await controller.ensureData();
     await vi.waitFor(() => expect(controller.status).toBe("ready"));
-    expect(controller.animating).toBe(true);
+    // The layout is settled before the first paint: nothing moves on screen
+    // except the camera. The loop runs a frame to repaint and then stops.
+    const atReady = snapshotPositions(controller);
     await vi.waitFor(() => expect(controller.animating).toBe(false), { timeout: 5000 });
-    expect(repaints.length).toBeGreaterThan(2);
+    expect(repaints.length).toBeGreaterThanOrEqual(1);
+    expect(snapshotPositions(controller)).toEqual(atReady);
     const before = repaints.length;
     controller.flyTo("api");
     expect(controller.animating).toBe(true);
@@ -265,7 +268,35 @@ describe("animation", () => {
     controller.dispose();
     expect(controller.animating).toBe(false);
   });
+
+  it("focusing a project cuts to the settled layout instead of bouncing into it", async () => {
+    const { controller } = make();
+    controllers.push(controller);
+    controller.setRepaintHook(() => {});
+    await controller.ensureData();
+    await vi.waitFor(() => expect(controller.status).toBe("ready"));
+    await vi.waitFor(() => expect(controller.animating).toBe(false), { timeout: 5000 });
+
+    const name = controller.projects[0].project || controller.projects[0].id;
+    controller.focusProject(name);
+    // What you see on the first frame after [ ] is where the nodes stay:
+    // no physics playing out under the camera for the next second.
+    const first = snapshotPositions(controller);
+    expect(controller.focusedProject).toBe(name);
+    await vi.waitFor(() => expect(controller.animating).toBe(false), { timeout: 5000 });
+    expect(snapshotPositions(controller)).toEqual(first);
+
+    // And releasing back to everything is just as still.
+    controller.focusProject(null);
+    const all = snapshotPositions(controller);
+    await vi.waitFor(() => expect(controller.animating).toBe(false), { timeout: 5000 });
+    expect(snapshotPositions(controller)).toEqual(all);
+  });
 });
+
+function snapshotPositions(controller: GraphController): Array<[string, number, number]> {
+  return [...controller.positions].map(([id, p]) => [id, Math.round(p.x * 1000), Math.round(p.y * 1000)]);
+}
 
 describe("watch mode", () => {
   /** A controller wired to a hand-fed event tail instead of a log file. */
