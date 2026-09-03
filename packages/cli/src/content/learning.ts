@@ -3,7 +3,8 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { debugLog, appendAuditLog, phrenOk, phrenErr, PhrenError, type PhrenResult, type FindingTag } from "../shared.js";
 import { normalizeMemoryScope } from "../shared.js";
-import { withFileLock } from "../shared/governance.js";
+import { withFileLock, recordLookupEvents } from "../shared/governance.js";
+import { findingNodeIdForLine } from "../finding-graph-id.js";
 import { isValidProjectName } from "../utils.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import {
@@ -471,6 +472,28 @@ export function addFindingToFile(
     "add_finding",
     `project=${project}${result.data.created ? " created=true" : ""} citation_commit=${result.data.citation.commit ?? "none"} citation_file=${result.data.citation.file ?? "none"}`
   );
+
+  // Live activity: a write lights up the same graph node a lookup would, so a
+  // watching shell shows findings being saved as well as read. Best-effort.
+  try {
+    const bullet = result.data.bullet;
+    if (bullet) {
+      // Derive the node id the same way buildGraph does, so a watching graph
+      // lights the node that was just written rather than a phantom id.
+      const nodeId = findingNodeIdForLine(project, bullet.startsWith("-") ? bullet : `- ${bullet}`);
+      recordLookupEvents(phrenPath, [{
+        query: "",
+        project,
+        filename: FINDINGS_FILENAME,
+        type: "findings",
+        snippet: bullet.replace(/^-\s+/, "").replace(/\s*<!--.*?-->/g, "").trim(),
+        source: "write",
+        ...(nodeId ? { nodeId } : {}),
+      }]);
+    }
+  } catch (err: unknown) {
+    debugLog(`addFindingToFile lookup-event: ${String(err)}`);
+  }
 
   const cap = Number.parseInt((process.env.PHREN_FINDINGS_CAP) || "", 10) || DEFAULT_FINDINGS_CAP;
   const activeCount = countActiveFindings(result.data.content);

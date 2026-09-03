@@ -12,6 +12,8 @@ import type { ShellView } from "./types.js";
 export interface ShellStartup {
   view?: ShellView;
   project?: string;
+  /** Graph watch mode. Undefined leaves the default (on). */
+  live?: boolean;
   /** Shown on the shell's message line — fullscreen mode eats anything printed before launch. */
   notice?: string;
 }
@@ -20,6 +22,7 @@ export interface ShellStartupArgs {
   view?: string;
   project?: string;
   here?: boolean;
+  live?: boolean;
   unknown?: string;
 }
 
@@ -78,6 +81,8 @@ export function parseShellArgs(args: string[]): ShellStartupArgs {
       case "--view": parsed.view = take(); break;
       case "--project": parsed.project = take(); break;
       case "--here": parsed.here = true; break;
+      case "--live": parsed.live = true; break;
+      case "--no-live": parsed.live = false; break;
       default:
         if (flag.startsWith("-") && parsed.unknown === undefined) parsed.unknown = flag;
     }
@@ -97,6 +102,7 @@ export function resolveShellStartup(
 ): { startup: ShellStartup; warnings: string[] } {
   const warnings: string[] = [];
   const startup: ShellStartup = {};
+  if (parsed.live !== undefined) startup.live = parsed.live;
 
   if (parsed.unknown) warnings.push(`Unknown flag ${parsed.unknown} — ignored.`);
 

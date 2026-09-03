@@ -147,7 +147,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Skills: [`${k("a")} ${d("add")}`, `${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
     Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
-    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("f")} ${d("filter")}`, `${k("[ ]")} ${d("project")}`, `${k("esc")} ${d("back")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`, `${k("f")} ${d("filter")}`, `${k("[ ]")} ${d("project")}`, `${k("esc")} ${d("back")}`],
   };
 
   const extra = viewHints[state.view] ?? [];

@@ -14,6 +14,7 @@ import { displayWidth, padToWidth, style } from "../render.js";
 import { BrailleCanvas, blendHex, hexToSgr } from "./canvas.js";
 import type { GraphController } from "./controller.js";
 import { graphGlyphs } from "./glyphs.js";
+import { formatAge } from "./watch.js";
 
 const PANE_WIDTH = 34;
 const WIDE_BREAKPOINT = 100;
@@ -166,12 +167,26 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     canvas.line(a.x, a.y, b.x, b.y, color, { z: touchesSelected ? 2 : 0, dotted: link.kind === "contradicts" });
   }
 
+  const watching = controller.watchEnabled && controller.watch.running;
+  const heatOf = (id: string): number => (watching ? controller.watch.heatOf(id) : 0);
   for (const { node, x, y } of placed) {
     const isSelected = selected?.id === node.id;
+    const heat = heatOf(node.id);
     let color = node.baseColor;
     if (isSelected) color = ACCENT_AMBER;
     else if (searching && !matches.has(node.id)) color = blendHex(node.baseColor, DIM_TARGET, 0.7);
-    canvas.disc(x, y, dotRadius(node, isSelected), color, isSelected ? 4 : node.kind === "project" ? 3 : 1);
+    // A just-touched node pulses toward the live cyan and swells a little.
+    if (heat > 0) color = blendHex(color, ACCENT_CYAN, 0.3 + heat * 0.55);
+    const radius = dotRadius(node, isSelected) + (heat > 0.35 ? 1 : 0);
+    canvas.disc(x, y, radius, color, isSelected ? 4 : heat > 0 ? 3 : node.kind === "project" ? 3 : 1);
+    // A ring around the hottest nodes, so a hit reads at a glance.
+    if (heat > 0.55) {
+      const r = radius + 2;
+      for (let a = 0; a < 16; a++) {
+        const t = (a / 16) * Math.PI * 2;
+        canvas.setDot(x + Math.cos(t) * r, y + Math.sin(t) * r * 0.9, blendHex(ACCENT_CYAN, BG_COLOR, 1 - heat), 2);
+      }
+    }
   }
 
   // Glyphs + labels live in the overlay so they are never eaten by dots.
@@ -197,7 +212,7 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     if (isSelected) canvas.putText(col, row, "◆", sgr(ACCENT_AMBER, "\x1b[1m"));
     else if (node.kind === "project") canvas.putText(col, row, KIND_GLYPH.project, sgr(glyphColor, "\x1b[1m"));
     else if (number !== undefined) canvas.putText(col, row, String(number), sgr(ACCENT_CYAN, "\x1b[1m"));
-    const forced = node.forceLabel || isSelected || node.id === currentHit;
+    const forced = node.forceLabel || isSelected || node.id === currentHit || heatOf(node.id) > 0;
     const wanted = forced || number !== undefined || (lit && labels < labelBudget && (zoomedIn || searching));
     if (!wanted) continue;
     const maxLabel = node.kind === "project" ? 20 : number !== undefined ? 14 : 18;
@@ -274,6 +289,7 @@ function healthDot(node: RuntimeNode): string {
 
 function renderPane(controller: GraphController, selected: RuntimeNode | null, width: number, height: number): string[] {
   const inner = width - 2;
+  const watching = controller.watchEnabled && controller.watch.running;
   const lines: string[] = [];
   const push = (line = "") => { if (lines.length < height) lines.push(` ${line}`); };
   const row = (label: string, value: string) => push(`${style.dim(label.padEnd(9))}${value}`);
@@ -281,7 +297,7 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
   if (selected) {
     const detail = controller.detail(selected.id);
     push(`${colored(selected.kind === "project" ? KIND_COLORS.project : selected.baseColor, KIND_GLYPH[selected.kind])} ${style.bold(KIND_LABEL[selected.kind])}${selected.kind === "task" && selected.section ? style.dim(`  ${selected.section.toLowerCase()}`) : ""}`);
-    for (const line of wrapText(selected.fullLabel || selected.label, inner, 4)) push(line);
+    for (const line of wrapText(selected.fullLabel || selected.label, inner, watching ? 7 : 4)) push(line);
     push();
     if (selected.kind !== "project" && selected.project) row("project", style.cyan(selected.project));
     if (selected.kind === "project") {
@@ -323,10 +339,14 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       });
       if (neighbors.length > 9) push(style.dim(`  +${neighbors.length - 9} more`));
     }
+    if (watching) {
+      const budget = height - lines.length - 1;
+      if (budget > 3) for (const line of activityLines(controller, inner, budget)) push(line);
+    }
   } else {
     const total = controller.model.rawNodes.length;
     const shown = controller.visible.nodes.length;
-    push(`${colored(ACCENT_CYAN, "❖")} ${style.bold("knowledge graph")}${controller.refreshing ? style.dim("  ⟳") : ""}`);
+    push(`${colored(ACCENT_CYAN, "❖")} ${style.bold("knowledge graph")}${controller.refreshing ? style.dim("  ⟳") : ""}${watching ? `  ${colored(ACCENT_CYAN, "◉")}${style.dim(" live")}` : ""}`);
     push(style.dim(shown === total ? `${shown} nodes · ${controller.visible.links.length} edges` : `${shown} of ${total} nodes · ${controller.visible.links.length} edges`));
     push();
     row("filter", `${controller.preset.name}${style.dim("  f")}`);
@@ -347,6 +367,14 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       if (projects.length > budget) push(style.dim(`  +${projects.length - budget} more`));
       push();
     }
+    if (watching) {
+      const budget = height - lines.length - 1;
+      if (budget > 3) {
+        for (const line of activityLines(controller, inner, budget)) push(line);
+        while (lines.length < height) lines.push("");
+        return lines.slice(0, height);
+      }
+    }
     const k = (s: string) => style.boldCyan(s);
     const d = (s: string) => style.dim(s);
     push(`${k("↑↓←→")} ${d("walk")}   ${k("↵")} ${d("select")}`);
@@ -358,6 +386,49 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
   }
   while (lines.length < height) lines.push("");
   return lines.slice(0, height);
+}
+
+
+const SOURCE_COLOR: Record<string, string> = {
+  search: ACCENT_CYAN,
+  inject: ACCENT_AMBER,
+  write: "#3ae374",
+};
+
+/**
+ * The live feed: what phren has just landed on, newest first. Each event gets
+ * a meta line and as much of the memory's text as the pane can carry, because
+ * the point of watching is reading what was found, not just seeing it blink.
+ */
+function activityLines(controller: GraphController, inner: number, budget: number): string[] {
+  const out: string[] = [];
+  const now = Date.now();
+  const live = controller.watch.hot;
+  out.push("");
+  out.push(`${colored(live ? ACCENT_CYAN : "#5c6b8a", live ? "◉" : "○")} ${style.dim("activity")}`);
+  if (!controller.watch.activity.length) {
+    out.push(style.dim("  nothing yet — run a search"));
+    out.push(style.dim("  in another terminal"));
+    return out.slice(0, budget);
+  }
+  for (const item of controller.watch.activity) {
+    if (out.length >= budget - 1) break;
+    const age = item.historical ? "" : formatAge(now - item.seenAt);
+    const source = item.event.source || "lookup";
+    const color = SOURCE_COLOR[source] ?? "#7f8db3";
+    const heat = item.nodeId ? controller.watch.heatOf(item.nodeId) : 0;
+    const meta = `${style.dim(age.padEnd(4))}${colored(color, source)} ${style.dim("·")} ${style.cyan(sliceWidth(item.event.project, inner - age.length - source.length - 4))}`;
+    out.push(heat > 0.5 ? `${meta}` : meta);
+    const text = item.event.snippet || item.event.filename || "";
+    if (text && out.length < budget - 1) {
+      const wrapped = wrapText(text, inner - 2, heat > 0 ? 3 : 2);
+      for (const line of wrapped) {
+        if (out.length >= budget - 1) break;
+        out.push(`  ${heat > 0 ? colored(blendHex("#e2e8f0", ACCENT_CYAN, heat * 0.7), line) : style.dim(line)}`);
+      }
+    }
+  }
+  return out.slice(0, budget);
 }
 
 function renderStrip(controller: GraphController, selected: RuntimeNode, width: number, rows: number): string[] {

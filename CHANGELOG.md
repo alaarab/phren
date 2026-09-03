@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Watch mode in the terminal graph.** The Graph view now tails
+  `.runtime/lookup-events.jsonl`, so a graph open in one terminal lights up as an
+  agent works in another: the node a search lands on pulses cyan with a ring, the
+  camera flies to it, the finding's full text fills the details pane, and the
+  event joins an activity feed with its age, source and snippet. Writes appear in
+  green alongside reads. The camera yields while you navigate and resumes a few
+  seconds after your last keypress. On by default; `w` toggles it and
+  `--live` / `--no-live` set it at launch.
+- `phren search` and `add_finding` now record the same lookup events the MCP
+  `search_knowledge` tool already did, so CLI searches and finding writes are
+  visible to a watching graph (previously only agent searches were).
+
+### Changed
+
+- The splash mascot no longer bobs or leans. It sits still beside the wordmark
+  and only blinks, which reads far better than shifting the whole character grid
+  by a cell.
+
+### Internal
+
+- The lookup-log tailing used by the web UI's activity stream is extracted to
+  `src/shared/lookup-tail.ts` and shared with the shell's watch mode.
+
+
 ## [0.1.45] - 2026-09-01
 
 ### Added

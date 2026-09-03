@@ -20,6 +20,7 @@ phren shell --project hub                  # project context, landing screen
 | Flag | Description |
 |------|-------------|
 | `--view <view>` | Open on a view. Case-insensitive, and accepts what you'd type: `tasks`, `findings`, `review`, `review-queue`, `skills`, `hooks`, `health`, `profiles`, `graph` (also `map`, `network`). |
+| `--live` / `--no-live` | Force the Graph view's watch mode on or off. Default is on. |
 | `--project <name>` | Set the active project context for this session. |
 | `--here` | Resolve the project from the current directory using the same detection phren's hooks use — a git worktree resolves to the repository it came from. Ignored when `--project` is given. |
 
@@ -113,11 +114,27 @@ phren shell --view graph --project hub
 | `[` / `]` | Cycle project focus (all → each project → all) |
 | `+` / `-` / `0` | Zoom in / out / fit everything |
 | `⇧` + arrows, `H J K L` | Pan |
+| `w` | Toggle watch mode (see below) |
 | `r` | Re-lay out (or retry a failed build) |
 | `o` | Where to open the 3D viewer |
 | `esc` | Clear search, then selection, then project focus, then leave the view |
 
 The graph draws the star everyone knows (project → its findings, tasks, fragments, references) plus two edge kinds the web viewer does not show: fragments that are mentioned by the same documents (cyan), and findings linked by `supersedes` (grey) or `contradicts` (dotted red) lifecycle annotations. The selected node's edges turn amber.
+
+#### Watch mode
+
+The graph follows what phren is doing, **including in other terminals on the same machine**. Every memory a search lands on, every memory a hook injects before a prompt, and every finding written is appended to `.runtime/lookup-events.jsonl`; the graph tails that file.
+
+Put the graph in one terminal and an agent in another. As the agent searches, the node it hit pulses cyan with a ring, the camera flies to it, the finding's full text fills the details pane, and the event joins the activity feed with its age, source and snippet. Writes show up the same way, in green, so you watch knowledge being saved as well as read.
+
+The camera yields to you: while you are navigating, incoming events still pulse and feed but do not move the view. It resumes following a few seconds after your last keypress.
+
+Watch mode is on by default in the Graph view. Press `w` to toggle it, or launch with `--no-live` to start with it off (`--live` forces it on).
+
+```bash
+phren shell --view graph            # watching by default
+phren shell --view graph --no-live  # static graph
+```
 
 The view rebuilds when the store changes (the shell's 2-second live poll), keeping the previous layout as a warm start so the map shifts rather than scrambling. Colours use truecolor when `COLORTERM` advertises it, 256-colour otherwise. Set `PHREN_ICONS=nerd` to draw node glyphs with Nerd Font icons if your terminal font is a patched one.
 

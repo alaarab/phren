@@ -26,6 +26,7 @@ import { errorMessage } from "../../utils.js";
 import { logger } from "../../logger.js";
 import { style } from "../render.js";
 import { ForceSim, bounds, type LayoutNode, type Point } from "./layout.js";
+import { GraphWatch, type ActivityItem } from "./watch.js";
 
 /** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
 export const TUI_NODE_LIMIT = 350;
@@ -78,6 +79,10 @@ export interface GraphControllerOptions {
   tokenOf?: (phrenPath: string) => string;
   /** Animation frame period; the tests shrink it. */
   frameMs?: number;
+  /** Injected watch, so tests can feed events without a log file or timers. */
+  watch?: GraphWatch;
+  /** Start with watch mode off (`--no-live`). */
+  watchEnabled?: boolean;
 }
 
 const DIRECTIONS: Record<string, Point> = {
@@ -149,10 +154,65 @@ export class GraphController {
   private readonly tokenOf: (phrenPath: string) => string;
   private readonly frameMs: number;
 
+  /** Live tail of what phren is landing on, in this or any other terminal. */
+  readonly watch: GraphWatch;
+  watchEnabled: boolean;
+  /**
+   * Wall-clock ms of the last navigation keypress. While the user is driving,
+   * incoming events still pulse and feed but do not steal the camera.
+   */
+  private lastUserInputAt = 0;
+
   constructor(readonly phrenPath: string, readonly profile: string, opts: GraphControllerOptions = {}) {
     this.builder = opts.builder ?? ((p, prof) => buildGraph(p, prof, undefined, null, { includeFragmentEdges: true, includeLifecycleEdges: true }));
     this.tokenOf = opts.tokenOf ?? computePhrenLiveStateToken;
     this.frameMs = opts.frameMs ?? 50;
+    this.watch = opts.watch ?? new GraphWatch(phrenPath);
+    this.watchEnabled = opts.watchEnabled !== false;
+  }
+
+  // ── Watch mode ──────────────────────────────────────────────────────────
+
+  /** Idempotent; called every render so the tail starts with the view. */
+  startWatch(): void {
+    if (!this.watchEnabled || this.watch.running) return;
+    this.watch.start((items) => this.onWatchEvents(items));
+  }
+
+  stopWatch(): void {
+    this.watch.stop();
+  }
+
+  toggleWatch(): boolean {
+    this.watchEnabled = !this.watchEnabled;
+    if (this.watchEnabled) this.startWatch();
+    else this.stopWatch();
+    return this.watchEnabled;
+  }
+
+  /** True while the user is actively driving, so the camera is left alone. */
+  private get userDriving(): boolean {
+    return Date.now() - this.lastUserInputAt < 4000;
+  }
+
+  /**
+   * New events landed. Light every node they touch, then follow the newest
+   * one that is actually on screen — unless the user is mid-navigation.
+   */
+  private onWatchEvents(items: ActivityItem[]): void {
+    let followed = false;
+    for (let i = items.length - 1; i >= 0 && !followed; i--) {
+      const nodeId = items[i].nodeId;
+      if (!nodeId || !this.model.nodeById.has(nodeId)) continue;
+      if (!this.userDriving) {
+        this.selectedId = nodeId;
+        this.flyTo(nodeId);
+      }
+      followed = true;
+    }
+    // Heat decays over several seconds, so keep painting even without a fly.
+    this.startAnimation();
+    this.repaintHook?.();
   }
 
   // ── Data ────────────────────────────────────────────────────────────────
@@ -188,6 +248,7 @@ export class GraphController {
    * through; otherwise the old picture stays up with a refreshing badge.
    */
   async ensureData(): Promise<void> {
+    this.startWatch();
     const token = this.currentToken();
     if (this.payload && token === this.dataToken) return;
     if (!this.building) {
@@ -369,7 +430,7 @@ export class GraphController {
   }
 
   private animationFrame(): void {
-    let busy = false;
+    let busy = this.watch.hot;
     if (this.sim && !this.sim.settled) {
       this.sim.tick(3);
       busy = true;
@@ -394,6 +455,7 @@ export class GraphController {
   /** Called by the shell when the view changes away or the shell closes. */
   dispose(): void {
     this.stopAnimation();
+    this.stopWatch();
   }
 
   // ── Selection / search / focus ──────────────────────────────────────────
@@ -554,6 +616,7 @@ export class GraphController {
    */
   handleKey(rawKey: string, host: GraphKeyHost): true | undefined {
     const key = normalizeArrow(rawKey);
+    if (key !== "w" && key !== "W") this.lastUserInputAt = Date.now();
     if (this.status !== "ready") {
       if (key === "r") { this.dataToken = ""; host.setMessage("  Rebuilding graph…"); return true; }
       return undefined;
@@ -615,6 +678,13 @@ export class GraphController {
     if (key === "]" || key === "[") {
       const name = this.cycleProject(key === "]" ? 1 : -1);
       host.setMessage(name ? `  ${style.boldCyan("❖")} ${style.boldCyan(name)}` : `  ${style.dim("all projects")}`);
+      return true;
+    }
+    if (key === "w" || key === "W") {
+      const on = this.toggleWatch();
+      host.setMessage(on
+        ? `  ${style.boldCyan("◉ watching")} ${style.dim("— lighting up what phren touches, anywhere on this machine")}`
+        : `  ${style.dim("watch off")}`);
       return true;
     }
     if (key === "o") {

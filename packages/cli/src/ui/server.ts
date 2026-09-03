@@ -43,6 +43,7 @@ import {
   recentUsage,
 } from "./data.js";
 import { lookupEventsLogFile } from "../shared.js";
+import { LookupTail } from "../shared/lookup-tail.js";
 import { CONSOLIDATION_ENTRY_THRESHOLD } from "../content/validate.js";
 import {
   ensureTopicReferenceDoc,
@@ -493,47 +494,11 @@ function handleLookupStream(req: Req, res: Res, ctx: RouteCtx): void {
   });
   res.write("retry: 3000\n\n");
 
-  const logPath = lookupEventsLogFile(ctx.phrenPath);
-  // Start from the current end of the file so we only stream events that happen
-  // after the client connects (the initial snapshot comes from /api/lookups).
-  let offset = 0;
-  try {
-    offset = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
-  } catch { offset = 0; }
-
-  let carry = "";
+  // Only stream events appended after the client connects; the initial
+  // snapshot comes from /api/lookups.
+  const tail = new LookupTail(lookupEventsLogFile(ctx.phrenPath));
   const flushNew = (): void => {
-    let size: number;
-    try {
-      if (!fs.existsSync(logPath)) return;
-      size = fs.statSync(logPath).size;
-    } catch { return; }
-    if (size < offset) { offset = 0; carry = ""; } // file rotated/truncated
-    if (size <= offset) return;
-    let chunk = "";
-    try {
-      const fd = fs.openSync(logPath, "r");
-      try {
-        const buf = Buffer.alloc(size - offset);
-        fs.readSync(fd, buf, 0, buf.length, offset);
-        chunk = buf.toString("utf8");
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch { return; }
-    offset = size;
-    const lines = (carry + chunk).split("\n");
-    carry = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        JSON.parse(trimmed); // validate before forwarding
-        res.write(`data: ${trimmed}\n\n`);
-      } catch {
-        // skip malformed lines
-      }
-    }
+    for (const line of tail.pollLines()) res.write(`data: ${line}\n\n`);
   };
 
   const pollTimer = setInterval(flushNew, 1000);
