@@ -141,6 +141,21 @@ export class PhrenShell {
    * Let the host lend the terminal to a child process. Without one — a non-TTY
    * host, or an embedder — callers fall back to telling the user the path.
    */
+  /**
+   * The Graph view wants the mouse (drag to orbit, wheel to zoom, click to
+   * select); every other view wants the terminal's own text selection. The
+   * entry point supplies what turning it on and off means for this terminal.
+   */
+  setMouseHandler(handler: ((on: boolean) => void) | null): void {
+    this.mouseHandler = handler;
+  }
+  private mouseHandler: ((on: boolean) => void) | null = null;
+
+  /** Apply the mouse state for the current view (after grabbing the terminal). */
+  syncMouse(): void {
+    this.mouseHandler?.(this.state.view === "Graph");
+  }
+
   setSuspendHandler(handler: ((run: () => Promise<void> | void) => Promise<void>) | null): void {
     this.suspendHandler = handler;
   }
@@ -171,7 +186,9 @@ export class PhrenShell {
 
   setView(view: ShellView): void {
     if (this.state.view === "Graph" && view !== "Graph") this._graph?.stopAnimation();
+    const hadMouse = this.state.view === "Graph";
     this.state.view = view;
+    if (hadMouse !== (view === "Graph")) this.mouseHandler?.(view === "Graph");
     this.viewScrollMap[view] = 0;
     saveShellState(this.phrenPath, this.state);
   }

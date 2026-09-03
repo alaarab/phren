@@ -321,6 +321,83 @@ describe("reader", () => {
   });
 });
 
+describe("orbit", () => {
+  async function readyController() {
+    const { controller } = make();
+    controllers.push(controller);
+    await controller.ensureData();
+    await vi.waitFor(() => expect(controller.status).toBe("ready"));
+    controller.setViewport(200, 100);
+    return controller;
+  }
+
+  it("v toggles the sphere and every node still has a place on screen", async () => {
+    const c = await readyController();
+    const h = host();
+    expect(c.handleKey("v", h)).toBe(true);
+    expect(c.orbit).toBe(true);
+    expect(h.messages.at(-1)).toContain("orbit");
+    for (const node of c.visible.nodes) {
+      const d = c.projectNode(node.id)!;
+      expect(d).not.toBeNull();
+      expect(d.t).toBeGreaterThanOrEqual(0);
+      expect(d.t).toBeLessThanOrEqual(1);
+    }
+    c.handleKey("v", h);
+    expect(c.orbit).toBe(false);
+    expect(c.projectNode("hub")!.t).toBe(0);
+  });
+
+  it("a drag turns the sphere, the wheel zooms, a click selects what is under it", async () => {
+    const c = await readyController();
+    const h = host();
+    c.handleKey("v", h);
+    const yaw0 = c.orbitCamera.yaw;
+    c.handleKey("\x1b[<0;20;10M", h);
+    c.handleKey("\x1b[<32;30;10M", h);
+    c.handleKey("\x1b[<0;30;10m", h);
+    expect(c.orbitCamera.yaw).not.toBeCloseTo(yaw0, 5);
+    expect(c.selectedId).toBeNull(); // a drag is not a click
+
+    c.handleKey("\x1b[<64;5;5M", h);
+    expect(c.orbitCamera.zoom).toBeGreaterThan(1);
+    c.handleKey("\x1b[<65;5;5M", h);
+    expect(c.orbitCamera.zoom).toBeCloseTo(1, 5);
+
+    c.canvasOrigin = { col: 0, row: 2 };
+    const d = c.projectNode("api")!;
+    const col = Math.floor(d.x / 2) + 1;
+    const row = Math.floor(d.y / 4) + 2 + 1;
+    c.handleKey(`\x1b[<0;${col};${row}M`, h);
+    c.handleKey(`\x1b[<0;${col};${row}m`, h);
+    expect(c.selectedId).toBe("api");
+  });
+
+  it("on the flat map a drag pans and the wheel zooms too", async () => {
+    const c = await readyController();
+    const h = host();
+    const cx = c.camera.cx;
+    c.handleKey("\x1b[<0;20;10M", h);
+    c.handleKey("\x1b[<32;25;10M", h);
+    c.handleKey("\x1b[<0;25;10m", h);
+    expect(c.camera.cx).not.toBeCloseTo(cx, 5);
+    const scale = c.camera.scaleX;
+    c.handleKey("\x1b[<64;5;5M", h);
+    expect(c.camera.scaleX).toBeGreaterThan(scale);
+  });
+
+  it("selecting a node in orbit turns the sphere to face it", async () => {
+    const c = await readyController();
+    const h = host();
+    c.handleKey("v", h);
+    c.select("api", { fly: true });
+    // No repaint hook, so the flight lands at once.
+    const d = c.projectNode("api")!;
+    expect(d.t).toBeLessThan(0.5);
+    expect(Math.abs(d.x - 100)).toBeLessThan(25);
+  });
+});
+
 function snapshotPositions(controller: GraphController): Array<[string, number, number]> {
   return [...controller.positions].map(([id, p]) => [id, Math.round(p.x * 1000), Math.round(p.y * 1000)]);
 }

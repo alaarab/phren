@@ -30,6 +30,11 @@ import { GraphWatch, type ActivityItem } from "./watch.js";
 import { GraphAgents } from "./agents.js";
 import { GraphMascot } from "./mascot.js";
 import { LIVE_BUBBLE_MS } from "./bubble.js";
+import { DEFAULT_ORBIT, PITCH_LIMIT, buildOrbitLayout, parseMouse, projectOrbit, yawDelta, yawToFace } from "./orbit.js";
+import type { MouseEvent as GraphMouseEvent, OrbitCamera, Vec3 } from "./orbit.js";
+
+/** Left alone in orbit for this long, the sphere starts turning on its own. */
+const IDLE_SPIN_MS = 6000;
 
 /** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
 export const TUI_NODE_LIMIT = 350;
@@ -175,6 +180,19 @@ export class GraphController {
   readonly mascot = new GraphMascot();
   /** Space opens the selected node's full text in a bubble on the canvas. */
   reader = false;
+  /**
+   * v: the same graph as a sphere. Selection, search, watch mode and the
+   * neighbour numbers all keep working; the camera orbits instead of panning.
+   */
+  orbit = false;
+  orbitCamera: OrbitCamera = { ...DEFAULT_ORBIT };
+  private orbitPositions = new Map<string, Vec3>();
+  private orbitRadius = 1;
+  private orbitYawTarget: number | null = null;
+  private lastOrbitTouch = 0;
+  private drag: { col: number; row: number; moved: boolean } | null = null;
+  /** Where the canvas sits in the terminal, so mouse coordinates can be mapped onto it. */
+  canvasOrigin = { col: 0, row: 2 };
   watchEnabled: boolean;
   /**
    * Wall-clock ms of the last navigation keypress. While the user is driving,
@@ -399,6 +417,7 @@ export class GraphController {
     // is cheap enough not to notice: under 10ms for a couple of hundred nodes,
     // and the focused subset that [ ] shows is far smaller than that.
     this.sim.settle();
+    this.rebuildOrbit();
     if (!warm || !this.lastPositions.size) this.fitAll();
     // One frame through the loop repaints, then it stops itself unless the
     // mascot, a flight or watch mode has something to show.
@@ -421,6 +440,101 @@ export class GraphController {
     return this.viewport;
   }
 
+  /** The sphere is derived from the settled flat layout, never simulated. */
+  private rebuildOrbit(): void {
+    const nodes: LayoutNode[] = this.visible.nodes.map((node) => ({ id: node.id, kind: node.kind, project: node.project, size: node.size }));
+    const built = buildOrbitLayout(nodes, this.visible.links, this.positions);
+    this.orbitPositions = built.positions;
+    this.orbitRadius = built.radius;
+  }
+
+  /** A node's place on screen, with depth: 0 nearest, 1 farthest, always 0 on the flat map. */
+  projectNode(id: string): { x: number; y: number; t: number } | null {
+    if (this.orbit) {
+      const v = this.orbitPositions.get(id);
+      return v ? projectOrbit(v, this.orbitCamera, this.viewport, this.orbitRadius) : null;
+    }
+    const p = this.positions.get(id);
+    return p ? { ...this.project(p), t: 0 } : null;
+  }
+
+  toggleOrbit(): boolean {
+    this.orbit = !this.orbit;
+    this.drag = null;
+    this.orbitYawTarget = null;
+    this.lastOrbitTouch = Date.now();
+    if (this.orbit) {
+      this.orbitCamera = { ...DEFAULT_ORBIT };
+      if (this.selectedId) this.flyTo(this.selectedId);
+      if (this.repaintHook) this.startAnimation();
+    }
+    return this.orbit;
+  }
+
+  /** In orbit, the pan keys turn the sphere instead. */
+  private turn(direction: keyof typeof DIRECTIONS): void {
+    const d = DIRECTIONS[direction];
+    this.orbitCamera.yaw += d.x * 0.12;
+    this.orbitCamera.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.orbitCamera.pitch + d.y * 0.08));
+    this.orbitYawTarget = null;
+    this.lastOrbitTouch = Date.now();
+  }
+
+  /** The visible node nearest a dot on the canvas, within a radius. */
+  nearestToDot(x: number, y: number, within: number): RuntimeNode | null {
+    let best: RuntimeNode | null = null;
+    let bestDistance = within;
+    for (const node of this.visible.nodes) {
+      const d = this.projectNode(node.id);
+      if (!d) continue;
+      // A project marker has findings packed right up against it; a click on
+      // the marker means the project, so it wins a few dots of slack.
+      const distance = Math.hypot(d.x - x, d.y - y) - (node.kind === "project" ? 4 : 0);
+      if (distance < bestDistance) { bestDistance = distance; best = node; }
+    }
+    return best;
+  }
+
+  /**
+   * Mouse: wheel zooms in both modes; a left drag turns the sphere or pans
+   * the map; a click with no movement selects the node under it.
+   */
+  private handleMouse(m: GraphMouseEvent, host: GraphKeyHost): true {
+    if (m.type === "wheel") { this.zoom(m.delta < 0 ? 1.15 : 1 / 1.15); return true; }
+    if (m.type === "press") {
+      if (m.button === 0) this.drag = { col: m.col, row: m.row, moved: false };
+      return true;
+    }
+    if (m.type === "drag") {
+      if (!this.drag) return true;
+      const dx = m.col - this.drag.col;
+      const dy = m.row - this.drag.row;
+      if (dx === 0 && dy === 0) return true;
+      this.drag = { col: m.col, row: m.row, moved: true };
+      if (this.orbit) {
+        this.orbitCamera.yaw += dx * 0.035;
+        this.orbitCamera.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.orbitCamera.pitch + dy * 0.06));
+        this.orbitYawTarget = null;
+        this.lastOrbitTouch = Date.now();
+      } else {
+        this.userMoved = true;
+        this.cameraTarget = null;
+        this.camera.cx -= (dx * 2) / this.camera.scaleX;
+        this.camera.cy -= (dy * 4) / this.camera.scaleY;
+      }
+      return true;
+    }
+    const wasClick = this.drag !== null && !this.drag.moved;
+    this.drag = null;
+    if (wasClick) {
+      const x = (m.col - this.canvasOrigin.col) * 2 + 1;
+      const y = (m.row - this.canvasOrigin.row) * 4 + 2;
+      const node = this.nearestToDot(x, y, 12);
+      if (node) { this.select(node.id); host.setMessage(this.describe(node)); }
+    }
+    return true;
+  }
+
   /** World → dot coordinates for the current camera. */
   project(p: Point): Point {
     return {
@@ -430,6 +544,11 @@ export class GraphController {
   }
 
   fitAll(): void {
+    if (this.orbit) {
+      this.orbitCamera.zoom = 1;
+      this.orbitCamera.pitch = DEFAULT_ORBIT.pitch;
+      this.lastOrbitTouch = Date.now();
+    }
     const box = bounds(this.positions.values());
     this.cameraTarget = null;
     this.userMoved = false;
@@ -453,6 +572,11 @@ export class GraphController {
   }
 
   zoom(factor: number): void {
+    if (this.orbit) {
+      this.orbitCamera.zoom = Math.max(0.4, Math.min(4, this.orbitCamera.zoom * factor));
+      this.lastOrbitTouch = Date.now();
+      return;
+    }
     this.userMoved = true;
     // Both axes move together, so a zoom never changes the shape on screen.
     const clampZoom = (v: number) => Math.max(0.2, Math.min(24, v));
@@ -461,6 +585,7 @@ export class GraphController {
   }
 
   pan(direction: keyof typeof DIRECTIONS): void {
+    if (this.orbit) { this.turn(direction); return; }
     const d = DIRECTIONS[direction];
     const stepX = (this.viewport.width * 0.12) / this.camera.scaleX;
     const stepY = (this.viewport.height * 0.12) / this.camera.scaleY;
@@ -472,6 +597,15 @@ export class GraphController {
 
   /** Centre the camera on a node, eased when animation is available. */
   flyTo(nodeId: string): void {
+    if (this.orbit) {
+      // Turn the sphere so the node faces you, eased like a flight.
+      const v = this.orbitPositions.get(nodeId);
+      if (!v) return;
+      this.orbitYawTarget = yawToFace(v);
+      if (this.repaintHook) this.startAnimation();
+      else { this.orbitCamera.yaw = this.orbitYawTarget; this.orbitYawTarget = null; }
+      return;
+    }
     const p = this.positions.get(nodeId);
     if (!p) return;
     if (this.repaintHook) {
@@ -485,6 +619,7 @@ export class GraphController {
 
   /** Fly only when the node sits outside the middle band of the viewport. */
   private keepInView(nodeId: string): void {
+    if (this.orbit) { this.flyTo(nodeId); return; }
     const p = this.positions.get(nodeId);
     if (!p) return;
     const d = this.project(p);
@@ -517,6 +652,18 @@ export class GraphController {
 
   private animationFrame(): void {
     let busy = this.watch.hot;
+    if (this.orbit) {
+      if (this.orbitYawTarget !== null) {
+        const d = yawDelta(this.orbitCamera.yaw, this.orbitYawTarget);
+        if (Math.abs(d) < 0.01) { this.orbitCamera.yaw = this.orbitYawTarget; this.orbitYawTarget = null; }
+        else this.orbitCamera.yaw += d * 0.25;
+      } else if (!this.drag && Date.now() - this.lastOrbitTouch > IDLE_SPIN_MS) {
+        // Left alone, it turns slowly, so the depth is always there to see.
+        this.orbitCamera.yaw += 0.005;
+      }
+      // The loop stays alive in orbit so the idle spin can start on its own.
+      busy = true;
+    }
     if (this.liveRecall()) busy = true;
     if (this.mascot.step()) busy = true;
     if (this.mascot.arrivalGlow() > 0) busy = true;
@@ -709,6 +856,8 @@ export class GraphController {
    * generic handler have it (q, :, ?, view shortcuts, final Esc).
    */
   handleKey(rawKey: string, host: GraphKeyHost): true | undefined {
+    const mouse = parseMouse(rawKey);
+    if (mouse) { this.lastUserInputAt = Date.now(); return this.status === "ready" ? this.handleMouse(mouse, host) : true; }
     const key = normalizeArrow(rawKey);
     if (key !== "w" && key !== "W") this.lastUserInputAt = Date.now();
     if (this.status !== "ready") {
@@ -804,6 +953,13 @@ export class GraphController {
       host.setMessage(on
         ? `  ${style.boldCyan("◉ watching")} ${style.dim("— lighting up what phren touches, anywhere on this machine")}`
         : `  ${style.dim("watch off")}`);
+      return true;
+    }
+    if (key === "v") {
+      const on = this.toggleOrbit();
+      host.setMessage(on
+        ? `  ${style.boldCyan("⟲")} ${style.dim("orbit — drag to turn, wheel to zoom,")} ${style.boldCyan("v")} ${style.dim("back to the map")}`
+        : `  ${style.dim("flat map")}`);
       return true;
     }
     if (key === "o") {

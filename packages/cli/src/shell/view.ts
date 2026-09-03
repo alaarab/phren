@@ -143,7 +143,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Skills: [`${k("↑↓")} ${d("move")}`, `${k("e")} ${d("edit")}`, `${k("t")} ${d("toggle")}`],
     Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`],
-    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("␣")} ${d("read")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("␣")} ${d("read")}`, `${k("v")} ${d("orbit")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
   };
   const search = state.view === "Graph" ? `${k("/")} ${d("search")}` : `${k("/")} ${d("filter")}`;
   // `? keys` and `q quit` are the two you cannot afford to lose, so a narrow
@@ -963,6 +963,8 @@ export async function renderShell(
         const offer = controller.agentHint();
         if (offer) message = `  ${style.boldCyan("▲")} ${style.dim(`${offer} — press`)} ${style.boldCyan("a")} ${style.dim("to see them")}`;
         contentLines = renderGraphView(controller, renderWidth(), height);
+        // Mouse reports are terminal coordinates; the canvas starts under the top bar.
+        controller.canvasOrigin = { col: 0, row: topBar.split("\n").length };
         break;
       }
       default:
