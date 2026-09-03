@@ -71,6 +71,7 @@ export class PhrenShell {
   private _subsectionsCache: SubsectionsCache | null = null;
   private _graph?: GraphController;
   private repaintHandler: (() => void) | null = null;
+  private suspendHandler: ((run: () => Promise<void> | void) => Promise<void>) | null = null;
   /** `--live` / `--no-live`; undefined leaves watch mode at its default. */
   private graphLive?: boolean;
 
@@ -115,6 +116,25 @@ export class PhrenShell {
   setRepaintHandler(handler: (() => void) | null): void {
     this.repaintHandler = handler;
     this._graph?.setRepaintHook(handler);
+  }
+
+  /**
+   * Let the host lend the terminal to a child process. Without one — a non-TTY
+   * host, or an embedder — callers fall back to telling the user the path.
+   */
+  setSuspendHandler(handler: ((run: () => Promise<void> | void) => Promise<void>) | null): void {
+    this.suspendHandler = handler;
+  }
+
+  get canSuspend(): boolean {
+    return this.suspendHandler !== null;
+  }
+
+  /** Run `fn` with the terminal released. Resolves false when that is impossible. */
+  async suspend(fn: () => Promise<void> | void): Promise<boolean> {
+    if (!this.suspendHandler) return false;
+    await this.suspendHandler(fn);
+    return true;
   }
 
   graph(): GraphController {
@@ -183,7 +203,7 @@ export class PhrenShell {
   private currentScroll(): number { return this.viewScrollMap[this.state.view] ?? 0; }
   private setScroll(n: number): void { this.viewScrollMap[this.state.view] = Math.max(0, n); }
 
-  getListItems(): { id?: string; name?: string; text?: string; line?: string }[] {
+  getListItems(): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[] {
     return getListItems(this.phrenPath, this.profile, this.state, this.healthLineCount);
   }
 
@@ -301,6 +321,7 @@ export class PhrenShell {
       getListItems: () => this.getListItems(),
       startInput: (ctx, initial) => this.startInput(ctx, initial),
       graph: () => this.graph(),
+      suspend: (fn) => this.suspend(fn),
     };
   }
 

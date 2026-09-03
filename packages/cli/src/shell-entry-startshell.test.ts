@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./shell/shell.js", () => {
   class MockPhrenShell {
     setRepaintHandler = vi.fn();
+    setSuspendHandler = vi.fn();
     render = vi.fn().mockResolvedValue("mocked-render");
     handleRawKey = vi.fn().mockResolvedValue(true);
     handleInput = vi.fn().mockResolvedValue(true);

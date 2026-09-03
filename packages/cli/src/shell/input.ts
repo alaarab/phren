@@ -39,6 +39,8 @@ import { consolidateProjectFindings } from "../governance/policy.js";
 import { style } from "./render.js";
 import { SUB_VIEWS, TAB_ICONS, type DoctorResultLike, type ShellDeps, type ShellView } from "./types.js";
 import { getProjectSkills, getHookEntries, writeInstallPreferences } from "./view.js";
+import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
+import { openInEditor } from "../editor/launch.js";
 import { removeSkillPath, setSkillEnabledAndSync } from "../skill/files.js";
 import {
   resultMsg,
@@ -75,7 +77,7 @@ export interface NavigationHost extends PaletteHost {
   currentCursor(): number;
   setCursor(n: number): void;
   moveCursor(delta: number): void;
-  getListItems(): { id?: string; name?: string; text?: string; line?: string }[];
+  getListItems(): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[];
   startInput(ctx: string, initial: string): void;
   inputMqId: string;
   prevHealthView: ShellView | undefined;
@@ -83,6 +85,30 @@ export interface NavigationHost extends PaletteHost {
   setFilter(value: string): void;
   /** The knowledge-graph view's controller (created on first use). */
   graph(): GraphController;
+  /** Run something with the terminal released; false when the host cannot. */
+  suspend(fn: () => Promise<void> | void): Promise<boolean>;
+}
+
+/**
+ * The file `e` and `E` edit for the current view. Skills edit their own
+ * markdown; a project edits the CLAUDE.md the store owns and symlinks into the
+ * repo, so editing here reaches every linked checkout.
+ */
+export function editTargetFor(
+  host: NavigationHost,
+  item: { name?: string; path?: string; storePath?: string } | undefined,
+): { path: string; label: string; kind: "skill" | "claude" } | null {
+  if (host.state.view === "Skills") {
+    if (!item?.path) return null;
+    return { path: item.path, label: item.name ?? path.basename(item.path), kind: "skill" };
+  }
+  if (host.state.view === "Projects") {
+    const project = item?.name ?? host.state.project;
+    if (!project) return null;
+    const store = resolveProjectStorePath(host.phrenPath, project);
+    return { path: path.join(store, project, "CLAUDE.md"), label: `${project}/CLAUDE.md`, kind: "claude" };
+  }
+  return null;
 }
 
 function taskFileForProject(phrenPath: string, project: string): string {
@@ -543,7 +569,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
 
 export function getListItems(
   phrenPath: string, profile: string, state: ShellState, healthLineCount: number,
-): { id?: string; name?: string; text?: string; line?: string }[] {
+): { id?: string; name?: string; text?: string; line?: string; path?: string; scopeType?: string; storePath?: string }[] {
   switch (state.view) {
     case "Projects": {
       const cards = listProjectCards(phrenPath, profile);
@@ -575,7 +601,13 @@ export function getListItems(
     }
     case "Skills": {
       if (!state.project) return [];
-      const allSkills = getProjectSkills(phrenPath, state.project).map((s) => ({ name: s.name, text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}` }));
+      const allSkills = getProjectSkills(phrenPath, state.project).map((s) => ({
+        name: s.name,
+        text: `${s.enabled ? "enabled" : "disabled"} · ${s.path}`,
+        path: s.path,
+        scopeType: s.scopeType,
+        storePath: s.storePath,
+      }));
       return state.filter
         ? allSkills.filter((s) => `${s.name} ${s.text}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : allSkills;
@@ -640,6 +672,21 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
   const cursor = host.currentCursor();
   const items = host.getListItems();
   const item = items[cursor];
+
+  // `e` hands the file to the user's own editor, whatever that is.
+  if (key === "e") {
+    const target = editTargetFor(host, item);
+    if (!target) { host.setMessage(`  ${style.dim("nothing to edit here")}`); return; }
+    const handed = await host.suspend(() => {
+      const result = openInEditor(target.path);
+      host.setMessage(result.ok
+        ? `  ${style.green("✓")} ${target.label}`
+        : `  Editor "${result.command}" failed — ${result.error ?? "could not start"}. Set $EDITOR.`);
+    });
+    if (!handed) host.setMessage(`  ${style.dim("edit it at")} ${target.path}`);
+    host.invalidateSubsectionsCache();
+    return;
+  }
   const project = host.state.project;
 
   switch (host.state.view) {
@@ -676,10 +723,11 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
     case "Skills":
       if ((key === "d" || key === "\x7f") && item?.name) {
         if (!project) { host.setMessage("Select a project first."); return; }
-        const skillPath = item.text!;
+        const skillPath = item.path;
+        if (!skillPath) { host.setMessage("  Could not resolve that skill's path."); return; }
         host.confirmThen(`Remove skill "${item.name}"?`, () => {
           try {
-            removeSkillPath(skillPath.split("·").slice(-1)[0].trim());
+            removeSkillPath(skillPath);
             host.setMessage(`  Removed ${item.name}`);
             host.setCursor(Math.max(0, cursor - 1));
           } catch (err: unknown) {
@@ -689,7 +737,10 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
       } else if (key === "t" && item?.name) {
         if (!project) { host.setMessage("Select a project first."); return; }
         const isEnabled = !item.text?.startsWith("disabled");
-        setSkillEnabledAndSync(host.phrenPath, project, item.name, !isEnabled);
+        // A global skill's enabled flag is recorded under the "global" scope;
+        // passing the project wrote a key that nothing ever reads back.
+        const scope = item.scopeType === "global" ? "global" : project;
+        setSkillEnabledAndSync(item.storePath ?? host.phrenPath, scope, item.name, !isEnabled);
         host.setMessage(`  ${!isEnabled ? "Enabled" : "Disabled"} ${item.name}`);
       } else if (key === "a") {
         if (!project) { host.setMessage("Select a project first."); return; }

@@ -623,6 +623,10 @@ export interface SkillEntry {
   name: string;
   path: string;
   enabled: boolean;
+  /** "global" or "project" — the scope key enable/disable is recorded under. */
+  scopeType?: string;
+  /** The store this skill was read from, which may be a team store. */
+  storePath?: string;
 }
 
 export function getProjectSkills(phrenPath: string, project: string): SkillEntry[] {
@@ -631,6 +635,11 @@ export function getProjectSkills(phrenPath: string, project: string): SkillEntry
     name: skill.name,
     path: skill.path,
     enabled: skill.enabled,
+    // Carried so actions do not have to guess: a global skill toggled with the
+    // project as its scope writes a key nothing reads, and a path recovered by
+    // splitting a display string breaks on any path containing the separator.
+    scopeType: skill.scopeType,
+    storePath,
   }));
 }
 
