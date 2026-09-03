@@ -18,7 +18,8 @@ import { formatAge } from "./watch.js";
 
 const PANE_WIDTH = 34;
 const WIDE_BREAKPOINT = 100;
-const NARROW_STRIP_ROWS = 6;
+/** Ceiling for the narrow-terminal detail strip; it only takes what it fills. */
+const NARROW_STRIP_MAX = 6;
 const DIM_TARGET = "#3a3f55";
 
 /** Resolved per frame so PHREN_ICONS is honoured without a restart. */
@@ -111,9 +112,11 @@ export function renderGraphView(controller: GraphController, width: number, heig
 
   const wide = width >= WIDE_BREAKPOINT;
   const selected = controller.selectedId ? controller.model.nodeById.get(controller.selectedId) ?? null : null;
-  const stripRows = !wide && selected ? NARROW_STRIP_ROWS : 0;
+  // Build the strip first so it takes only the rows it fills; every row it
+  // gives back goes to the graph, which is the part worth the space.
+  const strip = !wide && selected ? renderStrip(controller, selected, width, NARROW_STRIP_MAX) : [];
   const canvasCols = wide ? width - PANE_WIDTH - 1 : width;
-  const canvasRows = Math.max(4, height - 1 - stripRows);
+  const canvasRows = Math.max(4, height - 1 - strip.length);
 
   const canvas = drawCanvas(controller, canvasCols, canvasRows, selected);
   const legend = padToWidth(renderLegend(controller, canvasCols), canvasCols);
@@ -124,7 +127,6 @@ export function renderGraphView(controller: GraphController, width: number, heig
     const divider = style.dim("│");
     return canvasLines.map((line, i) => `${line}${divider}${padToWidth(pane[i] ?? "", PANE_WIDTH)}`);
   }
-  const strip = selected ? renderStrip(controller, selected, width, stripRows) : [];
   return [...canvasLines, ...strip.map((line) => padToWidth(line, width))];
 }
 
@@ -197,7 +199,7 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
   const neighborIndex = new Map<string, number>();
   if (selected) controller.neighborsOf(selected.id).slice(0, 9).forEach((node, i) => neighborIndex.set(node.id, i + 1));
   const currentHit = searching ? controller.search.results[controller.search.index]?.id : undefined;
-  const zoomedIn = controller.camera.scale >= 5;
+  const zoomedIn = Math.min(controller.camera.scaleX, controller.camera.scaleY) >= 5;
   const ranked = placed.slice().sort((a, b) => labelPriority(controller, b.node, selected, neighborIndex) - labelPriority(controller, a.node, selected, neighborIndex));
   const labelBudget = searching ? 14 : zoomedIn ? Math.max(8, Math.floor((cols * rows) / 60)) : Math.max(4, Math.floor((cols * rows) / 220));
   let labels = 0;
@@ -278,9 +280,14 @@ function renderLegend(controller: GraphController, width: number): string {
   entry("reference", KIND_COLORS.reference);
   const edges = controller.visible.links.length;
   parts.push(style.dim(`${edges} edge${edges === 1 ? "" : "s"}`));
-  let line = ` ${parts.join(style.dim("  ·  "))}`;
-  if (displayWidth(line) > width) line = ` ${parts.join(style.dim(" · "))}`;
-  return line;
+  // Drop whole entries off the end rather than slicing a count in half.
+  for (const sep of ["  ·  ", " · "]) {
+    for (let take = parts.length; take > 0; take--) {
+      const line = ` ${parts.slice(0, take).join(style.dim(sep))}`;
+      if (displayWidth(line) <= width) return line;
+    }
+  }
+  return "";
 }
 
 function healthDot(node: RuntimeNode): string {
@@ -453,6 +460,5 @@ function renderStrip(controller: GraphController, selected: RuntimeNode, width: 
     }
     lines.push(line.trimEnd());
   }
-  while (lines.length < rows) lines.push("");
   return lines.slice(0, rows);
 }

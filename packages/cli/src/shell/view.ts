@@ -22,6 +22,7 @@ import {
   separator,
   stripAnsi,
   truncateLine,
+  displayWidth,
   renderWidth,
   wrapSegments,
   lineViewport,
@@ -78,43 +79,36 @@ function resolveProjectStorePath(phrenPath: string, project: string): string {
 
 // ── Tab bar ────────────────────────────────────────────────────────────────
 
-function renderTabBar(state: ShellState): string {
+/**
+ * The whole top of the frame in as few rows as possible: brand, current view,
+ * project and filter on one line, then a rule. On a 24-row terminal the old
+ * three-row header cost more than a tenth of the screen.
+ */
+function renderTopBar(state: ShellState): string {
   const cols = renderWidth();
+  const brand = gradient("◆ phren");
+  const dot = style.dim("·");
+  const project = state.project ? `${dot} ${style.cyan(state.project)}` : "";
+  const filter = state.filter ? `${dot} ${style.yellow("/" + state.filter)}` : "";
+  const isSub = (SUB_VIEWS as readonly string[]).includes(state.view);
 
-  if (state.view === "Health") {
-    const label = `${TAB_ICONS.Health} Health`;
-    return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
+  if (!isSub) {
+    const label = style.boldMagenta(`${TAB_ICONS[state.view] ?? "◆"} ${state.view}`);
+    const line = ["  " + brand, label, project, filter].filter(Boolean).join("  ");
+    return `${truncateLine(line, cols)}\n${separator(cols)}`;
   }
 
-  if (state.view === "Graph") {
-    const label = `${TAB_ICONS.Graph} Graph`;
-    return `  ${style.boldMagenta(label)}\n${separator(cols)}`;
+  // Sub-views carry a tab strip. Try full labels, then icons for the inactive
+  // tabs, before giving up and taking a second row.
+  const head = `  ${brand}${project ? `  ${project}` : ""}${filter ? `  ${filter}` : ""}`;
+  const full = SUB_VIEWS.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(`${TAB_ICONS[v]} ${v}`)));
+  const terse = SUB_VIEWS.map((v) => (v === state.view ? style.boldMagenta(`${TAB_ICONS[v]} ${v}`) : style.dim(TAB_ICONS[v] ?? "")));
+  for (const tabs of [full, terse]) {
+    const merged = `${head}  ${style.dim("│")} ${tabs.join(style.dim(" │ "))}`;
+    if (displayWidth(merged) <= cols) return `${merged}\n${separator(cols)}`;
   }
-
-  if (state.view === "Projects") {
-    const label = `${TAB_ICONS.Projects} Projects`;
-    const tabLine = ` ${style.boldMagenta(label)} `;
-    return `${tabLine}\n${separator(cols)}`;
-  }
-
-  const projectTag = state.project
-    ? `${style.cyan(state.project)} ${style.dim("›")}`
-    : "";
-  const tabs = SUB_VIEWS.map((v) => {
-    const icon = TAB_ICONS[v] || "";
-    const label = `${icon} ${v}`;
-    return v === state.view
-      ? ` ${style.boldMagenta(label)} `
-      : ` ${style.dim(label)} `;
-  });
-
-  const segments = projectTag ? [projectTag, ...tabs] : tabs;
-  const tabLine = wrapSegments(segments, cols, {
-    indent: "  ",
-    maxLines: 2,
-    separator: style.dim("│"),
-  });
-  return `${tabLine}\n${separator(cols)}`;
+  const tabLine = wrapSegments(full, cols, { indent: "  ", maxLines: 2, separator: style.dim("│") });
+  return `${head}\n${tabLine}\n${separator(cols)}`;
 }
 
 // ── Bottom bar ─────────────────────────────────────────────────────────────
@@ -139,36 +133,29 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     return `${sep}\n  ${style.boldCyan(label + " ›")} ${inputBuf}${style.cyan("█")}`;
   }
 
-  const viewHints: Record<string, string[]> = {
-    Projects: [`${k("↵")} ${d("open project")}`, `${k("i")} ${d("intro mode")}`],
-    Tasks: [`${k("a")} ${d("add")}`, `${k("↵")} ${d("mark done")}`, `${k("d")} ${d("toggle active")}`],
-    Findings: [`${k("a")} ${d("add")}`, `${k("d")} ${d("remove")}`],
-    "Review Queue": [`${k("↵")} ${d("inspect")}`],
-    Skills: [`${k("a")} ${d("add")}`, `${k("t")} ${d("toggle")}`, `${k("d")} ${d("remove")}`],
-    Hooks: [`${k("a")} ${d("enable")}`, `${k("d")} ${d("disable")}`],
-    Health: [`${k("↑↓")} ${d("scroll")}`, `${k("esc")} ${d("back")}`],
-    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`, `${k("f")} ${d("filter")}`, `${k("[ ]")} ${d("project")}`, `${k("esc")} ${d("back")}`],
+  // Only what you reach for constantly. Everything else is one `?` away, so
+  // the bar never costs more than a single row.
+  const essentials: Record<string, string[]> = {
+    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`],
+    Tasks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`, `${k("↵")} ${d("done")}`],
+    Findings: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`],
+    "Review Queue": [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("inspect")}`],
+    Skills: [`${k("↑↓")} ${d("move")}`, `${k("t")} ${d("toggle")}`],
+    Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
+    Health: [`${k("↑↓")} ${d("scroll")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`],
   };
-
-  const extra = viewHints[state.view] ?? [];
-  const isSubView = state.view !== "Projects" && state.view !== "Health" && state.view !== "Graph";
-  const nav = isSubView
-    ? [`${k("←→")} ${d("tabs")}`, `${k("↑↓")} ${d("move")}`, `${k("esc")} ${d("back")}`]
-    : state.view === "Health" || state.view === "Graph"
-      ? []
-      : [`${k("↑↓")} ${d("move")}`];
-  const tail = [
-    state.view === "Graph" ? `${k("h")} ${d("health")}` : `${k("g")} ${d("graph")}`,
-    `${k("/")} ${d(state.view === "Graph" ? "search" : "filter")}`,
-    `${k(":")} ${d("cmd")}`, `${k("?")} ${d("help")}`, `${k("q")} ${d("quit")}`,
-  ];
-
-  const hints = [...nav, ...extra, ...tail];
-  return `${sep}\n${wrapSegments(hints, cols, {
-    indent: "  ",
-    maxLines: 3,
-    separator: dot,
-  })}`;
+  const search = state.view === "Graph" ? `${k("/")} ${d("search")}` : `${k("/")} ${d("filter")}`;
+  // `? keys` and `q quit` are the two you cannot afford to lose, so a narrow
+  // terminal drops view hints off the end instead of truncating those away.
+  const always = [`${k("?")} ${d("keys")}`, `${k("q")} ${d("quit")}`];
+  const optional = [...(essentials[state.view] ?? []), search];
+  let line = "";
+  for (let take = optional.length; take >= 0; take--) {
+    line = wrapSegments([...optional.slice(0, take), ...always], cols, { indent: "  ", maxLines: 1, separator: dot });
+    if (!stripAnsi(line).trimEnd().endsWith("…")) break;
+  }
+  return `${sep}\n${line}`;
 }
 
 // ── Content height ─────────────────────────────────────────────────────────
@@ -177,9 +164,9 @@ function countRenderedLines(block: string): number {
   return block.split("\n").length;
 }
 
-function contentHeight(tabBar: string, bottomBar: string): number {
+function contentHeight(topBar: string, bottomBar: string, hasMessage: boolean): number {
   const rows = process.stdout.rows || 24;
-  const reserved = 1 + countRenderedLines(tabBar) + 1 + countRenderedLines(bottomBar);
+  const reserved = countRenderedLines(topBar) + countRenderedLines(bottomBar) + (hasMessage ? 1 : 0);
   return Math.max(4, rows - reserved);
 }
 
@@ -904,17 +891,12 @@ export async function renderShell(
   setHealthLineCount: (n: number) => void,
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
-  const projectLabel = ctx.state.project
-    ? `  ${style.dim("·")}  ${style.cyan(ctx.state.project)}`
-    : "";
-  const filterLabel = ctx.state.filter
-    ? `  ${style.dim("·")}  ${style.yellow("/" + ctx.state.filter)}`
-    : "";
-  const header = `  ${gradient("◆ phren")}${projectLabel}${filterLabel}`;
-  const tabBar = renderTabBar(ctx.state);
+  const topBar = renderTopBar(ctx.state);
   const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
   const cursor = ctx.currentCursor();
-  const height = contentHeight(tabBar, bottomBar);
+  // An empty message line used to hold a row open on every frame.
+  const hasMessage = Boolean(stripAnsi(message).trim());
+  const height = contentHeight(topBar, bottomBar, hasMessage);
 
   let contentLines: string[];
   if (showHelp) {
@@ -967,10 +949,8 @@ export async function renderShell(
   const displayed = contentLines.slice(0, height);
   while (displayed.length < height) displayed.push("");
 
-  const msgLine = `  ${style.dimItalic(stripAnsi(message).trimStart() ? message : "")}`;
-
   const cols = renderWidth();
-  const parts = [header, tabBar, ...displayed, msgLine, bottomBar];
+  const parts = [topBar, ...displayed, ...(hasMessage ? [`  ${style.dimItalic(message.trimStart())}`] : []), bottomBar];
   return parts.map(line => {
     if (line.includes("\n")) {
       return line.split("\n").map(sub => truncateLine(sub, cols) + "\x1b[K").join("\n");
