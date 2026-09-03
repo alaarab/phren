@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **phren walks the terminal graph.** The web viewer has always had him; now the
+  little purple `◕` walks to whatever the store just touched, perching beside
+  the node with a cyan sparkle as he lands, and wandering off on his own after a
+  quiet spell. Watch mode had been showing you pulses; now it has a face.
+
+### Fixed
+
+- **Selecting a project no longer turns its whole cluster yellow.** Every edge
+  touching the selection was painted solid amber, so the more a node connected,
+  the less the highlight said — a project with thirty findings became a solid
+  yellow fan. Edges keep their own colour now, lifted toward amber, and a hub is
+  lifted least.
+- The agents overlay ships off, and nothing ever mentioned it, so agents running
+  on the machine went unseen. Opening the graph now offers it once when there is
+  actually something to show.
+
+
 ## [0.1.47] - 2026-09-03
 
 ### Added

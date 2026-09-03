@@ -28,6 +28,7 @@ import { style } from "../render.js";
 import { ForceSim, bounds, type LayoutNode, type Point } from "./layout.js";
 import { GraphWatch, type ActivityItem } from "./watch.js";
 import { GraphAgents } from "./agents.js";
+import { GraphMascot } from "./mascot.js";
 
 /** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
 export const TUI_NODE_LIMIT = 350;
@@ -170,6 +171,8 @@ export class GraphController {
   readonly watch: GraphWatch;
   /** Coding agents running on this machine, joined onto their projects. */
   readonly agents: GraphAgents;
+  /** phren himself, who walks to whatever the store just touched. */
+  readonly mascot = new GraphMascot();
   watchEnabled: boolean;
   /**
    * Wall-clock ms of the last navigation keypress. While the user is driving,
@@ -206,6 +209,18 @@ export class GraphController {
     this.agents.start(() => this.repaintHook?.());
   }
 
+  /**
+   * Offer the overlay once per session when agents are actually running but it
+   * is switched off. Shipping a feature off by default and never mentioning it
+   * is the same as not shipping it.
+   */
+  agentHint(): string | null {
+    if (this.offeredAgents || this.agents.enabled || this.status !== "ready") return null;
+    this.offeredAgents = true;
+    return this.agents.hasSomethingToShow() ? "agents are running on this machine" : null;
+  }
+  private offeredAgents = false;
+
   toggleAgents(): boolean {
     if (this.agents.enabled) {
       this.agents.toggle();
@@ -237,6 +252,7 @@ export class GraphController {
     for (let i = items.length - 1; i >= 0 && !followed; i--) {
       const nodeId = items[i].nodeId;
       if (!nodeId || !this.model.nodeById.has(nodeId)) continue;
+      this.mascot.walkTo(nodeId, this.positions);
       if (!this.userDriving) {
         this.selectedId = nodeId;
         this.flyTo(nodeId);
@@ -356,6 +372,7 @@ export class GraphController {
     // The layout is shaped to the canvas so it fills a wide terminal.
     this.sim = new ForceSim(nodes, links, undefined, this.viewport.width / Math.max(1, this.viewport.height));
     if (warm && this.lastPositions.size) this.sim.warmStart(this.lastPositions);
+    this.mascot.reset();
     const fresh = !warm || !this.lastPositions.size;
     if (this.repaintHook) {
       this.sim.tick(warm ? 12 : 40);
@@ -480,6 +497,9 @@ export class GraphController {
 
   private animationFrame(): void {
     let busy = this.watch.hot;
+    if (this.mascot.step()) busy = true;
+    if (this.mascot.arrivalGlow() > 0) busy = true;
+    if (this.mascot.maybeWander(this.visible.nodes.map((node) => node.id), this.positions)) busy = true;
     if (this.sim && !this.sim.settled) {
       this.sim.tick(3);
       busy = true;
@@ -526,6 +546,7 @@ export class GraphController {
   select(nodeId: string | null, opts: { fly?: boolean } = {}): void {
     this.selectedId = nodeId;
     if (nodeId) {
+      this.mascot.walkTo(nodeId, this.positions);
       if (opts.fly) this.flyTo(nodeId);
       else this.keepInView(nodeId);
     }
