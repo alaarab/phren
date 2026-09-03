@@ -115,3 +115,55 @@ describe("ForceSim", () => {
     expect(bounds(sim.positions.values())).toBeNull();
   });
 });
+
+describe("packing the ring to its clusters", () => {
+  /** Ring radius and mean cluster radius, both in aspect-corrected space. */
+  function measure(projects: number, leavesPer: number, aspect = 2.4) {
+    const { nodes, links } = star(projects, leavesPer);
+    const sim = new ForceSim(nodes, links, undefined, aspect);
+    sim.settle();
+    const ids = nodes.filter((n) => n.kind === "project").map((n) => n.id);
+    const norm = (id: string) => { const p = sim.positions.get(id)!; return { x: p.x / aspect, y: p.y }; };
+    const ring = ids.reduce((sum, id) => { const p = norm(id); return sum + Math.hypot(p.x, p.y); }, 0) / ids.length;
+    let cluster = 0;
+    let count = 0;
+    for (const id of ids) {
+      const hub = norm(id);
+      for (const leaf of nodes.filter((n) => n.project === id && n.kind !== "project")) {
+        const p = norm(leaf.id);
+        cluster += Math.hypot(p.x - hub.x, p.y - hub.y);
+        count++;
+      }
+    }
+    return { ring, cluster: count ? cluster / count : 0 };
+  }
+
+  it("sizes the ring from cluster size, not just project count", () => {
+    // Sizing by count alone left the same gap at every density: five projects
+    // with two findings each sat as far apart as five with forty.
+    const sparse = measure(5, 2);
+    const dense = measure(5, 40);
+    expect(dense.ring).toBeGreaterThan(sparse.ring * 1.5);
+    expect(dense.cluster).toBeGreaterThan(sparse.cluster);
+  });
+
+  it("keeps clusters within reach of each other at every density", () => {
+    for (const [projects, leaves] of [[3, 5], [5, 2], [5, 40], [12, 60], [40, 8]] as const) {
+      const { ring, cluster } = measure(projects, leaves);
+      // The circumference should carry roughly one cluster per project rather
+      // than stranding each one in its own quadrant.
+      const arc = (2 * Math.PI * ring) / projects;
+      expect(arc, `${projects}x${leaves} clusters are marooned`).toBeLessThan(Math.max(cluster, IDEAL_DISTANCE) * 8);
+    }
+  });
+
+  it("holds the ring against the repulsion that used to expand it", () => {
+    // Seeding a packed ring is not enough on its own: forty projects pushing on
+    // each other expanded it to nearly twice the seeded size until a radial
+    // spring held them.
+    const many = measure(40, 8);
+    const few = measure(4, 8);
+    expect(many.ring / few.ring).toBeLessThan(14);
+    expect(many.ring).toBeGreaterThan(few.ring);
+  });
+});

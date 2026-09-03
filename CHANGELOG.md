@@ -39,6 +39,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `◉ime◉◉a◉◉edge`. Glyphs now go down in their own pass, labels route around
   them and keep a clear cell either side, and only as many projects are named as
   the canvas can carry rather than all of them.
+- **The graph stopped stranding its clusters.** Projects were laid out on a ring
+  sized only by how many there were, never by how big their clusters actually
+  are, so the same gap sat between every pair at every scale and the graph never
+  covered more than about a seventh of its own bounds. Dense stores hid it by
+  growing into the gap; sparse ones looked marooned. The ring is now packed to
+  carry roughly one cluster per project, and a radial spring holds it there —
+  seeding alone was not enough, since forty projects pushing on each other
+  expanded it to nearly twice its seeded size.
 - **The node cap no longer misrepresents the store.** It took the globally
   highest-ranked nodes, so on a forty-project store two projects took the whole
   budget and thirty-eight showed as bare dots. Every project now gets a share,
