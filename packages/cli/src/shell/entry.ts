@@ -4,6 +4,7 @@
  */
 
 import { PhrenShell } from "./shell.js";
+import { MOUSE_OFF, MOUSE_ON } from "./graph/orbit.js";
 import {
   style,
   clearScreen,
@@ -201,6 +202,7 @@ export async function startShell(phrenPath: string, profile: string, startup: Sh
   const restoreTerminal = () => {
     // Shutdown cleanup is intentionally silent: terminal restoration is best-effort
     // cleanup, not a user-requested write path.
+    try { process.stdout.write(MOUSE_OFF); } catch {}
     try { process.stdin.setRawMode(false); } catch {}
     try { process.stdin.pause(); } catch {}
     try { exitFullscreen(); } catch {}
@@ -303,6 +305,10 @@ export async function startShell(phrenPath: string, profile: string, startup: Sh
   // Hand the terminal to a child process (an editor) and take it back. The
   // shell owns raw mode, the alternate screen and the stdin listener, so all
   // three have to be unwound or the child and the key pump fight over input.
+  // Mouse reporting is switched on only while the Graph view is showing;
+  // elsewhere the terminal keeps its own click-and-drag text selection.
+  shell.setMouseHandler((on) => { try { process.stdout.write(on ? MOUSE_ON : MOUSE_OFF); } catch {} });
+  shell.syncMouse();
   shell.setSuspendHandler(async (run) => {
     if (exiting) return;
     process.stdin.removeListener("data", onData);
@@ -312,6 +318,7 @@ export async function startShell(phrenPath: string, profile: string, startup: Sh
     } finally {
       if (!exiting) {
         grabTerminal();
+        shell.syncMouse();
         process.stdin.on("data", onData);
         // Anything typed at the child after it exited is not for us.
         decoder.flush();

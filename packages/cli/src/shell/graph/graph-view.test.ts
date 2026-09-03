@@ -186,3 +186,18 @@ describe("reader bubble", () => {
     for (const line of renderGraphView(c, 120, 32)) expect(displayWidth(stripAnsi(line))).toBe(120);
   });
 });
+
+describe("orbit view", () => {
+  it("renders exact-width frames on the sphere and names what is in front", async () => {
+    const c = await ready();
+    c.setViewport(2 * 85, 4 * 30);
+    c.toggleOrbit();
+    const lines = renderGraphView(c, 120, 32);
+    for (const line of lines) expect(displayWidth(stripAnsi(line))).toBe(120);
+    const text = stripAnsi(lines.join("\n"));
+    expect(text).toContain("orbit");
+    // At least one project label is up front and readable.
+    const named = c.projects.some((p) => text.includes(p.project || p.id));
+    expect(named).toBe(true);
+  });
+});

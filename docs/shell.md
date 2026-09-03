@@ -150,6 +150,14 @@ Deliberately a subset of vim: what you reach for without thinking, and nothing e
 
 Saving is careful, because the store is git-backed and other tools read it. A skill whose frontmatter no longer parses is refused with the reason rather than written, since a skill missing its `name` or `description` loads as neither. Writes land atomically, go through the same undo stack `:undo` uses, and refuse to write through a symlink — the mirrors in `~/.claude/skills` point back at the store, and replacing one with a regular file would silently detach it. Changing a skill's frontmatter also rebuilds the skill manifests, since the name and command are baked into them.
 
+#### Orbit: the graph in 3D
+
+`v` lifts the same graph into a sphere. Projects sit on it in a stable order, each cluster keeps the shape the flat layout gave it and gains depth, fragments shared between projects fall to the middle, and the far side fades and shrinks. That fading is the depth cue, and it only really reads in motion, so the sphere turns slowly on its own whenever you leave it alone for a few seconds.
+
+The mouse works here: drag to turn, wheel to zoom, click a node to select it. Without a mouse, `HJKL` (or shift-arrows) turn it and `+`/`-` zoom. Everything else is unchanged: the arrows still walk neighbours, `1-9` still jump, `/` still lights matches, `space` still opens the bubble, and watch mode still pulses and walks phren to whatever was recalled. Selecting a node turns the sphere so it faces you. `v` again goes back to the map, which stays the default because labels and the neighbour numbers are easier to use when nothing is moving.
+
+Mouse reporting is switched on only while the Graph view is showing, so in every other view the terminal keeps its own click-and-drag text selection. On the flat map the mouse works too: drag pans, wheel zooms, click selects.
+
 #### Reading a node
 
 The pane beside the graph takes a share of a wide terminal rather than a fixed width, so a finding wraps into fewer lines than it used to, and the text gets a share of the pane's height rather than four lines. When it still does not fit, the pane says so, and `space` opens the whole thing in a bubble on the canvas, wrapped wide enough to read, with the project, topic and date underneath. The bubble sits beside its node, or above or below it when there is no room to the side, and never on top of it. `space` or `esc` closes it; selecting another node closes it too. It works on narrow terminals as well, where the strip under the graph only has room for two lines.

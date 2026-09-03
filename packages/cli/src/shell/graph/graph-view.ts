@@ -103,6 +103,8 @@ interface Placed {
   node: RuntimeNode;
   x: number;
   y: number;
+  /** Depth in orbit: 0 nearest, 1 farthest. Always 0 on the flat map. */
+  t: number;
 }
 
 export function renderGraphView(controller: GraphController, width: number, height: number): string[] {
@@ -155,17 +157,15 @@ function centered(width: number, height: number, lines: string[]): string[] {
 function drawCanvas(controller: GraphController, cols: number, rows: number, selected: RuntimeNode | null): string[] {
   const canvas = new BrailleCanvas(cols, rows);
   controller.setViewport(canvas.dotWidth, canvas.dotHeight);
-  const positions = controller.positions;
   const searching = Boolean(controller.search.query);
   const matches = controller.search.matchIds;
   const placed: Placed[] = [];
-  const projected = new Map<string, { x: number; y: number }>();
+  const projected = new Map<string, { x: number; y: number; t: number }>();
   for (const node of controller.visible.nodes) {
-    const p = positions.get(node.id);
-    if (!p) continue;
-    const d = controller.project(p);
+    const d = controller.projectNode(node.id);
+    if (!d) continue;
     projected.set(node.id, d);
-    placed.push({ node, x: d.x, y: d.y });
+    placed.push({ node, x: d.x, y: d.y, t: d.t });
   }
   const isLit = (id: string): boolean => !searching || matches.has(id);
   // How connected the selection is, so a hub's highlight stays readable.
@@ -178,12 +178,13 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     if (!a || !b) continue;
     const touchesSelected = selected !== null && (link.source === selected.id || link.target === selected.id);
     const color = edgeColor(controller, link, touchesSelected, isLit(link.source) && isLit(link.target), selectedDegree);
-    canvas.line(a.x, a.y, b.x, b.y, color, { z: touchesSelected ? 2 : 0, dotted: link.kind === "contradicts" });
+    const depth = (a.t + b.t) / 2;
+    canvas.line(a.x, a.y, b.x, b.y, depth > 0 ? blendHex(color, BG_COLOR, depth * 0.7) : color, { z: touchesSelected ? 2 : 0, dotted: link.kind === "contradicts" });
   }
 
   const watching = controller.watchEnabled && controller.watch.running;
   const heatOf = (id: string): number => (watching ? controller.watch.heatOf(id) : 0);
-  for (const { node, x, y } of placed) {
+  for (const { node, x, y, t } of placed) {
     const isSelected = selected?.id === node.id;
     const heat = heatOf(node.id);
     let color = node.baseColor;
@@ -191,7 +192,9 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     else if (searching && !matches.has(node.id)) color = blendHex(node.baseColor, DIM_TARGET, 0.7);
     // A just-touched node pulses toward the live cyan and swells a little.
     if (heat > 0) color = blendHex(color, ACCENT_CYAN, 0.3 + heat * 0.55);
-    const radius = dotRadius(node, isSelected) + (heat > 0.35 ? 1 : 0);
+    // In orbit the far side fades and shrinks; that is what reads as depth.
+    if (t > 0) color = blendHex(color, BG_COLOR, t * 0.7);
+    const radius = Math.max(0, dotRadius(node, isSelected) + (heat > 0.35 ? 1 : 0) - (t > 0.5 ? 1 : 0));
     canvas.disc(x, y, radius, color, isSelected ? 4 : heat > 0 ? 3 : node.kind === "project" ? 3 : 1);
     // A ring around the hottest nodes, so a hit reads at a glance.
     if (heat > 0.55) {
@@ -217,7 +220,9 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
   // once more at the very end, because node markers do not check for them.
   const bubbles = planBubbles(controller, cols, rows, selected);
   for (const b of bubbles) paintBubble(canvas, b);
-  const ranked = placed.slice().sort((a, b) => labelPriority(controller, b.node, selected, neighborIndex) - labelPriority(controller, a.node, selected, neighborIndex));
+  // On the sphere only the near half gets glyphs and labels; naming the far
+  // side too flattened it straight back into a 2D heap.
+  const ranked = placed.filter((item) => item.t < 0.55 || item.node.id === selected?.id).sort((a, b) => labelPriority(controller, b.node, selected, neighborIndex) - labelPriority(controller, a.node, selected, neighborIndex));
   const onCanvas = ({ x, y }: Placed): { col: number; row: number } | null => {
     const col = Math.floor(x / 2);
     const row = Math.floor(y / 4);
@@ -300,9 +305,8 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
   if (controller.agents.enabled && controller.agents.agents.length) {
     const highlighted = controller.agents.current;
     for (const [project, agents] of controller.agents.byProject()) {
-      const p = positions.get(project);
-      if (!p) continue;
-      const d = controller.project(p);
+      const d = controller.projectNode(project);
+      if (!d || d.t > 0.55) continue;
       const col = Math.floor(d.x / 2);
       const row = Math.floor(d.y / 4) - 1;
       if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
@@ -319,9 +323,12 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
 
   // phren, wherever he currently is. Drawn after everything else so he is
   // never lost in the dot field — he is the thing you are meant to follow.
-  const mascotPos = controller.mascot.pos;
-  if (mascotPos) {
-    const d = controller.project(mascotPos);
+  // On the sphere he sits at his node's projected place; the flat walk is 2D.
+  const mascotAt = controller.orbit
+    ? (controller.mascot.targetNodeId ? controller.projectNode(controller.mascot.targetNodeId) : null)
+    : (controller.mascot.pos ? controller.project(controller.mascot.pos) : null);
+  if (mascotAt) {
+    const d = mascotAt;
     const col = Math.floor(d.x / 2);
     const row = Math.floor(d.y / 4);
     if (col >= 0 && col < cols && row >= 0 && row < rows) {
@@ -371,10 +378,10 @@ interface PlannedBubble {
 
 function planBubbles(controller: GraphController, cols: number, rows: number, selected: RuntimeNode | null): PlannedBubble[] {
   if (controller.reader && selected) {
-    const p = controller.positions.get(selected.id);
-    if (!p) return [];
+    const at = controller.projectNode(selected.id);
+    if (!at) return [];
     const text = selected.fullLabel || selected.label;
-    const anchor = toCell(controller.project(p));
+    const anchor = toCell(at);
     const maxInner = Math.min(64, cols - BUBBLE_CHROME_COLS - 2);
     const maxRows = rows - BUBBLE_CHROME_ROWS - 1;
     if (maxInner < 12 || maxRows < 2) return [];
@@ -391,11 +398,11 @@ function planBubbles(controller: GraphController, cols: number, rows: number, se
   }
   const live = controller.liveRecall();
   if (!live) return [];
-  const p = controller.positions.get(live.nodeId);
-  if (!p) return [];
+  const at = controller.projectNode(live.nodeId);
+  if (!at) return [];
   const text = live.item.event.snippet || live.item.event.filename || "";
   if (!text) return [];
-  const anchor = toCell(controller.project(p));
+  const anchor = toCell(at);
   const inner = Math.min(40, cols - BUBBLE_CHROME_COLS - 2);
   if (inner < 12 || rows < 6) return [];
   const fade = live.age / LIVE_BUBBLE_MS;
@@ -470,6 +477,7 @@ export function graphSummary(controller: GraphController): string {
   const n = (v: number) => v.toLocaleString("en-US");
   const capped = shown < total ? `${n(shown)} of ${n(total)} nodes` : `${n(shown)} nodes`;
   const parts = [capped, `${n(controller.visible.links.length)} edges`];
+  if (controller.orbit) parts.push(`${colored(ACCENT_CYAN, "⟲")}${style.dim(" orbit")}`);
   if (controller.watchEnabled && controller.watch.running) parts.push(`${colored(ACCENT_CYAN, "◉")}${style.dim(" live")}`);
   return parts.join(style.dim("  ·  "));
 }
@@ -543,7 +551,7 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
   } else {
     const total = controller.model.rawNodes.length;
     const shown = controller.visible.nodes.length;
-    push(`${colored(ACCENT_CYAN, "❖")} ${style.bold("knowledge graph")}${controller.refreshing ? style.dim("  ⟳") : ""}${watching ? `  ${colored(ACCENT_CYAN, "◉")}${style.dim(" live")}` : ""}`);
+    push(`${colored(ACCENT_CYAN, "❖")} ${style.bold("knowledge graph")}${controller.refreshing ? style.dim("  ⟳") : ""}${controller.orbit ? `  ${colored(ACCENT_CYAN, "⟲")}${style.dim(" orbit")}` : ""}${watching ? `  ${colored(ACCENT_CYAN, "◉")}${style.dim(" live")}` : ""}`);
     push(style.dim(shown === total ? `${shown} nodes · ${controller.visible.links.length} edges` : `${shown} of ${total} nodes · ${controller.visible.links.length} edges`));
     push();
     row("filter", `${controller.preset.name}${style.dim("  f")}`);

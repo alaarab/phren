@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.51] - 2026-09-03
+
+### Added
+
+- **The terminal graph in 3D.** `v` lifts the same graph into a sphere:
+  projects on it in a stable order, clusters keeping their shape and gaining
+  depth, shared fragments in the middle, the far side fading and shrinking.
+  It turns slowly on its own when left alone, because depth only reads in
+  motion. Drag to turn, wheel to zoom, click to select; `HJKL` and `+`/`-`
+  without a mouse. Selection, search, the neighbour numbers, the bubble,
+  watch mode and phren all keep working, and selecting a node turns the
+  sphere to face it. The flat map stays the default.
+- **The mouse works in the Graph view.** Drag pans the map or turns the
+  sphere, the wheel zooms, a click selects the node under it. Mouse reporting
+  is on only while the Graph view is showing, so every other view keeps the
+  terminal's own text selection.
+
+
 ## [0.1.50] - 2026-09-03
 
 ### Fixed

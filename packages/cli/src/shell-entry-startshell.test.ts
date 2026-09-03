@@ -12,6 +12,8 @@ vi.mock("./shell/shell.js", () => {
   class MockPhrenShell {
     setRepaintHandler = vi.fn();
     setSuspendHandler = vi.fn();
+    setMouseHandler = vi.fn();
+    syncMouse = vi.fn();
     render = vi.fn().mockResolvedValue("mocked-render");
     handleRawKey = vi.fn().mockResolvedValue(true);
     handleInput = vi.fn().mockResolvedValue(true);

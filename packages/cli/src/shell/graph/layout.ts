@@ -66,7 +66,7 @@ function clusterRadius(leafCount: number): number {
 }
 
 /** Project ids in stable order plus, for every node, the project(s) it hangs off. */
-function homes(nodes: LayoutNode[], links: RawLink[]): { projects: LayoutNode[]; homeOf: Map<string, string[]> } {
+export function homes(nodes: LayoutNode[], links: RawLink[]): { projects: LayoutNode[]; homeOf: Map<string, string[]> } {
   const byId = new Map(nodes.map((node) => [node.id, node] as const));
   const projects = nodes.filter((node) => node.kind === "project").sort((a, b) => a.id.localeCompare(b.id));
   const projectByName = new Map(projects.map((node) => [node.project ?? node.id, node.id] as const));
