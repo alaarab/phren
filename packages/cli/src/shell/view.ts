@@ -52,7 +52,7 @@ import { getScopedSkills } from "../skill/registry.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import type { GraphController } from "./graph/controller.js";
-import { renderGraphView } from "./graph/graph-view.js";
+import { renderGraphView, graphSummary } from "./graph/graph-view.js";
 
 /** Shared rendering state passed from the orchestrator */
 export interface ViewContext {
@@ -84,7 +84,7 @@ function resolveProjectStorePath(phrenPath: string, project: string): string {
  * project and filter on one line, then a rule. On a 24-row terminal the old
  * three-row header cost more than a tenth of the screen.
  */
-function renderTopBar(state: ShellState): string {
+function renderTopBar(state: ShellState, summary = ""): string {
   const cols = renderWidth();
   const brand = gradient("◆ phren");
   const dot = style.dim("·");
@@ -94,7 +94,7 @@ function renderTopBar(state: ShellState): string {
 
   if (!isSub) {
     const label = style.boldMagenta(`${TAB_ICONS[state.view] ?? "◆"} ${state.view}`);
-    const line = ["  " + brand, label, project, filter].filter(Boolean).join("  ");
+    const line = ["  " + brand, label, project, filter, summary ? `${dot} ${summary}` : ""].filter(Boolean).join("  ");
     return `${truncateLine(line, cols)}\n${separator(cols)}`;
   }
 
@@ -143,7 +143,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Skills: [`${k("↑↓")} ${d("move")}`, `${k("t")} ${d("toggle")}`],
     Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`],
-    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
   };
   const search = state.view === "Graph" ? `${k("/")} ${d("search")}` : `${k("/")} ${d("filter")}`;
   // `? keys` and `q quit` are the two you cannot afford to lose, so a narrow
@@ -891,7 +891,8 @@ export async function renderShell(
   setHealthLineCount: (n: number) => void,
   setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
-  const topBar = renderTopBar(ctx.state);
+  const graphSummaryLine = ctx.state.view === "Graph" && ctx.graph ? graphSummary(ctx.graph()) : "";
+  const topBar = renderTopBar(ctx.state, graphSummaryLine);
   const bottomBar = renderBottomBar(ctx.state, navMode, inputCtx, inputBuf);
   const cursor = ctx.currentCursor();
   // An empty message line used to hold a row open on every frame.

@@ -732,7 +732,9 @@ export function applyViewShortcut(host: NavigationHost, key: string): boolean {
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
   if (key === "k") { host.setView("Hooks"); host.setMessage(`  ${TAB_ICONS.Hooks} Hooks`); return true; }
   if (key === "h") { host.prevHealthView = host.state.view === "Health" ? host.prevHealthView : host.state.view; host.healthCache = undefined; host.setView("Health"); host.setMessage(`  ${TAB_ICONS.Health} Health  ${style.dim("(esc to return)")}`); return true; }
-  if (key === "g") { host.setView("Graph"); host.setMessage(`  ${TAB_ICONS.Graph} Graph  ${style.dim("↑↓←→ walk · / search · esc back")}`); return true; }
+  // No message: the bottom bar already says this, and in the Graph view a
+  // spare row is worth more than a reminder.
+  if (key === "g") { host.setView("Graph"); host.setMessage(""); return true; }
   return false;
 }
 

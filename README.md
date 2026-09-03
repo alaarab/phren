@@ -58,7 +58,7 @@ One store, six ways in. Every surface reads and writes the same markdown files, 
 | Surface | Open it | What it is for |
 |---------|---------|----------------|
 | **Terminal shell** | `phren shell` (or just `phren`) | Full-screen dashboard: projects, tasks, findings, review queue, skills, hooks, health. Deep-link with `--view tasks --here`. |
-| **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live: put it beside your agent and nodes light up as phren reads and writes them. |
+| **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live, so nodes light up as phren reads and writes them, and shows the coding agents running on your machine. |
 | **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings/tasks/fragments inside, a contents pane to review, edit, merge, and prune. |
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
 | **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |
@@ -69,6 +69,23 @@ One store, six ways in. Every surface reads and writes the same markdown files, 
 The shell opens with a short splash: the phren mascot beside the wordmark, which is revealed with a decrypt text effect on the first launch of a new version and shimmers while it waits for a key.
 
 <p align="center"><img src="docs/splash.gif" width="700" alt="phren splash: the wordmark decrypts into place"></p>
+
+### Watch it work
+
+Put the graph in one terminal and an agent in another. Every memory a search lands on, every memory a hook injects, and every finding written is appended to a log the graph tails: the node pulses, the camera flies to it, the finding's full text fills the pane, and the event joins an activity feed. Writes show in green so saving is as visible as reading.
+
+With `PHREN_FEATURE_AGENTS=1` the graph also shows **who** is doing it. phren asks whatever is already running your agents — a [Herdr](https://herdr.dev) workspace, `phren-agent --multi` — and joins each one onto a project by the directory it is working in. `Tab` cycles them, `↵` brings one to the front in its own host. Any tool that can print a small JSON record is a provider, so tmux or Zellij users need a few lines of shell rather than a change to phren.
+
+### Install it as a Claude Code plugin
+
+If you would rather install phren the way you install everything else:
+
+```
+/plugin marketplace add alaarab/phren
+/plugin install phren@phren
+```
+
+That brings the five `phren-*` slash commands, the MCP server, and the session hook, all version-pinned and removable with `/plugin uninstall`. `phren init` still does more — it creates the store and wires Copilot, Cursor and Codex too — so a reasonable split is `init` once for the store, the plugin for the Claude Code wiring. See [docs/claude-code-plugin.md](docs/claude-code-plugin.md).
 
 There is also an **experimental coding agent**, `phren-agent`, in [`experimental/agent`](experimental/agent): a standalone binary (not published, not wired into `phren`) that starts every session already knowing the project's gotchas, tasks, and decisions. It opens with the same splash. See [docs/agent.md](docs/agent.md).
 

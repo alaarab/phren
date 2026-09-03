@@ -97,6 +97,8 @@ export class PhrenShell {
     this.state.view = startup.view ?? "Projects";
     this.message = startup.notice
       ? `  ${style.yellow("⚠")}  ${startup.notice}`
+      : this.state.view === "Graph"
+      ? ""
       : this.state.project
       ? `  Dashboard ready — active context ${style.boldCyan(this.state.project)}`
       : `  Dashboard ready — choose a project with ${style.boldCyan("↵")} or stay global`;

@@ -115,6 +115,8 @@ phren shell --view graph --project hub
 | `+` / `-` / `0` | Zoom in / out / fit everything |
 | `⇧` + arrows, `H J K L` | Pan |
 | `w` | Toggle watch mode (see below) |
+| `a` | Toggle the agents overlay (see below) |
+| `Tab` | Cycle the highlighted agent, when the overlay is on |
 | `r` | Re-lay out (or retry a failed build) |
 | `o` | Where to open the 3D viewer |
 | `esc` | Clear search, then selection, then project focus, then leave the view |
@@ -130,6 +132,14 @@ Put the graph in one terminal and an agent in another. As the agent searches, th
 The camera yields to you: while you are navigating, incoming events still pulse and feed but do not move the view. It resumes following a few seconds after your last keypress.
 
 Watch mode is on by default in the Graph view. Press `w` to toggle it, or launch with `--no-live` to start with it off (`--live` forces it on).
+
+#### Agents
+
+With `PHREN_FEATURE_AGENTS=1`, the graph also shows the coding agents running on this machine. phren does not run them; it asks whatever does — a Herdr workspace, `phren-agent --multi` — and joins each agent onto a project by the directory it is working in.
+
+Each project with an agent in it gets a marker: green while working, grey when done, red on error, with a count when more than one. The details pane lists them with their status and project. `a` toggles the overlay, `Tab` cycles agents and flies to the one you land on, and `↵` brings that agent to the front in its own host. `esc` releases the highlight before it touches your selection.
+
+Watch mode tells you what your memory is doing; this tells you who is doing it. See [feature-flags.md](feature-flags.md#phren_feature_agents) for providers and how to add your own.
 
 ```bash
 phren shell --view graph            # watching by default

@@ -193,6 +193,28 @@ export PHREN_FEATURE_SEMANTIC_CONFLICT=1
 export PHREN_LLM_KEY=sk-...
 ```
 
+## PHREN_FEATURE_AGENTS
+
+**Default:** disabled
+
+Shows the coding agents running on this machine on the shell's knowledge graph. phren does not spawn or supervise them; it asks whatever is already running them and joins each one onto a phren project by the directory it is working in, using the same project detection the hooks use (so a git worktree resolves to the repository it came from).
+
+Two providers ship built in and are used when available:
+
+- **Herdr** — `herdr agent list`, which reports every agent pane, its status, its directory and which one is focused. Answers in a few milliseconds.
+- **phren-agent** — agents from `phren-agent --multi`, published to `.runtime/agents/`.
+
+Anything that prints the same record shape is a provider, so tmux or Zellij users need a few lines of shell rather than a change to phren.
+
+In the Graph view, `a` toggles the overlay, `Tab` cycles agents, and `↵` brings the highlighted agent to the front through its own host. Agents appear as a coloured marker beside the project they are working in — green while working, grey when done, red on error — and are listed in the details pane.
+
+Off by default because it runs an external binary on a timer. With no provider available the overlay never appears.
+
+```bash
+export PHREN_FEATURE_AGENTS=1
+export PHREN_HERDR_TIMEOUT_MS=3000   # optional, clamped to 250–30000
+```
+
 ## PHREN_FEATURE_FACT_EXTRACT
 
 **Default:** disabled

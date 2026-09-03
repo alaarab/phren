@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GraphPayload } from "../../graph-core/types.js";
 import { FILTER_PRESETS, GraphController } from "./controller.js";
 import { GraphWatch } from "./watch.js";
+import { GraphAgents } from "./agents.js";
+import type { JoinedAgent } from "../../agents/types.js";
 import type { LookupEvent } from "../../governance/activity.js";
 
 const DAY = 86400000;
@@ -399,5 +401,108 @@ describe("fitting the canvas", () => {
     const chosen = { ...c.camera };
     c.setViewport(160, 60);            // resize no longer re-fits
     expect(c.camera.scaleX).toBeCloseTo(chosen.scaleX, 5);
+  });
+});
+
+describe("agents overlay", () => {
+  const agent = (over: Partial<JoinedAgent> = {}): JoinedAgent => ({
+    id: "w1:p1", label: "hub greeting", cwd: "/repo/hub", status: "working",
+    project: "hub", focus: ["herdr", "agent", "focus", "w1:p1"], provider: "herdr", ...over,
+  });
+
+  async function withAgents(list: JoinedAgent[]) {
+    const focused: string[][] = [];
+    const agents = new GraphAgents("/store", "", {
+      collect: () => list,
+      runFocus: (argv) => { focused.push(argv); return true; },
+      enabled: true,
+      pollMs: 10_000,
+    });
+    const controller = new GraphController("/store", "", {
+      builder: async () => fixture(), tokenOf: () => "t", frameMs: 5, agents,
+    });
+    controllers.push(controller);
+    await controller.ensureData();
+    controller.setViewport(200, 100);
+    const host = { messages: [] as string[], setMessage(m: string) { this.messages.push(m); }, startInput() {} };
+    return { controller, agents, focused, host };
+  }
+
+  it("polls on open and groups agents by the project they are working in", async () => {
+    const { agents } = await withAgents([agent(), agent({ id: "w2:p1", project: "api", label: "api work" })]);
+    expect(agents.agents).toHaveLength(2);
+    expect([...agents.byProject().keys()].sort()).toEqual(["api", "hub"]);
+  });
+
+  it("tab cycles the highlight and flies to that agent's project", async () => {
+    const { controller, agents, host } = await withAgents([agent(), agent({ id: "w2:p1", project: "api", label: "api work" })]);
+    // The list is ordered for reading, not by arrival, so assert on movement.
+    expect(controller.handleKey("\t", host)).toBe(true);
+    const first = agents.current;
+    expect(first).not.toBeNull();
+    expect(controller.selectedId).toBe(first!.project);
+
+    controller.handleKey("\t", host);
+    expect(agents.current?.id).not.toBe(first!.id);
+    expect(controller.selectedId).toBe(agents.current!.project);
+
+    controller.handleKey("\x1b[Z", host); // shift-tab walks back
+    expect(agents.current?.id).toBe(first!.id);
+
+    controller.handleKey("\x1b[Z", host); // and wraps
+    expect(agents.current?.id).not.toBe(first!.id);
+  });
+
+  it("enter focuses the highlighted agent through its own command", async () => {
+    const { controller, focused, host } = await withAgents([agent()]);
+    controller.handleKey("\t", host);
+    expect(controller.handleKey("\r", host)).toBe(true);
+    expect(focused).toEqual([["herdr", "agent", "focus", "w1:p1"]]);
+    expect(host.messages.at(-1)).toContain("hub greeting");
+  });
+
+  it("enter still selects a node when no agent is highlighted", async () => {
+    const { controller, focused, host } = await withAgents([agent()]);
+    controller.handleKey("\r", host);
+    expect(focused).toEqual([]);
+    expect(controller.selectedId).not.toBeNull();
+  });
+
+  it("escape releases the agent before it touches the selection", async () => {
+    const { controller, agents, host } = await withAgents([agent()]);
+    controller.select("hub");
+    controller.handleKey("\t", host);
+    expect(controller.handleKey("\x1b", host)).toBe(true);
+    expect(agents.current).toBeNull();
+    expect(controller.selectedId).toBe("hub");
+  });
+
+  it("a toggles the overlay off and back on", async () => {
+    const { controller, agents, host } = await withAgents([agent()]);
+    expect(controller.handleKey("a", host)).toBe(true);
+    expect(agents.enabled).toBe(false);
+    expect(agents.agents).toEqual([]);
+    expect(controller.handleKey("a", host)).toBe(true);
+    expect(agents.enabled).toBe(true);
+    expect(agents.agents).toHaveLength(1);
+  });
+
+  it("declines tab when there is nothing to cycle, so the shell keeps it", async () => {
+    const { controller, host } = await withAgents([]);
+    expect(controller.handleKey("\t", host)).toBeUndefined();
+  });
+
+  it("keeps an agent that is outside any phren project", async () => {
+    const { agents } = await withAgents([agent({ project: null, cwd: "/tmp/scratch" })]);
+    expect(agents.agents).toHaveLength(1);
+    expect(agents.byProject().size).toBe(0);
+  });
+
+  it("survives a collector that throws", async () => {
+    const agents = new GraphAgents("/store", "", {
+      collect: () => { throw new Error("herdr died"); }, enabled: true, pollMs: 10_000,
+    });
+    expect(() => agents.poll()).not.toThrow();
+    expect(agents.agents).toEqual([]);
   });
 });

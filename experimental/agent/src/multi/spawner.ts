@@ -118,6 +118,7 @@ export class AgentSpawner extends EventEmitter {
     const entry: AgentEntry = {
       id: agentId,
       task: opts.task,
+      cwd: payload.cwd,
       displayName: opts.displayName,
       status: "starting",
       startedAt: Date.now(),

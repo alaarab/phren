@@ -105,3 +105,64 @@ describe("wrapText", () => {
     expect(wrapText("short", 10, 2)).toEqual(["short"]);
   });
 });
+
+describe("labels on a crowded canvas", () => {
+  /** Distinct, non-overlapping names so a mangled one is unmistakable. */
+  const NAMES = ["searchsvc", "webstore", "mobileapp", "billing", "edgecache", "identity", "warehouse", "telemetry", "scheduler", "mailer", "payments", "ledger"];
+
+  function crowded(): GraphPayload {
+    const nodes: GraphPayload["nodes"] = [];
+    const links: GraphPayload["links"] = [];
+    for (const [pi, name] of NAMES.entries()) {
+      nodes.push({ id: name, label: name, group: "project", project: name, findingCount: 20 - pi, taskCount: 3 });
+      for (let i = 0; i < 20; i++) {
+        const id = `${name}:f${i}`;
+        nodes.push({ id, label: `${name} finding ${i}`, fullLabel: `${name} finding ${i} about retries`, group: "topic:architecture", project: name, topicSlug: "architecture" });
+        links.push({ source: name, target: id });
+      }
+    }
+    return { nodes, links, scores: {} };
+  }
+
+  async function render(width: number, height: number): Promise<string> {
+    const c = new GraphController("/store", "", { builder: async () => crowded(), tokenOf: () => "t" });
+    controllers.push(c);
+    await c.ensureData();
+    c.setViewport(width * 2, height * 4);
+    c.fitAll();
+    return renderGraphView(c, width, height).map(stripAnsi).join("\n");
+  }
+
+  it("never punches a glyph through a label", async () => {
+    // The bug drew each node's glyph and label together, so a later glyph
+    // landed inside an earlier label: "searchsvc" rendered as "sear◉hsvc".
+    for (const [w, h] of [[80, 20], [120, 30]] as const) {
+      const frame = await render(w, h);
+      for (const name of NAMES) {
+        const stem = name.slice(0, 4);
+        if (!frame.includes(stem)) continue; // this project went unlabelled, which is allowed
+        expect(frame, `${name} appears mangled at ${w}x${h}`).toContain(name);
+      }
+    }
+  });
+
+  it("keeps a clear cell between neighbouring labels", async () => {
+    const frame = await render(120, 30);
+    for (const a of NAMES) {
+      for (const b of NAMES) {
+        expect(frame).not.toContain(`${a}${b}`);
+      }
+    }
+  });
+
+  it("labels only as many projects as the canvas can carry", async () => {
+    const tight = await render(60, 16);
+    const roomy = await render(200, 46);
+    const named = (frame: string) => NAMES.filter((n) => frame.includes(n)).length;
+    expect(named(tight)).toBeLessThan(NAMES.length);
+    expect(named(tight)).toBeGreaterThan(0);
+    // A bigger canvas earns more names, and the busiest projects are the ones kept.
+    expect(named(roomy)).toBeGreaterThanOrEqual(named(tight));
+    expect(tight).toContain(NAMES[0]);
+  });
+});

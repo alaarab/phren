@@ -98,6 +98,7 @@ export const ENV_HELP = `Environment variables:
   PHREN_HOOK_TIMEOUT_MS       Hook subprocess timeout in ms (default: 14000)
 
   Feature flags:
+  PHREN_FEATURE_AGENTS=1             Show running coding agents on the graph
   PHREN_FEATURE_TOOL_HOOK=0          Skip the PostToolUse subprocess (perf)
   PHREN_FEATURE_AUTO_EXTRACT=0       Disable auto memory extraction
   PHREN_FEATURE_AUTO_CAPTURE=1       Extract insights from conversations

@@ -378,7 +378,19 @@ export async function runAgentCli(raw: string[]) {
       registry.register(createSpawnAgentTool(spawner));
       registry.register(createSendMessageTool(spawner));
       registry.register(createListAgentsTool(spawner));
-      session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
+      // Publish this process's agents so a phren graph in another terminal can
+      // show them. Best-effort and silent: it is a courtesy to another tool.
+      const { createAgentPublisher } = await import("./multi/publish.js");
+      const publisher = createAgentPublisher(phrenCtx?.phrenPath);
+      const republish = () => publisher.publish(spawner.listAgents());
+      spawner.on("status", republish);
+      spawner.on("done", republish);
+      republish();
+      try {
+        session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
+      } finally {
+        publisher.stop();
+      }
       await spawner.shutdown();
     }
 

@@ -116,14 +116,12 @@ export function renderGraphView(controller: GraphController, width: number, heig
   // gives back goes to the graph, which is the part worth the space.
   const strip = !wide && selected ? renderStrip(controller, selected, width, NARROW_STRIP_MAX) : [];
   const canvasCols = wide ? width - PANE_WIDTH - 1 : width;
-  const canvasRows = Math.max(4, height - 1 - strip.length);
+  const canvasRows = Math.max(4, height - strip.length);
 
-  const canvas = drawCanvas(controller, canvasCols, canvasRows, selected);
-  const legend = padToWidth(renderLegend(controller, canvasCols), canvasCols);
-  const canvasLines = [...canvas, legend];
+  const canvasLines = drawCanvas(controller, canvasCols, canvasRows, selected);
 
   if (wide) {
-    const pane = renderPane(controller, selected, PANE_WIDTH, canvasRows + 1);
+    const pane = renderPane(controller, selected, PANE_WIDTH, canvasRows);
     const divider = style.dim("│");
     return canvasLines.map((line, i) => `${line}${divider}${padToWidth(pane[i] ?? "", PANE_WIDTH)}`);
   }
@@ -191,30 +189,72 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     }
   }
 
-  // Glyphs + labels live in the overlay so they are never eaten by dots.
-  // Labelling policy: projects, the selection and the current search hit are
-  // always named; the selection's neighbours get their 1-9 jump number; other
-  // leaves are named only while there is room (zoomed in, or a search has
-  // thinned the field) and only where the text does not cover other nodes.
+  // Glyphs and labels are drawn in two separate passes, and the order matters.
+  // Drawing a glyph and its label per node let a later node's glyph land inside
+  // an earlier node's label, which is what produced `sear◉hweb` on a busy
+  // canvas. Every glyph goes down first; labels then treat those cells as
+  // occupied and route around them.
   const neighborIndex = new Map<string, number>();
   if (selected) controller.neighborsOf(selected.id).slice(0, 9).forEach((node, i) => neighborIndex.set(node.id, i + 1));
   const currentHit = searching ? controller.search.results[controller.search.index]?.id : undefined;
   const zoomedIn = Math.min(controller.camera.scaleX, controller.camera.scaleY) >= 5;
   const ranked = placed.slice().sort((a, b) => labelPriority(controller, b.node, selected, neighborIndex) - labelPriority(controller, a.node, selected, neighborIndex));
-  const labelBudget = searching ? 14 : zoomedIn ? Math.max(8, Math.floor((cols * rows) / 60)) : Math.max(4, Math.floor((cols * rows) / 220));
-  let labels = 0;
-  for (const { node, x, y } of ranked) {
+  const onCanvas = ({ x, y }: Placed): { col: number; row: number } | null => {
     const col = Math.floor(x / 2);
     const row = Math.floor(y / 4);
-    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    return col < 0 || col >= cols || row < 0 || row >= rows ? null : { col, row };
+  };
+
+  // Pass 1 — glyphs.
+  for (const item of ranked) {
+    const at = onCanvas(item);
+    if (!at) continue;
+    const { node } = item;
     const isSelected = selected?.id === node.id;
     const lit = isLit(node.id);
     const glyphColor = isSelected ? ACCENT_AMBER : lit ? node.baseColor : blendHex(node.baseColor, DIM_TARGET, 0.7);
     const number = neighborIndex.get(node.id);
-    if (isSelected) canvas.putText(col, row, "◆", sgr(ACCENT_AMBER, "\x1b[1m"));
-    else if (node.kind === "project") canvas.putText(col, row, KIND_GLYPH.project, sgr(glyphColor, "\x1b[1m"));
-    else if (number !== undefined) canvas.putText(col, row, String(number), sgr(ACCENT_CYAN, "\x1b[1m"));
-    const forced = node.forceLabel || isSelected || node.id === currentHit || heatOf(node.id) > 0;
+    if (isSelected) canvas.putText(at.col, at.row, "◆", sgr(ACCENT_AMBER, "\x1b[1m"));
+    else if (node.kind === "project") canvas.putText(at.col, at.row, KIND_GLYPH.project, sgr(glyphColor, "\x1b[1m"));
+    else if (number !== undefined) canvas.putText(at.col, at.row, String(number), sgr(ACCENT_CYAN, "\x1b[1m"));
+  }
+
+  // Every project used to force a label, so forty of them piled into one
+  // unreadable heap. Only as many as the canvas can carry get named, largest
+  // first; the rest still show their glyph.
+  const projectLabelBudget = Math.max(4, Math.floor((cols * rows) / 120));
+  const namedProjects = new Set(
+    placed
+      .filter(({ node }) => node.kind === "project")
+      .sort((a, b) => projectWeight(b.node) - projectWeight(a.node))
+      .slice(0, projectLabelBudget)
+      .map(({ node }) => node.id),
+  );
+
+  /** A label needs a clear cell either side, or two labels read as one word. */
+  const hasRoom = (col: number, row: number, w: number, avoidDots: boolean): boolean => {
+    if (col < 0 || col + w > cols) return false;
+    const start = Math.max(0, col - 1);
+    const end = Math.min(cols, col + w + 1);
+    return canvas.isFree(start, row, end - start, avoidDots);
+  };
+
+  // Pass 2 — labels.
+  const labelBudget = searching ? 14 : zoomedIn ? Math.max(8, Math.floor((cols * rows) / 60)) : Math.max(4, Math.floor((cols * rows) / 220));
+  let labels = 0;
+  for (const item of ranked) {
+    const at = onCanvas(item);
+    if (!at) continue;
+    const { node } = item;
+    const { col, row } = at;
+    const isSelected = selected?.id === node.id;
+    const lit = isLit(node.id);
+    const glyphColor = isSelected ? ACCENT_AMBER : lit ? node.baseColor : blendHex(node.baseColor, DIM_TARGET, 0.7);
+    const number = neighborIndex.get(node.id);
+    const forced = isSelected
+      || node.id === currentHit
+      || heatOf(node.id) > 0
+      || (node.kind === "project" ? namedProjects.has(node.id) : node.forceLabel);
     const wanted = forced || number !== undefined || (lit && labels < labelBudget && (zoomedIn || searching));
     if (!wanted) continue;
     const maxLabel = node.kind === "project" ? 20 : number !== undefined ? 14 : 18;
@@ -228,11 +268,34 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
           ? sgr(lit ? blendHex(node.baseColor, "#ffffff", 0.35) : blendHex(node.baseColor, DIM_TARGET, 0.6))
           : sgr(lit ? blendHex(node.baseColor, "#ffffff", 0.2) : blendHex(node.baseColor, DIM_TARGET, 0.6));
     const slots: Array<[number, number]> = [[col + 2, row], [col - w - 1, row], [col + 2, row - 1], [col + 2, row + 1], [col - w - 1, row - 1], [col - w - 1, row + 1]];
-    // Clean slots first (no text, no dots); forced labels may cover dots as a last resort.
-    const placedAt = slots.find(([c, r]) => canvas.isFree(c, r, w, true)) ?? (forced ? slots.find(([c, r]) => canvas.isFree(c, r, w)) : undefined);
+    // Clean slots first (no text, no dots); forced labels may cover dots as a
+    // last resort, but never another label.
+    const placedAt = slots.find(([c, r]) => hasRoom(c, r, w, true)) ?? (forced ? slots.find(([c, r]) => hasRoom(c, r, w, false)) : undefined);
     if (!placedAt) continue;
     canvas.putText(placedAt[0], placedAt[1], text, labelSgr);
     if (!forced) labels++;
+  }
+
+  // Agents sit beside the project they are working in. They are runtime state,
+  // not memory, so they decorate a node rather than becoming one.
+  if (controller.agents.enabled && controller.agents.agents.length) {
+    const highlighted = controller.agents.current;
+    for (const [project, agents] of controller.agents.byProject()) {
+      const p = positions.get(project);
+      if (!p) continue;
+      const d = controller.project(p);
+      const col = Math.floor(d.x / 2);
+      const row = Math.floor(d.y / 4) - 1;
+      if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+      const busiest = agents.find((a) => a.status === "working") ?? agents[0];
+      const isHighlighted = agents.some((a) => a.id === highlighted?.id);
+      const mark = agents.length > 1 ? `▲${agents.length}` : "▲";
+      const color = AGENT_STATUS_COLOR[busiest.status] ?? "#7f8db3";
+      const marker = isHighlighted
+        ? `${hexToSgr(BG_COLOR)}\x1b[48;2;58;227;116m\x1b[1m`
+        : sgr(color, "\x1b[1m");
+      canvas.putText(col, row, mark, marker);
+    }
   }
 
   if (controller.refreshing) {
@@ -256,6 +319,11 @@ function edgeColor(controller: GraphController, link: RawLink, touchesSelected: 
   return lit ? base : blendHex(base, BG_COLOR, 0.6);
 }
 
+/** How much of the store a project holds; decides which get named when space is short. */
+function projectWeight(node: RuntimeNode): number {
+  return (node.findingCount ?? 0) + (node.taskCount ?? 0) + (node.refCount ?? 0);
+}
+
 function labelPriority(controller: GraphController, node: RuntimeNode, selected: RuntimeNode | null, neighborIndex: Map<string, number>): number {
   let score = nodeRank(node, controller.filters, controller.model.scores);
   if (selected?.id === node.id) score += 100000;
@@ -265,29 +333,21 @@ function labelPriority(controller: GraphController, node: RuntimeNode, selected:
   return score;
 }
 
-function renderLegend(controller: GraphController, width: number): string {
-  const counts: Record<NodeKind, number> = { project: 0, finding: 0, task: 0, entity: 0, reference: 0, other: 0 };
-  for (const node of controller.visible.nodes) counts[node.kind]++;
-  const parts: string[] = [];
-  const entry = (kind: NodeKind, color: string) => {
-    if (!counts[kind]) return;
-    parts.push(`${colored(color, KIND_GLYPH[kind])} ${style.dim(`${counts[kind]} ${KIND_LABEL[kind]}${counts[kind] === 1 ? "" : "s"}`)}`);
-  };
-  entry("project", KIND_COLORS.project);
-  entry("finding", "#46c8ff");
-  entry("task", KIND_COLORS["task-active"]);
-  entry("entity", KIND_COLORS.entity);
-  entry("reference", KIND_COLORS.reference);
-  const edges = controller.visible.links.length;
-  parts.push(style.dim(`${edges} edge${edges === 1 ? "" : "s"}`));
-  // Drop whole entries off the end rather than slicing a count in half.
-  for (const sep of ["  ·  ", " · "]) {
-    for (let take = parts.length; take > 0; take--) {
-      const line = ` ${parts.slice(0, take).join(style.dim(sep))}`;
-      if (displayWidth(line) <= width) return line;
-    }
-  }
-  return "";
+/**
+ * The one line of graph state worth spending characters on, rendered into the
+ * shell header rather than a row of its own. A legend of kind counts told you
+ * nothing the colours on screen did not, but whether you are looking at your
+ * whole store or a sample of it changes how you read the picture.
+ */
+export function graphSummary(controller: GraphController): string {
+  if (controller.status !== "ready") return "";
+  const shown = controller.visible.nodes.length;
+  const total = controller.model.rawNodes.length;
+  const n = (v: number) => v.toLocaleString("en-US");
+  const capped = shown < total ? `${n(shown)} of ${n(total)} nodes` : `${n(shown)} nodes`;
+  const parts = [capped, `${n(controller.visible.links.length)} edges`];
+  if (controller.watchEnabled && controller.watch.running) parts.push(`${colored(ACCENT_CYAN, "◉")}${style.dim(" live")}`);
+  return parts.join(style.dim("  ·  "));
 }
 
 function healthDot(node: RuntimeNode): string {
@@ -346,6 +406,8 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       });
       if (neighbors.length > 9) push(style.dim(`  +${neighbors.length - 9} more`));
     }
+    const agentBudget = height - lines.length - 1;
+    if (agentBudget > 3) for (const line of agentLines(controller, inner, agentBudget)) push(line);
     if (watching) {
       const budget = height - lines.length - 1;
       if (budget > 3) for (const line of activityLines(controller, inner, budget)) push(line);
@@ -374,6 +436,8 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       if (projects.length > budget) push(style.dim(`  +${projects.length - budget} more`));
       push();
     }
+    const agentBudget = height - lines.length - 1;
+    if (agentBudget > 3) for (const line of agentLines(controller, inner, agentBudget)) push(line);
     if (watching) {
       const budget = height - lines.length - 1;
       if (budget > 3) {
@@ -396,6 +460,13 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
 }
 
 
+const AGENT_STATUS_COLOR: Record<string, string> = {
+  working: "#3ae374",
+  idle: "#48b2ff",
+  done: "#5c6b8a",
+  error: "#ff5470",
+};
+
 const SOURCE_COLOR: Record<string, string> = {
   search: ACCENT_CYAN,
   inject: ACCENT_AMBER,
@@ -407,6 +478,31 @@ const SOURCE_COLOR: Record<string, string> = {
  * a meta line and as much of the memory's text as the pane can carry, because
  * the point of watching is reading what was found, not just seeing it blink.
  */
+/**
+ * Who is working, and where. Rendered above the activity feed so the pane reads
+ * top to bottom as: what is selected, who is on it, what phren just touched.
+ */
+function agentLines(controller: GraphController, inner: number, budget: number): string[] {
+  const agents = controller.agents.agents;
+  const out: string[] = [];
+  if (!controller.agents.enabled) return out;
+  out.push("");
+  out.push(`${colored(agents.length ? "#3ae374" : "#5c6b8a", "▲")} ${style.dim(`agents${agents.length ? "" : " — none running"}`)}`);
+  const current = controller.agents.current;
+  for (const agent of agents) {
+    if (out.length >= budget - 1) break;
+    const isCurrent = agent.id === current?.id;
+    const color = AGENT_STATUS_COLOR[agent.status] ?? "#7f8db3";
+    const marker = isCurrent ? style.boldCyan("›") : " ";
+    out.push(`${marker}${colored(color, "●")} ${sliceWidth(agent.label, inner - 3)}`);
+    if (out.length >= budget - 1) break;
+    const where = agent.project ?? style.dim("outside phren");
+    out.push(`  ${style.dim(agent.status)} ${style.dim("·")} ${agent.project ? style.cyan(where) : where}`);
+  }
+  if (agents.length) out.push(style.dim("  tab cycle · ↵ focus"));
+  return out.slice(0, budget);
+}
+
 function activityLines(controller: GraphController, inner: number, budget: number): string[] {
   const out: string[] = [];
   const now = Date.now();

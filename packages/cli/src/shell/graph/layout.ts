@@ -55,6 +55,16 @@ const LINK_STRENGTH: Record<RawLinkKind, number> = {
   contradicts: 0.4,
 };
 
+/**
+ * How far a project's own nodes sprawl from it, estimated from how many it has.
+ * The ring is sized from this so clusters end up close to touching; sizing the
+ * ring by project count alone left the same gap at every scale and the graph
+ * never filled more than about a seventh of its own bounds.
+ */
+function clusterRadius(leafCount: number): number {
+  return IDEAL_DISTANCE * (0.9 + 0.42 * Math.sqrt(Math.max(0, leafCount)));
+}
+
 /** Project ids in stable order plus, for every node, the project(s) it hangs off. */
 function homes(nodes: LayoutNode[], links: RawLink[]): { projects: LayoutNode[]; homeOf: Map<string, string[]> } {
   const byId = new Map(nodes.map((node) => [node.id, node] as const));
@@ -90,7 +100,18 @@ export function seedPositions(nodes: LayoutNode[], links: RawLink[], aspect = DE
   const positions = new Map<string, Point>();
   const ratio = normalizeAspect(aspect);
   const { projects, homeOf } = homes(nodes, links);
-  const ring = IDEAL_DISTANCE * Math.max(2.5, Math.sqrt(projects.length) * 2.2);
+  // Pack the ring so neighbouring clusters nearly touch: the circumference has
+  // to carry one cluster diameter per project, with a little air between.
+  const leavesPer = new Map<string, number>();
+  for (const [id, hosts] of homeOf) {
+    if (hosts.length === 0) continue;
+    const owner = hosts[0];
+    if (owner === id) continue;
+    leavesPer.set(owner, (leavesPer.get(owner) ?? 0) + 1);
+  }
+  const spread = Math.max(...projects.map((p) => clusterRadius(leavesPer.get(p.id) ?? 0)), IDEAL_DISTANCE);
+  const packed = (projects.length * spread * 2.3) / (2 * Math.PI);
+  const ring = Math.max(IDEAL_DISTANCE * 2.2, packed);
   projects.forEach((project, i) => {
     // Start a quarter turn in so two projects sit side by side rather than
     // stacked, which is the worst case on a wide screen.
@@ -134,9 +155,22 @@ export class ForceSim {
   private readonly startTemperature: number;
 
   private readonly aspect: number;
+  /** How far apart projects push each other; scaled to the clusters they carry. */
+  private readonly projectCutoff: number;
+  /**
+   * The ring radius each project should sit at, measured in aspect-corrected
+   * space. Seeding a packed ring is not enough on its own: mutual repulsion
+   * between many projects expands it again, which is how a forty-project store
+   * ended up sprawling to nearly twice its seeded size. A radial spring holds
+   * each project at the radius the packing chose.
+   */
+  private readonly targetRadius: number[];
 
   constructor(nodes: LayoutNode[], links: RawLink[], seed?: Map<string, Point>, aspect = DEFAULT_ASPECT) {
     this.aspect = normalizeAspect(aspect);
+    const leaves = nodes.filter((node) => node.kind !== "project").length;
+    const projectCount = Math.max(1, nodes.length - leaves);
+    this.projectCutoff = clusterRadius(leaves / projectCount) * 2.4;
     this.ids = nodes.map((node) => node.id);
     this.index = new Map(this.ids.map((id, i) => [id, i] as const));
     this.mass = nodes.map((node) => (node.kind === "project" ? 4 : 1) * Math.max(0.6, node.size / 12));
@@ -153,6 +187,11 @@ export class ForceSim {
     const seeded = seedPositions(nodes, links, this.aspect);
     this.positions = new Map();
     for (const id of this.ids) this.positions.set(id, { ...(seed?.get(id) ?? seeded.get(id)!) });
+    this.targetRadius = this.ids.map((id, i) => {
+      if (!this.isProject[i]) return 0;
+      const p = seeded.get(id)!;
+      return Math.hypot(p.x / this.aspect, p.y);
+    });
     this.startTemperature = IDEAL_DISTANCE * Math.max(1, Math.sqrt(nodes.length) / 4);
     this.temperature = this.startTemperature;
   }
@@ -226,7 +265,7 @@ export class ForceSim {
           dist2 = ddx * ddx + ddy * ddy || 0.01;
         }
         const dist = Math.sqrt(dist2);
-        const cutoff = k * (this.isProject[i] || this.isProject[j] ? 14 : 6);
+        const cutoff = this.isProject[i] || this.isProject[j] ? this.projectCutoff : k * 6;
         if (dist > cutoff) continue;
         const force = (k2 / dist) * Math.sqrt(this.mass[i] * this.mass[j]);
         const fx = (ddx / dist) * force;
@@ -251,10 +290,17 @@ export class ForceSim {
     // Cluster pull toward the home project(s); projects drift gently to the origin.
     for (let i = 0; i < count; i++) {
       if (this.isProject[i]) {
-        // Vertical drift is damped by the aspect, so the ring of projects
-        // keeps the wide ellipse the seed gave it instead of relaxing round.
-        dx[i] -= xs[i] * 0.02;
-        dy[i] -= ys[i] * 0.02 * this.aspect;
+        // Hold the project on its ring. The error is measured in
+        // aspect-corrected space so the restoring force preserves the wide
+        // ellipse rather than pulling the layout back into a circle.
+        const nx = xs[i] / this.aspect;
+        const ny = ys[i];
+        const radius = Math.hypot(nx, ny);
+        if (radius > 0.01) {
+          const pull = (this.targetRadius[i] - radius) * 0.18;
+          dx[i] += (nx / radius) * pull * this.aspect;
+          dy[i] += (ny / radius) * pull;
+        }
         continue;
       }
       const anchors = this.anchors[i];

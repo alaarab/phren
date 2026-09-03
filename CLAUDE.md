@@ -49,7 +49,10 @@ Outside the pnpm workspace:
 | `packages/cli/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `packages/cli/browser/graph/` | Shared 3D memory-viewer renderer (bundled for the web UI and the VS Code webview): scene, project navigator, contents/review pane, labels |
 | `packages/cli/src/graph-core/` | Host-agnostic graph model shared by the browser viewer and the terminal graph view: payload types, palette, kind/health derivation, filters, ranking, search. Must not import node builtins or anything outside itself (it is bundled for the browser). |
-| `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer |
+| `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
+| `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
+| `.claude-plugin/` | Claude Code plugin manifest + marketplace entry. Points at `global/skills/`, `.mcp.json` and `hooks/hooks.json`; keep the version in step with `packages/cli/package.json`. |
+| `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change — three defects were invisible on small fixtures. |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
 | `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads** — `setup.ts` copies from here. |
 | `packages/cli/skills/` | Older un-prefixed copies of the same five skills plus the maintainer-only `docs` skill. Nothing reads this at runtime: every skill lookup resolves against the *store* (`<phrenPath>/global/skills`, `<project>/skills`), never the package. Edit `starter/global/skills/` instead. |
