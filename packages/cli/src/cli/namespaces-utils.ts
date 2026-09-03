@@ -1,8 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync } from "child_process";
-import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
+import { openInEditor as launchEditor } from "../editor/launch.js";
 import { getNonPrimaryStores } from "../store-registry.js";
 
 export function resolveProjectStorePath(phrenPath: string, project: string): string {
@@ -23,13 +22,15 @@ export function parseMcpToggle(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
+/**
+ * One-shot CLI wrapper around the shared launcher: exits non-zero when the
+ * editor will not start, which is right for a command and wrong inside the
+ * shell — hence the split.
+ */
 export function openInEditor(filePath: string): void {
-  const editor = process.env.EDITOR || process.env.VISUAL || "nano";
-  try {
-    execFileSync(editor, [filePath], { stdio: "inherit" });
-  } catch (err: unknown) {
-    if ((process.env.PHREN_DEBUG)) logger.debug("cli-namespaces", `openInEditor: ${errorMessage(err)}`);
-    console.error(`Editor "${editor}" failed. Set $EDITOR to your preferred editor.`);
-    process.exit(1);
-  }
+  const result = launchEditor(filePath);
+  if (result.ok) return;
+  logger.debug("cli-namespaces", `openInEditor: ${result.error ?? "failed"}`);
+  console.error(`Editor "${result.command}" failed. Set $EDITOR to your preferred editor.`);
+  process.exit(1);
 }

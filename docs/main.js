@@ -179,7 +179,6 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     { id: 'Skills',       icon: '◆' },
     { id: 'Hooks',        icon: '⚡' },
     { id: 'Health',       icon: '♡' },
-    { id: 'Graph',        icon: '❖' },
   ];
 
   const SCENES = [
@@ -244,15 +243,6 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
         { kind: 'health-kv', key: 'Sync',      value: 'saved · unsynced 0' },
       ],
       status: 'Palette commands work from any view',
-      nextCmd: 'graph',
-    },
-    {
-      project: 'web-project-1',
-      activeTab: 'Graph',
-      rows: [
-        { kind: 'graph-image', src: 'shell-graph-crop.png', alt: 'The knowledge graph drawn in the terminal' },
-      ],
-      status: '↑↓←→ walk · / search · 1-9 jump to a neighbour · [ ] focus a project',
       nextCmd: 'projects',
     },
   ];
@@ -310,17 +300,6 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
 
     if (row.kind === 'health-sep') {
       return mkEl('div', 'demo-health-rule');
-    }
-
-    if (row.kind === 'graph-image') {
-      const wrap = mkEl('div', 'demo-shell-row demo-shell-row-graph');
-      const img = document.createElement('img');
-      img.className = 'demo-shell-graph';
-      img.src = row.src;
-      img.alt = row.alt || '';
-      img.loading = 'lazy';
-      wrap.appendChild(img);
-      return wrap;
     }
 
     if (row.kind === 'project') {

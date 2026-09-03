@@ -290,13 +290,33 @@ describe("PhrenShell", () => {
     const shell = createShell(dir);
     await shell.handleInput(":help");
     let output = await shell.render();
-    expect(output).toContain("Palette commands");
     expect(output).toContain("Navigation");
-    expect(output).toContain("press any key to dismiss");
+    expect(output).toContain("to dismiss");
 
     await shell.handleInput("");
     output = await shell.render();
-    expect(output).not.toContain("Palette Commands");
+    expect(output).not.toContain("Navigation");
+  });
+
+  it("scrolls the help rather than clipping what does not fit", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":help");
+    const first = await shell.render();
+    // The help is longer than a terminal, so it now says where you are in it
+    // instead of silently dropping the rest.
+    expect(first).toContain("Navigation");
+    expect(first).toMatch(/of \d+/);
+
+    // Arrows scroll instead of dismissing; the later sections become reachable.
+    for (let i = 0; i < 30; i++) await shell.handleRawKey("\x1b[B");
+    const scrolled = await shell.render();
+    expect(scrolled).toContain("Palette commands");
+    expect(shell.showHelp).toBe(true);
+
+    // Anything else still dismisses.
+    await shell.handleRawKey("x");
+    expect(shell.showHelp).toBe(false);
+    expect(await shell.render()).not.toContain("Palette commands");
   });
 
   it("switching views resets scroll and preserves cursor map", async () => {

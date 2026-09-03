@@ -156,10 +156,16 @@ export async function startShell(phrenPath: string, profile: string, startup: Sh
     return;
   }
 
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-  enterFullscreen();
+  // Taking and releasing the terminal is written once and used twice: at
+  // startup and shutdown, and again either side of handing the terminal to an
+  // editor. Two copies of this would drift.
+  const grabTerminal = () => {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    enterFullscreen();
+  };
+  grabTerminal();
   let exiting = false;
   let cleanedUp = false;
 
@@ -293,6 +299,26 @@ export async function startShell(phrenPath: string, profile: string, startup: Sh
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
   process.once("exit", onProcessExit);
+
+  // Hand the terminal to a child process (an editor) and take it back. The
+  // shell owns raw mode, the alternate screen and the stdin listener, so all
+  // three have to be unwound or the child and the key pump fight over input.
+  shell.setSuspendHandler(async (run) => {
+    if (exiting) return;
+    process.stdin.removeListener("data", onData);
+    restoreTerminal();
+    try {
+      await run();
+    } finally {
+      if (!exiting) {
+        grabTerminal();
+        process.stdin.on("data", onData);
+        // Anything typed at the child after it exited is not for us.
+        decoder.flush();
+        await repaint();
+      }
+    }
+  });
 
   try {
     await playStartupIntro(phrenPath, resolveStartupIntroPlan(phrenPath), waitForIntroKeypress);

@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.47] - 2026-09-03
+
+### Added
+
+- **Edit skills and project instructions from the shell.** `e` in the Skills or
+  Projects view opens the file in `$EDITOR` — your own editor, your config —
+  with the shell releasing the terminal and taking it back when you quit. `E`
+  opens phren's own modal editor instead, with a deliberate subset of vim:
+  `hjkl`, `w b`, `0 $`, `gg G`, `i a I A`, `o O`, `x`, `dd`, `yy`, `p P`, `u`,
+  `/` with `n`/`N`, and `:w :q :wq :q!`. In Skills it edits the skill's
+  markdown; in Projects it edits that project's `CLAUDE.md`, which the store
+  owns and symlinks into the repo, so one edit reaches every linked checkout.
+  Saving refuses a skill whose frontmatter no longer parses, refuses to write
+  through a symlink, lands atomically, and rebuilds the skill manifests when the
+  frontmatter changed.
+
+### Fixed
+
+- **`$EDITOR` values carrying arguments no longer fail.** The editor helper
+  passed `$EDITOR` straight to `execFileSync`, which takes a binary rather than
+  a command line, so anything like `code --wait` or
+  `omarchy-launch-editor --inline` failed with ENOENT. It is now parsed the way
+  git parses `core.editor`, splitting rather than going through a shell.
+- **The Skills view could not find its own files.** The list packed each skill's
+  path into a display string and recovered it by splitting on `·`, which broke on
+  any path containing that character and pointed at the wrong store for team
+  skills. Rows carry the real path now.
+- **Toggling a global skill did nothing.** Its enabled flag was written under the
+  project's scope while the reader looked under `global`.
+- **The help overlay silently hid more than half of itself.** At 37 lines it
+  needs a 50-row terminal; on 24 rows twenty lines were simply dropped. It now
+  scrolls with the arrows and says where you are in it.
+
+### Changed
+
+- The docs site's VS Code tab showed the old extension's own graph. VS Code now
+  hosts the same viewer as the web UI, so it shows that, which also drops an
+  8.5 MB animation from the site. Unused screenshots removed, and the README
+  trimmed to one.
+
+
 ## [0.1.46] - 2026-09-03
 
 ### Added

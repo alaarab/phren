@@ -71,6 +71,7 @@ export async function renderMenuFrame(
     "",           // no inputCtx
     "",           // no inputBuf
     false,        // no help
+    0,            // help scroll (unused: no help)
     "Tab: Chat  ←→: Views  ↑↓: Navigate  Enter: Select  /: Filter  Esc: Back",
     stubDoctor,
     null,         // subsectionsCache
