@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { ForceSim, IDEAL_DISTANCE, bounds, seedPositions, type LayoutNode } from "./layout.js";
+import { ForceSim, IDEAL_DISTANCE, bounds, seedPositions, type LayoutNode, type Point } from "./layout.js";
 import type { RawLink } from "../../graph-core/types.js";
 
 function star(projects: number, leavesPer: number): { nodes: LayoutNode[]; links: RawLink[] } {
@@ -165,5 +165,67 @@ describe("packing the ring to its clusters", () => {
     const few = measure(4, 8);
     expect(many.ring / few.ring).toBeLessThan(14);
     expect(many.ring).toBeGreaterThan(few.ring);
+  });
+});
+
+describe("ring packing by cluster size", () => {
+  function store(sizes: number[]) {
+    const nodes: LayoutNode[] = [];
+    const links: RawLink[] = [];
+    const frags = ["RetryPolicy", "AuthGuard", "EventBus"];
+    for (const f of frags) nodes.push({ id: `fragment:${f}`, kind: "fragment", size: 3 });
+    sizes.forEach((n, p) => {
+      const pid = `project:p${p}`;
+      nodes.push({ id: pid, kind: "project", project: `p${p}`, size: 6 });
+      for (let i = 0; i < n; i++) {
+        const id = `finding:p${p}-${i}`;
+        nodes.push({ id, kind: "finding", project: `p${p}`, size: 2 });
+        links.push({ source: pid, target: id, kind: "star" });
+        if (i % 3 === 0) links.push({ source: id, target: `fragment:${frags[i % 3]}`, kind: "fragment" });
+      }
+    });
+    return { nodes, links };
+  }
+
+  it("does not strand a one-finding project in empty space beside heavy clusters", () => {
+    // The shape a real store takes: a few big projects, a few just started.
+    const sizes = [40, 55, 30, 12, 8, 35, 1, 2, 1];
+    const { nodes, links } = store(sizes);
+    const sim = new ForceSim(nodes, links, undefined, 2.4);
+    sim.settle();
+    const pos = sim.positions;
+    const byProject = new Map<string, Point[]>();
+    for (const n of nodes) {
+      if (!n.project) continue;
+      byProject.set(n.project, [...(byProject.get(n.project) ?? []), pos.get(n.id)!]);
+    }
+    // How far each project is from the nearest node of any other project:
+    // a stranded project has a big gap, a nestled one a small gap.
+    const gap = (p: number): number => {
+      const me = pos.get(`project:p${p}`)!;
+      let best = Number.POSITIVE_INFINITY;
+      for (const [proj, pts] of byProject) {
+        if (proj === `p${p}`) continue;
+        for (const q of pts) best = Math.min(best, Math.hypot((me.x - q.x) / 2.4, me.y - q.y));
+      }
+      return best;
+    };
+    const big = sizes.map((n, p) => (n >= 8 ? gap(p) : Number.NaN)).filter((g) => !Number.isNaN(g)).sort((a, b) => a - b);
+    const median = big[Math.floor(big.length / 2)];
+    // Equal slices left the small ones at full ring distance from everything,
+    // well over the big-project median; packed by size they sit closer than it.
+    for (const p of [6, 7, 8]) expect(gap(p) / median, `project p${p}`).toBeLessThan(1);
+  });
+
+  it("keeps two equal projects side by side, not stacked", () => {
+    const two = seedPositions(
+      [{ id: "a", kind: "project", project: "a", size: 6 }, { id: "b", kind: "project", project: "b", size: 6 }],
+      [],
+      2.4,
+    );
+    const [a, b] = [two.get("a")!, two.get("b")!];
+    expect(Math.abs(a.y)).toBeLessThan(1);
+    expect(Math.abs(b.y)).toBeLessThan(1);
+    expect(Math.sign(a.x)).toBe(-Math.sign(b.x));
   });
 });

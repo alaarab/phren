@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.50] - 2026-09-03
+
+### Fixed
+
+- **Small projects no longer sit alone at the edge of the terminal graph.**
+  The project ring gave every project an equal slice regardless of size, so a
+  one-finding project got the same forty degrees as a fifty-finding one and sat
+  by itself in empty space at full ring distance, while the heavy clusters ran
+  together in the middle — "most of it in the centre, a few way out", with the
+  camera fitted to the few, so everything looked small. Each project's slice is
+  now proportional to its cluster, and small clusters sit a little inside the
+  ring so their outer edge lines up with their neighbours'. Same store, same
+  deterministic map; it just fills the screen evenly now.
+
+
 ## [0.1.49] - 2026-09-03
 
 ### Added
