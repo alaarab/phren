@@ -294,6 +294,33 @@ describe("animation", () => {
   });
 });
 
+describe("reader", () => {
+  it("space opens the selected node's text in a bubble; esc and reselecting close it", async () => {
+    const { controller } = make();
+    controllers.push(controller);
+    await controller.ensureData();
+    await vi.waitFor(() => expect(controller.status).toBe("ready"));
+    const h = host();
+    expect(controller.handleKey(" ", h)).toBe(true);
+    expect(controller.reader).toBe(false); // nothing selected: told, not opened
+    expect(h.messages.at(-1)).toContain("select a node first");
+
+    controller.select("api");
+    controller.handleKey(" ", h);
+    expect(controller.reader).toBe(true);
+    // Esc closes the reader before it would clear the selection.
+    controller.handleKey("\x1b", h);
+    expect(controller.reader).toBe(false);
+    expect(controller.selectedId).toBe("api");
+
+    controller.handleKey(" ", h);
+    expect(controller.reader).toBe(true);
+    const other = controller.neighborsOf("api")[0];
+    controller.select(other.id);
+    expect(controller.reader).toBe(false);
+  });
+});
+
 function snapshotPositions(controller: GraphController): Array<[string, number, number]> {
   return [...controller.positions].map(([id, p]) => [id, Math.round(p.x * 1000), Math.round(p.y * 1000)]);
 }

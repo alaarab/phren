@@ -213,6 +213,53 @@ export class BrailleCanvas {
     return written;
   }
 
+  /**
+   * Overlay a line that already carries ANSI styling, one cell per visible
+   * character. Each cell records the full attribute state in force at that
+   * point (everything since the last reset), so the renderer can switch
+   * styles cell by cell without leaking bold or colour into the neighbours.
+   */
+  putStyled(col: number, row: number, styled: string): number {
+    if (row < 0 || row >= this.rows) return 0;
+    let c = col;
+    let written = 0;
+    let state = "";
+    let i = 0;
+    while (i < styled.length) {
+      if (styled[i] === "\x1b") {
+        const end = styled.indexOf("m", i);
+        if (end === -1) break;
+        const seq = styled.slice(i, end + 1);
+        state = seq === "\x1b[0m" || seq === "\x1b[m" ? "" : state + seq;
+        i = end + 1;
+        continue;
+      }
+      const cp = styled.codePointAt(i) ?? 32;
+      const raw = String.fromCodePoint(cp);
+      i += raw.length;
+      if (c >= this.cols) break;
+      if (c >= 0) {
+        const width = displayWidth(raw);
+        if (width === 0) continue;
+        if (width === 2) {
+          // A wide glyph owns two cells: the glyph in the first, an empty
+          // marker in the second so nothing else draws there and the row
+          // still adds up to the right width. At the edge it becomes a dot.
+          if (c + 1 >= this.cols) { this.overlay[this.cell(c, row)] = { ch: "·", sgr: state }; written++; c++; continue; }
+          this.overlay[this.cell(c, row)] = { ch: raw, sgr: state };
+          this.overlay[this.cell(c + 1, row)] = { ch: "", sgr: state };
+          written += 2;
+          c += 2;
+          continue;
+        }
+        this.overlay[this.cell(c, row)] = { ch: raw, sgr: state };
+        written++;
+      }
+      c++;
+    }
+    return written;
+  }
+
   /** Every cell in a rectangle is overlaid with a space, hiding dots underneath (pane backdrop). */
   clearRect(col: number, row: number, width: number, height: number): void {
     for (let r = row; r < row + height; r++) {

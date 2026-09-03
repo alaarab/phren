@@ -277,7 +277,7 @@ export function shellHelpText(): string {
     `  ${style.bold("Tasks")}        ${k("a")} ${d("add task")}  ${k("d")} ${d("toggle active/queue")}  ${k("↵")} ${d("mark complete")}`,
     `  ${style.bold("Findings")}    ${k("a")} ${d("tell phren")}  ${k("d")} ${d("delete selected")}`,
     `  ${style.bold("Review Queue")} ${k("↵")} ${d("inspect selected item")}  ${d("(read-only)")}`,
-    `  ${style.bold("Graph")}        ${k("↑↓←→")} ${d("walk")}  ${k("1-9")} ${d("neighbour")}  ${k("↵")} ${d("select / focus")}  ${k("w")} ${d("watch")}`,
+    `  ${style.bold("Graph")}        ${k("↑↓←→")} ${d("walk")}  ${k("1-9")} ${d("neighbour")}  ${k("↵")} ${d("select / focus")}  ${k("␣")} ${d("read in a bubble")}  ${k("w")} ${d("watch")}`,
     `  ${" ".repeat(13)}${k("/")} ${d("search")}  ${k("n N")} ${d("next / prev hit")}  ${k("f")} ${d("filter")}  ${k("[ ]")} ${d("project")}`,
     `  ${" ".repeat(13)}${k("+ -")} ${d("zoom")}  ${k("0")} ${d("fit")}  ${k("r")} ${d("re-lay out")}  ${k("⇧↑↓←→")} ${d("pan")}  ${k("o")} ${d("3D viewer")}`,
     `  ${style.bold("Skills")}       ${k("e")} ${d("edit in $EDITOR")}  ${k("E")} ${d("edit here")}  ${k("t")} ${d("toggle enabled")}  ${k("d")} ${d("remove")}`,

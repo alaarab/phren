@@ -29,6 +29,7 @@ import { ForceSim, bounds, type LayoutNode, type Point } from "./layout.js";
 import { GraphWatch, type ActivityItem } from "./watch.js";
 import { GraphAgents } from "./agents.js";
 import { GraphMascot } from "./mascot.js";
+import { LIVE_BUBBLE_MS } from "./bubble.js";
 
 /** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
 export const TUI_NODE_LIMIT = 350;
@@ -172,6 +173,8 @@ export class GraphController {
   readonly agents: GraphAgents;
   /** phren himself, who walks to whatever the store just touched. */
   readonly mascot = new GraphMascot();
+  /** Space opens the selected node's full text in a bubble on the canvas. */
+  reader = false;
   watchEnabled: boolean;
   /**
    * Wall-clock ms of the last navigation keypress. While the user is driving,
@@ -206,6 +209,22 @@ export class GraphController {
   startAgents(): void {
     if (!this.agents.enabled || this.agents.running) return;
     this.agents.start(() => this.repaintHook?.());
+  }
+
+  /**
+   * The recall that just landed, while it is still fresh enough to show at its
+   * node. Watch mode's feed lists everything; this is the one worth pointing at.
+   */
+  liveRecall(now = Date.now()): { nodeId: string; item: ActivityItem; age: number } | null {
+    if (!this.watchEnabled || !this.watch.running) return null;
+    for (const item of this.watch.activity) {
+      if (item.historical || !item.nodeId) continue;
+      const age = now - item.seenAt;
+      if (age > LIVE_BUBBLE_MS) return null;
+      if (!this.positions.has(item.nodeId)) return null;
+      return { nodeId: item.nodeId, item, age };
+    }
+    return null;
   }
 
   /**
@@ -498,6 +517,7 @@ export class GraphController {
 
   private animationFrame(): void {
     let busy = this.watch.hot;
+    if (this.liveRecall()) busy = true;
     if (this.mascot.step()) busy = true;
     if (this.mascot.arrivalGlow() > 0) busy = true;
     if (this.mascot.maybeWander(this.visible.nodes.map((node) => node.id), this.positions)) busy = true;
@@ -546,6 +566,7 @@ export class GraphController {
   }
 
   select(nodeId: string | null, opts: { fly?: boolean } = {}): void {
+    if (nodeId !== this.selectedId) this.reader = false;
     this.selectedId = nodeId;
     if (nodeId) {
       this.mascot.walkTo(nodeId, this.positions);
@@ -789,7 +810,14 @@ export class GraphController {
       host.setMessage(`  ${style.dim("open the 3D viewer in a browser:")} ${style.boldCyan("phren web-ui")}`);
       return true;
     }
+    if (key === " ") {
+      if (!this.selectedId) { host.setMessage(`  ${style.dim("select a node first — ↵ or 1-9")}`); return true; }
+      this.reader = !this.reader;
+      host.setMessage(this.reader ? `  ${style.dim("reading —")} ${style.boldCyan("␣")} ${style.dim("or")} ${style.boldCyan("esc")} ${style.dim("to close")}` : "");
+      return true;
+    }
     if (key === "\x1b") {
+      if (this.reader) { this.reader = false; host.setMessage(""); return true; }
       if (this.agents.current) { this.agents.clearHighlight(); host.setMessage(`  ${style.dim("agent released")}`); return true; }
       if (this.search.query) { this.clearSearch(); host.setMessage(`  ${style.dim("search cleared")}`); return true; }
       if (this.selectedId) { this.select(null); host.setMessage(`  ${style.dim("selection cleared")}`); return true; }
