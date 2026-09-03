@@ -14,6 +14,7 @@ import { displayWidth, padToWidth, style } from "../render.js";
 import { BrailleCanvas, blendHex, hexToSgr } from "./canvas.js";
 import type { GraphController } from "./controller.js";
 import { graphGlyphs } from "./glyphs.js";
+import { MASCOT_COLOR, MASCOT_SPARK } from "./mascot.js";
 import { formatAge } from "./watch.js";
 
 const PANE_WIDTH = 34;
@@ -156,6 +157,8 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     placed.push({ node, x: d.x, y: d.y });
   }
   const isLit = (id: string): boolean => !searching || matches.has(id);
+  // How connected the selection is, so a hub's highlight stays readable.
+  const selectedDegree = selected ? (controller.model.visibleAdjacency.get(selected.id)?.size ?? 0) : 0;
 
   // Edges first so node dots win the cell colour.
   for (const link of controller.visible.links) {
@@ -163,7 +166,7 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     const b = projected.get(link.target);
     if (!a || !b) continue;
     const touchesSelected = selected !== null && (link.source === selected.id || link.target === selected.id);
-    const color = edgeColor(controller, link, touchesSelected, isLit(link.source) && isLit(link.target));
+    const color = edgeColor(controller, link, touchesSelected, isLit(link.source) && isLit(link.target), selectedDegree);
     canvas.line(a.x, a.y, b.x, b.y, color, { z: touchesSelected ? 2 : 0, dotted: link.kind === "contradicts" });
   }
 
@@ -298,6 +301,31 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     }
   }
 
+  // phren, wherever he currently is. Drawn after everything else so he is
+  // never lost in the dot field — he is the thing you are meant to follow.
+  const mascotPos = controller.mascot.pos;
+  if (mascotPos) {
+    const d = controller.project(mascotPos);
+    const col = Math.floor(d.x / 2);
+    const row = Math.floor(d.y / 4);
+    if (col >= 0 && col < cols && row >= 0 && row < rows) {
+      const glow = controller.mascot.arrivalGlow();
+      // A cyan halo on arrival, fading out, so a landing reads at a glance.
+      if (glow > 0) {
+        for (let a = 0; a < 12; a++) {
+          const t = (a / 12) * Math.PI * 2;
+          canvas.setDot(d.x + Math.cos(t) * 5, d.y + Math.sin(t) * 4.5, blendHex(MASCOT_SPARK, BG_COLOR, 1 - glow), 5);
+        }
+      }
+      // He perches *beside* what he is visiting, never on top of it — sitting
+      // on the node would hide the very marker you are meant to be looking at.
+      const perch = [[col - 1, row], [col + 1, row], [col, row - 1], [col - 1, row - 1]]
+        .find(([c, r]) => canvas.isFree(c, r, 1)) ?? [col - 1, row];
+      if (glow > 0) canvas.putText(perch[0], perch[1] - 1, "✦", sgr(blendHex(MASCOT_SPARK, BG_COLOR, 1 - glow), "\x1b[1m"));
+      canvas.putText(perch[0], perch[1], "◕", sgr(MASCOT_COLOR, "\x1b[1m"));
+    }
+  }
+
   if (controller.refreshing) {
     const badge = " ⟳ refreshing ";
     canvas.putText(cols - displayWidth(badge), 0, badge, sgr(ACCENT_CYAN, "\x1b[2m"));
@@ -305,8 +333,13 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
   return canvas.render();
 }
 
-function edgeColor(controller: GraphController, link: RawLink, touchesSelected: boolean, lit: boolean): string {
-  if (touchesSelected) return ACCENT_AMBER;
+/**
+ * Edges keep their own colour when the selection touches them, lifted toward
+ * amber rather than replaced by it. Painting every attached edge solid amber
+ * turned a selected project into a solid yellow fan — the more a node connected,
+ * the less the highlight told you — so a hub is lifted least.
+ */
+function edgeColor(controller: GraphController, link: RawLink, touchesSelected: boolean, lit: boolean, degree = 0): string {
   let base: string;
   if (link.kind === "fragment") base = blendHex(ACCENT_CYAN, BG_COLOR, 0.45);
   else if (link.kind === "contradicts") base = "#ff5470";
@@ -316,7 +349,10 @@ function edgeColor(controller: GraphController, link: RawLink, touchesSelected: 
     const node = controller.model.nodeById.get(leaf);
     base = blendHex(node?.baseColor ?? KIND_COLORS.other, BG_COLOR, 0.55);
   }
-  return lit ? base : blendHex(base, BG_COLOR, 0.6);
+  const shown = lit ? base : blendHex(base, BG_COLOR, 0.6);
+  if (!touchesSelected) return shown;
+  const lift = degree > 24 ? 0.22 : degree > 8 ? 0.34 : 0.5;
+  return blendHex(shown, ACCENT_AMBER, lift);
 }
 
 /** How much of the store a project holds; decides which get named when space is short. */

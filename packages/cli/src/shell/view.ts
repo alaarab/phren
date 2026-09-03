@@ -960,6 +960,8 @@ export async function renderShell(
         if (!ctx.graph) { contentLines = ["  The graph view needs the interactive shell — run `phren shell`."]; break; }
         const controller = ctx.graph();
         await controller.ensureData();
+        const offer = controller.agentHint();
+        if (offer) message = `  ${style.boldCyan("▲")} ${style.dim(`${offer} — press`)} ${style.boldCyan("a")} ${style.dim("to see them")}`;
         contentLines = renderGraphView(controller, renderWidth(), height);
         break;
       }

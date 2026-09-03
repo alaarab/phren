@@ -69,6 +69,19 @@ export class GraphAgents {
   }
   private polledOnce = false;
 
+  /**
+   * Is there anything to show, without turning the overlay on? Used to offer
+   * the feature when agents are actually running, rather than leaving it as a
+   * key nobody presses.
+   */
+  hasSomethingToShow(): boolean {
+    try {
+      return this.collectFn().length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   start(onUpdate: () => void): void {
     if (!this.enabled || this.timer) return;
     this.onUpdate = onUpdate;

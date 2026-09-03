@@ -158,6 +158,8 @@ Put the graph in one terminal and an agent in another. As the agent searches, th
 
 The camera yields to you: while you are navigating, incoming events still pulse and feed but do not move the view. It resumes following a few seconds after your last keypress.
 
+And phren goes with it. The little purple `◕` walks to whatever the store just touched, perching beside it with a cyan sparkle as he lands, the same way he does in the web viewer. When nothing has happened for a while he wanders off to another node on his own. He is what you are watching when you are watching.
+
 Watch mode is on by default in the Graph view. Press `w` to toggle it, or launch with `--no-live` to start with it off (`--live` forces it on).
 
 #### Agents
