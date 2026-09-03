@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-09-03
+
 ### Added
 
 - **Watch mode in the terminal graph.** The Graph view now tails
@@ -19,7 +21,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `search_knowledge` tool already did, so CLI searches and finding writes are
   visible to a watching graph (previously only agent searches were).
 
-### Added
 
 - **Running coding agents on the knowledge graph** (`PHREN_FEATURE_AGENTS=1`, off
   by default). phren asks whatever is already running your agents — a Herdr
@@ -30,6 +31,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   one to the front through its own host. The provider contract is a small JSON
   record, so a tmux or Zellij user needs a few lines of shell rather than a
   change to phren. With no provider available the overlay never appears.
+
+- **phren installs as a Claude Code plugin again.** The manifests in
+  `.claude-plugin/` predated the monorepo layout and pointed at directories that
+  no longer existed, so `/plugin install phren@phren` produced an empty plugin.
+  They now point at the real skills, an `.mcp.json` for the MCP server and a
+  `hooks.json` for the session hook, with the version kept in step with the
+  package. See `docs/claude-code-plugin.md`.
+- `phren-agent --multi` publishes its running agents to `.runtime/agents/`, so
+  phren's agents overlay sees agents phren itself spawned alongside any other
+  host's.
 
 ### Fixed
 
@@ -81,7 +92,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The lookup-log tailing used by the web UI's activity stream is extracted to
   `src/shared/lookup-tail.ts` and shared with the shell's watch mode.
-
 
 ## [0.1.45] - 2026-09-01
 

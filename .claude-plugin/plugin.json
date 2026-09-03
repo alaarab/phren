@@ -1,10 +1,24 @@
 {
   "name": "phren",
   "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
-  "version": "1.25.0",
+  "version": "0.1.46",
   "author": {
     "name": "Ala Arab",
     "url": "https://github.com/alaarab"
   },
-  "repository": "https://github.com/alaarab/phren"
+  "repository": "https://github.com/alaarab/phren",
+  "license": "MIT",
+  "homepage": "https://alaarab.github.io/phren/",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "mcp",
+    "memory",
+    "knowledge",
+    "agent-skills",
+    "hooks"
+  ],
+  "skills": "./global/skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
 }

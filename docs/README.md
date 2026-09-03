@@ -24,6 +24,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands, the terminal Graph view, the splash.
 - `docs/graph-viewer.md`: The 3D memory viewer (web UI Graph tab and VS Code webview): navigation, contents pane, review mode, bulk actions.
 - `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
+- `docs/claude-code-plugin.md`: Installing phren as a Claude Code plugin, and how that differs from `phren init`.
 - `apps/ios/README.md`: phren for iOS (SwiftUI app, widgets, Siri intents) and its App Store material.
 - Screenshots used by the site and README: `shell-*.png` (terminal), `webui-*.png` (web UI), `splash.gif`, `phren-graph-walk.gif` (VS Code).
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).

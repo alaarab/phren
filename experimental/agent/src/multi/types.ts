@@ -182,6 +182,8 @@ export type AgentStatus = "starting" | "running" | "idle" | "done" | "error" | "
 export interface AgentEntry {
   id: string;
   task: string;
+  /** Working directory, which is how phren joins this agent to a project. */
+  cwd?: string;
   /** Short display name for the agent tab (e.g. "fixer", "explorer"). */
   displayName?: string;
   status: AgentStatus;
