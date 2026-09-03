@@ -83,14 +83,13 @@ describe("saveEditedFile", () => {
   });
 
   it("reports a write it cannot make instead of throwing", () => {
-    const impossible = path.join(os_devNull(), "nope", "CLAUDE.md");
-    const result = saveEditedFile(impossible, "x\n", "claude");
+    // A regular file standing where a directory would have to be. Every
+    // platform refuses to mkdir through it, which /dev/null does not do on
+    // Windows and a /proc path does not do quickly on Linux.
+    const blocker = path.join(tmp.path, "not-a-directory");
+    fs.writeFileSync(blocker, "");
+    const result = saveEditedFile(path.join(blocker, "nope", "CLAUDE.md"), "x\n", "claude");
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
 });
-
-/** A file where a directory should be: fails fast, unlike a /proc path. */
-function os_devNull(): string {
-  return "/dev/null";
-}
