@@ -225,11 +225,14 @@ describe("keys", () => {
   it("zooms, pans and refits", async () => {
     const c = await ready();
     const h = host();
-    const scale = c.camera.scale;
+    const { scaleX, scaleY } = c.camera;
     c.handleKey("+", h);
-    expect(c.camera.scale).toBeCloseTo(scale * 1.25, 5);
+    expect(c.camera.scaleX).toBeCloseTo(scaleX * 1.25, 5);
+    // Both axes zoom together, so zooming never reshapes the graph.
+    expect(c.camera.scaleY).toBeCloseTo(scaleY * 1.25, 5);
     c.handleKey("-", h);
-    expect(c.camera.scale).toBeCloseTo(scale, 5);
+    expect(c.camera.scaleX).toBeCloseTo(scaleX, 5);
+    expect(c.camera.scaleY).toBeCloseTo(scaleY, 5);
     const cx = c.camera.cx;
     c.handleKey("\x1b[1;2C", h);
     expect(c.camera.cx).toBeGreaterThan(cx);
@@ -345,5 +348,56 @@ describe("watch mode", () => {
     expect(watch.running).toBe(false);
     emit(lookup({ nodeId: "f1" }));
     expect(controller.selectedId).toBeNull();
+  });
+});
+
+describe("fitting the canvas", () => {
+  async function fitted(width: number, height: number) {
+    const { controller } = make();
+    controllers.push(controller);
+    await controller.ensureData();
+    controller.setViewport(width, height);
+    controller.fitAll();
+    return controller;
+  }
+
+  it("fills a wide canvas on both axes instead of stranding the width", async () => {
+    const c = await fitted(240, 80);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const node of c.visible.nodes) {
+      const p = c.positions.get(node.id);
+      if (!p) continue;
+      const d = c.project(p);
+      xs.push(d.x);
+      ys.push(d.y);
+    }
+    const spanX = Math.max(...xs) - Math.min(...xs);
+    const spanY = Math.max(...ys) - Math.min(...ys);
+    // Before per-axis scaling the graph fitted the shorter axis and used well
+    // under half the width; it should now cover most of both.
+    expect(spanX / 240).toBeGreaterThan(0.6);
+    expect(spanY / 80).toBeGreaterThan(0.6);
+    // And it stays inside the canvas.
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(-1);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(241);
+  });
+
+  it("never distorts beyond the stretch cap", async () => {
+    const c = await fitted(400, 40);
+    expect(c.camera.scaleX / c.camera.scaleY).toBeLessThanOrEqual(2.2 + 1e-9);
+    expect(c.camera.scaleX / c.camera.scaleY).toBeGreaterThanOrEqual(1 - 1e-9);
+  });
+
+  it("re-fits when the terminal is resized, until the user takes the camera", async () => {
+    const c = await fitted(200, 60);
+    const wide = { ...c.camera };
+    c.setViewport(100, 60);
+    expect(c.camera.scaleX).not.toBeCloseTo(wide.scaleX, 5);
+    const host = { setMessage() {}, startInput() {} };
+    c.handleKey("+", host);            // user zooms
+    const chosen = { ...c.camera };
+    c.setViewport(160, 60);            // resize no longer re-fits
+    expect(c.camera.scaleX).toBeCloseTo(chosen.scaleX, 5);
   });
 });

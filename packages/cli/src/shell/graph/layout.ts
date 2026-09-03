@@ -33,6 +33,20 @@ export interface Point {
 /** Ideal edge length in world units. Everything else is scaled off this. */
 export const IDEAL_DISTANCE = 12;
 
+/**
+ * A terminal canvas is far wider than it is tall. A layout that settles into a
+ * circle therefore strands most of the screen, so the simulation is told the
+ * canvas aspect and lays the graph out as a matching ellipse: the project ring
+ * is stretched horizontally and vertical drift is damped by the same factor.
+ */
+export const DEFAULT_ASPECT = 2.4;
+const MAX_ASPECT = 3.5;
+
+export function normalizeAspect(aspect: number | undefined): number {
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 0) return DEFAULT_ASPECT;
+  return Math.max(1, Math.min(aspect, MAX_ASPECT));
+}
+
 /** Spring strength by edge flavour: spokes hold the clusters, enrichment edges just nudge. */
 const LINK_STRENGTH: Record<RawLinkKind, number> = {
   star: 1,
@@ -72,13 +86,16 @@ function pushUnique(list: string[], value: string): void {
  * their home project, multi-home fragments at the centroid of their homes,
  * orphans on an outer ring.
  */
-export function seedPositions(nodes: LayoutNode[], links: RawLink[]): Map<string, Point> {
+export function seedPositions(nodes: LayoutNode[], links: RawLink[], aspect = DEFAULT_ASPECT): Map<string, Point> {
   const positions = new Map<string, Point>();
+  const ratio = normalizeAspect(aspect);
   const { projects, homeOf } = homes(nodes, links);
   const ring = IDEAL_DISTANCE * Math.max(2.5, Math.sqrt(projects.length) * 2.2);
   projects.forEach((project, i) => {
-    const angle = (i / Math.max(1, projects.length)) * Math.PI * 2 - Math.PI / 2;
-    positions.set(project.id, { x: Math.cos(angle) * ring, y: Math.sin(angle) * ring });
+    // Start a quarter turn in so two projects sit side by side rather than
+    // stacked, which is the worst case on a wide screen.
+    const angle = (i / Math.max(1, projects.length)) * Math.PI * 2;
+    positions.set(project.id, { x: Math.cos(angle) * ring * ratio, y: Math.sin(angle) * ring });
   });
   if (projects.length === 1) positions.set(projects[0].id, { x: 0, y: 0 });
 
@@ -88,7 +105,7 @@ export function seedPositions(nodes: LayoutNode[], links: RawLink[]): Map<string
     const home = (homeOf.get(node.id) ?? []).map((id) => positions.get(id)).filter((p): p is Point => Boolean(p));
     const angle = seeded(node.id, "angle") * Math.PI * 2;
     if (home.length === 0) {
-      positions.set(node.id, { x: Math.cos(angle) * outer, y: Math.sin(angle) * outer });
+      positions.set(node.id, { x: Math.cos(angle) * outer * ratio, y: Math.sin(angle) * outer });
       continue;
     }
     const cx = home.reduce((sum, p) => sum + p.x, 0) / home.length;
@@ -116,7 +133,10 @@ export class ForceSim {
   private temperature: number;
   private readonly startTemperature: number;
 
-  constructor(nodes: LayoutNode[], links: RawLink[], seed?: Map<string, Point>) {
+  private readonly aspect: number;
+
+  constructor(nodes: LayoutNode[], links: RawLink[], seed?: Map<string, Point>, aspect = DEFAULT_ASPECT) {
+    this.aspect = normalizeAspect(aspect);
     this.ids = nodes.map((node) => node.id);
     this.index = new Map(this.ids.map((id, i) => [id, i] as const));
     this.mass = nodes.map((node) => (node.kind === "project" ? 4 : 1) * Math.max(0.6, node.size / 12));
@@ -130,7 +150,7 @@ export class ForceSim {
       if (a === undefined || b === undefined || a === b) continue;
       this.links.push({ a, b, strength: LINK_STRENGTH[link.kind ?? "star"] });
     }
-    const seeded = seedPositions(nodes, links);
+    const seeded = seedPositions(nodes, links, this.aspect);
     this.positions = new Map();
     for (const id of this.ids) this.positions.set(id, { ...(seed?.get(id) ?? seeded.get(id)!) });
     this.startTemperature = IDEAL_DISTANCE * Math.max(1, Math.sqrt(nodes.length) / 4);
@@ -231,8 +251,10 @@ export class ForceSim {
     // Cluster pull toward the home project(s); projects drift gently to the origin.
     for (let i = 0; i < count; i++) {
       if (this.isProject[i]) {
+        // Vertical drift is damped by the aspect, so the ring of projects
+        // keeps the wide ellipse the seed gave it instead of relaxing round.
         dx[i] -= xs[i] * 0.02;
-        dy[i] -= ys[i] * 0.02;
+        dy[i] -= ys[i] * 0.02 * this.aspect;
         continue;
       }
       const anchors = this.anchors[i];
@@ -243,7 +265,7 @@ export class ForceSim {
       ax /= anchors.length;
       ay /= anchors.length;
       dx[i] += (ax - xs[i]) * 0.08;
-      dy[i] += (ay - ys[i]) * 0.08;
+      dy[i] += (ay - ys[i]) * 0.08 * Math.sqrt(this.aspect);
     }
 
     // Apply, capped by the current temperature.

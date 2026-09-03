@@ -53,9 +53,18 @@ export interface Camera {
   /** World coordinates at the centre of the viewport. */
   cx: number;
   cy: number;
-  /** Braille dots per world unit. */
-  scale: number;
+  /**
+   * Braille dots per world unit, per axis. A terminal canvas is much wider
+   * than it is tall, so fitting a roughly round graph to the shorter axis
+   * would waste most of the width. The two scales are allowed to diverge up
+   * to MAX_STRETCH, which fills the screen while keeping the shape readable.
+   */
+  scaleX: number;
+  scaleY: number;
 }
+
+/** How far the x and y scales may diverge when filling the canvas. */
+const MAX_STRETCH = 2.2;
 
 export interface SearchState {
   query: string;
@@ -136,7 +145,7 @@ export class GraphController {
   presetIndex = 0;
   selectedId: string | null = null;
   search: SearchState = { query: "", matchIds: new Set(), results: [], index: -1 };
-  camera: Camera = { cx: 0, cy: 0, scale: 2 };
+  camera: Camera = { cx: 0, cy: 0, scaleX: 2, scaleY: 2 };
 
   private sim: ForceSim | null = null;
   private lastPositions: Map<string, Point> = new Map();
@@ -319,7 +328,8 @@ export class GraphController {
     if (this.sim) this.lastPositions = new Map([...this.sim.positions].map(([id, p]) => [id, { ...p }]));
     const nodes: LayoutNode[] = this.visible.nodes.map((node) => ({ id: node.id, kind: node.kind, project: node.project, size: node.size }));
     const links: RawLink[] = this.visible.links;
-    this.sim = new ForceSim(nodes, links);
+    // The layout is shaped to the canvas so it fills a wide terminal.
+    this.sim = new ForceSim(nodes, links, undefined, this.viewport.width / Math.max(1, this.viewport.height));
     if (warm && this.lastPositions.size) this.sim.warmStart(this.lastPositions);
     const fresh = !warm || !this.lastPositions.size;
     if (this.repaintHook) {
@@ -351,8 +361,8 @@ export class GraphController {
   /** World → dot coordinates for the current camera. */
   project(p: Point): Point {
     return {
-      x: (p.x - this.camera.cx) * this.camera.scale + this.viewport.width / 2,
-      y: (p.y - this.camera.cy) * this.camera.scale + this.viewport.height / 2,
+      x: (p.x - this.camera.cx) * this.camera.scaleX + this.viewport.width / 2,
+      y: (p.y - this.camera.cy) * this.camera.scaleY + this.viewport.height / 2,
     };
   }
 
@@ -361,23 +371,37 @@ export class GraphController {
     this.cameraTarget = null;
     this.fitOnSettle = false;
     this.userMoved = false;
-    if (!box) { this.camera = { cx: 0, cy: 0, scale: 2 }; return; }
+    if (!box) { this.camera = { cx: 0, cy: 0, scaleX: 2, scaleY: 2 }; return; }
     const w = Math.max(1, box.maxX - box.minX);
     const h = Math.max(1, box.maxY - box.minY);
-    const pad = 0.86;
-    const scale = Math.min((this.viewport.width * pad) / w, (this.viewport.height * pad) / h);
-    this.camera = { cx: (box.minX + box.maxX) / 2, cy: (box.minY + box.maxY) / 2, scale: Math.max(0.2, Math.min(scale, 12)) };
+    const pad = 0.92;
+    let sx = (this.viewport.width * pad) / w;
+    let sy = (this.viewport.height * pad) / h;
+    // Fill both axes rather than letting the shorter one strand the rest of
+    // the screen, but pull the looser axis back in once it would distort.
+    if (sx > sy * MAX_STRETCH) sx = sy * MAX_STRETCH;
+    else if (sy > sx * MAX_STRETCH) sy = sx * MAX_STRETCH;
+    const clamp01 = (v: number) => Math.max(0.2, Math.min(v, 12));
+    this.camera = {
+      cx: (box.minX + box.maxX) / 2,
+      cy: (box.minY + box.maxY) / 2,
+      scaleX: clamp01(sx),
+      scaleY: clamp01(sy),
+    };
   }
 
   zoom(factor: number): void {
     this.userMoved = true;
-    this.camera.scale = Math.max(0.2, Math.min(24, this.camera.scale * factor));
+    // Both axes move together, so a zoom never changes the shape on screen.
+    const clampZoom = (v: number) => Math.max(0.2, Math.min(24, v));
+    this.camera.scaleX = clampZoom(this.camera.scaleX * factor);
+    this.camera.scaleY = clampZoom(this.camera.scaleY * factor);
   }
 
   pan(direction: keyof typeof DIRECTIONS): void {
     const d = DIRECTIONS[direction];
-    const stepX = (this.viewport.width * 0.12) / this.camera.scale;
-    const stepY = (this.viewport.height * 0.12) / this.camera.scale;
+    const stepX = (this.viewport.width * 0.12) / this.camera.scaleX;
+    const stepY = (this.viewport.height * 0.12) / this.camera.scaleY;
     this.userMoved = true;
     this.cameraTarget = null;
     this.camera.cx += d.x * stepX;

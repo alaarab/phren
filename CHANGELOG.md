@@ -21,6 +21,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **The shell frame gives its rows back to the content.** The header, the view
+  label and the tab strip were three separate rows; they are now one line plus a
+  rule, with the tab strip collapsing to icons before it ever takes a second row.
+  The hint bar is a single row of the few keys you reach for, with the full map
+  behind `?` (which now documents the Graph view). An empty message line no
+  longer holds a row open. On an 80x24 terminal that is three rows back, about an
+  eighth of the screen.
+- **The graph fills the terminal.** The force layout is shaped to the canvas
+  aspect instead of settling into a circle, and the camera scales each axis
+  independently up to a bounded stretch, so a wide terminal no longer strands
+  most of its width. The legend drops whole entries rather than truncating a
+  count mid-word, and the hint bar drops optional keys before `? keys` and
+  `q quit`.
 - The splash mascot no longer bobs or leans. It sits still beside the wordmark
   and only blinks, which reads far better than shifting the whole character grid
   by a cell.
