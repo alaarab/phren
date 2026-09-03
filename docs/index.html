@@ -829,13 +829,16 @@
           <div class="surface-copy">
             <div class="surface-badge">In the terminal</div>
             <h3>Walk the knowledge graph without leaving the shell.</h3>
-            <p>The same graph as the web viewer, drawn on a braille canvas. <span class="kw-memory">Projects</span> cluster, <span class="kw-finding">findings</span> take their topic colour, <span class="kw-fragment">fragments</span> bridge projects. The layout is deterministic, so the same store always draws the same map.</p>
+            <p>The same graph as the web viewer, drawn on a braille canvas. <span class="kw-memory">Projects</span> cluster, <span class="kw-finding">findings</span> take their topic colour, <span class="kw-fragment">fragments</span> bridge projects. The layout is deterministic, so the same store always draws the same map. Press <kbd>v</kbd> and it becomes a sphere you can drag around; in watch mode, every recall lights its node and phren walks over to it.</p>
             <div class="surface-cmd">phren shell --view graph</div>
             <div class="surface-keys">
               <span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span><span>walk to the connected node that way</span>
               <span><kbd>1</kbd>–<kbd>9</kbd></span><span>jump to a numbered neighbour</span>
+              <span><kbd>space</kbd></span><span>read the whole node in a bubble</span>
               <span><kbd>/</kbd> <kbd>n</kbd></span><span>search, fly to the best hit, cycle hits</span>
               <span><kbd>[</kbd> <kbd>]</kbd> <kbd>f</kbd></span><span>focus a project, cycle filter presets</span>
+              <span><kbd>v</kbd></span><span>orbit: the graph in 3D — drag to turn, wheel to zoom, click to select</span>
+              <span><kbd>w</kbd></span><span>watch: recalls land live, with a bubble at the node</span>
             </div>
             <a class="surface-link" href="https://github.com/alaarab/phren/blob/main/docs/shell.md#graph-g">Graph keys →</a>
           </div>
@@ -1145,7 +1148,7 @@
       <span class="dot-sep">&#9829;</span>
       <span>made with love by <a href="https://github.com/alaarab" style="color:var(--text-muted);text-decoration:none;">@alaarab</a> &amp; claude</span>
       <span class="dot-sep">•</span>
-      <span style="opacity:0.5;font-size:11px">v0.1.45</span>
+      <span style="opacity:0.5;font-size:11px">v0.1.51</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>
