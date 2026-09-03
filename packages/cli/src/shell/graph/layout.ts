@@ -109,14 +109,27 @@ export function seedPositions(nodes: LayoutNode[], links: RawLink[], aspect = DE
     if (owner === id) continue;
     leavesPer.set(owner, (leavesPer.get(owner) ?? 0) + 1);
   }
-  const spread = Math.max(...projects.map((p) => clusterRadius(leavesPer.get(p.id) ?? 0)), IDEAL_DISTANCE);
-  const packed = (projects.length * spread * 2.3) / (2 * Math.PI);
-  const ring = Math.max(IDEAL_DISTANCE * 2.2, packed);
+  // Each project gets a slice of the ring proportional to its cluster, not an
+  // equal share. Equal slices gave a one-finding project the same forty
+  // degrees as a fifty-finding one, so small and new projects sat alone in
+  // empty space at full ring distance while the heavy clusters merged into a
+  // blob — "most of it in the middle, a few way out", and the camera fitted
+  // to the few. Small clusters also sit a little inside the ring, so their
+  // outer edge lines up with their neighbours' rather than their centre.
+  const radii = projects.map((p) => clusterRadius(leavesPer.get(p.id) ?? 0));
+  const spread = Math.max(...radii, IDEAL_DISTANCE);
+  const slices = radii.map((r) => r * 2.3);
+  const circumference = slices.reduce((sum, w) => sum + w, 0);
+  const ring = Math.max(IDEAL_DISTANCE * 2.2, circumference / (2 * Math.PI));
+  // Projects sit at the start of their slice, so equal clusters land exactly
+  // where the equal-slice ring put them (two projects side by side, not
+  // stacked, which is the worst case on a wide screen).
+  let offset = 0;
   projects.forEach((project, i) => {
-    // Start a quarter turn in so two projects sit side by side rather than
-    // stacked, which is the worst case on a wide screen.
-    const angle = (i / Math.max(1, projects.length)) * Math.PI * 2;
-    positions.set(project.id, { x: Math.cos(angle) * ring * ratio, y: Math.sin(angle) * ring });
+    const angle = (offset / Math.max(circumference, 1)) * Math.PI * 2;
+    offset += slices[i];
+    const radius = Math.max(IDEAL_DISTANCE * 1.6, ring - (spread - radii[i]) * 0.7);
+    positions.set(project.id, { x: Math.cos(angle) * radius * ratio, y: Math.sin(angle) * radius });
   });
   if (projects.length === 1) positions.set(projects[0].id, { x: 0, y: 0 });
 
@@ -292,7 +305,10 @@ export class ForceSim {
       if (this.isProject[i]) {
         // Hold the project on its ring. The error is measured in
         // aspect-corrected space so the restoring force preserves the wide
-        // ellipse rather than pulling the layout back into a circle.
+        // ellipse rather than pulling the layout back into a circle. A soft
+        // spring on purpose: pinning the radius outright left the clusters no
+        // room to breathe once the node cap made them larger than the seeded
+        // ring allowed for, and a forty-project store folded into a fan.
         const nx = xs[i] / this.aspect;
         const ny = ys[i];
         const radius = Math.hypot(nx, ny);
