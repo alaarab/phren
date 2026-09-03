@@ -87,6 +87,8 @@ export interface NavigationHost extends PaletteHost {
   graph(): GraphController;
   /** Run something with the terminal released; false when the host cannot. */
   suspend(fn: () => Promise<void> | void): Promise<boolean>;
+  /** Open a file in the shell's own modal editor. */
+  openEditor(filePath: string, label: string, kind: "skill" | "claude", scope?: string): boolean;
 }
 
 /**
@@ -125,7 +127,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
   if (command === "help") {
     host.showHelp = true;
-    host.setMessage("  Showing help — press any key to dismiss");
+    host.setMessage("  Showing help — ↑↓ to scroll, any other key to dismiss");
     return;
   }
 
@@ -813,7 +815,7 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
   if (key === "\x1b[Z") { prevTab(host); return true; }
   if (key === "q" || key === "Q") return false;
   if (key === "\r" || key === "\n") { await activateSelected(host); return true; }
-  if (key === "?") { host.showHelp = !host.showHelp; host.setMessage(host.showHelp ? "  Showing help — press any key to dismiss" : `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`); return true; }
+  if (key === "?") { host.showHelp = !host.showHelp; host.setMessage(host.showHelp ? "  Showing help — ↑↓ to scroll, any other key to dismiss" : `  ${style.boldCyan("←→")} ${style.dim("tabs")}  ${style.boldCyan("↑↓")} ${style.dim("move")}  ${style.boldCyan("↵")} ${style.dim("activate")}  ${style.boldCyan("?")} ${style.dim("help")}`); return true; }
   if (key === "/") { host.startInput("filter", host.filter || ""); return true; }
   if (key === ":") { host.startInput("command", ""); return true; }
   if (key === "\x1b") {
@@ -829,6 +831,17 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
     host.state.introMode = next;
     saveShellState(host.phrenPath, host.state);
     host.setMessage(`  Intro mode: ${style.boldCyan(next)}`);
+    return true;
+  }
+  if (key === "E") {
+    const items = host.getListItems();
+    const item = items[host.currentCursor()];
+    const target = editTargetFor(host, item);
+    if (!target) { host.setMessage(`  ${style.dim("nothing to edit here")}`); return true; }
+    const scope = target.kind === "skill" ? (item?.scopeType === "global" ? "global" : host.state.project) : undefined;
+    if (host.openEditor(target.path, target.label, target.kind, scope)) {
+      host.setMessage(`  ${style.dim("i insert · :w write · :q quit")}`);
+    }
     return true;
   }
   if (["a", "d", "e", "t", "\x7f"].includes(key)) { await doViewAction(host, key); return true; }

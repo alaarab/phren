@@ -64,11 +64,7 @@ One store, six ways in. Every surface reads and writes the same markdown files, 
 | **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |
 | **Herdr plugin** | `herdr plugin install alaarab/phren/integrations/herdr` | A keybinding that pops the shell over your Herdr layout for whatever project the pane is in. |
 
-<p align="center"><img src="docs/webui-graph.png" width="820" alt="phren web UI: the 3D memory viewer with a project focused and its contents pane open"></p>
-
 The shell opens with a short splash: the phren mascot beside the wordmark, which is revealed with a decrypt text effect on the first launch of a new version and shimmers while it waits for a key.
-
-<p align="center"><img src="docs/splash.gif" width="700" alt="phren splash: the wordmark decrypts into place"></p>
 
 ### Watch it work
 

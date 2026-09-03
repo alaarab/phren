@@ -26,6 +26,6 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
 - `docs/claude-code-plugin.md`: Installing phren as a Claude Code plugin, and how that differs from `phren init`.
 - `apps/ios/README.md`: phren for iOS (SwiftUI app, widgets, Siri intents) and its App Store material.
-- Screenshots used by the site and README: `shell-*.png` (terminal), `webui-*.png` (web UI), `splash.gif`, `phren-graph-walk.gif` (VS Code).
+- Screenshots used by the site and README: `shell-*.png` (terminal), `webui-graph.png` (the memory viewer, shared by the web UI and VS Code), `splash.gif`.
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).
 - `docs/faq.md`: Common setup and workflow questions.

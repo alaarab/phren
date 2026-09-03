@@ -136,11 +136,11 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
   // Only what you reach for constantly. Everything else is one `?` away, so
   // the bar never costs more than a single row.
   const essentials: Record<string, string[]> = {
-    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`],
+    Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`, `${k("e")} ${d("edit CLAUDE.md")}`],
     Tasks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`, `${k("↵")} ${d("done")}`],
     Findings: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`],
     "Review Queue": [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("inspect")}`],
-    Skills: [`${k("↑↓")} ${d("move")}`, `${k("t")} ${d("toggle")}`],
+    Skills: [`${k("↑↓")} ${d("move")}`, `${k("e")} ${d("edit")}`, `${k("t")} ${d("toggle")}`],
     Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`],
     Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
@@ -894,6 +894,7 @@ export async function renderShell(
   inputCtx: string,
   inputBuf: string,
   showHelp: boolean,
+  helpScroll: number,
   message: string,
   doctorSnapshot: () => Promise<DoctorResultLike>,
   subsectionsCache: SubsectionsCache | null,
@@ -910,7 +911,18 @@ export async function renderShell(
 
   let contentLines: string[];
   if (showHelp) {
-    contentLines = shellHelpText().split("\n");
+    // The help is longer than a small terminal, and used to be clipped in
+    // silence — on 24 rows more than half of it simply was not there.
+    const all = shellHelpText().split("\n");
+    if (all.length <= height) {
+      contentLines = all;
+    } else {
+      const maxScroll = all.length - (height - 1);
+      const start = Math.max(0, Math.min(helpScroll, maxScroll));
+      contentLines = all.slice(start, start + height - 1);
+      const atEnd = start >= maxScroll;
+      contentLines.push(style.dim(`  ━━━ ${start + 1}-${start + height - 1} of ${all.length}   ${atEnd ? "↑ back" : "↑↓ scroll"}`));
+    }
   } else {
     switch (ctx.state.view) {
       case "Projects":

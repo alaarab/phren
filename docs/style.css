@@ -2380,9 +2380,6 @@ a:focus-visible, button:focus-visible {
   .surface-panel { padding: 20px; }
 }
 
-/* Live demo: the Graph scene shows a real capture of the terminal graph */
-.demo-shell-graph { display: block; width: 100%; max-height: 268px; object-fit: cover; object-position: left top; border-radius: 6px; }
-
 /* Phone mock for the iOS tab */
 .phone-mock {
   width: 262px; border-radius: 38px; border: 6px solid #1a1a36; background: #0a0a1c;

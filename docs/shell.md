@@ -123,6 +123,33 @@ phren shell --view graph --project hub
 
 The graph draws the star everyone knows (project → its findings, tasks, fragments, references) plus two edge kinds the web viewer does not show: fragments that are mentioned by the same documents (cyan), and findings linked by `supersedes` (grey) or `contradicts` (dotted red) lifecycle annotations. The selected node's edges turn amber.
 
+### Editing skills and project instructions
+
+Two keys, in both the Skills and Projects views:
+
+| Key | |
+|-----|---|
+| `e` | Open the file in `$EDITOR` — your own vim, your config, your plugins |
+| `E` | Open it in phren's own modal editor, without leaving the dashboard |
+
+In the Skills view they edit the selected skill's markdown. In the Projects view they edit that project's `CLAUDE.md`, which the store owns and symlinks into the repo and into `.github/copilot-instructions.md` — so one edit reaches every linked checkout.
+
+`$EDITOR` is treated as a command line, not a binary, so values carrying arguments work (`code --wait`, `nvim -u NONE`). The shell releases the terminal while your editor runs and takes it back when you quit.
+
+#### The built-in editor
+
+Deliberately a subset of vim: what you reach for without thinking, and nothing else. An unrecognised key does nothing rather than guessing. For real work, press `e`.
+
+| | |
+|---|---|
+| Motion | `h j k l`, `w b`, `0 $`, `gg G`, arrows |
+| Insert | `i a I A`, `o O`, `esc` to leave |
+| Edit | `x`, `dd`, `yy`, `p P`, `u` to undo |
+| Search | `/`, then `n` and `N` |
+| Commands | `:w`, `:q`, `:wq`, `:q!` |
+
+Saving is careful, because the store is git-backed and other tools read it. A skill whose frontmatter no longer parses is refused with the reason rather than written, since a skill missing its `name` or `description` loads as neither. Writes land atomically, go through the same undo stack `:undo` uses, and refuse to write through a symlink — the mirrors in `~/.claude/skills` point back at the store, and replacing one with a regular file would silently detach it. Changing a skill's frontmatter also rebuilds the skill manifests, since the name and command are baked into them.
+
 #### Watch mode
 
 The graph follows what phren is doing, **including in other terminals on the same machine**. Every memory a search lands on, every memory a hook injects before a prompt, and every finding written is appended to `.runtime/lookup-events.jsonl`; the graph tails that file.
