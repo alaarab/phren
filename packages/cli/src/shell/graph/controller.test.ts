@@ -7,6 +7,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GraphPayload } from "../../graph-core/types.js";
 import { FILTER_PRESETS, GraphController } from "./controller.js";
+import { GraphWatch } from "./watch.js";
+import type { LookupEvent } from "../../governance/activity.js";
 
 const DAY = 86400000;
 
@@ -257,5 +259,91 @@ describe("animation", () => {
     expect(controller.camera.cx).toBeCloseTo(p.x, 3);
     controller.dispose();
     expect(controller.animating).toBe(false);
+  });
+});
+
+describe("watch mode", () => {
+  /** A controller wired to a hand-fed event tail instead of a log file. */
+  async function watched(opts: { watchEnabled?: boolean } = {}) {
+    const queue: LookupEvent[][] = [];
+    const watch = new GraphWatch("/store", {
+      tail: { poll: () => queue.shift() ?? [] },
+      backfill: () => [],
+    });
+    const controller = new GraphController("/store", "", {
+      builder: async () => fixture(),
+      tokenOf: () => "t",
+      frameMs: 5,
+      watch,
+      ...opts,
+    });
+    controllers.push(controller);
+    await controller.ensureData();
+    controller.setViewport(200, 100);
+    const emit = (...events: LookupEvent[]) => { queue.push(events); watch.poll(); };
+    return { controller, watch, emit };
+  }
+
+  const lookup = (over: Partial<LookupEvent> = {}): LookupEvent => ({
+    at: new Date().toISOString(), query: "retry", project: "hub",
+    filename: "FINDINGS.md", type: "findings", source: "search", ...over,
+  });
+
+  it("starts tailing when the view opens and stops on dispose", async () => {
+    const { controller, watch } = await watched();
+    expect(watch.running).toBe(true);
+    controller.dispose();
+    expect(watch.running).toBe(false);
+  });
+
+  it("selects and flies to the node an event lands on", async () => {
+    const { controller, emit } = await watched();
+    expect(controller.selectedId).toBeNull();
+    emit(lookup({ nodeId: "f1", snippet: "Retry uses jitter" }));
+    expect(controller.selectedId).toBe("f1");
+    expect(controller.watch.heatOf("f1")).toBeGreaterThan(0);
+    expect(controller.watch.activity[0].event.snippet).toBe("Retry uses jitter");
+  });
+
+  it("follows the newest event that is actually on the graph", async () => {
+    const { controller, emit } = await watched();
+    emit(lookup({ nodeId: "f1" }), lookup({ nodeId: "not-a-node" }));
+    // The newest resolvable node wins; an unknown id never steals the camera.
+    expect(controller.selectedId).toBe("f1");
+  });
+
+  it("falls back to the project node when an event has no finding id", async () => {
+    const { controller, emit } = await watched();
+    emit(lookup({ project: "api", type: "reference", filename: "reference/x.md" }));
+    expect(controller.selectedId).toBe("api");
+  });
+
+  it("does not steal the camera while the user is navigating", async () => {
+    const { controller, emit } = await watched();
+    const host = { messages: [] as string[], setMessage(m: string) { this.messages.push(m); }, startInput() {} };
+    controller.handleKey("\x1b[C", host);      // user walks the graph
+    const chosen = controller.selectedId;
+    emit(lookup({ nodeId: "f2" }));
+    expect(controller.selectedId).toBe(chosen);  // selection left alone
+    expect(controller.watch.heatOf("f2")).toBeGreaterThan(0); // but it still lights up
+    expect(controller.watch.activity[0].event.query).toBe("retry");
+  });
+
+  it("w toggles watching, and toggling does not count as navigating", async () => {
+    const { controller, watch } = await watched();
+    const host = { messages: [] as string[], setMessage(m: string) { this.messages.push(m); }, startInput() {} };
+    expect(controller.handleKey("w", host)).toBe(true);
+    expect(controller.watchEnabled).toBe(false);
+    expect(watch.running).toBe(false);
+    expect(controller.handleKey("w", host)).toBe(true);
+    expect(controller.watchEnabled).toBe(true);
+    expect(watch.running).toBe(true);
+  });
+
+  it("stays off when started with watching disabled", async () => {
+    const { controller, watch, emit } = await watched({ watchEnabled: false });
+    expect(watch.running).toBe(false);
+    emit(lookup({ nodeId: "f1" }));
+    expect(controller.selectedId).toBeNull();
   });
 });

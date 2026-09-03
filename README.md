@@ -58,7 +58,7 @@ One store, six ways in. Every surface reads and writes the same markdown files, 
 | Surface | Open it | What it is for |
 |---------|---------|----------------|
 | **Terminal shell** | `phren shell` (or just `phren`) | Full-screen dashboard: projects, tasks, findings, review queue, skills, hooks, health. Deep-link with `--view tasks --here`. |
-| **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. |
+| **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live: put it beside your agent and nodes light up as phren reads and writes them. |
 | **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings/tasks/fragments inside, a contents pane to review, edit, merge, and prune. |
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
 | **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |

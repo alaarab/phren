@@ -71,6 +71,8 @@ export class PhrenShell {
   private _subsectionsCache: SubsectionsCache | null = null;
   private _graph?: GraphController;
   private repaintHandler: (() => void) | null = null;
+  /** `--live` / `--no-live`; undefined leaves watch mode at its default. */
+  private graphLive?: boolean;
 
   get mode(): "navigate" | "input" { return this.navMode; }
   get inputBuffer(): string { return this.inputBuf; }
@@ -91,6 +93,7 @@ export class PhrenShell {
     // A deep link (`phren shell --view tasks --here`) wins over the view the
     // last session happened to leave behind; without one we always land home.
     if (startup.project) this.state.project = startup.project;
+    this.graphLive = startup.live;
     this.state.view = startup.view ?? "Projects";
     this.message = startup.notice
       ? `  ${style.yellow("⚠")}  ${startup.notice}`
@@ -114,7 +117,7 @@ export class PhrenShell {
 
   graph(): GraphController {
     if (!this._graph) {
-      this._graph = new GraphController(this.phrenPath, this.profile);
+      this._graph = new GraphController(this.phrenPath, this.profile, { watchEnabled: this.graphLive });
       this._graph.setRepaintHook(this.repaintHandler);
     }
     return this._graph;

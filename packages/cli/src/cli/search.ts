@@ -5,6 +5,8 @@ import { buildIndex, extractSnippet, queryDocRows, queryRows, queryFragmentLinks
 import { buildFtsQueryVariants, errorMessage, isValidProjectName } from "../utils.js";
 import { logger } from "../logger.js";
 import { keywordFallbackSearch } from "../core/search.js";
+import { recordLookupEvents } from "../shared/governance.js";
+import { bestFindingNodeId } from "../finding-graph-id.js";
 
 export interface SearchOptions {
   query: string;
@@ -318,11 +320,38 @@ export async function runSearch(
       lines.push("");
     }
 
+    const hits: Array<{ project: string; filename: string; type: string; snippet: string; path?: string; content: string }> = [];
     for (const row of rows) {
       const snippet = extractSnippet(row.content, opts.query, 7);
       lines.push(`[${row.project}/${row.filename}] (${row.type})`);
       lines.push(snippet);
       lines.push("");
+      hits.push({ project: row.project, filename: row.filename, type: row.type, snippet, path: row.path, content: row.content });
+    }
+
+    // Live activity: the CLI records the same lookup events the MCP search
+    // does, so `phren search` in one terminal lights up a graph watching in
+    // another. Best-effort — logging must never fail a search.
+    if (opts.query) {
+      try {
+        const at = new Date().toISOString();
+        recordLookupEvents(phrenPath, hits.map((hit) => {
+          const nodeId = hit.type === "findings" ? bestFindingNodeId(hit.project, hit.content, opts.query ?? "") : null;
+          return {
+            at,
+            query: opts.query ?? "",
+            project: hit.project,
+            filename: hit.filename,
+            type: hit.type,
+            path: hit.path,
+            snippet: hit.snippet,
+            source: "search",
+            ...(nodeId ? { nodeId } : {}),
+          };
+        }));
+      } catch (err: unknown) {
+        logger.debug("search", `cli search lookup-events: ${errorMessage(err)}`);
+      }
     }
 
     return { lines, exitCode: 0 };
