@@ -19,6 +19,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `search_knowledge` tool already did, so CLI searches and finding writes are
   visible to a watching graph (previously only agent searches were).
 
+### Added
+
+- **Running coding agents on the knowledge graph** (`PHREN_FEATURE_AGENTS=1`, off
+  by default). phren asks whatever is already running your agents — a Herdr
+  workspace, `phren-agent --multi` — and joins each one onto a project by the
+  directory it is working in, using the same detection the hooks use. Each
+  project with an agent gets a marker coloured by status, the details pane lists
+  them, `a` toggles the overlay, `Tab` cycles and flies to them, and `↵` brings
+  one to the front through its own host. The provider contract is a small JSON
+  record, so a tmux or Zellij user needs a few lines of shell rather than a
+  change to phren. With no provider available the overlay never appears.
+
 ### Fixed
 
 - **Labels stopped overwriting each other on a busy graph.** Glyphs and labels

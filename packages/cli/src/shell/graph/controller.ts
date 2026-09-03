@@ -27,6 +27,7 @@ import { logger } from "../../logger.js";
 import { style } from "../render.js";
 import { ForceSim, bounds, type LayoutNode, type Point } from "./layout.js";
 import { GraphWatch, type ActivityItem } from "./watch.js";
+import { GraphAgents } from "./agents.js";
 
 /** Nodes drawn at once. Terminals have far fewer pixels than a browser tab. */
 export const TUI_NODE_LIMIT = 350;
@@ -90,6 +91,8 @@ export interface GraphControllerOptions {
   frameMs?: number;
   /** Injected watch, so tests can feed events without a log file or timers. */
   watch?: GraphWatch;
+  /** Injected agents poller, so tests never shell out. */
+  agents?: GraphAgents;
   /** Start with watch mode off (`--no-live`). */
   watchEnabled?: boolean;
 }
@@ -165,6 +168,8 @@ export class GraphController {
 
   /** Live tail of what phren is landing on, in this or any other terminal. */
   readonly watch: GraphWatch;
+  /** Coding agents running on this machine, joined onto their projects. */
+  readonly agents: GraphAgents;
   watchEnabled: boolean;
   /**
    * Wall-clock ms of the last navigation keypress. While the user is driving,
@@ -178,6 +183,7 @@ export class GraphController {
     this.frameMs = opts.frameMs ?? 50;
     this.watch = opts.watch ?? new GraphWatch(phrenPath);
     this.watchEnabled = opts.watchEnabled !== false;
+    this.agents = opts.agents ?? new GraphAgents(phrenPath, profile);
   }
 
   // ── Watch mode ──────────────────────────────────────────────────────────
@@ -190,6 +196,24 @@ export class GraphController {
 
   stopWatch(): void {
     this.watch.stop();
+  }
+
+  // ── Agents ──────────────────────────────────────────────────────────────
+
+  /** Idempotent; the poller only runs while the Graph view is open. */
+  startAgents(): void {
+    if (!this.agents.enabled || this.agents.running) return;
+    this.agents.start(() => this.repaintHook?.());
+  }
+
+  toggleAgents(): boolean {
+    if (this.agents.enabled) {
+      this.agents.toggle();
+      return false;
+    }
+    this.agents.enabled = true;
+    this.agents.start(() => this.repaintHook?.());
+    return true;
   }
 
   toggleWatch(): boolean {
@@ -258,6 +282,7 @@ export class GraphController {
    */
   async ensureData(): Promise<void> {
     this.startWatch();
+    this.startAgents();
     const token = this.currentToken();
     if (this.payload && token === this.dataToken) return;
     if (!this.building) {
@@ -480,6 +505,7 @@ export class GraphController {
   dispose(): void {
     this.stopAnimation();
     this.stopWatch();
+    this.agents.stop();
   }
 
   // ── Selection / search / focus ──────────────────────────────────────────
@@ -658,6 +684,15 @@ export class GraphController {
     if (key === "0") { this.fitAll(); host.setMessage(`  ${style.dim("fit to screen")}`); return true; }
     if (key === "r") { this.relayout(); host.setMessage(`  ${style.dim("re-laid out")}`); return true; }
     if (key === "\r" || key === "\n") {
+      // A highlighted agent takes the Enter: bring it to the front.
+      const highlighted = this.agents.current;
+      if (highlighted) {
+        const focused = this.agents.focusCurrent();
+        host.setMessage(focused
+          ? `  ${style.boldCyan("→")} ${focused.label}`
+          : `  ${style.dim(highlighted.focus?.length ? "could not focus that agent" : "this agent's host cannot be focused")}`);
+        return true;
+      }
       if (!this.selectedId) {
         const node = this.nearestToCenter();
         if (node) { this.select(node.id); host.setMessage(this.describe(node)); }
@@ -704,6 +739,22 @@ export class GraphController {
       host.setMessage(name ? `  ${style.boldCyan("❖")} ${style.boldCyan(name)}` : `  ${style.dim("all projects")}`);
       return true;
     }
+    if (key === "a" || key === "A") {
+      const on = this.toggleAgents();
+      host.setMessage(on
+        ? `  ${style.boldCyan("◉ agents")} ${style.dim(`— ${this.agents.agents.length} running  ·  tab to cycle, ↵ to focus`)}`
+        : `  ${style.dim("agents off")}`);
+      return true;
+    }
+    if (key === "\t" || key === "\x1b[Z") {
+      if (!this.agents.enabled || !this.agents.agents.length) return undefined;
+      const agent = this.agents.cycle(key === "\t" ? 1 : -1);
+      if (agent) {
+        if (agent.project && this.model.nodeById.has(agent.project)) this.select(agent.project, { fly: true });
+        host.setMessage(`  ${style.boldCyan(agent.label)}  ${style.dim(`${agent.status}${agent.project ? ` · ${agent.project}` : " · outside phren"}`)}`);
+      }
+      return true;
+    }
     if (key === "w" || key === "W") {
       const on = this.toggleWatch();
       host.setMessage(on
@@ -716,6 +767,7 @@ export class GraphController {
       return true;
     }
     if (key === "\x1b") {
+      if (this.agents.current) { this.agents.clearHighlight(); host.setMessage(`  ${style.dim("agent released")}`); return true; }
       if (this.search.query) { this.clearSearch(); host.setMessage(`  ${style.dim("search cleared")}`); return true; }
       if (this.selectedId) { this.select(null); host.setMessage(`  ${style.dim("selection cleared")}`); return true; }
       if (this.focusedProject) { this.focusProject(null); host.setMessage(`  ${style.dim("all projects")}`); return true; }

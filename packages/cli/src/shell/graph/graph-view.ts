@@ -276,6 +276,28 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     if (!forced) labels++;
   }
 
+  // Agents sit beside the project they are working in. They are runtime state,
+  // not memory, so they decorate a node rather than becoming one.
+  if (controller.agents.enabled && controller.agents.agents.length) {
+    const highlighted = controller.agents.current;
+    for (const [project, agents] of controller.agents.byProject()) {
+      const p = positions.get(project);
+      if (!p) continue;
+      const d = controller.project(p);
+      const col = Math.floor(d.x / 2);
+      const row = Math.floor(d.y / 4) - 1;
+      if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+      const busiest = agents.find((a) => a.status === "working") ?? agents[0];
+      const isHighlighted = agents.some((a) => a.id === highlighted?.id);
+      const mark = agents.length > 1 ? `▲${agents.length}` : "▲";
+      const color = AGENT_STATUS_COLOR[busiest.status] ?? "#7f8db3";
+      const marker = isHighlighted
+        ? `${hexToSgr(BG_COLOR)}\x1b[48;2;58;227;116m\x1b[1m`
+        : sgr(color, "\x1b[1m");
+      canvas.putText(col, row, mark, marker);
+    }
+  }
+
   if (controller.refreshing) {
     const badge = " ⟳ refreshing ";
     canvas.putText(cols - displayWidth(badge), 0, badge, sgr(ACCENT_CYAN, "\x1b[2m"));
@@ -384,6 +406,8 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       });
       if (neighbors.length > 9) push(style.dim(`  +${neighbors.length - 9} more`));
     }
+    const agentBudget = height - lines.length - 1;
+    if (agentBudget > 3) for (const line of agentLines(controller, inner, agentBudget)) push(line);
     if (watching) {
       const budget = height - lines.length - 1;
       if (budget > 3) for (const line of activityLines(controller, inner, budget)) push(line);
@@ -412,6 +436,8 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       if (projects.length > budget) push(style.dim(`  +${projects.length - budget} more`));
       push();
     }
+    const agentBudget = height - lines.length - 1;
+    if (agentBudget > 3) for (const line of agentLines(controller, inner, agentBudget)) push(line);
     if (watching) {
       const budget = height - lines.length - 1;
       if (budget > 3) {
@@ -434,6 +460,13 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
 }
 
 
+const AGENT_STATUS_COLOR: Record<string, string> = {
+  working: "#3ae374",
+  idle: "#48b2ff",
+  done: "#5c6b8a",
+  error: "#ff5470",
+};
+
 const SOURCE_COLOR: Record<string, string> = {
   search: ACCENT_CYAN,
   inject: ACCENT_AMBER,
@@ -445,6 +478,31 @@ const SOURCE_COLOR: Record<string, string> = {
  * a meta line and as much of the memory's text as the pane can carry, because
  * the point of watching is reading what was found, not just seeing it blink.
  */
+/**
+ * Who is working, and where. Rendered above the activity feed so the pane reads
+ * top to bottom as: what is selected, who is on it, what phren just touched.
+ */
+function agentLines(controller: GraphController, inner: number, budget: number): string[] {
+  const agents = controller.agents.agents;
+  const out: string[] = [];
+  if (!controller.agents.enabled) return out;
+  out.push("");
+  out.push(`${colored(agents.length ? "#3ae374" : "#5c6b8a", "▲")} ${style.dim(`agents${agents.length ? "" : " — none running"}`)}`);
+  const current = controller.agents.current;
+  for (const agent of agents) {
+    if (out.length >= budget - 1) break;
+    const isCurrent = agent.id === current?.id;
+    const color = AGENT_STATUS_COLOR[agent.status] ?? "#7f8db3";
+    const marker = isCurrent ? style.boldCyan("›") : " ";
+    out.push(`${marker}${colored(color, "●")} ${sliceWidth(agent.label, inner - 3)}`);
+    if (out.length >= budget - 1) break;
+    const where = agent.project ?? style.dim("outside phren");
+    out.push(`  ${style.dim(agent.status)} ${style.dim("·")} ${agent.project ? style.cyan(where) : where}`);
+  }
+  if (agents.length) out.push(style.dim("  tab cycle · ↵ focus"));
+  return out.slice(0, budget);
+}
+
 function activityLines(controller: GraphController, inner: number, budget: number): string[] {
   const out: string[] = [];
   const now = Date.now();

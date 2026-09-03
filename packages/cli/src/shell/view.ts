@@ -143,7 +143,7 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     Skills: [`${k("↑↓")} ${d("move")}`, `${k("t")} ${d("toggle")}`],
     Hooks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("enable")}`],
     Health: [`${k("↑↓")} ${d("scroll")}`],
-    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`],
+    Graph: [`${k("↑↓←→")} ${d("walk")}`, `${k("↵")} ${d("select")}`, `${k("w")} ${d("watch")}`, `${k("a")} ${d("agents")}`],
   };
   const search = state.view === "Graph" ? `${k("/")} ${d("search")}` : `${k("/")} ${d("filter")}`;
   // `? keys` and `q quit` are the two you cannot afford to lose, so a narrow
