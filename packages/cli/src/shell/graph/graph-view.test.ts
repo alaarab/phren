@@ -166,3 +166,23 @@ describe("labels on a crowded canvas", () => {
     expect(tight).toContain(NAMES[0]);
   });
 });
+
+describe("reader bubble", () => {
+  it("space puts the whole text on the canvas, wrapped wide enough to read", async () => {
+    const c = await ready();
+    const finding = c.model.rawNodes.find((n) => n.kind === "finding")!;
+    c.select(finding.id);
+    c.setViewport(2 * 85, 4 * 30);
+    const before = stripAnsi(renderGraphView(c, 120, 32).join("\n"));
+    c.reader = true;
+    const after = stripAnsi(renderGraphView(c, 120, 32).join("\n"));
+    expect(after).toContain("╭─");
+    expect(after).toContain("␣ close");
+    // The bubble carries the full label on one line, which the pane could not.
+    const full = (finding.fullLabel || "").replace(/\s+/g, " ");
+    const oneLine = after.split("\n").some((line) => line.replace(/\s+/g, " ").includes(full));
+    expect(oneLine).toBe(true);
+    expect(before).not.toContain("╭─");
+    for (const line of renderGraphView(c, 120, 32)) expect(displayWidth(stripAnsi(line))).toBe(120);
+  });
+});

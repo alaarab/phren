@@ -15,9 +15,19 @@ import { BrailleCanvas, blendHex, hexToSgr } from "./canvas.js";
 import type { GraphController } from "./controller.js";
 import { graphGlyphs } from "./glyphs.js";
 import { MASCOT_COLOR, MASCOT_SPARK } from "./mascot.js";
+import { BUBBLE_CHROME_COLS, BUBBLE_CHROME_ROWS, LIVE_BUBBLE_MS, bubbleRows, placeBubble } from "./bubble.js";
+import type { BubblePlacement } from "./bubble.js";
+import type { Point } from "./layout.js";
 import { formatAge } from "./watch.js";
 
-const PANE_WIDTH = 34;
+/**
+ * The pane takes a share of a wide terminal rather than a fixed 34 columns:
+ * a finding wraps into far fewer lines at 50 cells than at 32, which is the
+ * difference between reading it and reading the first third of it.
+ */
+export function paneWidthFor(width: number): number {
+  return Math.max(34, Math.min(58, Math.round(width * 0.36)));
+}
 const WIDE_BREAKPOINT = 100;
 /** Ceiling for the narrow-terminal detail strip; it only takes what it fills. */
 const NARROW_STRIP_MAX = 6;
@@ -116,15 +126,16 @@ export function renderGraphView(controller: GraphController, width: number, heig
   // Build the strip first so it takes only the rows it fills; every row it
   // gives back goes to the graph, which is the part worth the space.
   const strip = !wide && selected ? renderStrip(controller, selected, width, NARROW_STRIP_MAX) : [];
-  const canvasCols = wide ? width - PANE_WIDTH - 1 : width;
+  const paneWidth = paneWidthFor(width);
+  const canvasCols = wide ? width - paneWidth - 1 : width;
   const canvasRows = Math.max(4, height - strip.length);
 
   const canvasLines = drawCanvas(controller, canvasCols, canvasRows, selected);
 
   if (wide) {
-    const pane = renderPane(controller, selected, PANE_WIDTH, canvasRows);
+    const pane = renderPane(controller, selected, paneWidth, canvasRows);
     const divider = style.dim("│");
-    return canvasLines.map((line, i) => `${line}${divider}${padToWidth(pane[i] ?? "", PANE_WIDTH)}`);
+    return canvasLines.map((line, i) => `${line}${divider}${padToWidth(pane[i] ?? "", paneWidth)}`);
   }
   return [...canvasLines, ...strip.map((line) => padToWidth(line, width))];
 }
@@ -201,6 +212,11 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
   if (selected) controller.neighborsOf(selected.id).slice(0, 9).forEach((node, i) => neighborIndex.set(node.id, i + 1));
   const currentHit = searching ? controller.search.results[controller.search.index]?.id : undefined;
   const zoomedIn = Math.min(controller.camera.scaleX, controller.camera.scaleY) >= 5;
+  // Bubbles go down before labels so the labels flow around them; drawn after,
+  // a bubble clipped whatever label happened to be under it. They are painted
+  // once more at the very end, because node markers do not check for them.
+  const bubbles = planBubbles(controller, cols, rows, selected);
+  for (const b of bubbles) paintBubble(canvas, b);
   const ranked = placed.slice().sort((a, b) => labelPriority(controller, b.node, selected, neighborIndex) - labelPriority(controller, a.node, selected, neighborIndex));
   const onCanvas = ({ x, y }: Placed): { col: number; row: number } | null => {
     const col = Math.floor(x / 2);
@@ -326,6 +342,8 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
     }
   }
 
+  for (const b of bubbles) paintBubble(canvas, b);
+
   if (controller.refreshing) {
     const badge = " ⟳ refreshing ";
     canvas.putText(cols - displayWidth(badge), 0, badge, sgr(ACCENT_CYAN, "\x1b[2m"));
@@ -339,6 +357,76 @@ function drawCanvas(controller: GraphController, cols: number, rows: number, sel
  * turned a selected project into a solid yellow fan — the more a node connected,
  * the less the highlight told you — so a hub is lifted least.
  */
+/**
+ * The reader bubble (space on a node: its whole text, wrapped wide) or, failing
+ * that, the live bubble (a recall that just landed, at its node). Never both:
+ * when you are reading, nothing else gets to talk over you.
+ */
+interface PlannedBubble {
+  placement: BubblePlacement;
+  rows: string[];
+  anchor: { col: number; row: number };
+  color: string;
+}
+
+function planBubbles(controller: GraphController, cols: number, rows: number, selected: RuntimeNode | null): PlannedBubble[] {
+  if (controller.reader && selected) {
+    const p = controller.positions.get(selected.id);
+    if (!p) return [];
+    const text = selected.fullLabel || selected.label;
+    const anchor = toCell(controller.project(p));
+    const maxInner = Math.min(64, cols - BUBBLE_CHROME_COLS - 2);
+    const maxRows = rows - BUBBLE_CHROME_ROWS - 1;
+    if (maxInner < 12 || maxRows < 2) return [];
+    const inner = Math.min(maxInner, Math.max(24, displayWidth(text)));
+    let lines = wrapText(text, inner, maxRows);
+    const meta = [selected.project, selected.topicLabel || selected.topicSlug, selected.date, selected.priority].filter(Boolean).join(" · ");
+    if (meta && lines.length < maxRows) lines = [...lines, "", style.dim(sliceWidth(meta, inner))];
+    const width = Math.max(inner, ...lines.map((l) => displayWidth(l)));
+    const placement = placeBubble(anchor, cols, rows, width, lines.length);
+    if (!placement) return [];
+    const color = selected.kind === "project" ? KIND_COLORS.project : selected.baseColor;
+    const title = `${colored(color, KIND_GLYPH[selected.kind])} ${style.bold(KIND_LABEL[selected.kind])}`;
+    return [{ placement, rows: bubbleRows(lines, width, placement, { title, footer: `${style.boldCyan("␣")} ${style.dim("close")}`, frame: (s) => colored(color, s) }), anchor, color }];
+  }
+  const live = controller.liveRecall();
+  if (!live) return [];
+  const p = controller.positions.get(live.nodeId);
+  if (!p) return [];
+  const text = live.item.event.snippet || live.item.event.filename || "";
+  if (!text) return [];
+  const anchor = toCell(controller.project(p));
+  const inner = Math.min(40, cols - BUBBLE_CHROME_COLS - 2);
+  if (inner < 12 || rows < 6) return [];
+  const fade = live.age / LIVE_BUBBLE_MS;
+  const ink = blendHex("#e2e8f0", BG_COLOR, fade * 0.6);
+  const edge = blendHex(ACCENT_CYAN, BG_COLOR, fade * 0.7);
+  const lines = wrapText(text, inner, 3).map((l) => colored(ink, l));
+  const width = Math.max(...lines.map((l) => displayWidth(l)), 12);
+  const placement = placeBubble(anchor, cols, rows, width, lines.length);
+  if (!placement) return [];
+  const source = live.item.event.source || "lookup";
+  const title = `${colored(edge, "◉")} ${colored(SOURCE_COLOR[source] ?? "#7f8db3", source)} ${style.dim("·")} ${style.cyan(sliceWidth(live.item.event.project, Math.max(4, width - source.length - 6)))}`;
+  return [{ placement, rows: bubbleRows(lines, width, placement, { title, frame: (s) => colored(edge, s) }), anchor, color: edge }];
+}
+
+function toCell(d: Point): { col: number; row: number } {
+  return { col: Math.floor(d.x / 2), row: Math.floor(d.y / 4) };
+}
+
+/** Clear the dots under the bubble, draw its rows, and run a thread to the anchor. */
+function paintBubble(canvas: BrailleCanvas, { placement, rows, anchor, color }: PlannedBubble): void {
+  canvas.clearRect(placement.col, placement.row, placement.width, placement.height);
+  rows.forEach((line, i) => canvas.putStyled(placement.col, placement.row + i, line));
+  // A dotted thread from the node to the tail, so the bubble is visibly *about* that node.
+  const from = { x: anchor.col * 2 + 1, y: anchor.row * 4 + 2 };
+  const to = placement.side === "right" ? { x: placement.col * 2, y: placement.tailRow * 4 + 2 }
+    : placement.side === "left" ? { x: (placement.col + placement.width) * 2 - 1, y: placement.tailRow * 4 + 2 }
+    : placement.side === "below" ? { x: placement.tailCol * 2 + 1, y: placement.row * 4 }
+    : { x: placement.tailCol * 2 + 1, y: (placement.row + placement.height) * 4 - 1 };
+  canvas.line(from.x, from.y, to.x, to.y, color, { z: 3, dotted: true });
+}
+
 function edgeColor(controller: GraphController, link: RawLink, touchesSelected: boolean, lit: boolean, degree = 0): string {
   let base: string;
   if (link.kind === "fragment") base = blendHex(ACCENT_CYAN, BG_COLOR, 0.45);
@@ -400,7 +488,11 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
   if (selected) {
     const detail = controller.detail(selected.id);
     push(`${colored(selected.kind === "project" ? KIND_COLORS.project : selected.baseColor, KIND_GLYPH[selected.kind])} ${style.bold(KIND_LABEL[selected.kind])}${selected.kind === "task" && selected.section ? style.dim(`  ${selected.section.toLowerCase()}`) : ""}`);
-    for (const line of wrapText(selected.fullLabel || selected.label, inner, watching ? 7 : 4)) push(line);
+    const text = selected.fullLabel || selected.label;
+    const textBudget = Math.max(4, Math.floor(height * (watching ? 0.3 : 0.4)));
+    const wrapped = wrapText(text, inner, textBudget);
+    for (const line of wrapped) push(line);
+    if (wrapped.length && wrapped[wrapped.length - 1].endsWith("…") && !text.endsWith("…")) push(`${style.boldCyan("␣")} ${style.dim("read all of it")}`);
     push();
     if (selected.kind !== "project" && selected.project) row("project", style.cyan(selected.project));
     if (selected.kind === "project") {

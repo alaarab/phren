@@ -150,6 +150,10 @@ Deliberately a subset of vim: what you reach for without thinking, and nothing e
 
 Saving is careful, because the store is git-backed and other tools read it. A skill whose frontmatter no longer parses is refused with the reason rather than written, since a skill missing its `name` or `description` loads as neither. Writes land atomically, go through the same undo stack `:undo` uses, and refuse to write through a symlink — the mirrors in `~/.claude/skills` point back at the store, and replacing one with a regular file would silently detach it. Changing a skill's frontmatter also rebuilds the skill manifests, since the name and command are baked into them.
 
+#### Reading a node
+
+The pane beside the graph takes a share of a wide terminal rather than a fixed width, so a finding wraps into fewer lines than it used to, and the text gets a share of the pane's height rather than four lines. When it still does not fit, the pane says so, and `space` opens the whole thing in a bubble on the canvas, wrapped wide enough to read, with the project, topic and date underneath. The bubble sits beside its node, or above or below it when there is no room to the side, and never on top of it. `space` or `esc` closes it; selecting another node closes it too. It works on narrow terminals as well, where the strip under the graph only has room for two lines.
+
 #### Watch mode
 
 The graph follows what phren is doing, **including in other terminals on the same machine**. Every memory a search lands on, every memory a hook injects before a prompt, and every finding written is appended to `.runtime/lookup-events.jsonl`; the graph tails that file.
@@ -157,6 +161,8 @@ The graph follows what phren is doing, **including in other terminals on the sam
 Put the graph in one terminal and an agent in another. As the agent searches, the node it hit pulses cyan with a ring, the camera flies to it, the finding's full text fills the details pane, and the event joins the activity feed with its age, source and snippet. Writes show up the same way, in green, so you watch knowledge being saved as well as read.
 
 The camera yields to you: while you are navigating, incoming events still pulse and feed but do not move the view. It resumes following a few seconds after your last keypress.
+
+And the recall itself appears where it lives: for a few seconds after a lookup lands, a small bubble opens at that node with the snippet, titled by what caused it (`search · api-service`), threaded to the node, fading as it ages. The feed in the pane keeps the history; the bubble is the one worth pointing at right now.
 
 And phren goes with it. The little purple `◕` walks to whatever the store just touched, perching beside it with a cyan sparkle as he lands, the same way he does in the web viewer. When nothing has happened for a while he wanders off to another node on his own. He is what you are watching when you are watching.
 

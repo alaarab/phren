@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.49] - 2026-09-03
+
+### Added
+
+- **Read a whole finding from the graph.** `space` on a selected node opens its
+  full text in a bubble on the canvas, wrapped wide enough to read, with the
+  project, topic and date underneath. It sits beside the node, or above or
+  below when there is no room to the side, and never covers it. `space` or
+  `esc` closes it. Works on narrow terminals too, where the strip under the
+  graph only had room for two lines.
+- **Recalls appear where they live.** In watch mode, a lookup that just landed
+  gets a small bubble at its node for a few seconds — the snippet, titled by
+  what caused it, threaded to the node, fading as it ages. The feed in the
+  pane keeps the history; the bubble points at the one happening now.
+
+### Changed
+
+- The graph's side pane takes a share of a wide terminal (36%, between 34 and
+  58 columns) instead of a fixed 34, and the selected node's text gets a share
+  of the pane's height instead of four lines. On a 124-column terminal a
+  300-character finding now fits in the pane; before, you saw the first third
+  and an ellipsis. When it still does not fit, the pane says `␣ read all of it`.
+
+
 ## [0.1.48] - 2026-09-03
 
 ### Added
