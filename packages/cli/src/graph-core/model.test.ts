@@ -211,3 +211,84 @@ describe("module boundary", () => {
     }
   });
 });
+
+describe("the node cap under a real-sized store", () => {
+  /** 40 projects, 250 findings and 40 tasks each — the survey's worst case. */
+  function bigStore(projects = 40, findingsEach = 250, tasksEach = 40) {
+    const raw: RawNode[] = [];
+    for (let p = 0; p < projects; p++) {
+      const name = `proj-${p}`;
+      raw.push({ id: name, label: name, group: "project", project: name });
+      for (let i = 0; i < findingsEach; i++) {
+        raw.push({ id: `${name}:f${i}`, label: `${name} finding ${i}`, group: "topic:architecture", project: name, topicSlug: "architecture" });
+      }
+      for (let i = 0; i < tasksEach; i++) {
+        raw.push({ id: `${name}:t${i}`, label: `${name} task ${i}`, group: "task-active", project: name, section: "Active" });
+      }
+    }
+    raw.push({ id: "e:shared", label: "RetryPolicy", group: "entity", refCount: 40 });
+    const links: RawLink[] = [];
+    for (const node of raw) {
+      if (node.kind === undefined && node.group !== "project" && node.project) links.push({ source: node.project, target: node.id });
+    }
+    const nodes = raw.map((node) => normalizeNode(node, {}, noStoreColor));
+    for (const node of nodes) {
+      if (node.kind !== "project" && node.project) links.push({ source: node.project, target: node.id });
+    }
+    links.push({ source: "e:shared", target: "proj-0" });
+    return {
+      rawNodes: nodes,
+      rawLinks: links.filter((l, i, all) => all.findIndex((x) => x.source === l.source && x.target === l.target) === i),
+      scores: {},
+    };
+  }
+
+  it("gives every project a share instead of spending the budget on a few", () => {
+    const model = bigStore();
+    const visible = buildVisibleData(model, filters({ nodeLimit: 350 }), null);
+    const perProject = new Map<string, number>();
+    for (const node of visible.nodes) {
+      if (node.kind === "project" || !node.project) continue;
+      perProject.set(node.project, (perProject.get(node.project) ?? 0) + 1);
+    }
+    // Before the quota, two projects took everything and 38 got nothing.
+    expect(perProject.size).toBe(40);
+    for (const [project, count] of perProject) {
+      expect(count, `${project} was starved`).toBeGreaterThan(0);
+    }
+    expect(visible.nodes.length).toBeLessThanOrEqual(350 + 1); // +1 for a selected node
+  });
+
+  it("keeps tasks visible instead of letting findings crowd them out", () => {
+    const model = bigStore();
+    const visible = buildVisibleData(model, filters({ nodeLimit: 350 }), null);
+    const kinds = new Set(visible.nodes.map((node) => node.kind));
+    expect(kinds).toContain("finding");
+    expect(kinds).toContain("task");
+    expect(kinds).toContain("project");
+  });
+
+  it("keeps the selected node even when its project's quota is spent", () => {
+    const model = bigStore();
+    const visible = buildVisibleData(model, filters({ nodeLimit: 350 }), "proj-39:f249");
+    expect(visible.nodes.map((n) => n.id)).toContain("proj-39:f249");
+  });
+
+  it("leaves a store under the limit completely untouched", () => {
+    const model = bigStore(3, 5, 2);
+    const visible = buildVisibleData(model, filters({ nodeLimit: 350 }), null);
+    expect(visible.nodes.length).toBe(model.rawNodes.length);
+  });
+
+  it("still spends the whole budget when projects are lopsided", () => {
+    const model = bigStore(4, 2, 0);
+    // Give one project far more than the others.
+    for (let i = 0; i < 300; i++) {
+      model.rawNodes.push(normalizeNode({ id: `proj-0:extra${i}`, label: `extra ${i}`, group: "topic:api", project: "proj-0", topicSlug: "api" }, {}, noStoreColor));
+      model.rawLinks.push({ source: "proj-0", target: `proj-0:extra${i}` });
+    }
+    const visible = buildVisibleData(model, filters({ nodeLimit: 100 }), null);
+    expect(visible.nodes.length).toBeGreaterThan(90);
+    expect(visible.nodes.length).toBeLessThanOrEqual(100);
+  });
+});

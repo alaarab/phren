@@ -284,6 +284,74 @@ export function nodeRank(node: RuntimeNode, filters: GraphFilters, scores: Score
   return rank;
 }
 
+/**
+ * Split a budget across buckets so every one gets a share. Buckets smaller than
+ * an even share release what they cannot use, and the surplus goes round again,
+ * so a store of many small projects and a few huge ones still spends the whole
+ * budget without starving the small ones.
+ */
+function allocateQuotas(buckets: Map<string, RuntimeNode[]>, budget: number): Map<string, number> {
+  const quotas = new Map<string, number>();
+  let hungry = [...buckets.keys()];
+  let remaining = budget;
+  while (hungry.length > 0 && remaining > 0) {
+    const share = Math.floor(remaining / hungry.length);
+    if (share < 1) break;
+    const next: string[] = [];
+    for (const key of hungry) {
+      const taken = quotas.get(key) ?? 0;
+      const want = buckets.get(key)!.length - taken;
+      const give = Math.min(share, want);
+      if (give > 0) {
+        quotas.set(key, taken + give);
+        remaining -= give;
+      }
+      if (want > give) next.push(key);
+    }
+    if (next.length === hungry.length && next.length > 0 && remaining === budget) break;
+    hungry = next;
+  }
+  // Hand out the indivisible remainder one at a time, largest bucket first.
+  if (remaining > 0 && hungry.length > 0) {
+    const bySize = hungry.slice().sort((a, b) => buckets.get(b)!.length - buckets.get(a)!.length);
+    for (const key of bySize) {
+      if (remaining <= 0) break;
+      const taken = quotas.get(key) ?? 0;
+      if (taken >= buckets.get(key)!.length) continue;
+      quotas.set(key, taken + 1);
+      remaining--;
+    }
+  }
+  return quotas;
+}
+
+/**
+ * Fill a bucket's quota by taking the best of each kind in turn rather than the
+ * best overall, so a project's tasks and reference docs cannot be crowded out
+ * by its own findings.
+ */
+function pickAcrossKinds(nodes: RuntimeNode[], quota: number, filters: GraphFilters, scores: ScoreMap): RuntimeNode[] {
+  if (quota <= 0) return [];
+  if (nodes.length <= quota) return nodes;
+  const byKind = new Map<NodeKind, RuntimeNode[]>();
+  for (const node of nodes) {
+    const list = byKind.get(node.kind);
+    if (list) list.push(node);
+    else byKind.set(node.kind, [node]);
+  }
+  for (const list of byKind.values()) list.sort((a, b) => nodeRank(b, filters, scores) - nodeRank(a, filters, scores));
+  const queues = [...byKind.values()];
+  const picked: RuntimeNode[] = [];
+  let cursor = 0;
+  while (picked.length < quota && queues.some((q) => q.length > 0)) {
+    const queue = queues[cursor % queues.length];
+    const node = queue.shift();
+    if (node) picked.push(node);
+    cursor++;
+  }
+  return picked;
+}
+
 export interface VisibleData {
   nodes: RuntimeNode[];
   links: RawLink[];
@@ -303,15 +371,26 @@ export function buildVisibleData(
   const filteredNodes = model.rawNodes.filter((node) => nodeMatchesFilters(node, filters));
   let limitedNodes = filteredNodes.slice();
   if (limitedNodes.length > filters.nodeLimit) {
-    const sorted = limitedNodes.slice().sort((a, b) => nodeRank(b, filters, model.scores) - nodeRank(a, filters, model.scores));
-    const keepIds = new Set<string>();
-    for (const node of sorted) {
-      if (keepIds.size >= filters.nodeLimit) break;
-      keepIds.add(node.id);
+    // Taking the globally highest-ranked nodes concentrates the whole budget on
+    // whichever projects happen to rank well: on a 40-project store two of them
+    // took every slot and the other 38 showed as bare dots, which makes the map
+    // misrepresent the store. Give every project a share instead.
+    const projects = filteredNodes.filter((node) => node.kind === "project");
+    const buckets = new Map<string, RuntimeNode[]>();
+    for (const node of filteredNodes) {
+      if (node.kind === "project") continue;
+      // Fragments carry no project of their own; they bucket together so
+      // cross-project structure survives the cap.
+      const key = node.project || "";
+      const list = buckets.get(key);
+      if (list) list.push(node);
+      else buckets.set(key, [node]);
     }
-    model.rawNodes.forEach((node) => {
-      if (node.kind === "project") keepIds.add(node.id);
-    });
+    const quotas = allocateQuotas(buckets, Math.max(0, filters.nodeLimit - projects.length));
+    const keepIds = new Set<string>(projects.map((node) => node.id));
+    for (const [key, list] of buckets) {
+      for (const node of pickAcrossKinds(list, quotas.get(key) ?? 0, filters, model.scores)) keepIds.add(node.id);
+    }
     if (selectedId) keepIds.add(selectedId);
     limitedNodes = filteredNodes.filter((node) => keepIds.has(node.id));
   }

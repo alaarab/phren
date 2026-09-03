@@ -19,8 +19,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   `search_knowledge` tool already did, so CLI searches and finding writes are
   visible to a watching graph (previously only agent searches were).
 
+### Fixed
+
+- **Labels stopped overwriting each other on a busy graph.** Glyphs and labels
+  were drawn per node in one pass, so a later node's glyph landed inside an
+  earlier node's label: at twelve projects the canvas read `sear◉hweb` and
+  `◉ime◉◉a◉◉edge`. Glyphs now go down in their own pass, labels route around
+  them and keep a clear cell either side, and only as many projects are named as
+  the canvas can carry rather than all of them.
+- **The node cap no longer misrepresents the store.** It took the globally
+  highest-ranked nodes, so on a forty-project store two projects took the whole
+  budget and thirty-eight showed as bare dots. Every project now gets a share,
+  with unused share redistributed, and within a project the budget is spent
+  across kinds in turn — which is what stops tasks disappearing entirely, as
+  they did at twelve projects.
+
 ### Changed
 
+- **The graph legend is gone and the header carries what mattered.** A row of
+  kind counts told you nothing the colours on screen already did. The header now
+  shows `350 of 9,687 nodes` so a sampled view is never mistaken for the whole
+  store, and the Graph view no longer spends a row repeating the key hints.
 - **The shell frame gives its rows back to the content.** The header, the view
   label and the tab strip were three separate rows; they are now one line plus a
   rule, with the tab strip collapsing to icons before it ever takes a second row.
