@@ -155,6 +155,7 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "machines", usage: "phren config machines", summary: "Registered machines" },
   { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
   { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
+  { name: "mcp-profile", usage: "phren config mcp-profile [core|full]", summary: "MCP tool surface: 10 core tools or all of them" },
 ];
 
 const MAINTAIN_SUBCOMMANDS: Subcommand[] = [

@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-05
+
+### Changed
+
+- **The MCP server has two tool profiles, and `core` is the default.** The
+  server used to hand every client 59 tools — about 53k characters of schema,
+  roughly 13k tokens, before a session said a word, and 59 similar verbs to
+  pick the wrong one from. `core` exposes ten: `search_knowledge`,
+  `get_memory_detail`, `get_project_summary`, `add_finding`, `revise_finding`,
+  `get_tasks`, `add_task`, `manage_task`, `session`, and `phren_admin`, which
+  reaches everything else by name (`phren_admin(action: "list_actions")` lists
+  them with parameters). About 17k characters. `full` keeps every tool under
+  its own name, plus the composites. Switch with `phren config mcp-profile
+  core|full` or `PHREN_MCP_PROFILE`, then restart the client.
+
+  Migration for anything scripted against the old names:
+
+  | Old tool | Now |
+  |----------|-----|
+  | `add_note` | `add_finding(kind: "note", …)` |
+  | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` | `revise_finding(action: supersede \| retract \| edit \| remove \| link \| resolve_contradiction \| pin \| feedback, …)` |
+  | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` | `manage_task(action: complete \| update \| remove \| pin \| tidy, …)` |
+  | `session_start`, `session_end`, `session_context`, `session_history` | `session(action: start \| end \| context \| history, …)` |
+  | every other tool | `phren_admin(action: "<old name>", …)`, or `phren config mcp-profile full` |
+
+  A composite validates against the target tool's own schema and returns the
+  parameter list on a miss, so the old parameters are unchanged.
+
+
 ## [0.1.53] - 2026-09-04
 
 ### Fixed

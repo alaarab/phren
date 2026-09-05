@@ -13,6 +13,12 @@ symlinks into `~/.claude`, installs wrappers, and self-heals every session;
 MCP server only. See [footprint.md](footprint.md) for a full path-by-path table
 and precedence rules. `phren status` shows the active preset and what it touches.
 
+## MCP tool profile
+
+| Variable | Values | Default | Effect |
+|----------|--------|---------|--------|
+| `PHREN_MCP_PROFILE` | `core`, `full` | `core` (or whatever `phren config mcp-profile` set) | `core` exposes ten tools with everything else behind `phren_admin`; `full` exposes every tool by name. See `api-reference.md`. |
+
 ## Core
 
 | Variable | Type | Default | Description |

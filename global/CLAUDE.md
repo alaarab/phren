@@ -9,8 +9,9 @@
 
 - Save knowledge → `add_finding(project, finding)`
 - Recall knowledge → `search_knowledge(query)`
-- Track tasks → `add_task()` / `complete_task()` / `get_tasks()`
-- Track sessions → `session_start()` / `session_end()`
+- Track tasks → `add_task()` / `get_tasks()` / `manage_task(action: "complete")`
+- Track sessions → `session(action: "start")` / `session(action: "end")`
+- Anything else (skills, hooks, config, review queue) → `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists them
 
 ## How I Work
 
@@ -56,7 +57,7 @@ When spawning an Agent() or using team agents, phren context is auto-injected vi
 
 1. **Before starting work:** call `search_knowledge(query)` with the task description to check for existing findings, conventions, and decisions.
 2. **During work:** call `add_finding(project, finding)` for any non-obvious discovery (gotchas, patterns, architectural decisions, tradeoffs).
-3. **When completing a task:** call `complete_task(project, item)` if working on a tracked task.
+3. **When completing a task:** call `manage_task(action: "complete", project, item)` if working on a tracked task.
 4. **At handoff:** summarize what was done and what was learned. Findings persist across sessions; chat does not.
 
 ## Project store
@@ -86,8 +87,8 @@ The phren MCP server is running. Use these tools proactively. Don't ask the user
 - **When you discover something about a codebase fragment:** call `search_fragments(name)` or `get_related_docs(fragment)` to see what's already known
 - **To explore the knowledge graph:** call `read_graph(project?)` to see fragments and their relationships
 - **To link a finding to a fragment:** call `link_findings(project, finding_text, fragment, relation?)` to persist a manual link
-- **At session start for real work:** call `session_start(project?, connectionId?)` to create resumable session history, checkpoints, and provenance. Lifecycle hooks inject context and save phren, but they do not create `session_history` entries by themselves.
-- **At session end for real work:** call `session_end(summary?, sessionId?|connectionId?)` to save a resumable summary and checkpoint handoff.
+- **At session start for real work:** call `session(action: "start", project?, connectionId?)` to create resumable session history, checkpoints, and provenance. Lifecycle hooks inject context and save phren, but they do not create `session_history` entries by themselves.
+- **At session end for real work:** call `session(action: "end", summary?, sessionId?|connectionId?)` to save a resumable summary and checkpoint handoff.
 - **To check session state during a long task:** call `session_context(sessionId?|connectionId?)`
 
 The goal: Claude should already know the context before the user has to explain it. Tasks stay in files, not buried in chat history.

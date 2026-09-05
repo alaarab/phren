@@ -184,46 +184,24 @@ async function main() {
 
   // Track MCP tool calls for telemetry (opt-in only, best-effort)
   const { trackToolCall } = await import("./telemetry.js");
+  const { createToolGate, resolveMcpProfile } = await import("./mcp/profile.js");
   const origRegisterTool = server.registerTool.bind(server);
-  type RegisterToolFn = typeof server.registerTool;
-  type RegisterToolArgs = Parameters<RegisterToolFn>;
-  type RegisterToolName = RegisterToolArgs[0];
-  type RegisterToolConfig = RegisterToolArgs[1];
-  type RegisterToolHandler = (...args: unknown[]) => unknown;
+  type RegisterToolArgs = Parameters<typeof server.registerTool>;
 
-  // Tools Claude reaches for during normal work. Marked with anthropic/alwaysLoad
-  // so Claude Code keeps their schemas resident instead of deferring them behind
-  // ToolSearch — otherwise the first call in a fresh session fails with
-  // InputValidationError until the schema is fetched.
-  const ALWAYS_LOAD_TOOLS = new Set([
-    "add_finding",
-    "add_note",
-    "add_task",
-    "complete_task",
-    "search_knowledge",
-    "session_start",
-    "session_end",
-    "get_findings",
-    "get_tasks",
-  ]);
+  // Tools Claude reaches for during normal work in the full profile. Marked
+  // anthropic/alwaysLoad so Claude Code keeps their schemas resident instead of
+  // deferring them behind ToolSearch. The core profile marks all of its tools.
+  const ALWAYS_LOAD_TOOLS = ["add_note", "complete_task", "session_start", "session_end", "get_findings"];
 
-  const registeredToolNames = new Set<string>();
-
-  server.registerTool = function (name: RegisterToolName, config: RegisterToolConfig, handler: RegisterToolHandler) {
-    const registeredName = name;
-    // Registration runs before server.connect, so throwing here fails fast at
-    // startup instead of letting a later module silently shadow an earlier tool.
-    if (registeredToolNames.has(registeredName as string)) {
-      throw new Error(`Duplicate MCP tool registration: "${String(registeredName)}"`);
-    }
-    registeredToolNames.add(registeredName as string);
-    let finalConfig = config;
-    if (ALWAYS_LOAD_TOOLS.has(registeredName as string)) {
-      const cfgObj = config as Record<string, unknown>;
-      const existingMeta = (cfgObj?._meta as Record<string, unknown> | undefined) ?? {};
-      finalConfig = { ...cfgObj, _meta: { ...existingMeta, "anthropic/alwaysLoad": true } } as RegisterToolConfig;
-    }
-    const wrapped = async (...args: unknown[]) => {
+  // Every module registers its tools as before; the gate decides what the
+  // client sees. `core` (the default) exposes ten tools and folds the rest
+  // behind phren_admin; `full` is the whole surface. See mcp/profile.ts.
+  const mcpProfile = resolveMcpProfile(phrenPath);
+  const gate = createToolGate({
+    profile: mcpProfile,
+    alwaysLoad: ALWAYS_LOAD_TOOLS,
+    register: (name, config, handler) => origRegisterTool(name as RegisterToolArgs[0], config as RegisterToolArgs[1], handler as unknown as RegisterToolArgs[2]),
+    wrap: (registeredName, handler) => async (...args: unknown[]) => {
       if (shuttingDown) {
         return {
           content: [{
@@ -249,10 +227,10 @@ async function main() {
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
         logger.warn("trackToolCall", errorMessage(err));
       }
-      return handler(...args);
-    };
-    return origRegisterTool(registeredName, finalConfig, wrapped as RegisterToolArgs[2]);
-  } as typeof server.registerTool;
+      return (handler as (...a: unknown[]) => unknown)(...args);
+    },
+  });
+  server.registerTool = gate.registerTool as unknown as typeof server.registerTool;
 
   // Register all tool handlers from domain modules
   const ctx: McpContext = {
@@ -288,10 +266,11 @@ async function main() {
     import("./tools/notes.js"),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
+  gate.finish();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`phren-mcp running (${phrenPath})`);
+  console.error(`phren-mcp running (${phrenPath}) · profile ${mcpProfile} · ${gate.exposed.size} tools`);
 
   // Graceful shutdown: drain write queue and close DB before exit
   async function shutdown(signal: string): Promise<void> {

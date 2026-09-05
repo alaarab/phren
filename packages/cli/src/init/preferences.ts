@@ -11,6 +11,12 @@ import type { CustomHookEntry } from "../hooks.js";
 
 export interface InstallPreferences {
   mcpEnabled?: boolean;
+  /**
+   * Which MCP tool surface clients get. "core" (default) is ten tools with
+   * everything else behind phren_admin; "full" is every tool by name.
+   * PHREN_MCP_PROFILE overrides it. See mcp/profile.ts.
+   */
+  mcpProfile?: "core" | "full";
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
   projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";
