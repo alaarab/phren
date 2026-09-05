@@ -5,7 +5,9 @@ it, and phren in the app launcher.
 
 - **Bar icon** — lights up while phren is recalling something. Click for the
   panel, right-click straight into the shell, middle-click into the graph.
-- **Panel** — every project with its finding and open-task counts, the last
+- **Panel** — every project with its finding and open-task counts and, when
+  `phren maintain summarize` has run, a one-line summary of what phren knows
+  about it; the last
   recalls as they land (what was looked up, from which project, by what), and
   three buttons: **Shell**, **Graph**, **Web viewer**. `s` `g` `w` do the same
   from the keyboard, `r` refreshes, `esc` closes.

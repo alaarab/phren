@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "phren",
   "name": "phren",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Ala Arab",
   "license": "MIT",
   "description": "Your phren knowledge store in the Omarchy bar: projects and their counts, recalls as they land, and one click into the shell, the graph, or the web viewer.",

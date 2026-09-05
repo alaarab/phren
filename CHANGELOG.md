@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-05
+
+### Added
+
+- **The graph shows what phren knows about a project.** Select a project and
+  the pane lists, under its counts, the first lines of its `What phren knows`
+  block; `space` opens the whole block in the bubble. The Omarchy panel shows
+  the same first line under each project. Both read the block that
+  `phren maintain summarize` writes; a project without one shows nothing extra.
+
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed

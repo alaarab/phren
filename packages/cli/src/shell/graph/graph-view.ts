@@ -380,7 +380,8 @@ function planBubbles(controller: GraphController, cols: number, rows: number, se
   if (controller.reader && selected) {
     const at = controller.projectNode(selected.id);
     if (!at) return [];
-    const text = selected.fullLabel || selected.label;
+    const knows = selected.kind === "project" && selected.project ? controller.knowsFor(selected.project) : null;
+    const text = knows ? knows.replace(/\*\*/g, "").replace(/^- /gm, "• ") : (selected.fullLabel || selected.label);
     const anchor = toCell(at);
     const maxInner = Math.min(64, cols - BUBBLE_CHROME_COLS - 2);
     const maxRows = rows - BUBBLE_CHROME_ROWS - 1;
@@ -506,6 +507,21 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
     if (selected.kind === "project") {
       row("findings", String(selected.findingCount ?? 0));
       row("tasks", String(selected.taskCount ?? 0));
+      const knows = selected.project ? controller.knowsFor(selected.project) : null;
+      if (knows) {
+        push();
+        push(style.dim("what phren knows"));
+        const bullets = knows.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).replace(/\*\*/g, ""));
+        const budget = Math.max(3, Math.floor(height * 0.28));
+        let used = 0;
+        for (const b of bullets) {
+          const lines = wrapText(b, inner - 2, 3);
+          if (used + lines.length > budget) break;
+          lines.forEach((l, i) => push(`${i === 0 ? "· " : "  "}${l}`));
+          used += lines.length;
+        }
+        if (bullets.length > 1) push(`${style.boldCyan("␣")} ${style.dim("read all of it")}`);
+      }
       if (selected.store && selected.store !== "primary") row("store", selected.store);
     }
     if (selected.topicLabel || selected.topicSlug) row("topic", colored(selected.baseColor, selected.topicLabel || selected.topicSlug || ""));
