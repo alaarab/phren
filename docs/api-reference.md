@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren's MCP server has two tool profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (59 of them, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
+Phren exposes 59 MCP tools across 13 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 59, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 
