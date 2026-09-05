@@ -5,8 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-05
+
 ### Fixed
 
+- Topic summaries decide "unchanged, leave it" from a fingerprint of the file's
+  bullets carried in the block marker, not from the file's mtime against the
+  clock, which re-summarised on some machines and skipped on others.
 - **VS Code extension 0.6.3**: the extension calls MCP tools by their full
   names, which the server's default `core` profile (0.2.0) no longer exposes,
   so every action from the sidebar failed against a 0.2.x phren. The extension
