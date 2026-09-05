@@ -1,0 +1,57 @@
+#!/bin/bash
+# Emit one JSON object describing the phren store, for the Omarchy bar widget.
+# Reads the store's files directly rather than driving the phren CLI, so it
+# costs a few milliseconds every refresh and works with phren not on PATH.
+#
+#   phren-omarchy-status            -> {"ok":true,"store":"...","projects":[...],"recalls":[...],...}
+set -u
+
+store="${PHREN_PATH:-$HOME/.phren}"
+if [[ ! -d $store ]]; then
+  jq -cn --arg store "$store" '{ok:false, reason:"no store", store:$store, projects:[], recalls:[], totals:{projects:0,findings:0,tasks:0}, live:false, version:""}'
+  exit 0
+fi
+
+now=$(date +%s)
+projects=()
+for dir in "$store"/*/; do
+  name=$(basename "$dir")
+  findings_file="$dir/FINDINGS.md"
+  [[ -f $findings_file ]] || continue
+  case $name in global|profiles|reference|.*) continue ;; esac
+  # grep -c prints 0 *and* exits 1 when nothing matches, so `|| echo 0` would
+  # append a second zero and hand jq "0\n0".
+  findings=$(grep -c '^- \[' "$findings_file" 2>/dev/null); findings=${findings:-0}
+  tasks=0
+  if [[ -f "$dir/tasks.md" ]]; then tasks=$(grep -c '^- \[ \]' "$dir/tasks.md" 2>/dev/null); tasks=${tasks:-0}; fi
+  updated=$(stat -c %Y "$findings_file" 2>/dev/null); updated=${updated:-0}
+  projects+=("$(jq -cn --arg n "$name" --argjson f "$findings" --argjson t "$tasks" --argjson u "$updated" --argjson now "$now" '{name:$n, findings:$f, tasks:$t, updatedAgoSec: ($now - $u)}')")
+done
+projects_json=$(printf '%s\n' "${projects[@]:-}" | jq -cs 'map(select(type=="object")) | sort_by(-.findings)')
+
+# The graph's watch mode tails the same log; the last few lines are the recalls.
+log="$store/.runtime/lookup-events.jsonl"
+recalls_json="[]"
+if [[ -f $log ]]; then
+  recalls_json=$(tail -n 8 "$log" 2>/dev/null | jq -c 'select(type=="object") | {at, project, source: (.source // "lookup"), snippet: ((.snippet // .filename // "") | .[0:140]), type}' 2>/dev/null | jq -cs 'reverse')
+  [[ -n $recalls_json ]] || recalls_json="[]"
+fi
+
+version=""
+[[ -f "$store/.runtime/install-preferences.json" ]] && version=$(jq -r '.version // .installedVersion // ""' "$store/.runtime/install-preferences.json" 2>/dev/null)
+
+jq -cn \
+  --arg store "$store" \
+  --arg version "${version:-}" \
+  --argjson now "$now" \
+  --argjson projects "$projects_json" \
+  --argjson recalls "$recalls_json" \
+  '{
+    ok: true,
+    store: $store,
+    version: $version,
+    projects: $projects,
+    recalls: $recalls,
+    totals: { projects: ($projects | length), findings: ($projects | map(.findings) | add // 0), tasks: ($projects | map(.tasks) | add // 0) },
+    live: (($recalls | length) > 0 and ((($recalls[0].at // "") | try (fromdateiso8601) catch 0) > ($now - 15)))
+  }'

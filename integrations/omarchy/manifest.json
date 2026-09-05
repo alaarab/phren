@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "phren",
+  "name": "phren",
+  "version": "0.1.0",
+  "author": "Ala Arab",
+  "license": "MIT",
+  "description": "Your phren knowledge store in the Omarchy bar: projects and their counts, recalls as they land, and one click into the shell, the graph, or the web viewer.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "phren",
+    "description": "One bar icon and one panel: what phren remembers, per project, and what it just recalled. Click for the panel, right-click for the shell, middle-click for the graph.",
+    "category": "AI",
+    "aliases": ["phren", "memory"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 30,
+      "webPort": 3499
+    },
+    "schema": [
+      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 10, "max": 600, "step": 10, "defaultValue": 30 },
+      { "key": "webPort", "type": "integer", "label": "Web viewer port", "min": 1024, "max": 65535, "step": 1, "defaultValue": 3499, "description": "phren web-ui is started on this port the first time you open the viewer from the panel." }
+    ]
+  }
+}

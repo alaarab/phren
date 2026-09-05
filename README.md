@@ -53,7 +53,7 @@ One command. Sets up `~/.phren`, wires up MCP for your tools, installs hooks. Ne
 
 ## Interfaces
 
-One store, six ways in. Every surface reads and writes the same markdown files, so nothing you do in one is invisible to the others.
+One store, seven ways in. Every surface reads and writes the same markdown files, so nothing you do in one is invisible to the others.
 
 | Surface | Open it | What it is for |
 |---------|---------|----------------|
@@ -63,6 +63,7 @@ One store, six ways in. Every surface reads and writes the same markdown files, 
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
 | **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |
 | **Herdr plugin** | `herdr plugin install alaarab/phren/integrations/herdr` | A keybinding that pops the shell over your Herdr layout for whatever project the pane is in. |
+| **Omarchy plugin** | `bash integrations/omarchy/install.sh` | A bar widget: projects and counts, recalls as they land, one click into the shell, graph or web viewer. Also puts `phren` in the app launcher. |
 
 The shell opens with a short splash: the phren mascot beside the wordmark, which is revealed with a decrypt text effect on the first launch of a new version and shimmers while it waits for a key.
 
@@ -187,6 +188,7 @@ All use the same phren store. No vendor lock-in.
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`apps/ios`](apps/ios) | phren for iOS: native SwiftUI app + widgets + Siri intents (not on npm; built with XcodeGen) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
+| [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |
 | [`experimental/agent`](experimental/agent) | `phren-agent`, an experimental coding agent with phren memory (unpublished) |
 
 ---

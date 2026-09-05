@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **phren for Omarchy** (`integrations/omarchy/`). A bar widget for Omarchy's
+  shell: the icon lights while phren is recalling, the panel lists every
+  project with its counts and the last recalls as they land, and three buttons
+  (or `s` `g` `w`) open the shell, the terminal graph, or the 3D web viewer,
+  starting phren's server the first time. The installer also registers `phren`
+  and `phren graph` in the app launcher. Follows Omarchy's `manifest.json`
+  plugin contract and validates with `omarchy plugin validate`.
+
+
 ## [0.1.52] - 2026-09-04
 
 ### Fixed
