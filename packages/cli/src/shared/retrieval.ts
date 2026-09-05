@@ -87,6 +87,17 @@ const INTENT_REVIEW_RE = /(review|audit|pr|pull request|nit|refactor)/;
 const INTENT_BUILD_RE = /(build|deploy|release|ci|workflow|pipeline|test)/;
 const INTENT_DOCS_RE = /\b(doc|docs|readme|explain|guide|instructions?)\b/;
 
+const WANTS_TASKS_RE = /\b(tasks?|todos?|backlog|queue|what'?s (left|next|remaining)|what is (left|next|remaining)|next up|remaining work|priorit(y|ies))\b/i;
+
+/**
+ * Tasks are a backlog, not memory: a to-do list injected into a debugging
+ * question is noise that costs findings their budget. They go in only when the
+ * prompt is about building or asks about the work itself.
+ */
+export function wantsTasks(prompt: string, intent: ReturnType<typeof detectTaskIntent>): boolean {
+  return intent === "build" || WANTS_TASKS_RE.test(prompt);
+}
+
 export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
   const p = prompt.toLowerCase();
   if (INTENT_SKILL_CMD_RE.test(p) || INTENT_SKILL_KW_RE.test(p)) return "skill";

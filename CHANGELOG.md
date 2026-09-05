@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-05
+
+### Added
+
+- **The archive has a shape.** `phren maintain summarize [project] [--llm]
+  [--force]` writes a `## Now` block at the top of every
+  `reference/topics/<topic>.md` — how many findings, which tags, what keeps
+  being mentioned, the newest headlines; a prose paragraph when a model is
+  configured and `--llm` is passed — and a `What phren knows` block at the end
+  of `summary.md`. The prompt hook injects that block once per session for the
+  project at hand, before any individual bullets, so an agent gets what a
+  project's archive amounts to rather than bullet 312. Blocks sit between
+  markers and are replaced, never accumulated; the bullets themselves are not
+  touched. A topic file past 400 bullets is split, oldest sections first, into
+  `<topic>.older.md`, still indexed. Background maintenance refreshes the
+  structural summaries for files that changed.
+- **`phren status` shows the store's weight** — words in findings, the archive,
+  tasks and skills, and the global CLAUDE.md — and **`phren doctor` has a
+  `context-cost` check** that warns when the global CLAUDE.md passes 600 words,
+  the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
+  None of the tidying stays done unless it is visible.
+
+### Changed
+
+- **Tasks are a backlog, not memory.** The prompt hook injects task items only
+  when the prompt is about building or asks about the work (`backlog`, `what's
+  left`, `priorities`, …). A to-do list in a debugging question was costing
+  findings their budget. Background maintenance also moves done items past
+  thirty into `.config/task-archive/<project>.md`, so `tasks.md` holds open
+  work.
+
+
 ## [0.2.0] - 2026-09-05
 
 ### Changed

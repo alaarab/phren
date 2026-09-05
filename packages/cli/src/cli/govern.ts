@@ -23,6 +23,8 @@ import { FINDINGS_FILENAME } from "../data/access.js";
 import { logger } from "../logger.js";
 import { compactFindingJournals } from "../finding/journal.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
+import { summarizeProject } from "../content/summarize.js";
+import { tidyDoneTasks } from "../data/tasks.js";
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -366,6 +368,8 @@ export async function handleMaintain(args: string[]) {
     }
     case "prune":
       return handlePruneMemories(rest);
+    case "summarize":
+      return handleSummarize(rest);
     case "consolidate":
       return handleConsolidateMemories(rest);
     case "extract":
@@ -458,12 +462,56 @@ async function handleRestoreBackup(args: string[]) {
 
 // ── Background maintenance ───────────────────────────────────────────────────
 
+/**
+ * `phren maintain summarize [project] [--llm] [--force]`: write the "## Now"
+ * block at the top of every topic file and "What phren knows" in summary.md.
+ */
+export async function handleSummarize(args: string[]) {
+  let projectArg: string | undefined;
+  let llm = false;
+  let force = false;
+  for (const arg of args) {
+    if (arg === "--llm") { llm = true; continue; }
+    if (arg === "--force") { force = true; continue; }
+    if (arg.startsWith("-")) { console.error(`Unknown summarize flag: ${arg}`); console.error("Usage: phren maintain summarize [project] [--llm] [--force]"); process.exit(1); }
+    projectArg = arg;
+  }
+  const phrenPath = getPhrenPath();
+  const projects = targetProjects(projectArg);
+  let topics = 0;
+  let updated = 0;
+  for (const project of projects) {
+    const result = await summarizeProject(phrenPath, project, { llm, force });
+    topics += result.topics.length;
+    updated += result.topics.filter((t) => t.updated).length + (result.summaryUpdated ? 1 : 0);
+    const split = result.topics.filter((t) => t.split).map((t) => path.basename(t.split!));
+    console.log(`${project}: ${result.topics.length} topic file(s), ${result.topics.filter((t) => t.updated).length} refreshed${result.summaryUpdated ? ", summary.md updated" : ""}${split.length ? `, split: ${split.join(", ")}` : ""}`);
+  }
+  console.log(`Summarized ${projects.length} project(s): ${topics} topic file(s), ${updated} file(s) written${llm ? " (LLM prose where a model answered)" : ""}.`);
+  appendAuditLog(phrenPath, "summarize", `projects=${projects.length} topics=${topics} updated=${updated} llm=${llm}`);
+}
+
 export async function handleBackgroundMaintenance(projectArg?: string) {
   const markers = qualityMarkers(getPhrenPath());
   const startedAt = new Date().toISOString();
   try {
     const compacted = compactFindingJournals(getPhrenPath(), projectArg);
     const governance = await handleGovernMemories(projectArg, true);
+    // Done tasks past thirty move to .config/task-archive, and topic files get
+    // their "## Now" block refreshed when they changed. Both structural and
+    // cheap; a model is only consulted from `phren maintain summarize --llm`.
+    let tidied = 0;
+    let summarized = 0;
+    for (const project of targetProjects(projectArg)) {
+      try {
+        const tidy = tidyDoneTasks(getPhrenPath(), project, 30);
+        if (tidy.ok && tidy.data.startsWith("Tidied")) tidied++;
+      } catch (err: unknown) { logger.debug("maintenance", `tidy ${project}: ${errorMessage(err)}`); }
+      try {
+        const summary = await summarizeProject(getPhrenPath(), project, {});
+        if (summary.topics.some((t) => t.updated) || summary.summaryUpdated) summarized++;
+      } catch (err: unknown) { logger.debug("maintenance", `summarize ${project}: ${errorMessage(err)}`); }
+    }
     const pruneResult = pruneDeadMemories(getPhrenPath(), projectArg);
     const pruneMsg = pruneResult.ok ? pruneResult.data.message.replace(/\n+/g, " ") : pruneResult.error;
     if (!pruneResult.ok) {
@@ -488,7 +536,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     appendAuditLog(
       getPhrenPath(),
       "background_maintenance",
-      `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount}`
+      `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount} tasks_tidied=${tidied} summarized=${summarized}`
     );
   } catch (err: unknown) {
     const errMsg = errorMessage(err);

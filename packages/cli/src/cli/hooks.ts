@@ -98,8 +98,7 @@ import {
   DEFAULT_MIN_QUERY_RELEVANCE,
   selectSnippets,
   detectTaskIntent,
-  type SelectedSnippet,
-} from "../shared/retrieval.js";
+  type SelectedSnippet, wantsTasks } from "../shared/retrieval.js";
 import { buildHookOutput } from "./hooks-output.js";
 import {
   getGitContext,
@@ -109,6 +108,7 @@ import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
 import { bestFindingNodeId } from "../finding-graph-id.js";
+import { readKnowsBlock } from "../content/summarize.js";
 
 // Auto-learn from prompts was removed — it learned conversational noise ("bro", "idk", typos)
 // as synonyms for high-frequency terms. Manual `phren config synonyms add` still works.
@@ -249,6 +249,8 @@ export async function handleHookPrompt() {
     // Notes are intentionally available to explicit search, but are personal scratch
     // context and should never be injected into an agent prompt automatically.
     rows = rows.filter((row) => row.type !== "notes");
+    // Tasks are a backlog, not memory: only when the prompt is about the work.
+    if (!wantsTasks(prompt, intent)) rows = rows.filter((row) => row.type !== "task");
     stage.trustMs = Date.now() - tTrust0;
     if (!rows.length) process.exit(0);
 
@@ -296,9 +298,25 @@ export async function handleHookPrompt() {
     }
 
     const tSelect0 = Date.now();
-    const { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
+    let { selected, usedTokens } = selectSnippets(rows, keywords, safeTokenBudget, safeLineBudget, safeCharBudget);
     stage.selectMs = Date.now() - tSelect0;
     if (!selected.length) process.exit(0);
+
+    // Once per session per project: the "What phren knows" paragraph from
+    // summary.md, so the agent gets the shape of a project's archive before
+    // individual bullets. Written by `phren maintain summarize`; absent until then.
+    if (detectedProject && sessionId) {
+      const knowsMarker = sessionMarker(getPhrenPath(), `knows-${sessionId}-${detectedProject}`);
+      if (!fs.existsSync(knowsMarker)) {
+        const knows = readKnowsBlock(getPhrenPath(), detectedProject);
+        if (knows) {
+          const text = knows.text.length > 520 ? `${knows.text.slice(0, 519)}…` : knows.text;
+          selected = [{ doc: { project: detectedProject, filename: "summary.md", type: "summary", content: knows.text, path: knows.path }, snippet: text, key: `knows:${detectedProject}` }, ...selected.filter((s) => s.key !== `knows:${detectedProject}`)];
+          usedTokens += approximateTokens(text) + SNIPPET_OVERHEAD_TOKENS;
+          try { fs.writeFileSync(knowsMarker, ""); } catch (err: unknown) { debugLog(`knows marker: ${errorMessage(err)}`); }
+        }
+      }
+    }
 
     // Injection budget: cap total injected tokens across all content
     const maxInjectTokens = clampInt(process.env.PHREN_MAX_INJECT_TOKENS, 2000, 200, 20000);

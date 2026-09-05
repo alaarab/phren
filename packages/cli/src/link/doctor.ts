@@ -41,6 +41,8 @@ import type { DoctorResult } from "./link.js";
 import { getProjectOwnershipMode, readProjectConfig } from "../project-config.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
+import { CONTEXT_COST_LIMITS, medianHookInjectionTokens, storeWeight } from "../store-weight.js";
+import { resolveMcpProfile } from "../mcp/profile.js";
 
 // ── Doctor ──────────────────────────────────────────────────────────────────
 
@@ -587,6 +589,27 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       runtime = null;
     }
   }
+  // What an agent pays before it says a word, and per prompt after. None of
+  // the tidying stays done unless this is visible.
+  try {
+    const weight = storeWeight(phrenPath);
+    const profile = resolveMcpProfile(phrenPath);
+    const injection = medianHookInjectionTokens(phrenPath);
+    const problems: string[] = [];
+    if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global CLAUDE.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
+    if (profile === "full") problems.push("MCP profile is full (59 tools, ~53k chars of schema per session); `phren config mcp-profile core` is ~17k");
+    if (injection.medianTokens > CONTEXT_COST_LIMITS.medianInjectionTokens) problems.push(`median hook injection is ${injection.medianTokens} tokens over the last ${injection.prompts} prompts`);
+    checks.push({
+      name: "context-cost",
+      ok: problems.length === 0,
+      detail: problems.length
+        ? problems.join("; ")
+        : `global CLAUDE.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "59 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
+    });
+  } catch (err: unknown) {
+    logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
+  }
+
   checks.push({
     name: "runtime-health-file",
     ok: Boolean(runtime),
