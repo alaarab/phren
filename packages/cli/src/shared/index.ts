@@ -2058,7 +2058,14 @@ export function detectProject(phrenPath: string, cwd: string, profile?: string):
     const sourcePath = getProjectSourcePath(storePhrenPath, projectName)
       || getProjectSourcePath(phrenPath, projectName);
     if (!sourcePath) continue;
-    const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep);
+    // Exact first. Then case-insensitive: a sourcePath written on a
+    // case-insensitive filesystem (macOS) and synced here can differ from the
+    // real directory only in case — "/home/me/projects/x" against
+    // "/home/me/Projects/x" — and without this the project is invisible to the
+    // hook on that machine, with nothing to say why.
+    const matches = resolvedCwd === sourcePath || resolvedCwd.startsWith(sourcePath + path.sep)
+      || resolvedCwd.toLowerCase() === sourcePath.toLowerCase()
+      || resolvedCwd.toLowerCase().startsWith(sourcePath.toLowerCase() + path.sep);
     if (!matches) continue;
     if (!bestMatch || sourcePath.length > bestMatch.length) {
       bestMatch = { project: projectName, length: sourcePath.length };
