@@ -9,8 +9,9 @@
 
 - Save knowledge → `add_finding(project, finding)`
 - Recall knowledge → `search_knowledge(query)`
-- Track tasks → `add_task()` / `complete_task()` / `get_tasks()`
-- Track sessions → `session_start()` / `session_end()`
+- Track tasks → `add_task()` / `get_tasks()` / `manage_task(action: "complete")`
+- Track sessions → `session(action: "start")` / `session(action: "end")`
+- Anything else (skills, hooks, config, review queue) → `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists them
 
 ## How I Work
 
@@ -73,7 +74,7 @@ The phren MCP server is running. Phren already knows a lot. Ask him before askin
 - **When the user mentions a task or todo:** ask phren what's tracked: `get_tasks(project)`
 - **When you discover a non-obvious pattern, bug, or workaround:** tell phren immediately: `add_finding(project, insight)`
 - **When the user says they want to do something later:** tell phren to remember it: `add_task(project, item)` instead of listing it in chat
-- **When a task is finished:** tell phren it's done: `complete_task(project, item)` without being asked
+- **When a task is finished:** tell phren it's done: `manage_task(action: "complete", project, item)` without being asked
 
 **What NOT to tell phren:**
 - Credentials, API keys, tokens, passwords, or anything that looks like a secret

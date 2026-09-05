@@ -34,7 +34,8 @@ Outside the pnpm workspace:
 
 | File | Purpose |
 |------|---------|
-| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server with 59 tools |
+| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (59 tools registered; the `core` profile exposes 10, see `src/mcp/profile.ts`) |
+| `packages/cli/src/mcp/profile.ts` | MCP tool profiles: the gate between tool modules and the server, the `core` tool list, the `revise_finding` / `manage_task` / `session` / `phren_admin` composites that dispatch into the catalog with the target's own schema |
 | `packages/cli/src/entrypoint.ts` | Top-level dispatcher: resolves `--help`/`--version`/`--health`/MCP/manage invocations and routes via the command registry |
 | `packages/cli/src/cli-registry.ts` | Command catalog. Single source of truth for help generation and dispatch (Command type, REGISTRY, lookupCommand, DOC_TOPICS). |
 | `packages/cli/src/cli-help.ts` | Help formatters over the registry: formatCheatSheet, formatTopic, formatCommand, formatFullHelp |
@@ -73,12 +74,12 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.1.53 (see `packages/cli/package.json`).
+`@phren/cli` 0.2.0 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 
 Developer docs live in `docs/` (also published to the GitHub Pages site):
-- `api-reference.md` -- all 59 MCP tools, parameters, and usage
+- `api-reference.md` -- the two tool profiles, all MCP tools, parameters, and usage
 - `architecture.md` -- system architecture and design patterns
 - `architecture-team-stores.md` -- multi-store / team-store design
 - `environment.md` -- environment variables, directory structure, finding quality rules

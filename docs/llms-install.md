@@ -1,6 +1,6 @@
 # phren: LLM Installation Guide
 
-phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks.
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes ten tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
 
 ## Quick Start
 

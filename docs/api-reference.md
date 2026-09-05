@@ -1,6 +1,25 @@
 # MCP API Reference
 
-Phren exposes 59 MCP tools across 13 modules through the Model Context Protocol. These are available to any MCP-compatible client when the phren server is running.
+Phren's MCP server has two tool profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (59 of them, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
+
+Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
+
+## Core profile
+
+| Tool | Does | Stands for (full-profile names) |
+|------|------|--------------------------------|
+| `search_knowledge` | Search the store | — |
+| `get_memory_detail` | Fetch one memory entry in full | — |
+| `get_project_summary` | A project's summary and counts | — |
+| `add_finding` | Save a finding; `kind: "note"` saves a daily note instead | `add_note` |
+| `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
+| `get_tasks` | List tasks | — |
+| `add_task` | Add a task | — |
+| `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
+| `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction |
+
+A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
 All tools return structured JSON: `{ ok, message, data?, error? }`.
 

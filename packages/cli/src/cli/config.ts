@@ -1,6 +1,8 @@
 import { getPhrenPath, readRootManifest } from "../shared.js";
 import { listMachines as listMachinesStore, listProfiles as listProfilesStore } from "../data/access.js";
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "../telemetry.js";
+import { readInstallPreferences, updateInstallPreferences } from "../init/preferences.js";
+import { resolveMcpProfile } from "../mcp/profile.js";
 import * as path from "path";
 import { buildConfigView, type ConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -126,6 +128,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigProfiles();
     case "telemetry":
       return handleConfigTelemetry(rest);
+    case "mcp-profile":
+      return handleConfigMcpProfile(rest);
     case "proactivity":
     case "proactivity.findings":
     case "proactivity.tasks":
@@ -212,6 +216,25 @@ function handleConfigProfiles() {
     for (const proj of p.projects) console.log(`  - ${proj}`);
     if (!p.projects.length) console.log("  (no projects)");
   }
+}
+
+function handleConfigMcpProfile(args: string[]) {
+  const phrenPath = getPhrenPath();
+  const want = args[0]?.trim().toLowerCase();
+  if (want === "core" || want === "full") {
+    updateInstallPreferences(phrenPath, () => ({ mcpProfile: want }));
+    console.log(`MCP profile set to ${want}. Restart your MCP clients (Claude Code, Cursor, …) to pick it up.`);
+    if (want === "core") console.log("Agents see 10 tools; everything else is reachable through phren_admin.");
+    else console.log("Agents see every tool by name, plus the revise_finding / manage_task / session composites.");
+    return;
+  }
+  if (want) { console.error(`Unknown profile "${args[0]}". Use core or full.`); process.exitCode = 1; return; }
+  const current = resolveMcpProfile(phrenPath);
+  const source = process.env.PHREN_MCP_PROFILE ? "PHREN_MCP_PROFILE" : (readInstallPreferences(phrenPath).mcpProfile ? "install preferences" : "default");
+  console.log(`MCP profile: ${current} (${source})`);
+  console.log(current === "core"
+    ? "10 tools: search_knowledge, get_memory_detail, get_project_summary, add_finding, revise_finding, get_tasks, add_task, manage_task, session, phren_admin."
+    : "Every tool by name. `phren config mcp-profile core` for the compact surface.");
 }
 
 function handleConfigTelemetry(args: string[]) {
