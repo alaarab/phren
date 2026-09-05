@@ -89,6 +89,7 @@ These control the optional LLM calls used for semantic dedup and conflict detect
 |----------|------|---------|-------------|
 | `PHREN_LLM_ENDPOINT` | string | (none) | OpenAI-compatible endpoint URL for semantic dedup/conflict LLM calls. |
 | `PHREN_LLM_KEY` | string | (none) | API key for LLM endpoint. Falls back to `OPENAI_API_KEY` then `ANTHROPIC_API_KEY`. |
+| `PHREN_LLM_TIMEOUT_MS` | integer | `10000` | Floor for the per-call LLM timeout. Summaries already wait up to 120s; raise this if a local model needs longer for dedup/conflict checks too. |
 | `PHREN_LLM_MODEL` | string | `gpt-4o-mini` / `claude-haiku-4-5-20251001` | Model name override. Default depends on whether the OpenAI or Anthropic path is used. |
 
 ## Feature Flags
