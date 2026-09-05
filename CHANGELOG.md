@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **VS Code extension 0.6.3**: the extension calls MCP tools by their full
+  names, which the server's default `core` profile (0.2.0) no longer exposes,
+  so every action from the sidebar failed against a 0.2.x phren. The extension
+  now starts its server with `PHREN_MCP_PROFILE=full`. Needs a Marketplace
+  publish (`pnpm --filter @phren/vscode publish:extension`).
+
+
 ## [0.2.2] - 2026-09-05
 
 ### Fixed
