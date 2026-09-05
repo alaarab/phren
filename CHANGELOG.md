@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-09-05
+
+### Fixed
+
+- **A model's summary paragraph is kept only if it invents nothing.** Every
+  identifier the paragraph names must appear in the findings it summarises;
+  a local 8B model described a TypeScript project as "built on argparse", so
+  any paragraph naming things the findings do not is dropped for the
+  structural one. The prompt also now forbids naming languages, libraries or
+  components the findings do not name.
+- **Hand-written documents under `reference/topics/` get no `## Now` block.**
+  The summarizer stamped every markdown file there, including reference docs
+  with no archived bullets, with "Nothing archived under this topic yet"; those
+  are skipped now, and a block left on one before is removed.
+
+
 ## [0.2.6] - 2026-09-05
 
 ### Fixed

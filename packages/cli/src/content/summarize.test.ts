@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
+import { inventedIdentifiers, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
 import { writeRootManifest } from "../shared.js";
 
 const dirs: string[] = [];
@@ -164,5 +164,30 @@ describe("summarizeProject with a model", () => {
     } finally {
       if (before === undefined) delete process.env.PHREN_LLM_ENDPOINT; else process.env.PHREN_LLM_ENDPOINT = before;
     }
+  });
+});
+
+describe("hand-written docs under reference/topics", () => {
+  it("get no Now block, and lose one they were given", async () => {
+    const dir = tmp();
+    const file = path.join(dir, "cli-commands.md");
+    fs.writeFileSync(file, "# CLI Commands\n\n```bash\nphren search <query>\n```\n\n## Notes\n\nNot an archive.\n");
+    const first = await summarizeTopicFile(file, "cli-commands", { force: true });
+    expect(first.updated).toBe(false);
+    expect(fs.readFileSync(file, "utf8")).not.toContain("## Now");
+    fs.writeFileSync(file, `# CLI Commands\n\n${NOW_START}\n## Now\n\nNothing archived under this topic yet.\n${NOW_END}\n\n## Notes\n\nNot an archive.\n`);
+    const second = await summarizeTopicFile(file, "cli-commands", { force: true });
+    expect(second.updated).toBe(true);
+    const content = fs.readFileSync(file, "utf8");
+    expect(content).not.toContain("## Now");
+    expect(content).toContain("## Notes");
+  });
+});
+
+describe("inventedIdentifiers", () => {
+  it("flags names a paragraph uses that no finding mentions, and accepts names spelled as the findings spell them", () => {
+    const bullets = [{ date: "2026-01-01", tag: "pattern", text: "RetryPolicy wraps outbound calls; see `retry.ts` and the phren-mcp server." }];
+    expect(inventedIdentifiers("RetryPolicy is implemented in `retry.ts` for the phren-mcp server.", bullets)).toEqual([]);
+    expect(inventedIdentifiers("The CLI is built on the `argparse` library and uses FastAPI.", bullets)).toEqual(["argparse", "FastAPI"]);
   });
 });

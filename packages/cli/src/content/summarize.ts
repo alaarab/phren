@@ -145,14 +145,46 @@ export function structuralNow(d: TopicDigest): string {
   return parts.join(" ");
 }
 
-/** A prose paragraph over the newest bullets, when a model is configured; "" otherwise. */
+/**
+ * Identifiers a paragraph names that none of the bullets do. A small local
+ * model asked to summarise engineering notes will happily invent the stack
+ * ("built on argparse" for a TypeScript project); a summary that adds facts
+ * is worse than no summary, so any invented identifier fails the paragraph.
+ */
+export function inventedIdentifiers(prose: string, bullets: ArchivedBullet[]): string[] {
+  const source = bullets.map((b) => b.text).join("\n").toLowerCase();
+  const out: string[] = [];
+  for (const m of prose.matchAll(/`([^`]{2,60})`|\b([A-Z][a-z]+[A-Z][A-Za-z0-9]+)\b|\b([a-z][a-z0-9]*(?:[_.-][a-z0-9]+)+)\b/g)) {
+    const term = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+    if (!term || term.length < 3) continue;
+    if (!source.includes(term.toLowerCase())) out.push(term);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * A prose paragraph over the newest bullets, when a model is configured; ""
+ * otherwise, and "" when the paragraph names things the bullets do not.
+ */
 export async function proseNow(d: TopicDigest, bullets: ArchivedBullet[], signal?: AbortSignal): Promise<string> {
   const newest = [...bullets].reverse().slice(0, 60).map((b) => `- [${b.tag}] ${b.text}`).join("\n");
-  const prompt = `These are archived engineering findings for the topic "${d.slug}" of one software project, newest first. Write one paragraph of 4 to 6 plain sentences stating what is currently known: the standing decisions, the pitfalls that still apply, and the patterns in use. Be concrete, name the components involved, no preamble, no bullet points.\n\n${newest}`;
+  const prompt = [
+    `Below are archived engineering findings for the topic "${d.slug}" of one software project, newest first.`,
+    "Write one paragraph of 4 to 6 plain sentences saying what is currently known: standing decisions, pitfalls that still apply, patterns in use.",
+    "Rules: use only facts stated in the findings. Do not name any language, framework, library, file, or component unless a finding names it, and spell such names exactly as the findings do. If the findings do not support a sentence, leave it out. No preamble, no bullet points, no headings.",
+    "",
+    newest,
+  ].join("\n");
   try {
     // A paragraph from a local model can take a minute on a laptop; the default ten-second budget is for YES/NO checks.
     const text = (await callLlm(prompt, signal, 320, 120_000)).trim();
-    return text.length > 40 ? text : "";
+    if (text.length <= 40) return "";
+    const invented = inventedIdentifiers(text, bullets);
+    if (invented.length) {
+      debugLog(`summarize: rejected model paragraph for ${d.slug}, names not in the findings: ${invented.slice(0, 5).join(", ")}`);
+      return "";
+    }
+    return text;
   } catch (err: unknown) {
     debugLog(`summarize: llm failed: ${errorMessage(err)}`);
     return "";
@@ -238,6 +270,18 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
   const fingerprint = contentFingerprint(content, NOW_START, NOW_END);
   const bullets = parseTopicBullets(content);
   const digest = digestTopic(slug, filePath, bullets);
+  if (!bullets.length) {
+    // A hand-written reference doc that happens to live under reference/topics
+    // is not an archive. It gets no block, and loses one it was given before.
+    const s = content.indexOf(NOW_START.replace("-->", ""));
+    const e = content.indexOf(NOW_END);
+    if (s !== -1 && e !== -1 && e > s) {
+      const stripped = `${content.slice(0, s)}${content.slice(e + NOW_END.length)}`.replace(/\n{3,}/g, "\n\n");
+      atomicWriteText(filePath, stripped);
+      return { slug, file: filePath, bullets: 0, updated: true, now: "" };
+    }
+    return { slug, file: filePath, bullets: 0, updated: false, now: "" };
+  }
   // The block carries a fingerprint of the rest of the file; unchanged bullets
   // mean an unchanged summary, whatever the clock says.
   if (!opts.force && prev?.hash === fingerprint && !split) {
