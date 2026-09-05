@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-05
+
+### Fixed
+
+- **Summaries from a local model no longer time out.** Every LLM call shared a
+  ten-second budget sized for YES/NO dedup checks against a hosted model; a
+  paragraph from an 8B model on a laptop CPU takes longer, so `--llm`
+  summaries silently fell back to the structural text. Callers with real
+  output to wait for now pass their own budget (summaries wait up to two
+  minutes), and `PHREN_LLM_TIMEOUT_MS` raises the floor for everything.
+
+
 ## [0.2.4] - 2026-09-05
 
 ### Added

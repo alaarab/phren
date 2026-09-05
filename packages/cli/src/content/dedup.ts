@@ -90,6 +90,18 @@ function isAbortError(error: unknown): boolean {
 
 const LLM_TIMEOUT_MS = 10_000;
 
+/**
+ * Per-call budget. Ten seconds suits a YES/NO dedup check against a hosted
+ * model; a paragraph from a local 8B model on a laptop CPU takes longer, so
+ * callers with real output to wait for pass their own, and PHREN_LLM_TIMEOUT_MS
+ * raises the floor for everything.
+ */
+function llmTimeoutMs(requested?: number): number {
+  const fromEnv = Number.parseInt(process.env.PHREN_LLM_TIMEOUT_MS ?? "", 10);
+  const floor = Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : LLM_TIMEOUT_MS;
+  return Math.max(floor, requested ?? 0);
+}
+
 function parseOpenAiResponse(data: unknown): string {
   const d = data as { choices?: Array<{ message?: { content?: string } }> };
   return d.choices?.[0]?.message?.content?.trim() ?? "";
@@ -101,9 +113,10 @@ async function fetchLlm(
   init: Omit<RequestInit, "signal">,
   signal: AbortSignal | undefined,
   parseResponse: (data: unknown) => string,
+  timeoutMs: number = LLM_TIMEOUT_MS,
 ): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
   let response: Response;
   try {
@@ -117,7 +130,8 @@ async function fetchLlm(
 
 // Default maxTokens is 10 — callers that only need YES/NO or CONFLICT/OK responses
 // need just 3-5 tokens. Callers expecting longer output pass an explicit override (e.g. 60).
-export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 10): Promise<string> {
+export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 10, timeoutMs?: number): Promise<string> {
+  const budget = llmTimeoutMs(timeoutMs);
   // Check abort before starting any work to avoid unnecessary API calls
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -139,6 +153,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 
       },
       signal,
       parseOpenAiResponse,
+      budget,
     );
   } else if (anthropicKey) {
     // Anthropic REST API fallback (no SDK required)
@@ -155,6 +170,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 
         const block = d.content?.[0];
         return (block?.type === "text" ? block.text ?? "" : "").trim();
       },
+      budget,
     );
   } else if (openaiKey) {
     // OpenAI REST API fallback
@@ -167,6 +183,7 @@ export async function callLlm(prompt: string, signal?: AbortSignal, maxTokens = 
       },
       signal,
       parseOpenAiResponse,
+      budget,
     );
   } else {
     // No LLM configured — return empty to signal "not duplicate" / "no conflict"

@@ -149,7 +149,8 @@ export async function proseNow(d: TopicDigest, bullets: ArchivedBullet[], signal
   const newest = [...bullets].reverse().slice(0, 60).map((b) => `- [${b.tag}] ${b.text}`).join("\n");
   const prompt = `These are archived engineering findings for the topic "${d.slug}" of one software project, newest first. Write one paragraph of 4 to 6 plain sentences stating what is currently known: the standing decisions, the pitfalls that still apply, and the patterns in use. Be concrete, name the components involved, no preamble, no bullet points.\n\n${newest}`;
   try {
-    const text = (await callLlm(prompt, signal, 320)).trim();
+    // A paragraph from a local model can take a minute on a laptop; the default ten-second budget is for YES/NO checks.
+    const text = (await callLlm(prompt, signal, 320, 120_000)).trim();
     return text.length > 40 ? text : "";
   } catch (err: unknown) {
     debugLog(`summarize: llm failed: ${errorMessage(err)}`);
@@ -243,7 +244,7 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
     return { slug, file: filePath, bullets: bullets.length, updated: false, now: existing.split("\n").slice(2).join("\n").trim() };
   }
   let now = "";
-  if (opts.llm) now = await proseNow(digest, bullets, AbortSignal.timeout(25_000));
+  if (opts.llm) now = await proseNow(digest, bullets, AbortSignal.timeout(150_000));
   if (!now) now = structuralNow(digest);
   const next = upsertBlock(content, NOW_START, NOW_END, block(NOW_START, NOW_END, "## Now", now, stamp, fingerprint), "top");
   if (next !== content) atomicWriteText(filePath, next);
