@@ -8,6 +8,7 @@ import {
   appendIndexEvent,
   getProjectDirs,
   collectNativeMemoryFiles,
+  nativeMemoryEnabled,
   runtimeFile,
   homeDir,
   readRootManifest,
@@ -385,7 +386,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     try {
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
@@ -653,7 +654,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     entries.push({ fullPath: mem.fullPath, project: mem.project, filename: mem.file, type: "findings" });
     allAbsolutePaths.push(mem.fullPath);
   }
@@ -994,16 +995,19 @@ function collectContentDirs(phrenPath: string, projectDirs: string[]): string[] 
     walk(dir);
   }
   walk(path.join(phrenPath, "global", "skills"));
-  // Native agent memory (~/.claude/projects/*/memory) is indexed too, but the
-  // surrounding project dirs are huge — watch only the two levels that matter.
-  const nativeRoot = path.join(homeDir(), ".claude", "projects");
-  out.add(nativeRoot);
-  try {
-    for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
-      if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+  // Native agent memory (~/.claude/projects/*/memory) is indexed only when
+  // PHREN_FEATURE_NATIVE_MEMORY is on; then the surrounding project dirs are
+  // huge, so watch only the two levels that matter.
+  if (nativeMemoryEnabled()) {
+    const nativeRoot = path.join(homeDir(), ".claude", "projects");
+    out.add(nativeRoot);
+    try {
+      for (const entry of fs.readdirSync(nativeRoot, { withFileTypes: true })) {
+        if (entry.isDirectory()) out.add(path.join(nativeRoot, entry.name, "memory"));
+      }
+    } catch {
+      // no native memory dirs — the nativeRoot entry above still catches creation
     }
-  } catch {
-    // no native memory dirs — the nativeRoot entry above still catches creation
   }
   return [...out];
 }

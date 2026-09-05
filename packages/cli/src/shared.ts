@@ -77,6 +77,7 @@ export {
   getProjectDirs,
   listInvalidProjectDirs,
   collectNativeMemoryFiles,
+  nativeMemoryEnabled,
   computePhrenLiveStateToken,
   getPhrenPath,
   qualityMarkers,

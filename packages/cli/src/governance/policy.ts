@@ -240,8 +240,12 @@ export const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
 /** Default index policy. Exported so {@link config/schema} can render one source of truth. */
 export const DEFAULT_INDEX_POLICY: IndexPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
-  includeGlobs: ["**/*.md", "**/skills/**/*.md", ".claude/skills/**/*.md"],
-  excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**"],
+  // Skills are instructions you invoke by name, not knowledge to retrieve:
+  // indexed, they crowd the findings out of a prompt's context budget (nine of
+  // twelve injections in one session were skill files). They stay reachable
+  // through list_skills and the global CLAUDE.md.
+  includeGlobs: ["**/*.md"],
+  excludeGlobs: ["**/.git/**", "**/node_modules/**", "**/dist/**", "**/build/**", "**/skills/**", "**/.claude/skills/**"],
   includeHidden: false,
 };
 

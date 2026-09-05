@@ -1,99 +1,35 @@
-# User-level instructions
+# Instructions for the agent
 
-<!-- Copy this file to your personal phren instance's global/CLAUDE.md and fill in your own preferences. -->
-<!-- This becomes ~/.claude/CLAUDE.md after syncing. Claude reads it at the start of every session. -->
+<!-- phren copies this to ~/.phren/global/CLAUDE.md and links it as ~/.claude/CLAUDE.md. Every session reads it, so keep it short and addressed to the agent. Fill in "How I work"; leave the rest. -->
 
-## Memory
+## Memory lives in phren
 
-**Use Phren for all knowledge persistence, not Claude Code's built-in auto memory.** Do not write to `~/.claude/projects/.../memory/` files. Instead:
+phren already knows this user's projects. Ask it before asking them to repeat themselves, and tell it what you learn as you go, not at the end.
 
-- Save knowledge → `add_finding(project, finding)`
-- Recall knowledge → `search_knowledge(query)`
-- Track tasks → `add_task()` / `get_tasks()` / `manage_task(action: "complete")`
-- Track sessions → `session(action: "start")` / `session(action: "end")`
-- Anything else (skills, hooks, config, review queue) → `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists them
+- Recall: `search_knowledge(query)`, then `get_memory_detail(id)` for the full entry. `get_project_summary(project)` when starting on a project.
+- Save: `add_finding(project, finding, findingType?)` the moment you learn something non-obvious that would save time next session. `kind: "note"` for a lightweight daily note.
+- Tasks: `get_tasks(project)`, `add_task(project, item)`, `manage_task(action: "complete", project, item)`. Tasks live in phren, not in chat.
+- Sessions: `session(action: "start", project)` for substantial work, `session(action: "end", summary)` when done. Hooks do not do this for you.
+- Everything else: `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists it.
+- Do not write to `~/.claude/projects/*/memory/`. phren is the memory.
 
-## How I Work
+Worth saving: decisions and why, pitfalls with the fix, patterns that worked, measurements. Not worth saving: secrets or personal data, one-off facts, narration of what happened, anything obvious from the code. Fewer, sharper entries beat volume.
 
-<!-- Your non-negotiable rules. Examples: -->
-<!-- "Write human from the start. No em dashes. No double hyphens. No AI buzzwords." -->
-<!-- "Think visually. If it looks like a template, it's not done." -->
-<!-- "Finish the job. Changelog, README, tests. Don't wait to be asked." -->
+## How I work
+
+<!-- Your rules, in your words. Examples: -->
+<!-- - Lead with the answer. Don't over-engineer. Scope to what I asked. -->
+<!-- - Draft emails and comms for me, don't send. -->
+<!-- - Save findings as we go, not at the end. -->
 
 ## Skills
 
-These skills are available as a full set via phren, or individually from the Claude skills marketplace. You don't need the full phren setup to use skills marked with (standalone).
+`/phren-sync`, `/phren-init`, `/phren-discover`, `/phren-consolidate`, `/phren-profiles` manage the store. Your own skills live in `~/.phren/global/skills/` and are listed by `phren skills list`; invoke them by name rather than expecting them to appear as memory.
 
-### Phren skills (manage your project store)
+## Team agents
 
-| Skill | What it does |
-|-------|-------------|
-| `/phren-sync` | Pull phren to a new machine or push config changes back to the repo |
-| `/phren-init` | Scaffold a new project with summary, CLAUDE.md, tasks |
-| `/phren-discover` | Research what's missing in a project and surface gaps and opportunities |
-| `/phren-consolidate` | Find patterns across all project FINDINGS.md files |
-| `/phren-profiles` | Manages machine-to-profile mapping |
+Every agent follows these rules, and tells phren about non-obvious findings before handing work back.
 
-### Your own skills
+## Where things are
 
-Put personal workflow skills in `~/.phren/global/skills/` and list them here. See [phren](https://github.com/alaarab/phren) for examples.
-
-<!-- Example:
-| `/my-skill` | One line on what it does and when to reach for it |
--->
-
-## Agent coordination
-
-<!-- If you use team agents, document your coordination pattern here. Example: -->
-<!-- "Never use fire-and-forget background agents. Always use TeamCreate/TaskCreate/SendMessage." -->
-
-- Team agents follow the same phren rules as the primary agent.
-- Before handing work back or stopping, tell phren about non-obvious bugs, patterns, tradeoffs, or decisions with `add_finding(...)`.
-- Do not wait for the user to explicitly say "save this as a finding" if the insight will matter next session.
-
-## Project store
-
-In shared mode, skills and project config live in `~/.phren` (or wherever `PHREN_DIR` points). This is a git repo that syncs across machines using profiles.
-
-If you're using `phren init --mode project-local`, the root is `<repo>/.phren` instead. Project-local mode does not use profiles, machine mappings, or global hooks.
-
-- `~/.phren/global/`: skills and config that apply everywhere
-- `~/.phren/<project>/`: per-project CLAUDE.md, skills, tasks, findings
-- `~/.phren/profiles/`: YAML files mapping project sets to machine roles
-- `~/.phren/machines.yaml`: maps machine hostnames to profiles
-
-Run `/phren-sync` to pull everything down or push changes back.
-
-## MCP tools
-
-The phren MCP server is running. Phren already knows a lot. Ask him before asking the user to repeat themselves.
-
-- **At session start:** ask phren what's active: `list_projects()`, then `get_project_summary(name)` for the relevant project
-- **When the user mentions a project, codebase, or task:** ask phren first: `search_knowledge(query)` before asking questions
-- **When the user asks about commands, architecture, conventions, or past decisions:** check with phren: `search_knowledge(query)`
-- **When the user mentions a task or todo:** ask phren what's tracked: `get_tasks(project)`
-- **When you discover a non-obvious pattern, bug, or workaround:** tell phren immediately: `add_finding(project, insight)`
-- **When the user says they want to do something later:** tell phren to remember it: `add_task(project, item)` instead of listing it in chat
-- **When a task is finished:** tell phren it's done: `manage_task(action: "complete", project, item)` without being asked
-
-**What NOT to tell phren:**
-- Credentials, API keys, tokens, passwords, or anything that looks like a secret
-- Personal or sensitive data: SSNs, financial info, health info, PII of any kind
-- One-off facts that won't apply next session ("the server was down today")
-- Narration of what happened ("fixed the login bug"): only save the actual insight
-- Things obvious from reading the code or docs
-
-If you're unsure whether something is worth telling phren, skip it. High-signal entries beat volume.
-
-The goal: phren should already have the context before the user has to explain it. Tasks stay in files, not buried in chat history.
-
-## Machine context
-
-<!-- Claude reads this at session start to know what's active on this machine. -->
-<!-- Auto-generated by /phren-sync. Don't edit manually. -->
-
-Read `~/.phren-context.md` at the start of every session for machine-specific context: which profile is active, which projects are linked, and when the last sync happened.
-
-## Without MCP server
-
-If the MCP server isn't available, phren still helps. Claude reads `~/.phren-context.md` and per-project memory files from `~/.claude/projects/` for context, then fetches details directly from `~/.phren/project-name/` as needed. No MCP required, phren just works a bit more quietly.
+`~/.phren` (or `$PHREN_PATH`) is a git repo: `global/` for everything-everywhere, `<project>/` for each project's CLAUDE.md, findings, tasks and skills, `profiles/` and `machines.yaml` for which projects belong on which machine. `phren doctor` explains anything that is off. If the MCP server is not running, phren still injects context through hooks; the CLI (`phren search`, `phren add-finding`) does the rest.
