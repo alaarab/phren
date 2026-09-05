@@ -105,15 +105,38 @@ export function digestTopic(slug: string, file: string, bullets: ArchivedBullet[
 }
 
 function plural(n: number, word: string): string {
-  if (word === "context") return `${n} context note${n === 1 ? "" : "s"}`;
   return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** Tags are not all nouns that take an s: "18 architectures" and "8 code-qualitys" read as bugs. */
+const TAG_PLURALS: Record<string, [string, string]> = {
+  bug: ["bug", "bugs"],
+  pitfall: ["pitfall", "pitfalls"],
+  pattern: ["pattern", "patterns"],
+  decision: ["decision", "decisions"],
+  tradeoff: ["tradeoff", "tradeoffs"],
+  context: ["context note", "context notes"],
+  architecture: ["architecture note", "architecture notes"],
+  "code-quality": ["code-quality note", "code-quality notes"],
+  competitive: ["competitive note", "competitive notes"],
+  security: ["security note", "security notes"],
+  performance: ["performance note", "performance notes"],
+  tooling: ["tooling note", "tooling notes"],
+  workflow: ["workflow note", "workflow notes"],
+  api: ["API note", "API notes"],
+};
+
+function tagCount(n: number, tag: string): string {
+  const forms = TAG_PLURALS[tag];
+  if (forms) return `${n} ${n === 1 ? forms[0] : forms[1]}`;
+  return `${n} ${tag}`;
 }
 
 /** The paragraph that can always be written, no model required. */
 export function structuralNow(d: TopicDigest): string {
   if (!d.bullets) return "Nothing archived under this topic yet.";
   const span = d.first && d.last ? (d.first === d.last ? `archived on ${d.first}` : `archived between ${d.first} and ${d.last}`) : "";
-  const tagLine = Object.entries(d.tags).filter(([t]) => t !== "untagged").sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => plural(n, t)).join(", ");
+  const tagLine = Object.entries(d.tags).filter(([t]) => t !== "untagged").sort((a, b) => b[1] - a[1]).slice(0, 4).map(([t, n]) => tagCount(n, t)).join(", ");
   const parts = [`${plural(d.bullets, "finding")}${span ? `, ${span}` : ""}${tagLine ? `: ${tagLine}` : ""}.`];
   if (d.mentioned.length) parts.push(`Keeps coming back to ${d.mentioned.join(", ")}.`);
   if (d.headlines.length) parts.push(`Newest: ${d.headlines.map((h, i) => `(${i + 1}) ${h}`).join(" ")}`);

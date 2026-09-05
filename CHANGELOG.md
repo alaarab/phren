@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-05
+
+### Fixed
+
+- **A project whose recorded source path differs from the real directory only
+  in case is found again.** A `sourcePath` written on macOS
+  (`/home/me/projects/x`) and synced to Linux (`/home/me/Projects/x`) made the
+  project invisible to the prompt hook on that machine, with nothing to say
+  why: no project context, no summary, no project-scoped findings. Detection
+  now falls back to a case-insensitive match after the exact one.
+- Topic summaries pluralise tags like a person would: "2 architecture notes",
+  not "2 architectures"; "1 code-quality note", not "1 code-qualitys".
+
+
 ## [0.2.1] - 2026-09-05
 
 ### Added

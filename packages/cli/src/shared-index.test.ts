@@ -273,6 +273,13 @@ describe("detectProject", () => {
     expect(result).toBe("myproject");
   });
 
+  it("falls back to a case-insensitive match, for a sourcePath synced from a case-insensitive filesystem", () => {
+    const phren = makePhren();
+    makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
+    expect(detectProject(phren, "/home/user/MyProject/src")).toBe("myproject");
+    expect(detectProject(phren, "/home/user/myprojectx")).toBeNull();
+  });
+
   it("returns null when no project matches", () => {
     const phren = makePhren();
     makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });

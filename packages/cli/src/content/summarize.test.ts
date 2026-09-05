@@ -45,6 +45,16 @@ describe("digest and structural paragraph", () => {
     expect(now).toContain("(1) Rails 8 removed ActiveStorage azure service");
   });
 
+  it("pluralises tags like a person would", () => {
+    const d = digestTopic("x", "/x.md", [
+      { date: "2026-01-01", tag: "architecture", text: "a" }, { date: "2026-01-01", tag: "architecture", text: "b" },
+      { date: "2026-01-01", tag: "code-quality", text: "c" }, { date: "2026-01-01", tag: "bug", text: "d" },
+    ]);
+    const now = structuralNow(d);
+    expect(now).toContain("2 architecture notes, 1 code-quality note, 1 bug");
+    expect(now).not.toContain("architectures");
+  });
+
   it("does not count common words as things mentioned", () => {
     const bullets = [
       { date: "", tag: "x", text: "The Rails app uses RetryPolicy. NEVER skip it." },
