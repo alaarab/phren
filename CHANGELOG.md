@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-05
+
 ### Added
 
 - A **release workflow for the VS Code extension** (`Release VS Code
