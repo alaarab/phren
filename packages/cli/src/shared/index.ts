@@ -386,7 +386,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     try {
       const stat = fs.statSync(mem.fullPath);
       hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
@@ -654,7 +654,7 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
     }
   }
 
-  for (const mem of collectNativeMemoryFiles()) {
+  for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     entries.push({ fullPath: mem.fullPath, project: mem.project, filename: mem.file, type: "findings" });
     allAbsolutePaths.push(mem.fullPath);
   }

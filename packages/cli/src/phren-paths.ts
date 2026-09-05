@@ -662,7 +662,6 @@ export function nativeMemoryEnabled(env: NodeJS.ProcessEnv = process.env): boole
 
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
 export function collectNativeMemoryFiles(): Array<{ project: string; file: string; fullPath: string }> {
-  if (!nativeMemoryEnabled()) return [];
   const claudeProjectsDir = homePath(".claude", "projects");
   if (!fs.existsSync(claudeProjectsDir)) return [];
 

@@ -2290,3 +2290,13 @@ describe("PhrenError new codes", () => {
     expect(actualKeys.length).toBe(expectedKeys.length);
   });
 });
+
+describe("nativeMemoryEnabled", () => {
+  it("is off unless PHREN_FEATURE_NATIVE_MEMORY asks for it", async () => {
+    const { nativeMemoryEnabled } = await import("./phren-paths.js");
+    expect(nativeMemoryEnabled({})).toBe(false);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "0" })).toBe(false);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "1" })).toBe(true);
+    expect(nativeMemoryEnabled({ PHREN_FEATURE_NATIVE_MEMORY: "true" })).toBe(true);
+  });
+});
