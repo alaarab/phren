@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-09-05
+
+### Fixed
+
+- `phren maintain summarize --llm` loads the store's `.env` before asking the
+  model, so `PHREN_LLM_ENDPOINT` and `PHREN_LLM_MODEL` set there are honoured
+  from the CLI, not only from hook paths that had already touched a feature
+  flag. Without it, `--llm` silently produced the structural text.
+
+
 ## [0.2.5] - 2026-09-05
 
 ### Fixed

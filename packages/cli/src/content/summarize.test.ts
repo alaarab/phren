@@ -145,3 +145,24 @@ describe("summarizeProject", () => {
     expect(fs.readFileSync(path.join(proj, "summary.md"), "utf8").match(new RegExp(KNOWS_START.slice(0, 18), "g"))).toHaveLength(1);
   });
 });
+
+describe("summarizeProject with a model", () => {
+  it("loads the store's .env so the LLM endpoint is seen, and falls back to structural when it does not answer", async () => {
+    const dir = tmp();
+    writeRootManifest(dir, { version: 1, installMode: "shared", syncMode: "managed-git" });
+    fs.writeFileSync(path.join(dir, ".env"), "PHREN_LLM_ENDPOINT=http://127.0.0.1:9/v1\nPHREN_LLM_MODEL=none\n");
+    const proj = path.join(dir, "demo");
+    fs.mkdirSync(path.join(proj, "reference", "topics"), { recursive: true });
+    fs.writeFileSync(path.join(proj, "summary.md"), "# demo\n");
+    fs.writeFileSync(path.join(proj, "reference", "topics", "api.md"), topicDoc([["2026-03-01", ["- [pattern] RetryPolicy caps at five"]]]));
+    const before = process.env.PHREN_LLM_ENDPOINT;
+    delete process.env.PHREN_LLM_ENDPOINT;
+    try {
+      const result = await summarizeProject(dir, "demo", { llm: true, now: () => new Date("2026-09-05T10:00:00Z") });
+      expect(process.env.PHREN_LLM_ENDPOINT).toBe("http://127.0.0.1:9/v1");
+      expect(result.topics[0].now).toContain("1 finding, archived on 2026-03-01");
+    } finally {
+      if (before === undefined) delete process.env.PHREN_LLM_ENDPOINT; else process.env.PHREN_LLM_ENDPOINT = before;
+    }
+  });
+});

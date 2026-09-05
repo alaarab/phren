@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { createHash } from "crypto";
 import { callLlm } from "./dedup.js";
+import { bootstrapPhrenDotEnv } from "../phren-dotenv.js";
 import { readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { atomicWriteText, debugLog } from "../phren-paths.js";
@@ -272,6 +273,9 @@ function countOpenTasks(tasksPath: string): number {
 
 /** Summarize every topic file of a project and refresh the "What phren knows" block in summary.md. */
 export async function summarizeProject(phrenPath: string, project: string, opts: SummarizeOptions = {}): Promise<ProjectSummary> {
+  // The store's .env carries the LLM endpoint and model; a CLI path that has
+  // not touched a feature flag yet has not loaded it.
+  if (opts.llm) bootstrapPhrenDotEnv(phrenPath);
   const topics = readProjectTopics(phrenPath, project).topics;
   const results: TopicResult[] = [];
   const seen = new Set<string>();
