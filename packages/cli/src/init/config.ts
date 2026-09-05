@@ -4,7 +4,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import { buildLifecycleCommands, commandExists } from "../hooks.js";
+import { buildLifecycleCommands, commandExists, phrenPackageSpec } from "../hooks.js";
 import {
   isRecord,
   hookConfigPath,
@@ -21,7 +21,7 @@ import {
 } from "../provider-adapters.js";
 
 import { getMcpEnabledPreference, getHooksEnabledPreference, readInstallPreferences, updateInstallPreferences } from "./preferences.js";
-import { resolveEntryScript, log, VERSION } from "./shared.js";
+import { resolveEntryScript, log } from "./shared.js";
 import { readCustomHooks } from "../hooks.js";
 
 export type McpConfigStatus = "installed" | "already_configured" | "disabled" | "already_disabled";
@@ -63,21 +63,43 @@ export function patchJsonFile(filePath: string, patch: (data: JsonObject) => voi
   atomicWriteText(filePath, JSON.stringify(data, null, 2) + "\n");
 }
 
-function buildMcpServerConfig(phrenPath: string) {
-  const entryScript = resolveEntryScript();
-  if (entryScript && fs.existsSync(entryScript)) {
-    return {
-      command: "node",
-      args: [entryScript, phrenPath],
-    };
+/**
+ * True when the running copy of phren lives in npm's npx cache. That cache is
+ * npm's to evict, so a path into it is not something to write into anyone's
+ * settings: it works until the day it silently does not.
+ */
+export function isEphemeralInstall(entryScript: string): boolean {
+  return /[\\/]_npx[\\/]/.test(entryScript);
+}
+
+export interface McpServerConfig { command: string; args: string[] }
+
+/**
+ * How Claude (and the other MCP hosts) should start the phren server.
+ *
+ * A real install points straight at its own `dist/index.js`. An `npx` install
+ * does not: the file it would name sits in the npx cache, and the day npm
+ * evicts it the MCP server stops starting with no error anyone sees — which
+ * is exactly how `npx @phren/cli init` ends up "not working" a week later.
+ * That case goes through the CLI wrapper init writes to `~/.local/bin`, which
+ * knows how to find or fetch phren. Windows has no shell wrapper to lean on,
+ * so it falls back to `npx.cmd` with the real package name.
+ */
+export function buildMcpServerConfig(
+  phrenPath: string,
+  opts: { entryScript?: string; platform?: NodeJS.Platform; wrapperPath?: string } = {},
+): McpServerConfig {
+  const entryScript = opts.entryScript ?? resolveEntryScript();
+  const platform = opts.platform ?? process.platform;
+  if (entryScript && !isEphemeralInstall(entryScript) && fs.existsSync(entryScript)) {
+    return { command: "node", args: [entryScript, phrenPath] };
+  }
+  if (platform !== "win32") {
+    return { command: opts.wrapperPath ?? homePath(".local", "bin", "phren"), args: [phrenPath] };
   }
   // MCP clients spawn servers with { shell: false } on Windows, so the bare
   // `npx` name can't resolve the `npx.cmd` shim and the server fails to start.
-  // Using `npx.cmd` on win32 matches how child_process resolves Windows binaries.
-  return {
-    command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", `phren@${VERSION}`, phrenPath],
-  };
+  return { command: "npx.cmd", args: ["-y", phrenPackageSpec(), phrenPath] };
 }
 
 function upsertMcpServer(
