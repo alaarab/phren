@@ -38,8 +38,7 @@ These skills are available as a full set via phren, or individually from the Cla
 Put personal workflow skills in `~/.phren/global/skills/` and list them here. See [phren](https://github.com/alaarab/phren) for examples.
 
 <!-- Example:
-| `/humanize` | Strip AI language from writing and code |
-| `/release`  | Version bump, changelog, tag, publish |
+| `/my-skill` | One line on what it does and when to reach for it |
 -->
 
 ## Agent coordination
