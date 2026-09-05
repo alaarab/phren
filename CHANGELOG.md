@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.53] - 2026-09-04
+
+### Fixed
+
+- **What a prompt pulls in now counts as a recall.** The prompt hook, by far
+  the most common way memory gets read, never wrote to the live lookup log:
+  only `phren search` and the MCP search tool did. So the terminal graph's
+  watch mode, and anything else tailing that log, lit up for searches and sat
+  dark while an agent actually worked. Every snippet the hook injects is
+  recorded now, with the prompt as the query and `source: "hook"`, resolved to
+  its graph node when it is a finding.
+
 ### Added
 
 - **phren for Omarchy** (`integrations/omarchy/`). A bar widget for Omarchy's
