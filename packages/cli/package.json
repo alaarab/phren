@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
   "type": "module",
   "bin": {

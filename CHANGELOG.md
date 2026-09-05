@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-09-05
+
+### Added
+
+- **Summaries written by the agent you already have.** Two admin tools,
+  `get_topic_summaries` and `set_topic_summary`, hand the agent a topic
+  archive's newest bullets and store the paragraph it writes back as the
+  topic's `## Now` block, refreshing the project's `What phren knows`. The
+  same identifier check applies: a paragraph naming anything the bullets do
+  not is refused with the names. The `/phren-summarize` skill walks a project
+  or the whole profile with them. No API key, no local model: the model
+  running the session does the writing. `phren maintain summarize --llm`
+  remains for machines with a local model.
+
+
 ## [0.2.7] - 2026-09-05
 
 ### Fixed

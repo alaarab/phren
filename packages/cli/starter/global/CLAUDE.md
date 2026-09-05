@@ -24,7 +24,7 @@ Worth saving: decisions and why, pitfalls with the fix, patterns that worked, me
 
 ## Skills
 
-`/phren-sync`, `/phren-init`, `/phren-discover`, `/phren-consolidate`, `/phren-profiles` manage the store. Your own skills live in `~/.phren/global/skills/` and are listed by `phren skills list`; invoke them by name rather than expecting them to appear as memory.
+`/phren-sync`, `/phren-init`, `/phren-discover`, `/phren-consolidate`, `/phren-profiles`, `/phren-summarize` manage the store. Your own skills live in `~/.phren/global/skills/` and are listed by `phren skills list`; invoke them by name rather than expecting them to appear as memory.
 
 ## Team agents
 

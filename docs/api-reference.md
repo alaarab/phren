@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 59 MCP tools across 13 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 59, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
+Phren exposes 61 MCP tools across 14 modules, through two profiles. **`core`**, the default, gives a client ten tools: the handful an agent reaches for during normal work, plus `phren_admin`, which reaches everything else by name. **`full`** exposes every tool under its own name (all 61, plus the three composites below), for clients that scripted against the old surface. Switch with `phren config mcp-profile core|full` or the `PHREN_MCP_PROFILE` environment variable; restart the client afterwards.
 
 Why: the full surface is about 53k characters of schema, roughly 13k tokens, downloaded before a session says a word, and 59 similar verbs to pick the wrong one from. Core is about 17k characters.
 
@@ -17,7 +17,7 @@ Why: the full surface is about 53k characters of schema, roughly 13k tokens, dow
 | `add_task` | Add a task | — |
 | `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
-| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`) |
 
 A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
@@ -723,3 +723,32 @@ Update configuration for a specific domain. Unified setter for all config domain
 ---
 
 Maintenance tools (govern, prune, consolidate, extract) are CLI-only. See `phren config` and `phren maintain`.
+
+---
+
+## Topic Summaries
+
+Summaries written by the agent itself, with the model it is already running as; no API key and no local model. Driven by the `/phren-summarize` skill. In the core profile both are reached through `phren_admin`.
+
+### `get_topic_summaries`
+
+Every `reference/topics` file of a project with its bullet count, its current `## Now` text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | no | A topic slug from the list; returns its newest bullets. |
+| `bullets` | number | no | How many of the newest bullets to return for `topic` (5–200, default 60). |
+
+---
+
+### `set_topic_summary`
+
+Store the paragraph you wrote as the topic's `## Now` block and refresh the project's `What phren knows` block. Refused, with the offending names returned, if the paragraph names anything the topic's bullets do not.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | yes | Topic slug, as listed by `get_topic_summaries`. |
+| `text` | string | yes | Four to six plain sentences; only facts the bullets state, names spelled as the bullets spell them. |
+
