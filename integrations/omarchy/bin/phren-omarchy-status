@@ -25,7 +25,12 @@ for dir in "$store"/*/; do
   tasks=0
   if [[ -f "$dir/tasks.md" ]]; then tasks=$(grep -c '^- \[ \]' "$dir/tasks.md" 2>/dev/null); tasks=${tasks:-0}; fi
   updated=$(stat -c %Y "$findings_file" 2>/dev/null); updated=${updated:-0}
-  projects+=("$(jq -cn --arg n "$name" --argjson f "$findings" --argjson t "$tasks" --argjson u "$updated" --argjson now "$now" '{name:$n, findings:$f, tasks:$t, updatedAgoSec: ($now - $u)}')")
+  # The first line of "What phren knows" (written by `phren maintain summarize`), if the project has one.
+  knows=""
+  if [[ -f "$dir/summary.md" ]]; then
+    knows=$(sed -n '/phren:knows:start/,/phren:knows:end/p' "$dir/summary.md" | grep -m1 '^- ' | sed 's/^- //; s/\*\*//g')
+  fi
+  projects+=("$(jq -cn --arg n "$name" --arg k "$knows" --argjson f "$findings" --argjson t "$tasks" --argjson u "$updated" --argjson now "$now" '{name:$n, findings:$f, tasks:$t, updatedAgoSec: ($now - $u), knows:$k}')")
 done
 projects_json=$(printf '%s\n' "${projects[@]:-}" | jq -cs 'map(select(type=="object")) | sort_by(-.findings)')
 

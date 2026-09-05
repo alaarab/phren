@@ -30,6 +30,7 @@ import { GraphWatch, type ActivityItem } from "./watch.js";
 import { GraphAgents } from "./agents.js";
 import { GraphMascot } from "./mascot.js";
 import { LIVE_BUBBLE_MS } from "./bubble.js";
+import { readKnowsBlock } from "../../content/summarize.js";
 import { DEFAULT_ORBIT, PITCH_LIMIT, buildOrbitLayout, parseMouse, projectOrbit, yawDelta, yawToFace } from "./orbit.js";
 import type { MouseEvent as GraphMouseEvent, OrbitCamera, Vec3 } from "./orbit.js";
 
@@ -180,6 +181,21 @@ export class GraphController {
   readonly mascot = new GraphMascot();
   /** Space opens the selected node's full text in a bubble on the canvas. */
   reader = false;
+  private knowsCache = new Map<string, string | null>();
+
+  /**
+   * The "What phren knows" paragraph for a project, written by
+   * `phren maintain summarize`; null until it has run. Read once per project
+   * per data load, so the pane can show it on every frame.
+   */
+  knowsFor(project: string): string | null {
+    if (!this.knowsCache.has(project)) {
+      let text: string | null = null;
+      try { text = readKnowsBlock(this.phrenPath, project)?.text.replace(/^## What phren knows\s*/m, "").trim() ?? null; } catch { text = null; }
+      this.knowsCache.set(project, text);
+    }
+    return this.knowsCache.get(project) ?? null;
+  }
   /**
    * v: the same graph as a sphere. Selection, search, watch mode and the
    * neighbour numbers all keep working; the camera orbits instead of panning.
@@ -409,6 +425,7 @@ export class GraphController {
     this.sim = new ForceSim(nodes, links, undefined, this.viewport.width / Math.max(1, this.viewport.height));
     if (warm && this.lastPositions.size) this.sim.warmStart(this.lastPositions);
     this.mascot.reset();
+    this.knowsCache.clear();
     // Settle before anyone sees it. Animating the relaxation instead — ticking
     // a few steps, framing the half-settled positions, then letting the rest
     // play out under a fixed camera — read as the whole cluster bouncing for a

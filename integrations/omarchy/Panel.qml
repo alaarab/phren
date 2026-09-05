@@ -281,7 +281,21 @@ Panel {
               delegate: Item {
                 required property var modelData
                 width: column.width
-                height: nameText.implicitHeight + Style.space(4)
+                height: nameText.implicitHeight + (knowsText.visible ? knowsText.implicitHeight + Style.space(2) : 0) + Style.space(4)
+                Text {
+                  id: knowsText
+                  visible: !!modelData.knows
+                  anchors.top: nameText.bottom
+                  anchors.topMargin: Style.space(2)
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  text: modelData.knows || ""
+                  elide: Text.ElideRight
+                  maximumLineCount: 1
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
                 Text {
                   id: nameText
                   anchors.left: parent.left

@@ -201,3 +201,30 @@ describe("orbit view", () => {
     expect(named).toBe(true);
   });
 });
+
+describe("what phren knows in the pane", () => {
+  it("shows the project's summary block under its counts, and the bubble carries all of it", async () => {
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-knows-"));
+    try {
+      fs.mkdirSync(path.join(dir, "hub"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "hub", "summary.md"), "# hub\n\n<!-- phren:knows:start at=x -->\n## What phren knows\n\n- 4 active findings, 120 archived across 3 topics, 2 open tasks.\n- **auth** — 60 findings, archived between 2026-03-01 and 2026-08-01: 20 patterns.\n<!-- phren:knows:end -->\n");
+      const c = new GraphController(dir, "", { builder: async () => payload(), tokenOf: () => "t" });
+      await c.ensureData();
+      c.setViewport(2 * 85, 4 * 30);
+      const hub = c.projects.find((p) => p.project === "hub")!;
+      c.select(hub.id);
+      const pane = stripAnsi(renderGraphView(c, 120, 32).join("\n"));
+      expect(pane).toContain("what phren knows");
+      expect(pane).toContain("4 active findings, 120 archived");
+      c.reader = true;
+      const bubble = stripAnsi(renderGraphView(c, 120, 32).join("\n"));
+      expect(bubble).toContain("60 findings");
+      for (const line of renderGraphView(c, 120, 32)) expect(displayWidth(stripAnsi(line))).toBe(120);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

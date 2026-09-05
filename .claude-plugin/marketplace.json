@@ -8,7 +8,7 @@
       "name": "phren",
       "source": "./",
       "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "author": {
         "name": "Ala Arab"
       },

@@ -158,6 +158,10 @@ The mouse works here: drag to turn, wheel to zoom, click a node to select it. Wi
 
 Mouse reporting is switched on only while the Graph view is showing, so in every other view the terminal keeps its own click-and-drag text selection. On the flat map the mouse works too: drag pans, wheel zooms, click selects.
 
+#### What phren knows about a project
+
+Select a project and the pane shows, under its counts, the first lines of the project's `What phren knows` block: how much is active and archived, how many tasks are open, and what each topic archive amounts to. `space` opens the whole block in the bubble. The block is written by `phren maintain summarize` and refreshed by background maintenance; a project without one shows nothing extra.
+
 #### Reading a node
 
 The pane beside the graph takes a share of a wide terminal rather than a fixed width, so a finding wraps into fewer lines than it used to, and the text gets a share of the pane's height rather than four lines. When it still does not fit, the pane says so, and `space` opens the whole thing in a bubble on the canvas, wrapped wide enough to read, with the project, topic and date underneath. The bubble sits beside its node, or above or below it when there is no room to the side, and never on top of it. `space` or `esc` closes it; selecting another node closes it too. It works on narrow terminals as well, where the strip under the graph only has room for two lines.
