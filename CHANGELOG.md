@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.52] - 2026-09-04
+
+### Fixed
+
+- **`npx @phren/cli init` no longer wires Claude's MCP server to the npx
+  cache.** Init wrote the path of its own `dist/index.js` into the MCP
+  server entry, and under `npx` that file lives in `~/.npm/_npx/…`, which npm
+  evicts. The server then stops starting with no error anyone sees, which is
+  how an init that "worked" ends up not working a week later. An npx install
+  now routes the MCP server through the `~/.local/bin/phren` wrapper init
+  already writes, which knows how to find or fetch phren; a real install still
+  points at its own entry script.
+- The no-entry-script fallback named a package that does not exist on npm
+  (`phren@…` instead of `@phren/cli@…`). It uses the real package spec now.
+
+
 ## [0.1.51] - 2026-09-03
 
 ### Added

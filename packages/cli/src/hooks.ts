@@ -177,7 +177,7 @@ export function findStaleHookEntrypoints(commands: readonly string[]): string[] 
   return [...stale];
 }
 
-function phrenPackageSpec(): string {
+export function phrenPackageSpec(): string {
   return PACKAGE_SPEC;
 }
 
