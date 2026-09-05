@@ -94,6 +94,10 @@ export class PhrenClient {
   private spawnProcess(): ChildProcessWithoutNullStreams {
     const child = spawn(this.options.nodePath ?? process.execPath, [this.options.mcpServerPath, this.options.storePath], {
       stdio: "pipe",
+      // This client calls tools by their full names (complete_task, session_start,
+      // list_skills, …). The server's default `core` profile folds those behind
+      // composites for agents; a first-party client asks for the full surface.
+      env: { ...process.env, PHREN_MCP_PROFILE: "full" },
     });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
