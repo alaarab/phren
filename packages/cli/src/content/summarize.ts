@@ -16,6 +16,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import { callLlm } from "./dedup.js";
 import { readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
@@ -156,8 +157,16 @@ export async function proseNow(d: TopicDigest, bullets: ArchivedBullet[], signal
   }
 }
 
-function block(start: string, end: string, heading: string, body: string, stamp: string): string {
-  return `${start.replace("-->", `at=${stamp} -->`)}\n${heading}\n\n${body}\n${end}`;
+function block(start: string, end: string, heading: string, body: string, stamp: string, hash = ""): string {
+  return `${start.replace("-->", `at=${stamp}${hash ? ` hash=${hash}` : ""} -->`)}\n${heading}\n\n${body}\n${end}`;
+}
+
+/** Fingerprint of everything in a topic file except its own Now block. */
+export function contentFingerprint(content: string, start: string, end: string): string {
+  const s = content.indexOf(start.replace("-->", ""));
+  const e = content.indexOf(end);
+  const rest = s !== -1 && e !== -1 && e > s ? content.slice(0, s) + content.slice(e + end.length) : content;
+  return createHash("sha1").update(rest.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);
 }
 
 /** Insert or replace a marked block. Topic files: before the first section; summary: at the end. */
@@ -176,10 +185,10 @@ export function upsertBlock(content: string, start: string, end: string, rendere
   return `${content.trimEnd()}\n\n${rendered}\n`;
 }
 
-/** The stamp inside an existing block, so unchanged files are not rewritten. */
-export function blockStamp(content: string, start: string): string | null {
-  const m = new RegExp(`${start.replace("-->", "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}at=([^ ]+) -->`).exec(content);
-  return m ? m[1] : null;
+/** The stamp and fingerprint inside an existing block, so unchanged files are not rewritten. */
+export function blockMeta(content: string, start: string): { at: string; hash: string | null } | null {
+  const m = new RegExp(`${start.replace("-->", "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}at=([^ ]+)(?: hash=([0-9a-f]+))? -->`).exec(content);
+  return m ? { at: m[1], hash: m[2] ?? null } : null;
 }
 
 export interface SummarizeOptions {
@@ -222,20 +231,21 @@ export function splitTopicFile(filePath: string, maxBullets = TOPIC_SPLIT_AT): s
 export async function summarizeTopicFile(filePath: string, slug: string, opts: SummarizeOptions = {}): Promise<TopicResult> {
   const split = splitTopicFile(filePath);
   const content = fs.readFileSync(filePath, "utf8");
-  const stat = fs.statSync(filePath);
   const stamp = (opts.now ?? (() => new Date()))().toISOString();
-  const prev = blockStamp(content, NOW_START);
+  const prev = blockMeta(content, NOW_START);
+  const fingerprint = contentFingerprint(content, NOW_START, NOW_END);
   const bullets = parseTopicBullets(content);
   const digest = digestTopic(slug, filePath, bullets);
-  // The block records when it was written; a file untouched since then is left alone.
-  if (!opts.force && prev && !split && new Date(prev).getTime() >= stat.mtimeMs - 1000) {
+  // The block carries a fingerprint of the rest of the file; unchanged bullets
+  // mean an unchanged summary, whatever the clock says.
+  if (!opts.force && prev?.hash === fingerprint && !split) {
     const existing = content.slice(content.indexOf(NOW_START.replace("-->", "")), content.indexOf(NOW_END));
     return { slug, file: filePath, bullets: bullets.length, updated: false, now: existing.split("\n").slice(2).join("\n").trim() };
   }
   let now = "";
   if (opts.llm) now = await proseNow(digest, bullets, AbortSignal.timeout(25_000));
   if (!now) now = structuralNow(digest);
-  const next = upsertBlock(content, NOW_START, NOW_END, block(NOW_START, NOW_END, "## Now", now, stamp), "top");
+  const next = upsertBlock(content, NOW_START, NOW_END, block(NOW_START, NOW_END, "## Now", now, stamp, fingerprint), "top");
   if (next !== content) atomicWriteText(filePath, next);
   return { slug, file: filePath, bullets: bullets.length, updated: next !== content, split: split ?? undefined, now };
 }
@@ -297,7 +307,7 @@ export async function summarizeProject(phrenPath: string, project: string, opts:
   const rendered = block(KNOWS_START, KNOWS_END, "## What phren knows", lines.join("\n"), stamp);
   const existing = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, "utf8") : `# ${project}\n`;
   const next = upsertBlock(existing, KNOWS_START, KNOWS_END, rendered, "bottom");
-  const stripStamp = (s: string) => s.replace(/ at=[^ ]+ -->/g, " -->");
+  const stripStamp = (s: string) => s.replace(/ at=[^ ]+( hash=[0-9a-f]+)? -->/g, " -->");
   const changed = stripStamp(next) !== stripStamp(existing);
   if (changed) atomicWriteText(summaryPath, next);
   return { project, topics: results, summaryPath, summaryUpdated: changed };
