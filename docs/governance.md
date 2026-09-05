@@ -187,3 +187,12 @@ phren review                          # show the queue
 phren review approve <project> <text> # promote (or keep) the item, then dequeue
 phren review reject  <project> <text> # delete the content wherever it lives, then dequeue
 ```
+
+## Summaries and the weight of the store
+
+Findings age out of `FINDINGS.md` into `reference/topics/<topic>.md`, and a store a year old carries hundreds of thousands of words there, reachable only by keyword. `phren maintain summarize [project] [--llm] [--force]` writes a `## Now` block at the top of each topic file — structural by default (how many findings, which tags, what keeps being mentioned, the newest headlines) or a prose paragraph when an LLM is configured and `--llm` is passed — and a `What phren knows` block at the end of `summary.md`. The prompt hook injects that block once per session for the project at hand, before any individual bullets. Both blocks live between markers and are replaced, never accumulated; the archive's own bullets are not rewritten. A topic file past 400 bullets is split, oldest sections first, into `<topic>.older.md`, which stays indexed.
+
+Background maintenance (the stop hook) refreshes the structural summaries for files that changed and moves done tasks past thirty into `.config/task-archive/<project>.md`. Tasks are injected into prompts only when the prompt is about building or asks about the work itself.
+
+`phren status` prints the store's weight by kind, and `phren doctor`'s `context-cost` check warns when the global CLAUDE.md passes 600 words, the MCP profile is `full`, or the median hook injection passes 1,500 tokens.
+

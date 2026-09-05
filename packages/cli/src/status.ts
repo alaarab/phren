@@ -23,6 +23,7 @@ import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
+import { storeWeight } from "./store-weight.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -111,6 +112,13 @@ export async function runStatus() {
   // Phren path and config
   console.log(`  ${DIM}path${RESET}     ${phrenPath}`);
   console.log(`  ${DIM}mode${RESET}     ${manifest?.installMode || "unknown"}`);
+  try {
+    const w = storeWeight(phrenPath, profile);
+    const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+    console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived · ${k(w.tasks)} in tasks · ${k(w.skills)} in skills · CLAUDE.md ${w.globalClaude} words`);
+  } catch (err: unknown) {
+    logger.debug("status", `weight: ${errorMessage(err)}`);
+  }
   if (manifest?.workspaceRoot) {
     console.log(`  ${DIM}workspace${RESET} ${manifest.workspaceRoot}`);
   }

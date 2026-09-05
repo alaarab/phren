@@ -35,6 +35,8 @@ Outside the pnpm workspace:
 | File | Purpose |
 |------|---------|
 | `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (59 tools registered; the `core` profile exposes 10, see `src/mcp/profile.ts`) |
+| `packages/cli/src/content/summarize.ts` | The archive's shape: `## Now` blocks at the top of `reference/topics/*.md` (structural, or LLM prose with `--llm`), the `What phren knows` block in `summary.md` the hook injects once per session, and the split of oversized topic files into `<topic>.older.md`. Run by `phren maintain summarize` and by background maintenance. |
+| `packages/cli/src/store-weight.ts` | Words per kind across the store and the median hook injection size; behind `phren status`'s weight line and doctor's `context-cost` check |
 | `packages/cli/src/mcp/profile.ts` | MCP tool profiles: the gate between tool modules and the server, the `core` tool list, the `revise_finding` / `manage_task` / `session` / `phren_admin` composites that dispatch into the catalog with the target's own schema |
 | `packages/cli/src/entrypoint.ts` | Top-level dispatcher: resolves `--help`/`--version`/`--health`/MCP/manage invocations and routes via the command registry |
 | `packages/cli/src/cli-registry.ts` | Command catalog. Single source of truth for help generation and dispatch (Command type, REGISTRY, lookupCommand, DOC_TOPICS). |
@@ -74,7 +76,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.2.0 (see `packages/cli/package.json`).
+`@phren/cli` 0.2.1 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 

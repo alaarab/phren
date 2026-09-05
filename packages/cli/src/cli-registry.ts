@@ -162,6 +162,7 @@ const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
   { name: "govern", usage: "phren maintain govern [project]", summary: "Queue stale memories for review" },
   { name: "prune", usage: "phren maintain prune [project]", summary: "Delete expired entries" },
   { name: "consolidate", usage: "phren maintain consolidate [project]", summary: "Deduplicate findings" },
+  { name: "summarize", usage: "phren maintain summarize [project] [--llm] [--force]", summary: "Write what each topic archive amounts to, and what phren knows per project" },
   { name: "extract", usage: "phren maintain extract [project]", summary: "Mine git/GitHub signals" },
 ];
 
