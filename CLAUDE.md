@@ -57,7 +57,7 @@ Outside the pnpm workspace:
 | `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change — three defects were invisible on small fixtures. |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
 | `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads** — `setup.ts` copies from here. |
-| `packages/cli/skills/` | Older un-prefixed copies of the same five skills plus the maintainer-only `docs` skill. Nothing reads this at runtime: every skill lookup resolves against the *store* (`<phrenPath>/global/skills`, `<project>/skills`), never the package. Edit `starter/global/skills/` instead. |
+| `.claude/skills/docs/` | Maintainer-only `docs` skill for this repo (update every documentation surface after a change). Not shipped. |
 | `packages/cli/starter/` | Bundled starter templates (4 project types, copied to ~/.phren on init) |
 | `packages/cli/starter/templates/` | Project templates: python-project, monorepo, library, frontend |
 | `docs/index.html` | GitHub Pages site |

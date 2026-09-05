@@ -654,8 +654,15 @@ export function getProjectDirs(phrenPath: string, profile?: string): string[] {
   }
 }
 
+/** Claude's own memory directory is indexed only when asked: by default phren indexes phren. */
+export function nativeMemoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.PHREN_FEATURE_NATIVE_MEMORY?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on";
+}
+
 // Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
 export function collectNativeMemoryFiles(): Array<{ project: string; file: string; fullPath: string }> {
+  if (!nativeMemoryEnabled()) return [];
   const claudeProjectsDir = homePath(".claude", "projects");
   if (!fs.existsSync(claudeProjectsDir)) return [];
 

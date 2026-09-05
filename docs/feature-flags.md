@@ -13,6 +13,10 @@ The [management preset](footprint.md) is the coarse control; these flags are the
 
 The `manual` preset writes `PHREN_FEATURE_AUTO_CAPTURE=0`, `PHREN_FEATURE_AUTO_EXTRACT=0`, and `PHREN_FEATURE_DAILY_MAINTENANCE=0` into `~/.phren/.env` at install so its automations stay off; you can flip any of them back on individually there.
 
+## PHREN_FEATURE_NATIVE_MEMORY
+
+Default: **off**. When on, phren also indexes Claude Code's own memory files (`~/.claude/projects/*/memory/*.md`) and can inject them as context. Off by default since 0.2.0: phren indexes phren, and Claude's memory directory is Claude's. Set `PHREN_FEATURE_NATIVE_MEMORY=1` to restore the old behaviour.
+
 ## PHREN_FEATURE_TOOL_HOOK
 
 **Default:** enabled

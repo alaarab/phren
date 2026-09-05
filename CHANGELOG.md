@@ -33,6 +33,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   A composite validates against the target tool's own schema and returns the
   parameter list on a miss, so the old parameters are unchanged.
 
+- **Skills are no longer indexed as memory.** The default index policy excludes
+  `**/skills/**` and `.claude/skills/**`. Skills are instructions you invoke by
+  name; indexed, they were crowding findings out of the prompt's context budget
+  (nine of twelve injections in one session were skill files). They stay
+  reachable through `list_skills` and the global CLAUDE.md. Existing stores
+  keep their own `index-policy.json`; `phren config index` shows it.
+- **Claude's own memory directory is indexed only when asked.**
+  `PHREN_FEATURE_NATIVE_MEMORY=1` turns it back on; by default phren indexes
+  phren.
+- **The shipped `global/CLAUDE.md` is written to the agent, not to a new
+  user.** Under 400 words: how to recall, what to save and what not to, tasks,
+  sessions, where things are. The template comments that every session was
+  reading are gone.
+- **`/phren-sync` and `/phren-profiles` are thin wrappers around the CLI**
+  (`phren profile switch`, `phren init`, `phren add`, `phren skills sync`)
+  instead of walking the agent through hand-made symlinks, which is how an
+  agent ended up fighting `phren init`.
+
+### Removed
+
+- `packages/cli/skills/`, the older un-prefixed copies of the store skills that
+  nothing read. The maintainer-only `docs` skill moved to the repo's own
+  `.claude/skills/docs/`.
+
 
 ## [0.1.53] - 2026-09-04
 
