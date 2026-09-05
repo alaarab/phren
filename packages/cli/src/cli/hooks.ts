@@ -12,8 +12,7 @@ import {
   getPhrenPath,
 } from "../shared.js";
 import {
-  mergeConfig,
-} from "../shared/governance.js";
+  mergeConfig, recordLookupEvents } from "../shared/governance.js";
 import {
   loadIndexForHook,
   detectProject,
@@ -109,6 +108,7 @@ import {
 import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
+import { bestFindingNodeId } from "../finding-graph-id.js";
 
 // Auto-learn from prompts was removed — it learned conversational noise ("bro", "idk", typos)
 // as synonyms for high-frequency terms. Manual `phren config synonyms add` still works.
@@ -325,6 +325,35 @@ export async function handleHookPrompt() {
       budgetSelected = kept;
       budgetUsedTokens = runningTokens;
       debugLog(`injection-budget: trimmed ${selected.length} -> ${kept.length} snippets to fit ${maxInjectTokens} token budget`);
+    }
+
+    // Live activity: what a prompt pulled in is a recall as much as a search
+    // hit is, and it is by far the most common kind. Recording it here is what
+    // lets the terminal graph's watch mode, and anything else tailing the log,
+    // light up while an agent works. Best-effort: logging must never break
+    // the hook.
+    try {
+      const at = new Date().toISOString();
+      // The prompt, not the expanded keyword string: the feed shows this to a
+      // person, and "retry retry backoff backoff jitter" is not what they asked.
+      const asked = prompt.replace(/\s+/g, " ").trim().slice(0, 160);
+      recordLookupEvents(getPhrenPath(), budgetSelected.map((s) => {
+        const nodeId = s.doc.type === "findings" ? bestFindingNodeId(s.doc.project, s.doc.content, keywords) : null;
+        return {
+          at,
+          query: asked,
+          project: s.doc.project,
+          filename: s.doc.filename,
+          type: s.doc.type,
+          path: s.doc.path,
+          snippet: s.snippet,
+          source: "hook",
+          ...(nodeId ? { nodeId } : {}),
+          ...(sessionId ? { session: sessionId } : {}),
+        };
+      }));
+    } catch (err: unknown) {
+      debugLog(`hook-prompt lookup-events: ${errorMessage(err)}`);
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId);
