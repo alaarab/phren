@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings, notes, and tasks in a team sto
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (59)
+## MCP Tools (61)
 
 ### Search and Browse
 
