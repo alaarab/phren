@@ -19,7 +19,7 @@ No central registry is involved: Claude Code clones the repository and reads
 | | |
 |---|---|
 | **Skills** | The five `phren-*` slash commands, namespaced as `/phren:sync`, `/phren:discover` and so on, so they cannot collide with your own |
-| **MCP server** | phren's 59 tools, run through `npx -y @phren/cli mcp-mode` |
+| **MCP server** | phren's 61 tools, run through `npx -y @phren/cli mcp-mode` |
 | **Hook** | The session-stop hook that commits and pushes what the session learned |
 
 The MCP server runs the published CLI rather than a copy bundled in the plugin,

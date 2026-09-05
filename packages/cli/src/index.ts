@@ -264,6 +264,7 @@ async function main() {
     import("./tools/extract.js"),
     import("./tools/config.js"),
     import("./tools/notes.js"),
+    import("./tools/summaries.js"),
   ]);
   for (const mod of toolModules) mod.register(server, ctx);
   gate.finish();

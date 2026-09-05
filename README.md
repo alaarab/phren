@@ -184,7 +184,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 commands; 10 MCP tools by default, 59 in the full profile; FTS5, hooks), the interactive shell and terminal graph, the web UI |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 commands; 10 MCP tools by default, 61 in the full profile; FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`apps/ios`](apps/ios) | phren for iOS: native SwiftUI app + widgets + Siri intents (not on npm; built with XcodeGen) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |

@@ -362,6 +362,46 @@ export async function summarizeProject(phrenPath: string, project: string, opts:
   return { project, topics: results, summaryPath, summaryUpdated: changed };
 }
 
+export interface TopicFile { slug: string; file: string }
+
+/** Every markdown file under a project's reference/topics, minus the .older.md spill-over files. */
+export function listTopicFiles(phrenPath: string, project: string): TopicFile[] {
+  const dir = storeAwareProjectPath(phrenPath, project, "reference", "topics");
+  if (!dir || !fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((n) => n.endsWith(".md") && !n.endsWith(".older.md"))
+    .sort()
+    .map((n) => ({ slug: n.replace(/\.md$/, ""), file: path.join(dir, n) }));
+}
+
+/** The current Now text of a topic file and whether it is structural or prose. */
+export function readNowBlock(content: string): { text: string; structural: boolean } | null {
+  const s = content.indexOf(NOW_START.replace("-->", ""));
+  const e = content.indexOf(NOW_END);
+  if (s === -1 || e === -1 || e <= s) return null;
+  const text = content.slice(s, e).split("\n").slice(2).join("\n").trim();
+  return { text, structural: /^\d+ findings?\b|^Nothing archived/.test(text) };
+}
+
+/**
+ * Store a paragraph an agent wrote for a topic, under the same rule a model's
+ * paragraph gets: every identifier it names must appear in the bullets.
+ * Returns the invented names on refusal.
+ */
+export function setTopicSummary(filePath: string, text: string, now: () => Date = () => new Date()): { ok: true } | { ok: false; invented: string[] } | { ok: false; error: string } {
+  const paragraph = text.replace(/\s+/g, " ").trim();
+  if (paragraph.length < 40) return { ok: false, error: "A summary needs at least a couple of sentences." };
+  const content = fs.readFileSync(filePath, "utf8");
+  const bullets = parseTopicBullets(content);
+  if (!bullets.length) return { ok: false, error: "This file has no archived bullets; it is a hand-written document, not a topic archive." };
+  const invented = inventedIdentifiers(paragraph, bullets);
+  if (invented.length) return { ok: false, invented };
+  const fingerprint = contentFingerprint(content, NOW_START, NOW_END);
+  const next = upsertBlock(content, NOW_START, NOW_END, block(NOW_START, NOW_END, "## Now", paragraph, now().toISOString(), fingerprint), "top");
+  if (next !== content) atomicWriteText(filePath, next);
+  return { ok: true };
+}
+
 /** The "What phren knows" block of a project, for the hook to inject; null when absent. */
 export function readKnowsBlock(phrenPath: string, project: string): { path: string; text: string } | null {
   const summaryPath = storeAwareProjectPath(phrenPath, project, "summary.md");
