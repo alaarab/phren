@@ -14,7 +14,7 @@ pnpm workspace with turborepo. Shipped packages:
 | Package | Path | npm | Description |
 |---------|------|-----|-------------|
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
-| `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension |
+| `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension. Versions separately from the CLI (`packages/vscode/CHANGELOG.md`, shown on the Marketplace listing) and releases through the `Release VS Code extension` workflow. It is a thin client calling MCP tools by name, so it starts its server in the `full` tool profile, and a test in `packages/cli` fails if the CLI stops registering a tool it calls. |
 
 Experimental (not published, not wired into the `phren` CLI):
 

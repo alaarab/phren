@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- A **release workflow for the VS Code extension** (`Release VS Code
+  extension`), matching the CLI's: dispatch with the version you expect, it
+  verifies `packages/vscode/package.json` and `packages/vscode/CHANGELOG.md`,
+  builds, lints and tests the workspace, packages the `.vsix`, attaches it to
+  the run, publishes to the Marketplace, and tags `vscode-vX.Y.Z`. Publishing
+  needs a `VSCE_PAT` repository secret; without it the run fails after
+  attaching the `.vsix`, so a missing token costs a manual upload rather than
+  a rebuild.
+- A test that **fails when the CLI stops registering a tool the VS Code
+  extension calls**. The extension names 45 tools as strings from a package
+  with no dependency on this one; 0.2.0's core profile hid them and every
+  sidebar action broke, which nothing caught. The failure now names the tool
+  and the file that calls it.
+
+
 ## [0.2.8] - 2026-09-05
 
 ### Added

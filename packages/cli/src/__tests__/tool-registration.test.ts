@@ -74,6 +74,34 @@ describe("MCP tool registration", () => {
     expect(names.length).toBeGreaterThan(0);
   });
 
+  /**
+   * The VS Code extension is a thin client that calls MCP tools by name, as
+   * strings, from a package with no dependency on this one. Nothing linked the
+   * two until `@phren/cli` 0.2.0's core tool profile stopped exposing the names
+   * it calls and every sidebar action failed against a 0.2.x phren — caught by
+   * reading code after the release, not by a test. This is that test.
+   */
+  it("registers every tool the VS Code extension calls", () => {
+    const registered = new Set(registerAllTools());
+    const srcDir = path.resolve(__dirname, "..", "..", "..", "vscode", "src");
+    const called = new Map<string, string>();
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full); continue; }
+        if (!entry.name.endsWith(".ts")) continue;
+        for (const m of fs.readFileSync(full, "utf8").matchAll(/callTool\(\s*"([a-z_]+)"/g)) {
+          if (!called.has(m[1])) called.set(m[1], path.relative(srcDir, full));
+        }
+      }
+    };
+    walk(srcDir);
+
+    expect(called.size, "expected to find callTool(\"...\") sites in packages/vscode/src").toBeGreaterThan(20);
+    const missing = [...called.entries()].filter(([name]) => !registered.has(name)).map(([name, file]) => `${name} (called from vscode/src/${file})`);
+    expect(missing, "the extension calls MCP tools this package no longer registers; add them back, or update the extension and its minimum phren version").toEqual([]);
+  });
+
   // Guards against the doc-rot pattern where a tool is added/removed but the
   // headline count in docs/api-reference.md ("Phren exposes N MCP tools across
   // M modules") is never updated — that sentence once said 54 when the real
