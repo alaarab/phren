@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-09-06
+
+### Security
+
+- `qs` is pinned to **>= 6.16.0**, closing two advisories. The previous floor of
+  `>= 6.15.2` resolved to 6.15.3 — still inside the vulnerable range, which is why
+  the alerts persisted behind an override that looked like it covered them.
+- Transitive dependency pins moved to `pnpm-workspace.yaml`. They had been sitting in
+  `package.json`'s `pnpm.overrides`, which pnpm 10 no longer reads, beside an
+  npm-style top-level `overrides` block that pnpm never read at all. The pins applied
+  only because they were already resolved into the lockfile; the next resolve would
+  have silently dropped every one.
+
+### Added
+
+- **phren for iOS can edit skills and browse the memory graph.** Skills sync and edit
+  in both shapes the CLI recognises (`<scope>/skills/<name>.md` and
+  `<scope>/skills/<name>/SKILL.md`), under `global/` as well as per project. The graph
+  runs the same renderer as the web memory UI and the VS Code webview, with the
+  payload built on-device since the app is serverless; edits made in it become
+  ordinary pending ops.
+
+### Fixed
+
+- The browser e2e suite no longer rots by wall clock. Its fixtures dated findings to
+  fixed days, so once those aged past the retention TTL the trust filter stripped the
+  bullet bodies and two specs began failing on a calendar date rather than a code
+  change. Also fixed two races against deferred renderer work and two assertions that
+  turned on fixture arithmetic instead of behaviour.
+
+
 ## [0.2.9] - 2026-09-05
 
 ### Added
