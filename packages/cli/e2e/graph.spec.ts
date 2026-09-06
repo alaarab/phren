@@ -1101,13 +1101,26 @@ test.describe.serial("graph visualization e2e", () => {
     const panel = page.locator(".phren-project-panel");
     await expect(panel).toBeVisible({ timeout: 8_000 });
 
-    // Restrict to findings, enter select mode, pick all (fixture: 2 findings).
+    // Restrict to findings and enter select mode, then pick rows explicitly.
+    //
+    // This used to press "Select all" and assume the fixture held exactly two
+    // findings. repo-a holds three, and these specs share one mutating store in
+    // file order, so what "all" meant drifted with fixture edits and test
+    // order — the assertion turned on arithmetic rather than on the rule it
+    // names. Picking rows directly states that rule, in both directions.
     await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await panel.locator("[data-pp-select]").click();
     const merge = panel.locator("[data-pp-bulk-merge]");
+    const rows = panel.locator(".phren-pp-row");
+    expect(await rows.count()).toBeGreaterThanOrEqual(2);
+
     await expect(merge).toBeHidden(); // nothing picked yet
-    await panel.locator("[data-pp-bulk-all]").click();
+    await rows.nth(0).click();
+    await expect(merge).toBeHidden(); // one is not enough
+    await rows.nth(1).click();
     await expect(merge).toBeVisible(); // exactly two same-project findings
+    await rows.nth(0).click();
+    await expect(merge).toBeHidden(); // back to one
   });
 
   test("merge combines two findings and undo restores them", async ({ page }) => {
@@ -1115,8 +1128,11 @@ test.describe.serial("graph visualization e2e", () => {
     await openGraphTab(page);
     const repoAFindings = () => page.evaluate(() =>
       (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "finding" && n.projectName === "repo-a").length);
+    // Captured rather than hard-coded: these specs share one store and mutate
+    // it in order, so repo-a's finding count depends on what ran before. The
+    // merge rule is "two into one", which is what the deltas below assert.
     const before = await repoAFindings();
-    expect(before).toBe(2);
+    expect(before).toBeGreaterThanOrEqual(2);
 
     await page.evaluate(() => {
       const pg = (window as any).phrenGraph;
@@ -1126,13 +1142,17 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(panel).toBeVisible({ timeout: 8_000 });
     await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await panel.locator("[data-pp-select]").click();
-    await panel.locator("[data-pp-bulk-all]").click();
+    // Exactly two: merge is offered only for a pair, so "select all" merges
+    // nothing the moment the fixture carries a third finding.
+    const mergeRows = panel.locator(".phren-pp-row");
+    await mergeRows.nth(0).click();
+    await mergeRows.nth(1).click();
     await panel.locator("[data-pp-bulk-merge]").click();
-    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(1);
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(before - 1);
 
     // Undo splits the merged bullet back into the two originals (net-zero).
     await page.locator("#toast-container button", { hasText: "Undo" }).click();
-    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(2);
+    await expect.poll(repoAFindings, { timeout: 10_000 }).toBe(before);
   });
 
   test("contents pane multi-select shows a bulk delete bar", async ({ page }) => {
@@ -1236,15 +1256,32 @@ test.describe.serial("graph visualization e2e", () => {
     const panel = page.locator(".phren-project-panel");
     await expect(panel).toBeVisible({ timeout: 8_000 });
 
-    const before = (await panel.boundingBox())!.width;
+    const paneWidth = async () => (await panel.boundingBox())?.width ?? 0;
+
+    // selectNode() on a project reveals this pane twice: once immediately
+    // ({transitioning:true}) and again ~900ms later ({forceOpen:true}), after
+    // the camera settles (graph/interactions.ts). Dragging across that second
+    // reveal replaces the element mid-gesture, and a single boundingBox() call
+    // then reads null — an intermittent "Cannot read properties of null
+    // (reading 'width')". Wait for the width to hold steady first.
+    await expect.poll(async () => {
+      const first = await paneWidth();
+      await page.waitForTimeout(250);
+      return first > 0 && first === (await paneWidth()) ? "settled" : "moving";
+    }, { timeout: 10_000 }).toBe("settled");
+
+    const before = await paneWidth();
     const handle = panel.locator(".phren-pp-resize");
     const hb = (await handle.boundingBox())!;
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    await page.mouse.move(hb.x - 130, hb.y + hb.height / 2, { steps: 8 }); // drag inward → wider
+    // Clamped to stay on-screen: the handle sits on the pane's left edge, and
+    // an unclamped target goes negative when the pane starts near the left.
+    await page.mouse.move(Math.max(20, hb.x - 130), hb.y + hb.height / 2, { steps: 8 }); // drag inward → wider
     await page.mouse.up();
-    const after = (await panel.boundingBox())!.width;
-    expect(after).toBeGreaterThan(before + 60);
+
+    await expect(panel).toBeVisible();
+    await expect.poll(paneWidth, { timeout: 5_000 }).toBeGreaterThan(before + 60);
   });
 
   test("bulk delete offers undo that restores the findings", async ({ page }) => {
@@ -1329,15 +1366,33 @@ test.describe.serial("graph visualization e2e", () => {
     const orbs = page.locator(".phren-project-nav .phren-project-orb");
     await expect.poll(async () => orbs.count(), { timeout: 8_000 }).toBeGreaterThan(1);
 
-    // Focus the canvas (not a text field), then step forward with ArrowRight.
+    // stepProject() cycles over *visible* projects, not rendered orbs: with one
+    // visible project the second press hits its own id and calls
+    // clearSelection() instead of advancing. Assert the real precondition.
+    const visibleProjects = await page.evaluate(() =>
+      (window as any).phrenGraph.getData().nodes.filter((n: any) => n.kind === "project").length);
+    expect(visibleProjects, "navigator needs two visible projects to cycle").toBeGreaterThan(1);
+
+    const activeProject = () =>
+      page.locator(".phren-project-orb.active").first().getAttribute("data-project-id");
+
+    // Focus the canvas (not a text field) before sending keys. That click is a
+    // *background* click, and the renderer answers it with clearSelection()
+    // (graph/scene.ts onBackgroundClick) — asynchronously. When that landed
+    // after the first ArrowRight it wiped the focus the press had just set, so
+    // the second press started from nothing and re-selected the same project.
+    // Waiting for the clear makes both presses deterministic.
     await page.locator("#graph-canvas").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator(".phren-project-orb.active")).toHaveCount(0);
+
     await page.keyboard.press("ArrowRight");
     await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
-    const firstActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
+    const firstActive = await activeProject();
 
-    // ArrowRight again moves to a different project.
+    // ArrowRight again moves to a different project. Polled rather than read
+    // once: sampling the attribute straight after the keypress races the orbs
+    // repainting.
     await page.keyboard.press("ArrowRight");
-    const secondActive = await page.locator(".phren-project-orb.active").getAttribute("data-project-id");
-    expect(secondActive).not.toBe(firstActive);
+    await expect.poll(activeProject, { timeout: 8_000 }).not.toBe(firstActive);
   });
 });

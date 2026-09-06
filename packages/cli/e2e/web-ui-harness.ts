@@ -127,12 +127,18 @@ function seedProjectFixtures(phrenDir: string): void {
     path.join(phrenDir, "repo-a", "summary.md"),
     "# repo-a\n\nRepo A summary for browser smoke coverage.\n",
   );
+  // Date fixture content as *today*, for the same reason the big-store fixture
+  // does: past the retention TTL the trust filter strips the bullet bodies, so
+  // the graph renders no finding nodes and the select/merge assertions fail on
+  // a calendar date rather than a regression.
+  const today = new Date().toISOString().slice(0, 10);
+
   writeFile(
     path.join(phrenDir, "repo-a", "FINDINGS.md"),
     [
       "# repo-a FINDINGS",
       "",
-      "## 2026-03-10",
+      `## ${today}`,
       "",
       "- [pattern] Browser smoke finding",
       "- [decision] Web UI should launch from an isolated test store",
@@ -170,7 +176,7 @@ function seedProjectFixtures(phrenDir: string): void {
       "",
       "## Review",
       "",
-      "- [2026-03-10] Review me first [confidence 0.90]",
+      `- [${today}] Review me first [confidence 0.90]`,
       "",
     ].join("\n"),
   );
@@ -184,7 +190,7 @@ function seedProjectFixtures(phrenDir: string): void {
     [
       "# repo-b FINDINGS",
       "",
-      "## 2026-03-10",
+      `## ${today}`,
       "",
       "- [pitfall] Secondary project keeps graph filters populated",
       "",

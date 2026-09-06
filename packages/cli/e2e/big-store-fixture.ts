@@ -58,7 +58,15 @@ function hash(s: string): number {
 }
 
 function findingsFor(project: string, others: string[]): string {
-  const lines = [`# ${project} FINDINGS`, "", "## 2026-04-12", ""];
+  // Date the findings as *today*. A hard-coded date rots: once it ages past
+  // the retention TTL (120 days, governance/policy.ts) the trust filter strips
+  // the bullet bodies, leaving only the "# <project> FINDINGS" header — so
+  // search returns no bullet for bestFindingNodeId to resolve, and the
+  // activity feed's nodeId assertion starts failing on a wall-clock date
+  // rather than on a code change. The lookup-events unit test documents the
+  // same trap.
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = [`# ${project} FINDINGS`, "", `## ${today}`, ""];
   const count = 18 + (hash(project) % 10); // 18–27 findings
   for (let i = 0; i < count; i++) {
     const seed = hash(project) + i;
