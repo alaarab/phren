@@ -1,3 +1,31 @@
 packages:
   - "packages/*"
   - "experimental/*"
+
+# Transitive-dependency pins, mostly security floors for packages we do not
+# depend on directly.
+#
+# These live here rather than in package.json's `pnpm.overrides`: pnpm 10 no
+# longer reads that field and warns it is ignoring it, so the pins survived
+# only because they were already baked into the lockfile — the next resolve
+# would have quietly dropped them. The npm-style top-level `overrides` block
+# that sat beside it was never read by pnpm at all.
+overrides:
+  fast-uri: ^3.1.4
+  flatted: ^3.4.2
+  hono: ^4.12.34
+  "@hono/node-server": ">=2.0.5"
+  body-parser: ">=2.3.0"
+  ip-address: ^10.3.1
+  undici: ^7.29.0
+  form-data: ">=4.0.6"
+  vite: ^8.2.2
+  uuid: ^14.0.0
+  tmp: ">=0.2.7"
+  ws: ">=8.21.0"
+  # GHSA advisories on qs < 6.16.0. The previous floor of >=6.15.2 resolved to
+  # 6.15.3, which is still inside the vulnerable range.
+  qs: ">=6.16.0"
+  brace-expansion: ">=5.0.8"
+  markdown-it: ^14.2.0
+  linkify-it: ^5.0.1
