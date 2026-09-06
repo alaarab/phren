@@ -25,6 +25,8 @@ npx @phren/cli init
 
 One command. Sets up `~/.phren`, wires up MCP for your tools, installs hooks. Next time you open a project, context starts flowing automatically. On a new machine? Re-run init and you're back in sync.
 
+Periodic remote checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while an MCP server is running. Clients sharing a store coordinate one check; only changed remote refs trigger a fetch, and automatic updates are fast-forward only. Use `phren config pull-interval 600` for ten minutes, or `phren config pull-interval off` to disable periodic checks. See [Git sync](https://alaarab.github.io/phren/docs.html#syncing) for details.
+
 ---
 
 ## What actually happens

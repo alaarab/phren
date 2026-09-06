@@ -38,7 +38,7 @@ import {
   readSessionStateFile,
   writeSessionStateFile,
 } from "../session/utils.js";
-import { runBestEffortGit, countUnsyncedCommits } from "./session-git.js";
+import { runBestEffortGit, countUnsyncedCommits, pullAtSessionStart } from "./session-git.js";
 import { scheduleBackgroundMaintenance } from "./session-background.js";
 import { runDoctor } from "./hooks-context.js";
 
@@ -182,7 +182,7 @@ export async function handleHookSessionStart() {
   const pull = !gitRepo.ok
     ? { ok: false, error: gitRepo.detail }
     : hasRemote
-      ? await runBestEffortGit(["pull", "--rebase", "--quiet"], phrenPath)
+      ? await pullAtSessionStart(phrenPath)
       : {
           ok: true,
           output: gitRepo.initialized
@@ -220,7 +220,7 @@ export async function handleHookSessionStart() {
     for (const store of otherStores) {
       if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
       try {
-        await runBestEffortGit(["pull", "--rebase", "--quiet"], store.path);
+        await pullAtSessionStart(store.path);
       } catch (err: unknown) {
         debugLog(`session-start store-pull ${store.name}: ${errorMessage(err)}`);
       }

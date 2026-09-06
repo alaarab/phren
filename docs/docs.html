@@ -997,7 +997,7 @@ phren push_changes "sync from laptop"
 
 # On a new machine
 phren init  # pulls from remote</code></pre>
-        <p>The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session.</p>
+        <p>The <code>SessionStart</code> hook automatically runs <code>git pull</code> at the start of every session. Periodic checks are off by default; enable checks every minute with <code>phren config pull-interval 60</code> while an MCP server is running.</p>
 
         <h2 id="gs-agents">Agent Setup <a href="#gs-agents" class="anchor-link">#</a></h2>
         <p><code>phren init</code> auto-configures all detected agents:</p>
@@ -1246,6 +1246,7 @@ sequenceDiagram
           <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>PHREN_CONTEXT_TOKEN_BUDGET</code></td><td>550</td><td>Max tokens injected per hook-prompt call (180--10000)</td></tr>
+            <tr><td><code>PHREN_PULL_INTERVAL_SECONDS</code></td><td>0 (off)</td><td>Overrides the machine-local interval for periodic MCP remote checks. Whole seconds from 30 to 86400; 0 or off disables.</td></tr>
             <tr><td><code>PHREN_CONTEXT_SNIPPET_LINES</code></td><td>6</td><td>Max lines per snippet (2--100)</td></tr>
             <tr><td><code>PHREN_CONTEXT_SNIPPET_CHARS</code></td><td>520</td><td>Max characters per snippet (120--10000)</td></tr>
             <tr><td><code>PHREN_MAX_INJECT_TOKENS</code></td><td>2000</td><td>Hard cap on total injected tokens (200--20000)</td></tr>
@@ -2474,6 +2475,12 @@ ci-server: minimal</code></pre>
           <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
         </ul>
         <p>Findings, tasks, and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
+        <p>Periodic remote checks are off by default. Set an interval to enable checks of shared Git stores while an MCP server is running. Clients sharing a store coordinate one check per interval. Each check reads the upstream commit with <code>git ls-remote</code>; only changed refs trigger a fetch, followed by a fast-forward update. Uncommitted edits, diverged history, and in-progress Git operations defer the update and record a reason in runtime sync status. Failed remote checks back off, up to 30 minutes or the configured interval if longer.</p>
+        <pre><code>phren config pull-interval       # show this machine's effective setting
+phren config pull-interval 60    # enable checks every minute
+phren config pull-interval 600   # every ten minutes
+phren config pull-interval off   # disable periodic checks (default)</code></pre>
+        <p>The setting is machine-local, accepts whole seconds from 30 to 86400 (or 0/off), and is reloaded by running servers. <code>PHREN_PULL_INTERVAL_SECONDS</code> overrides it. Pulled changes refresh each client's memory index and existing managed skill/instruction mirrors; agents consume instructions at their normal reload boundaries. No service is installed: periodic checks stop when the MCP server closes. The manual preset and project-local/workspace-Git installs do not poll by default. SessionStart and Stop hooks are configured separately.</p>
 
         <h3 id="linking">Machine Setup</h3>
         <p><code>phren init</code> wires everything together on a machine. It detects the current install mode, configures MCP settings for supported agents, registers lifecycle hooks, applies machine/profile defaults, and refreshes generated assets.</p>

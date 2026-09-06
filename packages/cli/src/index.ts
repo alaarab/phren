@@ -58,6 +58,11 @@ function cleanStaleLocks(phrenPath: string): void {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > STALE_LOCK_MS) {
+          const pid = Number.parseInt(fs.readFileSync(lockPath, "utf8").split("\n")[0], 10);
+          if (pid > 0) {
+            try { process.kill(pid, 0); continue; }
+            catch (err: unknown) { if ((err as NodeJS.ErrnoException).code !== "ESRCH") continue; }
+          }
           fs.unlinkSync(lockPath);
           debugLog(`Cleaned stale lock: ${entry}`);
         }
@@ -121,12 +126,12 @@ async function main() {
   let writeQueueDepth = 0;
   const MAX_QUEUE_DEPTH = 50;
   const WRITE_TIMEOUT_MS = 30_000;
-  async function rebuildIndex() {
+  async function rebuildIndex(force = false) {
     runCustomHooks(phrenPath, "pre-index");
     const oldDb = db;
     try {
       indexReady = false;
-      db = await buildIndex(phrenPath, profile);
+      db = await buildIndex(phrenPath, profile, { force });
       indexReady = true;
       // buildIndex() hands back its cached handle inside the debounce
       // window, so oldDb can be the very database we just installed.
@@ -273,10 +278,31 @@ async function main() {
   await server.connect(transport);
   console.error(`phren-mcp running (${phrenPath}) · profile ${mcpProfile} · ${gate.exposed.size} tools`);
 
+  const { startPullPolling } = await import("./sync/pull.js");
+  const { refreshLinkedContext } = await import("./link/refresh.js");
+  const polling = startPullPolling(phrenPath, {
+    onChange: async () => {
+      // Index refresh still succeeds if an external mirror is temporarily unwritable.
+      try { refreshLinkedContext(phrenPath, profile); }
+      catch (err: unknown) { logger.warn("periodic-pull", `context refresh: ${errorMessage(err)}`); }
+      await rebuildIndex(true);
+    },
+    runExclusive: (fn) => {
+      // Network calls have their own timeouts. Do not release the queue while
+      // an underlying Git operation is still running, as Promise.race would.
+      const run = writeQueue.then(fn);
+      writeQueue = run.catch((err: unknown) => { logger.warn("periodic-pull", errorMessage(err)); });
+      return run;
+    },
+  });
+  server.server.onclose = () => { void shutdown("transport closed"); };
+
   // Graceful shutdown: drain write queue and close DB before exit
   async function shutdown(signal: string): Promise<void> {
+    if (shuttingDown) return;
     shuttingDown = true;
     structuredLog("info", "shutdown", `Received ${signal}, draining write queue...`);
+    await polling.stop();
     try {
       await writeQueue;
     } catch {

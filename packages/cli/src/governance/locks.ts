@@ -79,6 +79,39 @@ function releaseFileLock(lockPath: string): void {
   }
 }
 
+/** A non-blocking lock for background work. Uses the same files as withFileLock. */
+export function tryFileLock(filePath: string): (() => void) | null {
+  const lockPath = filePath + ".lock";
+  const owner = `${process.pid}\n${Date.now()}\n${Math.random()}`;
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(lockPath, owner, { flag: "wx", mode: 0o600 });
+      return () => {
+        try {
+          if (fs.readFileSync(lockPath, "utf8") === owner) fs.unlinkSync(lockPath);
+        } catch { /* already released */ }
+      };
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        const contents = fs.readFileSync(lockPath, "utf8");
+        const pid = Number.parseInt(contents.split("\n")[0], 10);
+        if (pid > 0) {
+          try { process.kill(pid, 0); return null; }
+          catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") return null;
+          }
+        } else if (Date.now() - fs.statSync(lockPath).mtimeMs < 30_000) {
+          return null;
+        }
+        if (fs.readFileSync(lockPath, "utf8") === contents) fs.unlinkSync(lockPath);
+      } catch { return null; }
+    }
+  }
+  return null;
+}
+
 // Q10: withFileLock now accepts both sync and async callbacks.
 // When the callback returns a Promise, the lock file is held until the
 // Promise settles — preventing concurrent processes from seeing partial state.

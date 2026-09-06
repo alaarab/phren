@@ -83,6 +83,17 @@ describe("index invalidation: file changes trigger rebuild", () => {
     expect(data.meta[findingsPath]).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size });
   });
 
+  it("forces a refresh of pulled content while a recently built index is still open", async () => {
+    db = await buildIndex(tmp.path);
+    const oldDb = db;
+    writeFile(path.join(tmp.path, "myapp", "FINDINGS.md"), "# Findings\n\n- Remote knowledge received from another machine\n");
+    try {
+      db = await buildIndex(tmp.path, undefined, { force: true });
+      expect(db.exec("SELECT content FROM docs WHERE content LIKE '%Remote knowledge%'").length).toBeGreaterThan(0);
+      expect(db.exec("SELECT content FROM docs WHERE content LIKE '%Zymurgical%'")).toHaveLength(0);
+    } finally { if (oldDb !== db) oldDb.close(); }
+  });
+
   it("rewriting a file with identical content (mtime bump) keeps the doc indexed", async () => {
     db = await buildIndex(tmp.path);
     db.close();

@@ -1780,10 +1780,11 @@ function isDbOpen(db: SqlJsDatabase): boolean {
   }
 }
 
-export async function buildIndex(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+export async function buildIndex(phrenPath: string, profile?: string, options: { force?: boolean } = {}): Promise<SqlJsDatabase> {
   const debounceMs = getIndexDebounceMs();
   const buildKey = `${phrenPath}|${profile ?? ""}`;
   if (
+    !options.force &&
     debounceMs > 0 &&
     _lastBuiltDb !== null &&
     _lastBuildKey === buildKey &&

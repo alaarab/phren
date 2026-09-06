@@ -184,6 +184,7 @@ CLI Commands:
     phren config telemetry [on|off]       - opt-in usage telemetry
     phren config machines                 - registered machines
     phren config profiles                 - profiles and projects
+    phren config pull-interval [seconds|off] - machine-local periodic MCP remote checks (default off; 30–86400 or 0/off)
 
   Maintenance:
     phren maintain govern [project]       - queue stale/conflicting memories
@@ -224,6 +225,7 @@ Environment Variables:
 
   PHREN_PATH                    - override phren directory (default: ~/.phren)
   PHREN_PROFILE                 - active profile name (filters indexed projects)
+  PHREN_PULL_INTERVAL_SECONDS   - overrides machine-local periodic MCP checks (default off; 30–86400 or 0/off)
   PHREN_ACTOR                   - identity for access control and audit logging
   PHREN_DEBUG                   - set to 1 for debug logging to ~/.phren/.runtime/debug.log
   PHREN_CONTEXT_TOKEN_BUDGET    - max approx tokens injected by hook-prompt (default: 550)

@@ -99,6 +99,8 @@ Copilot CLI, Cursor, and Codex use two layers:
 
 This gives Claude full native lifecycle parity while keeping other tools synchronized through wrappers + config.
 
+Running MCP servers can poll shared Git stores on a configurable interval (off by default; enable with `phren config pull-interval 60` for one minute). A per-store process lock and shared timestamp coordinate checks across clients. `git ls-remote` compares the upstream commit before fetching; a shared Git-operation lock protects clean fast-forward updates against session hooks and pushes. Polling defers dirty or diverged stores and backs off network failures. Each server watches local HEAD changes to refresh its index and existing managed skill/instruction mirrors, including updates pulled by a sibling client. This runs only during the MCP server's lifetime, respects lifecycle-automation presets, and excludes project-local/workspace-Git installs.
+
 ## MCP Server Modules
 
 Phren MCP is split into 13 modules:

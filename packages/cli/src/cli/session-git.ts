@@ -12,6 +12,8 @@ import {
 } from "./hooks-context.js";
 import { runGit } from "../utils.js";
 import { isTaskFileName } from "../data/tasks.js";
+import { withFileLock } from "../governance/locks.js";
+import { runtimeFile } from "../phren-paths.js";
 import {
   autoMergeConflicts,
   mergeTask,
@@ -142,6 +144,26 @@ export async function countUnsyncedCommits(cwd: string): Promise<number> {
   if (!ahead.ok || !ahead.output) return 0;
   const parsed = Number.parseInt(ahead.output.trim(), 10);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/** Startup pulls share the store's Git lock and clean up only rebases they started. */
+export async function pullAtSessionStart(cwd: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+  try {
+    return await withFileLock(runtimeFile(cwd, "git-op"), async () => {
+      const gitDir = await runBestEffortGit(["rev-parse", "--absolute-git-dir"], cwd);
+      if (!gitDir.ok || !gitDir.output) return { ok: false, error: gitDir.error || "Cannot locate Git directory." };
+      const rebasing = () => ["rebase-merge", "rebase-apply"].some((name) => fs.existsSync(path.join(gitDir.output!, name)));
+      if (rebasing() || ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer"].some((name) => fs.existsSync(path.join(gitDir.output!, name)))) {
+        return { ok: false, error: "Store already has a Git operation in progress; session-start pull deferred." };
+      }
+      const result = await runBestEffortGit(["pull", "--rebase", "--quiet"], cwd);
+      if (!result.ok && rebasing()) {
+        const abort = await runBestEffortGit(["rebase", "--abort"], cwd);
+        if (!abort.ok) return { ok: false, error: `${result.error}; rebase cleanup failed: ${abort.error}` };
+      }
+      return result;
+    });
+  } catch (err: unknown) { return { ok: false, error: errorMessage(err) }; }
 }
 
 // ── Merge helpers ───────────────────────────────────────────────────────────

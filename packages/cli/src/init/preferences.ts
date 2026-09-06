@@ -54,6 +54,8 @@ export interface InstallPreferences {
   managedPrePromptSiblingCommands?: string[];
   /** Whether the user intended cross-machine sync ("sync") or local-only ("local"). */
   syncIntent?: "sync" | "local";
+  /** Seconds between MCP remote checks. 0 disables periodic pulls (the default). */
+  pullIntervalSeconds?: number;
 }
 
 function preferencesFile(phrenPath: string): string {

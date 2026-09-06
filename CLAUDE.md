@@ -47,6 +47,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/content/` | Content operations: finding CRUD, trust filtering, dedup, consolidation |
 | `packages/cli/src/governance/` | Governance: policy/access/workflow config, review queue, audit log, locks |
 | `packages/cli/src/shared/index.ts` | FTS5 indexer: buildIndex, queryRows, @import resolution, file classification |
+| `packages/cli/src/sync/pull.ts` | Configurable MCP remote polling (off by default), coordinated per store; fast-forward updates refresh the index and existing managed context through `link/refresh.ts`. |
 | `packages/cli/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `packages/cli/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
 | `packages/cli/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |

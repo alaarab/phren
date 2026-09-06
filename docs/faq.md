@@ -32,6 +32,8 @@ They all read and write the same `~/.phren` directory. Concurrent reads are safe
 
 In practice: an agent on Codex hits a pitfall and saves a finding. On the next git pull cycle, a Claude Code session on a different machine has it in context. No coordination code, no message passing. It's just a shared git repo.
 
+Periodic checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while an MCP server is running, sharing one check per store across clients. A check compares the remote commit; only changed refs are fetched, and only clean fast-forwards are applied. Use `phren config pull-interval 600` for ten minutes or `phren config pull-interval off` to stop periodic checks on this machine. Pulled content refreshes the memory index and existing managed skill/instruction mirrors. The manual preset and project-local installs do not poll by default, and a closed MCP server does not run a timer. SessionStart/Stop hooks keep their existing sync behavior.
+
 The one rough edge is heavy concurrent writes on the same machine. If two agents are pushing at exactly the same moment you can get a push conflict or a locally saved commit that has not been pushed yet. Phren retries transient git failures, rebases and auto-merges safe markdown conflicts in the background sync worker, and surfaces remaining failures in status, shell, and web UI. Under extreme parallelism, think of Phren as eventually consistent rather than strongly coordinated.
 
 ## What failure modes should I expect?

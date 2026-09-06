@@ -3,6 +3,7 @@ import { listMachines as listMachinesStore, listProfiles as listProfilesStore } 
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "../telemetry.js";
 import { readInstallPreferences, updateInstallPreferences } from "../init/preferences.js";
 import { resolveMcpProfile } from "../mcp/profile.js";
+import { parsePullInterval, resolvePullInterval, periodicPullEnabled } from "../sync/pull.js";
 import * as path from "path";
 import { buildConfigView, type ConfigView } from "../config/resolve.js";
 import { CONFIG_DOMAINS } from "../config/schema.js";
@@ -130,6 +131,8 @@ export async function handleConfig(args: string[]) {
       return handleConfigTelemetry(rest);
     case "mcp-profile":
       return handleConfigMcpProfile(rest);
+    case "pull-interval":
+      return handleConfigPullInterval(rest);
     case "proactivity":
     case "proactivity.findings":
     case "proactivity.tasks":
@@ -175,6 +178,8 @@ Subcommands:
                                         Manage project learned synonyms
   phren config machines                 Registered machines and profiles
   phren config profiles                 All profiles and their projects
+  phren config pull-interval [seconds|off]
+                                        Periodic MCP remote checks (default: off)
   phren config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
       if (sub) {
         console.error(`\nUnknown config subcommand: "${sub}"`);
@@ -184,6 +189,27 @@ Subcommands:
 }
 
 // ── Machines and profiles ────────────────────────────────────────────────────
+
+function handleConfigPullInterval(args: string[]) {
+  const phrenPath = getPhrenPath();
+  if (args.length > 0) {
+    const seconds = parsePullInterval(args[0]);
+    if (seconds === undefined || args.length !== 1) {
+      console.error("Use phren config pull-interval <seconds|off>: 0 disables polling; otherwise use a whole number from 30 to 86400.");
+      process.exitCode = 1;
+      return;
+    }
+    updateInstallPreferences(phrenPath, () => ({ pullIntervalSeconds: seconds }));
+    console.log(seconds === 0 ? "Periodic pulls disabled on this machine." : `Periodic remote checks set to every ${seconds} seconds on this machine.`);
+  }
+  const seconds = resolvePullInterval(phrenPath);
+  const source = process.env.PHREN_PULL_INTERVAL_SECONDS !== undefined
+    && parsePullInterval(process.env.PHREN_PULL_INTERVAL_SECONDS) !== undefined
+    ? "PHREN_PULL_INTERVAL_SECONDS" : readInstallPreferences(phrenPath).pullIntervalSeconds !== undefined ? "install preferences" : "default";
+  console.log(`Pull interval: ${seconds === 0 ? "off" : `${seconds} seconds`} (${source}).`);
+  if (!periodicPullEnabled(phrenPath)) console.log("Periodic pulls are inactive for this install mode or management preset.");
+  else console.log("Running MCP servers pick up changes automatically. Only changed remotes are fetched; updates are fast-forward only.");
+}
 
 function handleConfigMachines() {
   const manifest = readRootManifest(getPhrenPath());

@@ -41,6 +41,8 @@ import {
 } from "../finding/lifecycle.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { TEAM_STORE_PATHSPECS } from "../cli/session-git.js";
+import { withFileLock } from "../governance/locks.js";
+import { runtimeFile } from "../phren-paths.js";
 
 
 
@@ -584,7 +586,7 @@ async function handlePushChanges(
   { message }: { message?: string },
 ) {
   const { phrenPath, withWriteQueue } = ctx;
-  return withWriteQueue(async () => {
+  return withWriteQueue(async () => withFileLock(runtimeFile(phrenPath, "git-op"), async () => {
     const { execFileSync } = await import("child_process");
     const runGit = (args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}): string => execFileSync(
       "git",
@@ -749,7 +751,7 @@ async function handlePushChanges(
     } catch {
       // store-registry not available — skip silently
     }
-  });
+  }));
 }
 
 // ── Registration ─────────────────────────────────────────────────────────────

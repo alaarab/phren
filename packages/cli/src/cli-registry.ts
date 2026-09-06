@@ -85,6 +85,7 @@ export const ENV_HELP = `Environment variables:
   PHREN_PATH                  Override phren directory (default: ~/.phren)
   PHREN_PROFILE               Active profile name
   PHREN_DEBUG                 Enable debug logging (set to 1)
+  PHREN_PULL_INTERVAL_SECONDS Remote check interval in seconds (default: off; 0 disables)
 
   Embeddings:
   PHREN_OLLAMA_URL            Ollama base URL (default: http://localhost:11434, 'off' to disable)
@@ -156,6 +157,7 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
   { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
   { name: "mcp-profile", usage: "phren config mcp-profile [core|full]", summary: "MCP tool surface: 10 core tools or all of them" },
+  { name: "pull-interval", usage: "phren config pull-interval [seconds|off]", summary: "Periodic MCP remote checks (default: off; 0 disables)" },
 ];
 
 const MAINTAIN_SUBCOMMANDS: Subcommand[] = [

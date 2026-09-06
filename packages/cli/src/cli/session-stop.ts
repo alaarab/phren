@@ -558,71 +558,73 @@ export async function handleBackgroundSync() {
   const lockPath = runtimeFile(phrenPathLocal, "background-sync.lock");
 
   try {
-    const previousSync = getRuntimeHealth(phrenPathLocal).lastSync;
-    const record = (
-      autoSaveStatus: AutoSaveStatus,
-      patch: Omit<SyncStatus, "consecutiveFailures" | "lastSuccessfulPushAt"> & { lastPushStatus: PushStatus },
-      detail: string,
-    ) => {
-      updateRuntimeHealth(phrenPathLocal, {
-        lastAutoSave: { at: now, status: autoSaveStatus, detail },
-        lastSync: nextSyncStatus(previousSync, patch, now),
-      });
-      appendAuditLog(phrenPathLocal, "background_sync", `status=${patch.lastPushStatus} detail=${JSON.stringify(detail)}`);
-    };
+    await withFileLock(runtimeFile(phrenPathLocal, "git-op"), async () => {
+      const previousSync = getRuntimeHealth(phrenPathLocal).lastSync;
+      const record = (
+        autoSaveStatus: AutoSaveStatus,
+        patch: Omit<SyncStatus, "consecutiveFailures" | "lastSuccessfulPushAt"> & { lastPushStatus: PushStatus },
+        detail: string,
+      ) => {
+        updateRuntimeHealth(phrenPathLocal, {
+          lastAutoSave: { at: now, status: autoSaveStatus, detail },
+          lastSync: nextSyncStatus(previousSync, patch, now),
+        });
+        appendAuditLog(phrenPathLocal, "background_sync", `status=${patch.lastPushStatus} detail=${JSON.stringify(detail)}`);
+      };
 
-    const remotes = await runBestEffortGit(["remote"], phrenPathLocal);
-    if (!remotes.ok || !remotes.output) {
+      const remotes = await runBestEffortGit(["remote"], phrenPathLocal);
+      if (!remotes.ok || !remotes.output) {
+        const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
+        const detail = "background sync skipped; no remote configured";
+        record("saved-local", { lastPushAt: now, lastPushStatus: "saved-local", lastPushDetail: detail, unsyncedCommits }, detail);
+        return;
+      }
+
+      const push = await runBestEffortGit(["push"], phrenPathLocal);
+      if (push.ok) {
+        const detail = "commit pushed by background sync";
+        record("saved-pushed", { lastPushAt: now, lastPushStatus: "saved-pushed", lastPushDetail: detail, unsyncedCommits: 0 }, detail);
+        return;
+      }
+
+      const recovered = await recoverPushConflict(phrenPathLocal);
+      if (recovered.ok) {
+        record("saved-pushed", {
+          lastPushAt: now,
+          lastPushStatus: "saved-pushed",
+          lastPushDetail: recovered.detail,
+          lastPullAt: now,
+          lastPullStatus: recovered.pullStatus,
+          lastPullDetail: recovered.pullDetail,
+          lastSuccessfulPullAt: now,
+          unsyncedCommits: 0,
+        }, recovered.detail);
+        return;
+      }
+
+      // The push leg genuinely failed. Report *which* leg failed instead of the
+      // old success-shaped "saved-local", and name the unrelated-histories case
+      // specifically — no retry will ever clear it, so a generic "pull failed"
+      // would send the user chasing the wrong problem.
       const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
-      const detail = "background sync skipped; no remote configured";
-      record("saved-local", { lastPushAt: now, lastPushStatus: "saved-local", lastPushDetail: detail, unsyncedCommits }, detail);
-      return;
-    }
-
-    const push = await runBestEffortGit(["push"], phrenPathLocal);
-    if (push.ok) {
-      const detail = "commit pushed by background sync";
-      record("saved-pushed", { lastPushAt: now, lastPushStatus: "saved-pushed", lastPushDetail: detail, unsyncedCommits: 0 }, detail);
-      return;
-    }
-
-    const recovered = await recoverPushConflict(phrenPathLocal);
-    if (recovered.ok) {
-      record("saved-pushed", {
+      const unrelated = recovered.pullStatus === "error" && await hasUnrelatedHistories(phrenPathLocal);
+      const pushStatus: PushStatus = unrelated
+        ? "unrelated-histories"
+        : recovered.pullStatus === "error" ? "pull-failed" : "push-failed";
+      const failDetail = unrelated
+        ? `local and remote histories are unrelated (no merge base) — the remote was most likely re-initialized. ` +
+          `Reconcile manually: cd ${phrenPathLocal} && git fetch && git log --oneline origin/HEAD`
+        : (recovered.detail || push.error || "background sync push failed");
+      record("sync-failed", {
         lastPushAt: now,
-        lastPushStatus: "saved-pushed",
-        lastPushDetail: recovered.detail,
+        lastPushStatus: pushStatus,
+        lastPushDetail: failDetail,
         lastPullAt: now,
         lastPullStatus: recovered.pullStatus,
         lastPullDetail: recovered.pullDetail,
-        lastSuccessfulPullAt: now,
-        unsyncedCommits: 0,
-      }, recovered.detail);
-      return;
-    }
-
-    // The push leg genuinely failed. Report *which* leg failed instead of the
-    // old success-shaped "saved-local", and name the unrelated-histories case
-    // specifically — no retry will ever clear it, so a generic "pull failed"
-    // would send the user chasing the wrong problem.
-    const unsyncedCommits = await countUnsyncedCommits(phrenPathLocal);
-    const unrelated = recovered.pullStatus === "error" && await hasUnrelatedHistories(phrenPathLocal);
-    const pushStatus: PushStatus = unrelated
-      ? "unrelated-histories"
-      : recovered.pullStatus === "error" ? "pull-failed" : "push-failed";
-    const failDetail = unrelated
-      ? `local and remote histories are unrelated (no merge base) — the remote was most likely re-initialized. ` +
-        `Reconcile manually: cd ${phrenPathLocal} && git fetch && git log --oneline origin/HEAD`
-      : (recovered.detail || push.error || "background sync push failed");
-    record("sync-failed", {
-      lastPushAt: now,
-      lastPushStatus: pushStatus,
-      lastPushDetail: failDetail,
-      lastPullAt: now,
-      lastPullStatus: recovered.pullStatus,
-      lastPullDetail: recovered.pullDetail,
-      unsyncedCommits,
-    }, failDetail);
+        unsyncedCommits,
+      }, failDetail);
+    });
   } finally {
     try { fs.unlinkSync(lockPath); } catch {}
   }
