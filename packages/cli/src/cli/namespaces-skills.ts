@@ -267,8 +267,8 @@ export function handleSkillsNamespace(args: string[], profile: string) {
       console.error(`Skill not found: "${name}" in "${scope}"`);
       process.exit(1);
     }
-    setSkillEnabledAndSync(getPhrenPath(), scope, resolved.name, subcommand === "enable");
-    console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} skill ${resolved.name} in ${scope}.`);
+    setSkillEnabledAndSync(getPhrenPath(), resolved.source, resolved.name, subcommand === "enable");
+    console.log(`${subcommand === "enable" ? "Enabled" : "Disabled"} skill ${resolved.name} in ${resolved.source}${resolved.source === "global" ? " (all projects)" : ""}.`);
     return;
   }
 

@@ -535,6 +535,14 @@ Delete a skill file.
 ### `toggle_skill`
 
 Enable or disable a skill without deleting its file.
+Choices are stored in the synced `.config/skill-preferences.json` (schema 1,
+`enabledSkills` keys `<source-scope>:<lowercase-name>`). An explicit shared
+choice takes precedence over legacy machine-local `disabledSkills`; absent
+keys keep that computer's existing preference. Selecting an inherited global
+skill changes its global source setting for all projects. It does not create
+a project override of the global skill. Updated desktop clients apply phone
+changes to existing managed mirrors after pulling; agent reload boundaries
+still apply.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -751,4 +759,3 @@ Store the paragraph you wrote as the topic's `## Now` block and refresh the proj
 | `project` | string | yes | Project name, optionally store-qualified. |
 | `topic` | string | yes | Topic slug, as listed by `get_topic_summaries`. |
 | `text` | string | yes | Four to six plain sentences; only facts the bullets state, names spelled as the bullets spell them. |
-

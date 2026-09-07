@@ -838,7 +838,7 @@ function handlePostSkillToggle(req: Req, res: Res, url: string, ctx: RouteCtx): 
     if (!project || !name || (project.toLowerCase() !== "global" && !isValidProjectName(project))) return jsonErr(res, "Invalid skill toggle request");
     const skill = findSkill(ctx.phrenPath, ctx.profile || "", project, name);
     if (!skill || "error" in skill) return jsonErr(res, skill && "error" in skill ? skill.error : "Skill not found");
-    setSkillEnabledAndSync(ctx.phrenPath, project, skill.name, enabled);
+    setSkillEnabledAndSync(ctx.phrenPath, skill.source, skill.name, enabled);
     jsonOk(res, { ok: true, enabled });
   });
 }
