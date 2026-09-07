@@ -63,7 +63,7 @@ One store, seven ways in. Every surface reads and writes the same markdown files
 | **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live, so nodes light up as phren reads and writes them, and shows the coding agents running on your machine. |
 | **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings/tasks/fragments inside, a contents pane to review, edit, merge, and prune. |
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
-| **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, and the review queue on your phone, live against the store repo. Serverless: it talks to the GitHub REST API only. Widgets and Siri intents included. |
+| **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, skills, agent instructions, and the memory graph on your phone. Store sync goes directly to GitHub; optional live Herdr status uses your Moshi hook over SSH/Tailscale. Widgets and Siri intents included. |
 | **Herdr plugin** | `herdr plugin install alaarab/phren/integrations/herdr` | A keybinding that pops the shell over your Herdr layout for whatever project the pane is in. |
 | **Omarchy plugin** | `bash integrations/omarchy/install.sh` | A bar widget: projects and counts, recalls as they land, one click into the shell, graph or web viewer. Also puts `phren` in the app launcher. |
 
