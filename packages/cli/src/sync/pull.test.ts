@@ -109,7 +109,8 @@ describe("store polling with real Git repositories", () => {
     const remoteHead = publish();
     expect((await pollStore(reader, 60)).status).toBe("updated");
     expect(git(reader, "rev-parse", "HEAD")).toBe(remoteHead);
-    expect(fs.readFileSync(path.join(reader, "project", "summary.md"), "utf8")).toBe("from phone\n");
+    // Git may check out CRLF under the Windows runner's core.autocrlf.
+    expect(fs.readFileSync(path.join(reader, "project", "summary.md"), "utf8").replace(/\r\n/g, "\n")).toBe("from phone\n");
     expect(git(reader, "status", "--porcelain")).toBe("");
   });
 

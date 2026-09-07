@@ -49,6 +49,18 @@ describe("refreshing existing instruction and skill destinations", () => {
     expect(fs.existsSync(path.join(repo, ".claude"))).toBe(false);
   });
 
+  it("applies phone skill switches to existing mirrors and generated instructions", () => {
+    const { store, repo } = fixture();
+    writeFile(path.join(store, "demo", "skills", "audit.md"), "# Audit\n");
+    const skillsDir = path.join(repo, ".claude", "skills");
+    syncScopeSkillsToDir(store, "demo", skillsDir);
+    writeFile(path.join(store, ".config", "skill-preferences.json"), JSON.stringify({ schemaVersion: 1, enabledSkills: { "demo:audit": false } }));
+    refreshLinkedContext(store, "dev");
+    expect(fs.existsSync(path.join(skillsDir, "audit.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8")).toContain("Disabled skills:");
+    expect(fs.existsSync(path.join(store, "demo", "skills", "audit.md"))).toBe(true);
+  });
+
   it("respects ownership and the assisted preset", () => {
     const { store, repo } = fixture();
     const agents = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");

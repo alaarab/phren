@@ -52,6 +52,7 @@ export type PhrenGraphApi = {
   clearSelection: () => void;
   selectNode: (nodeId: string) => boolean;
   focusNode: (nodeId: string) => boolean;
+  peekNode: (nodeId: string) => void;
   walkTo: (nodeId: string) => boolean;
   getNodeAt: (x: number, y: number) => NodeDetail | null;
   getNodeDetail: (nodeId: string) => NodeDetail | null;

@@ -14,7 +14,7 @@ import { applyHighlight, refreshNodeVisual } from "./nodes.js";
 import { resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
-import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, runIntro, selectNode } from "./interactions.js";
+import { clearSelection, fitCameraToGraph, getNodeAt, hideTooltip, peekNode, runIntro, selectNode } from "./interactions.js";
 import { disposePulses, mascot, startMascot, stopMascot, walkTo } from "./mascot.js";
 import { refreshProjectPanel } from "./project-panel.js";
 
@@ -345,6 +345,13 @@ ROOT.phrenGraph = {
   clearSelection,
   selectNode,
   focusNode: selectNode,
+  peekNode(nodeId: string) {
+    if (!state.fgNodeById.has(nodeId)) return;
+    // An explicit host camera request owns the view even during first settle.
+    state.firstSettle = false;
+    state.introPlayed = true;
+    peekNode(nodeId);
+  },
   walkTo,
   getNodeAt,
   getNodeDetail: nodeDetail,
