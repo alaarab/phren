@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- iOS CI runs only by manual dispatch; the full native UI suite requires an
+  additional opt-in. Bound job/test runtime, cancel superseded runs, and retain
+  native UI artifacts for three days. Regular CI jobs have 10-minute limits.
+
 ## [0.2.14] - 2026-09-10
 
 ### Added
