@@ -6,6 +6,7 @@ import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink } f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import { planAgentHooks, upgradeKeys } from "./install.js";
 import { TranscriptReader, transcriptPath, visibleEvent, historicalImage } from "./transcripts.js";
@@ -66,6 +67,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
     await writeFile(record, JSON.stringify({ type: "session_meta", payload: { id: session } }) + "\n" + JSON.stringify(row("First message")) + "\n");
     herdr = createNetServer(socket => {
+      socket.on("error", () => { /* A cancelled client may close before the fixture's reply. */ });
       let pending = ""; socket.on("data", bytes => {
         pending += bytes;
         if (!pending.includes("\n")) return;
@@ -168,7 +170,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const page = await new TranscriptReader(record, "codex").read();
     expect(JSON.stringify(page)).not.toContain(image.toString("base64").slice(0, 300));
     expect((page.entries[0].raw.payload as any).content[1]).toEqual({ type: "input_image" });
-    expect(await historicalImage(record, 0, 1, "codex")).toEqual(image);
+    const downloaded = await historicalImage(record, 0, 1, "codex");
+    expect(downloaded.length).toBe(image.length);
+    expect(createHash("sha256").update(downloaded).digest("hex")).toBe(createHash("sha256").update(image).digest("hex"));
   });
   it("skips an oversized old row without blocking newer messages or changing line IDs", async () => {
     await writeFile(record, "");
