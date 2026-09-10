@@ -65,6 +65,16 @@ afterEach(() => {
 });
 
 describe("add_finding MCP tool", () => {
+  it("accepts a slash-joined device list through the registered tool", async () => {
+    const server = makeMockServer();
+    const ctx: McpContext = { phrenPath: tmp.path, profile: "", db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {}, updateFileInIndex: () => {}, withWriteQueue: async fn => fn() };
+    register(server as any, ctx);
+    const finding = "Keep derail/strata/cleave/cleaver/oracle/overtone/tapeworm aligned with the device registry.";
+    const result = parseResult(await server.call("add_finding", { project: PROJECT, finding }));
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(findingsPath(), "utf8")).toContain(finding);
+  });
   it("happy path: finding added to FINDINGS.md", () => {
     const r = addFindingToFile(tmp.path, PROJECT, "Always use parameterized queries to prevent SQL injection");
     expect(r.ok).toBe(true);

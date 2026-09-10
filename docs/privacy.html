@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Generated from apps/ios/AppStore/privacy-policy.md. Keep source and page in sync. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phren iOS — Privacy</title><style>
+:root{color-scheme:dark}body{margin:40px auto;padding:0 22px;max-width:760px;background:#1e1e1e;color:#fff;font:17px/1.65 system-ui,sans-serif}a{color:#c2aaff}h1,h2{line-height:1.2;margin-top:1.6em}pre,code{background:#121416;border-radius:6px}pre{padding:16px;overflow:auto}code{padding:2px 4px}nav{display:flex;gap:24px;font-size:15px}footer{margin:44px 0;color:#a4a9b1}
+</style></head><body><nav><a href="./">Phren</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a></nav><main>
+<h1>Privacy Policy — phren for iOS</h1>
+<p><strong>Last updated: 10 September 2026</strong></p>
+<p>phren for iOS (&quot;the app&quot;) is a client for a knowledge store you own, stored in a Git repository on GitHub. This policy explains what the app does with your data. Store sync goes directly to the GitHub account you connect. Optional SSH connections, agent chat, and voice features are described below.</p>
+<h2>We do not collect your data</h2>
+<p>There is no phren account or developer-operated phren backend. The developer of this app receives <strong>no</strong> data from it — no analytics, no crash reporting, no telemetry, no advertising identifiers, no usage statistics. The app uses open-source SwiftNIO SSH and Swift Crypto for optional computer connections; these libraries do not provide analytics or telemetry.</p>
+<h2>What the app stores on your device</h2>
+<ul><li><strong>Your GitHub access token</strong>, in the iOS Keychain. It never leaves the device except as an authorization header sent directly to GitHub&#x27;s API over HTTPS.</li><li><strong>A local cache</strong> of the markdown files in your store repository, so the app works offline and searches without a network round trip.</li><li><strong>A queue of pending changes</strong> you have made but which have not yet been pushed to GitHub.</li><li><strong>App settings</strong>, such as your chosen default project for quick capture and a short log of recent captures, saved graph views, and custom themes. Optional live connections also save computer addresses, usernames, trusted SSH fingerprints, and directory links to projects in device preferences.</li><li><strong>A separate SSH private key per added computer</strong>, in the device Keychain, accessible only while unlocked and excluded from Keychain syncing and backups.</li><li><strong>Last received live session metadata</strong>, such as tab names, agent states, and working directories, in memory while the session screen exists.</li><li><strong>Chat drafts and attached images</strong>, in the app&#x27;s private storage so they survive relaunch. Conversation content is read from your connected computer; it is not sent to the phren developer.</li></ul>
+<p>Deleting the app removes its private container. Keychain credentials can survive app deletion: signing out clears the GitHub token, and <strong>Forget computer</strong> deletes that connection&#x27;s SSH key. Remove the corresponding public key from the computer&#x27;s authorized_keys file to revoke its access there.</p>
+<h2>What the app sends, and where</h2>
+<p>For sign-in and store sync, the app communicates directly with <strong>GitHub</strong>: <code>github.com</code> for optional device sign-in and <code>api.github.com</code> for repository access with your token.</p>
+<p>It reads the repository or repositories you select, and writes the changes you make — findings, notes, tasks, and review decisions — back to those repositories as commits authored by your GitHub account.</p>
+<p>Your use of GitHub is governed by GitHub&#x27;s own privacy policy: https://docs.github.com/site-policy/privacy-policies</p>
+<h2>Optional live computer connections</h2>
+<p>When you open an added computer, phren connects directly to its configured SSH address and reads session metadata and conversations from Phren Hook on that computer. Phren Hook is installed and operated on your own computer. The SSH public key identifies this device; the private key is never sent. The app verifies the computer&#x27;s SSH host key against the fingerprint you trust. GitHub credentials are not sent to this connection. If you attach project memory, skills, text, or images to chat, the app sends that content to the selected computer and agent when you submit the message. That agent may send it to its configured AI provider under that provider&#x27;s privacy policy.</p>
+<p>Live reads pause when the app becomes inactive. You can send chat and terminal input, stop a turn, and respond to supported approval requests. These actions go to your connected computer. Uploaded images are retained there for up to 14 days, with expiry checked when another upload occurs; uninstalling the Hook preserves local data for recovery. No live metadata is uploaded to GitHub or the phren developer. Copying or sharing the SSH authorization line exports only public key material.</p>
+<p>Web previews forward the selected development server through SSH into an isolated in-app browser. Pages can contact external resources they include; those services receive normal web requests. Links to unrelated pages open outside the privileged preview browser.</p>
+<h2>Microphone and speech recognition</h2>
+<p>If you use voice capture, the app records audio only while you are actively dictating, and uses Apple&#x27;s Speech framework to transcribe it.</p>
+<p>The app requests <strong>on-device</strong> recognition wherever the device supports it, in which case the audio never leaves your iPhone. If on-device recognition is unavailable, iOS may send the audio to Apple for transcription under Apple&#x27;s privacy policy. The recording is not stored; only the resulting text becomes a note or task, and only if you save it.</p>
+<p>You can decline microphone and speech permissions and continue to use every other feature of the app, including typing or using the keyboard&#x27;s own dictation.</p>
+<h2>Siri and App Intents</h2>
+<p>The app registers Siri shortcuts for adding a note or task. When you use them, the dictated text is handled by Siri under Apple&#x27;s privacy policy and passed to the app, which writes it to your store. The developer receives nothing.</p>
+<h2>Children</h2>
+<p>The app is not directed at children and collects no data from anyone.</p>
+<h2>Changes to this policy</h2>
+<p>If this policy changes materially, the updated version will be published at this URL with a revised date, and the change will be noted in the app&#x27;s release notes.</p>
+<h2>Contact</h2>
+<p>Questions about this policy: <strong>ala@alaarab.com</strong></p>
+<p>Source code: https://github.com/alaarab/phren</p>
+</main><footer>Phren for iPhone · Your computers, your memory.</footer></body></html>

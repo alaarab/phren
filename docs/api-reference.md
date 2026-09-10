@@ -409,6 +409,13 @@ Find fragments and related docs by name.
 
 ### `get_related_docs`
 
+Compatibility: graph tools use the established `entity` / `entity_type` parameter
+keys for fragments. `manual-links.json` retains `entity` / `entityType`, and the
+rebuildable SQLite graph retains `entities`, `entity_links`, and `global_entities`.
+These internal names do not introduce additional user-facing concepts. The
+`canonical` document type and `search --type canonical` continue to mean
+`truths.md`. Keeping these identifiers avoids breaking existing tools and filters.
+
 Get docs linked to a named fragment.
 
 | Parameter | Type | Required | Description |
@@ -627,6 +634,12 @@ Read recent hook/debug failures from runtime logs.
 ### `get_review_queue`
 
 Read review queue items for one project or all active-profile projects. The review queue is read-only.
+
+The optional queue is retained for quarantined candidates and deliberate manual
+triage (September 2026 decision). Normal agent memory capture does not require
+the user to approve each finding. `memory_feedback` adjusts retrieval ranking;
+it does not replace the trust boundary around unreviewed candidate content.
+There is not sufficient usage evidence to remove the working queue safely.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -1,7 +1,8 @@
-import { open, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { glob } from "glob";
+import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
 
 export interface Entry { line: number; raw: Json }
@@ -34,7 +35,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
 export function visibleEvent(raw: Json, source: Provider): Json | undefined {
   if (source === "codex") {
     const p = object(raw.payload);
-    if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "error"].includes(String(p.type))) return raw;
+    if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
     if (raw.type !== "response_item") return undefined;
     if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") return raw;
     if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
@@ -46,7 +47,7 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
       ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" }) } };
   } else {
-    if (raw.agentId || raw.ephemeral || !["user.message", "assistant.message", "assistant.message_delta", "tool.execution_start", "tool.execution_complete", "assistant.turn_start", "assistant.turn_end", "session.idle", "session.error", "session.usage_info", "assistant.usage"].includes(String(raw.type))) return undefined;
+    if (raw.agentId || raw.ephemeral || !["user.message", "assistant.message", "assistant.message_delta", "tool.execution_start", "tool.execution_complete", "assistant.turn_start", "assistant.turn_end", "session.idle", "abort", "session.error", "session.usage_info", "assistant.usage"].includes(String(raw.type))) return undefined;
     const data = object(raw.data);
     // Copilot includes optional reasoning beside the public message in some
     // versions. Export only the fields used by public text/tool/usage readers.
@@ -56,62 +57,40 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
   return undefined;
 }
 
-/** Append-only reader with bounded retained history. Incomplete rows wait for the next read. */
+/** Parse only the requested page; shared byte indexes make reopening and
+ * backward pagination independent of the amount of already-read history. */
 export class TranscriptReader {
-  private offset = 0;
-  private inode?: number;
-  private pending: Buffer[] = [];
-  private pendingBytes = 0;
-  private skippingRow = false;
-  private line = 0;
-  private retained: Entry[] = [];
-  private retainedBytes = 0;
+  private revision?: string;
+  private nextLine = 0;
   constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number) {}
-  async read(before?: number): Promise<{ entries: Entry[]; totalLines: number; hasMore: boolean; reset: boolean }> {
-    const handle = await open(this.file, "r");
-    try {
-      const meta = await handle.stat();
-      if (!meta.isFile() || meta.size > 4_294_967_296) throw new BridgeError(413, "This conversation exceeds the transcript limit.");
-      const reset = this.inode !== meta.ino || meta.size < this.offset;
-      if (reset) { this.offset = 0; this.line = 0; this.pending = []; this.pendingBytes = 0; this.skippingRow = false; this.retained = []; this.retainedBytes = 0; }
-      this.inode = meta.ino;
-      const start = this.line;
-      const buffer = Buffer.alloc(65_536);
-      while (this.offset < meta.size && (before === undefined || this.line < before)) {
-        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, meta.size - this.offset), this.offset);
-        if (!bytesRead) break;
-        this.offset += bytesRead;
-        let cursor = 0;
-        while (cursor < bytesRead) {
-          const newline = buffer.indexOf(10, cursor);
-          const complete = newline >= cursor && newline < bytesRead;
-          const end = complete ? newline : bytesRead;
-          this.pendingBytes += end - cursor;
-          if (this.pendingBytes > 67_108_864) { this.skippingRow = true; this.pending = []; }
-          if (!this.skippingRow) this.pending.push(Buffer.from(buffer.subarray(cursor, end)));
-          cursor = end + (complete ? 1 : 0);
-          if (!complete) break;
-          const line = this.line++;
-          const row = this.skippingRow ? undefined : Buffer.concat(this.pending, this.pendingBytes);
-          this.pending = []; this.pendingBytes = 0; this.skippingRow = false;
-          if (!row || (before !== undefined && line >= before)) continue;
-          try {
-            const raw = visibleEvent(object(JSON.parse(row.toString())), this.source);
-            if (raw) {
-              const entry = { line, raw: this.imageLine === line ? raw : chatFrame(raw, this.source) };
-              const size = Buffer.byteLength(JSON.stringify(entry));
-              if (this.imageLine === line) { this.retained = [entry]; this.retainedBytes = size; }
-              else if (this.imageLine === undefined && size < 2_097_152) {
-                this.retained.push(entry); this.retainedBytes += size;
-                while (this.retained.length > 200 || this.retainedBytes > 4_194_304) this.retainedBytes -= Buffer.byteLength(JSON.stringify(this.retained.shift()));
-              }
-            }
-          } catch { /* A malformed or oversized old row cannot block newer messages. */ }
+  async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
+    return withTranscriptIndex(this.file, async (handle, index) => {
+      const reset = this.revision !== index.revision;
+      const end = Math.min(before ?? index.lines, index.lines);
+      const lower = this.imageLine ?? (reset || before !== undefined ? 0 : this.nextLine);
+      const entries: Entry[] = [];
+      let bytes = 0, cursor = end;
+      for await (const row of index.rows(handle, end, lower, signal)) {
+        signal?.throwIfAborted();
+        let entry: Entry | undefined;
+        try {
+          const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source);
+          if (raw) entry = { line: row.line, raw: this.imageLine === row.line ? raw : chatFrame(raw, this.source) };
+        } catch { /* A malformed old row cannot block the next readable page. */ }
+        if (entry) {
+          const size = Buffer.byteLength(JSON.stringify(entry));
+          if (this.imageLine !== undefined || size < 2_097_152) {
+            // Leave an entry that doesn't fit for the following history page.
+            if (this.imageLine === undefined && bytes + size > 4_194_304) break;
+            entries.push(entry); bytes += size;
+          }
         }
+        cursor = row.line;
+        if (entries.length >= 200) break;
       }
-      const entries = reset || before !== undefined ? this.retained : this.retained.filter(e => e.line >= start);
-      return { entries, totalLines: this.line, hasMore: (this.retained[0]?.line ?? 0) > 0, reset };
-    } finally { await handle.close(); }
+      if (before === undefined) { this.revision = index.revision; this.nextLine = index.lines; }
+      return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0, reset };
+    }, signal);
   }
 }
 

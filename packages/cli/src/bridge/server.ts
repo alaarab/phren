@@ -83,6 +83,16 @@ export async function serve(version: string): Promise<void> {
             const bytes = await historicalImage(await transcriptPath(target.source, target.session), Number(url.searchParams.get("line")), Number(url.searchParams.get("block")), target.source);
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
+          case "/v1/transcripts/history": {
+            const target = targetFromURL(url);
+            const before = z.coerce.number().int().positive().parse(url.searchParams.get("beforeLine"));
+            const abort = new AbortController();
+            response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+            await validateTarget(target);
+            const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source);
+            const page = await reader.read(before, abort.signal);
+            result = { ...page, type: "older", source: target.source, session: target.session }; break;
+          }
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }
       } else if (request.method === "POST") {
@@ -131,46 +141,59 @@ export async function serve(version: string): Promise<void> {
   });
   async function stream(client: WebSocket, url: URL) {
     const target = targetFromURL(url);
-    await validateTarget(target);
-    if (client.readyState !== WebSocket.OPEN) return;
-    const unwatch = agentHooks.watch(target);
-    client.once("close", unwatch);
-    const reader = url.pathname === "/v1/transcripts" ? new TranscriptReader(await transcriptPath(target.source, target.session), target.source) : undefined;
-    let busy = false, closed = false, first = true;
-    client.on("close", () => { closed = true; clearInterval(timer); });
-    client.on("error", () => { closed = true; clearInterval(timer); });
+    const abort = new AbortController();
+    let reader: TranscriptReader | undefined, timer: ReturnType<typeof setInterval> | undefined;
+    let unwatch: (() => void) | undefined;
+    let busy = false, ready = false, first = true;
+    let initialPane: Json;
+    const pending: number[] = [];
+    const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
+    client.once("close", stop); client.once("error", stop);
     const tick = async () => {
-      if (busy || closed) return; busy = true;
+      if (busy || !ready || abort.signal.aborted) return; busy = true;
       try {
-        const pane = await validateTarget(target);
-        if (reader) {
-          const page = await reader.read();
-          if (first || page.entries.length || page.reset) send(client, { type: first || page.reset ? "backlog" : "append", source: target.source,
-            session: target.session, entries: page.entries, totalLines: page.totalLines, hasMore: page.hasMore });
-        } else {
-          const pendingApproval = agentHooks.approval(target);
-          send(client, { agentStatus: { source: target.source, session: target.session,
-            status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, capabilities } });
+        if (first || pending.length === 0) {
+          const pane = first ? initialPane : await validateTarget(target);
+          if (reader) {
+            const page = await reader.read(undefined, abort.signal);
+            if (first || page.entries.length || page.reset) send(client, { ...page, type: first || page.reset ? "backlog" : "append", source: target.source,
+              session: target.session });
+          } else {
+            const pendingApproval = agentHooks.approval(target);
+            send(client, { agentStatus: { source: target.source, session: target.session,
+              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, capabilities } });
+          }
+          first = false;
         }
-        first = false;
-      } catch { client.close(1011, "The conversation changed; refresh"); }
-      finally { busy = false; }
-    };
-    const timer = setInterval(() => { void tick(); }, reader ? 500 : 1500);
-    client.on("message", bytes => {
-      void (async () => {
-        const message = object(JSON.parse(bytes.toString()));
-        if (message.type !== "older" || !reader || busy) return;
-        busy = true;
-        try {
+        while (pending.length && reader && !abort.signal.aborted) {
+          const before = pending.shift()!;
           await validateTarget(target);
-          const before = z.number().int().positive().parse(message.beforeLine);
-          const page = await new TranscriptReader(reader.file, target.source).read(before);
-          send(client, { type: "older", source: target.source, entries: page.entries, hasMore: page.hasMore, totalLines: page.totalLines });
-        } finally { busy = false; }
-      })().catch(() => client.close(1008, "Invalid history request"));
+          const page = await reader.read(before, abort.signal);
+          send(client, { ...page, type: "older", source: target.source, session: target.session });
+        }
+      } catch { stop(); client.close(1011, "The conversation changed; refresh"); }
+      finally { busy = false; if (pending.length) void tick(); }
+    };
+    client.on("message", bytes => {
+      try {
+        const message = object(JSON.parse(bytes.toString()));
+        if (message.type !== "older" || url.pathname !== "/v1/transcripts" || abort.signal.aborted) return;
+        const before = z.number().int().positive().parse(message.beforeLine);
+        if (pending.length >= 8) throw new Error("History queue is full");
+        if (!pending.includes(before)) pending.push(before);
+        void tick();
+      } catch { stop(); client.close(1008, "Invalid history request"); }
     });
-    await tick();
+    try {
+      initialPane = await validateTarget(target);
+      if (abort.signal.aborted) return;
+      unwatch = agentHooks.watch(target);
+      reader = url.pathname === "/v1/transcripts" ? new TranscriptReader(await transcriptPath(target.source, target.session), target.source) : undefined;
+      if (abort.signal.aborted) { stop(); return; }
+      ready = true;
+      timer = setInterval(() => { void tick(); }, reader ? 500 : 1500);
+      await tick();
+    } catch (error) { stop(); throw error; }
   }
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(socketPath(), () => resolve()); });
   await chmod(socketPath(), 0o600);
