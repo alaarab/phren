@@ -18,6 +18,12 @@ const row = (text: string) => ({ type: "response_item", payload: { type: "messag
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("Phren Hook boundaries", () => {
+  it("exports the shared iPhone lifecycle and usage contract", async () => {
+    const cases = JSON.parse(await readFile(new URL("../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/hook-events.json", import.meta.url), "utf8"));
+    for (const fixture of cases) for (const event of fixture.events) {
+      expect(visibleEvent(event, fixture.source)).toEqual(event);
+    }
+  });
   it("migrates only recognized Phren keys and preserves unrelated restrictions", () => {
     const key = 'restrict,port-forwarding,permitopen="127.0.0.1:*",command="python3 ~/.local/share/phren/chat-progress.py" ssh-ed25519 AAAA phren-iphone\n';
     const other = key.replace("phren-iphone", "personal");
@@ -44,6 +50,7 @@ describe("Phren Hook boundaries", () => {
 describe.skipIf(process.platform === "win32")("standalone Phren service", () => {
   let root: string, hook: ChildProcess, herdr: Server, log: string, record: string, commands: { method: string; params: Record<string, unknown> }[];
   let current = session;
+  let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -61,7 +68,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root.length > 55) {
       const short = await mkdtemp("/tmp/phren-hook-"); await rm(root, { recursive: true }); root = short;
     }
-    commands = []; current = session; log = "";
+    commands = []; current = session; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -75,8 +82,10 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: "term-one", agent: "codex", agent_status: "working",
           agent_session: { kind: "id", agent: "codex", value: current }, cwd: root };
         const snapshot = { panes: [pane], workspaces: [{ workspace_id: "w1", label: "Project" }], tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }] };
-        socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
+        const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
           : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: process.pid }] } } : { ok: true } }) + "\n");
+        if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
+        else answer();
       });
     });
     await new Promise<void>(resolve => herdr.listen(path.join(root, "herdr/herdr.sock"), resolve));
@@ -88,6 +97,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(ready, log).toBe(true);
   });
   afterEach(async () => {
+    releaseSnapshot?.();
     if (hook && hook.exitCode === null) { hook.kill("SIGTERM"); await once(hook, "exit"); }
     if (herdr) await new Promise<void>(resolve => herdr.close(() => resolve()));
     if (root) await rm(root, { recursive: true, force: true });
@@ -131,6 +141,32 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await api("/v1/approvals/answer", { target, actionId: "bbbbbbbb-1111-4111-8111-111111111111", decision: "approve" })).status).toBe(409);
     expect((await api("/hook", { target, event: "PermissionRequest" })).status).toBe(404);
     expect(commands.some(c => c.method === "agent.send_keys")).toBe(false);
+  });
+  it("answers history submitted during an in-flight transcript poll", async () => {
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams(target)}`);
+    const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+    try {
+      await once(socket, "open");
+      for (let i = 0; i < 80 && !frames.length; i++) await sleep(10);
+      expect(frames[0].type).toBe("backlog");
+      holdSnapshot = true;
+      for (let i = 0; i < 150 && !releaseSnapshot; i++) await sleep(10);
+      expect(releaseSnapshot).toBeDefined();
+      socket.send(JSON.stringify({ type: "older", beforeLine: 1 }));
+      await sleep(30); releaseSnapshot!(); releaseSnapshot = undefined;
+      for (let i = 0; i < 80 && !frames.some(f => f.type === "older"); i++) await sleep(10);
+      expect(frames.find(f => f.type === "older")).toMatchObject({ entries: [], startLine: 0, hasMore: false });
+    } finally { socket.terminate(); }
+  });
+  it("serves a requested history page without sending a recent backlog", async () => {
+    await writeFile(record, Array.from({ length: 450 }, (_, i) => JSON.stringify(row(`Message ${i}`))).join("\n") + "\n");
+    const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "225" }));
+    expect(page.status).toBe(200);
+    expect(page.data).toMatchObject({ type: "older", session, startLine: 25, totalLines: 450, hasMore: true });
+    expect(page.data.entries.map((e: any) => e.line)).toEqual(Array.from({ length: 200 }, (_, i) => i + 25));
+    expect((await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "-1" }))).status).toBe(400);
+    current = "bbbbbbbb-1111-4111-8111-111111111111";
+    expect((await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "225" }))).status).toBe(409);
   });
   it("stores images privately and rejects traversal filenames", async () => {
     const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=", "base64");

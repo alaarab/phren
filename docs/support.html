@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- Generated from apps/ios/AppStore/support.md. Keep source and page in sync. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Phren iOS — Support</title><style>
+:root{color-scheme:dark}body{margin:40px auto;padding:0 22px;max-width:760px;background:#1e1e1e;color:#fff;font:17px/1.65 system-ui,sans-serif}a{color:#c2aaff}h1,h2{line-height:1.2;margin-top:1.6em}pre,code{background:#121416;border-radius:6px}pre{padding:16px;overflow:auto}code{padding:2px 4px}nav{display:flex;gap:24px;font-size:15px}footer{margin:44px 0;color:#a4a9b1}
+</style></head><body><nav><a href="./">Phren</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a></nav><main>
+<h1>phren for iOS — Support</h1>
+<h2>Getting started</h2>
+<p>phren for iOS connects to your coding agents and project memory. Agents and terminals use SSH and Phren Hook on your computers; they work without a GitHub sign-in. To sync memory, connect a phren store — a GitHub repository containing a <code>phren.root.yaml</code> file.</p>
+<p>If you don&#x27;t have one yet, install the CLI and create one:</p>
+<pre>
+npm install -g @phren/cli
+
+phren init
+
+</pre>
+<p>Then push that store to a GitHub repository and connect the app to it.</p>
+<h2>Connecting memory</h2>
+<p>Open Projects or Settings → Connect memory. GitHub is needed only for syncing your memory repositories; you can dismiss setup and continue using Agents.</p>
+<p>1. Create a fine-grained personal access token at <strong>github.com/settings/personal-access-tokens/new</strong> 2. Under <strong>Repository access</strong>, choose <strong>Only select repositories</strong> and pick your phren store repository 3. Under <strong>Permissions → Repository permissions</strong>, set <strong>Contents: Read and write</strong> and <strong>Metadata: Read</strong> 4. Paste the token into the app</p>
+<p>Your token is stored only in your device&#x27;s Keychain and is sent only to GitHub.</p>
+<h2>Common problems</h2>
+<p><strong>Agent chat or terminals cannot connect.</strong> Keep Tailscale connected on the phone and computer. Install Phren Hook on each computer with <code>npx --yes @phren/cli@0.2.13 bridge install</code>, then run <code>npx --yes @phren/cli@0.2.13 bridge doctor</code>. Add the computer in Agents and authorize its device SSH key. Moshi is not required. See the <a href="https://alaarab.github.io/phren/phren-hook.html">Phren Hook guide</a>.</p>
+<p><strong>A web preview has no styles or scripts.</strong> Check that the development server serves its CSS and JavaScript URLs without errors. Restart or redeploy its HTML and asset manifest together after an app build. Relative assets and WebSockets work over Phren&#x27;s SSH preview; an app that hardcodes another origin may need its public/base URL configured.</p>
+<p><strong>The input token count is much larger than the message I typed.</strong> The latest response can include conversation context, instructions, and tools. The usage details distinguish reused cached input from uncached input. They show the latest model response, not an account quota or the text length of your latest message.</p>
+<p><strong>&quot;Only public repositories are listed&quot; / my store isn&#x27;t in the picker.</strong> Your token doesn&#x27;t have access to the repository. GitHub deliberately returns &quot;not found&quot; rather than &quot;forbidden&quot; for private repositories a token can&#x27;t read, so this looks like the repo doesn&#x27;t exist. Edit the token and make sure your store repository is included under Repository access.</p>
+<p><strong>Everything is read-only / I can&#x27;t add anything.</strong> Your token has read access but not write. Set <strong>Contents: Read and write</strong> on the token, then pull to refresh in the app — permissions are re-checked on refresh.</p>
+<p><strong>A note or task I added hasn&#x27;t appeared on my other machines.</strong> Changes are queued locally and pushed when the app is open. Open the app and give it a few seconds. <strong>Settings → Recent captures</strong> shows each capture and whether it has synced yet. If something failed permanently, it appears under <strong>Settings → Needs attention</strong>, where you can retry or discard it.</p>
+<p><strong>Siri added a task but I don&#x27;t know where it went.</strong> <strong>Settings → Recent captures</strong> shows the destination of every capture. To stop it choosing for you, set a default under <strong>Settings → Quick capture</strong>, or leave it on <strong>Always ask</strong> and Siri will ask each time.</p>
+<p><strong>Siri opens the wrong app when I say &quot;phren&quot;.</strong> Say <strong>&quot;Add a phren task&quot;</strong> rather than &quot;add a task to phren&quot; — the latter is a phrase Reminders also claims. Running the shortcut once by hand from the Shortcuts app significantly improves Siri&#x27;s recognition afterwards. You can also bind <strong>phren: Add Task</strong> to the Action Button.</p>
+<h2>Contact</h2>
+<p><strong>ala@alaarab.com</strong></p>
+<p>Bug reports and feature requests are welcome as GitHub issues: https://github.com/alaarab/phren/issues</p>
+</main><footer>Phren for iPhone · Your computers, your memory.</footer></body></html>

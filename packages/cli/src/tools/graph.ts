@@ -9,14 +9,8 @@ import { runtimeFile } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
 import { logger } from "../logger.js";
 
-// NOTE on naming: titles/descriptions below all say "fragment" (the entity ->
-// fragment rename, CHANGELOG 0.0.5), but the actual input schema key on
-// get_related_docs, link_findings, and cross_project_fragments is still
-// `entity` / `entity_type` — renaming it is a breaking change to a live MCP
-// tool contract, plus link_findings persists that same shape to
-// .runtime/manual-links.json (read back in shared/index.ts), so it is not a
-// same-PR-safe rename. Left as-is; flagged for a product decision rather than
-// changed unilaterally.
+// Compatibility decision (2026-09): fragments keep the established entity /
+// entity_type wire keys and manual-links.json fields. See docs/api-reference.md.
 
 export function register(server: McpServer, ctx: McpContext): void {
 
@@ -29,7 +23,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Search named fragments in the knowledge graph (libraries, tools, concepts mentioned in findings). " +
         "Returns matching fragment names and how many findings reference each.",
       inputSchema: z.object({
-        query: z.string().describe("Fragment name to search for (partial match)."),
+        query: z.string().describe("Fragment name to search for (partial match); the compatible parameter key remains entity."),
         project: z.string().optional().describe("Filter to a specific project."),
         limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)."),
       }),
@@ -91,7 +85,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Find all findings and docs that mention a specific fragment (library, tool, concept). " +
         "Use this to see how a technology is used across projects.",
       inputSchema: z.object({
-        entity: z.string().describe("Fragment name to look up."),
+        entity: z.string().describe("Fragment name to look up; the compatible parameter key remains entity."),
         project: z.string().optional().describe("Filter to a specific project."),
         limit: z.number().int().min(1).max(50).optional().describe("Max docs to return (default 10)."),
       }),
@@ -244,7 +238,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name."),
         finding_text: z.string().describe("Partial text of the finding to link (used to locate the source doc)."),
-        entity: z.string().describe("Fragment name to link to (e.g. 'Redis', 'Docker')."),
+        entity: z.string().describe("Fragment name to link to (e.g. 'Redis', 'Docker'); the compatible parameter key remains entity."),
         relation: z.string().optional().describe("Relationship type (default: 'mentions')."),
         entity_type: z.string().optional().describe("Fragment type (e.g. 'library', 'service', 'concept', 'architecture'). Defaults to 'fragment'."),
       }),
@@ -370,7 +364,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Find fragments (libraries, tools, concepts) shared across multiple projects. " +
         "Use this to discover how a technology or concept is used in other projects.",
       inputSchema: z.object({
-        entity: z.string().describe("Fragment name to search for (partial match)."),
+        entity: z.string().describe("Fragment name to search for (partial match); the compatible parameter key remains entity."),
         exclude_project: z.string().optional().describe("Exclude a specific project from results."),
         limit: z.number().int().min(1).max(50).optional().describe("Max results (default 20)."),
       }),

@@ -5,8 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-09-10
+
 ### Added
 
+- Agents and terminals work without a GitHub sign-in. New users start on
+  Agents; GitHub setup and account recovery are scoped to project memory.
 - iPhone appearance settings with Charcoal, Amethyst, Graphite, and Slate
   presets and named custom themes. Edit background, text, panel, accent, and
   link colors with swatches or hex values; preview, save, duplicate, and delete
@@ -18,12 +22,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Smaller chat tool boxes and a smaller combined Send/Stop control. An empty
   composer shows Stop during a running turn; a new draft brings Send back.
+- Phren purple actions on the default charcoal theme. Tool details unwrap
+  known result envelopes; patches share a compact, numbered diff renderer with
+  repository changes, with semantic addition/deletion colors and folding.
+- Token details distinguish cached and uncached input and identify their scope
+  as the latest reported model response, with included reasoning output.
 
 ### Fixed
 
 - Removed accumulated space below the last chat message and blank transcript
   lines around tool activity. Keyboard dismissal and upward history loading
   retain the compact conversation layout.
+- Sparse transcript indexing, direct older-history reads, and queued requests
+  during polling make long conversations faster to open and page backward.
+- Completion/abort compatibility and current activity precedence prevent old
+  working events from keeping Stop visible after an agent finishes.
+- Ordered background draft writes avoid UI-thread file work; theme decoding
+  preserves unreadable original data for recovery.
+- Web preview relays require a fresh per-preview credential and restrict
+  forwarding to the selected service. Assets, uploads, and WebSockets retain
+  their shared origin.
+- Upgrade transitive Hono to 4.13.5; production dependency audit is clean.
 
 ## [0.2.12] - 2026-09-10
 
