@@ -7,9 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- iPhone appearance settings with four live theme previews: Midnight, Amethyst,
-  Graphite, and Slate. The default Midnight palette pairs a black canvas with
-  bright purple text; the selected theme persists across launches.
+- iPhone appearance settings with Charcoal, Amethyst, Graphite, and Slate
+  presets and named custom themes. Edit background, text, panel, accent, and
+  link colors with swatches or hex values; preview, save, duplicate, and delete
+  themes. The default Charcoal palette uses white text and dark neutral panels.
+- Agent switching beside the chat Terminal control, including conversations
+  on other computers and agents within the current tab, with separate drafts.
+
+### Changed
+
+- Smaller chat tool boxes and a smaller combined Send/Stop control. An empty
+  composer shows Stop during a running turn; a new draft brings Send back.
 
 ### Fixed
 
