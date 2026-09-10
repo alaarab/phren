@@ -5,8 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-09-10
+
+### Added
+
+- Compact iPhone task controls: status menu, optional search, creation-age and
+  priority filters, project/store filters, and saved date/priority/task-order sorting.
+- Direct Start/Backlog/Done task actions and bulk selection across stores. Tasks
+  remembers the last workload view and begins on Backlog for first use.
+- A single compact Herdr terminal header combines back, computer/status, and
+  reconnect, removing the separate title and computer strip.
+- Photos, Camera, and Files in the Herdr Ctrl-hold Uploads panel. Attachments
+  open as a draft in the currently focused agent, verified through Phren Hook;
+  older Hooks offer an explicit session picker. Nothing sends automatically.
+- Creation dates in task rows and details. Older tasks without a recorded date
+  are labeled Date unknown and sort after dated tasks.
+
 ### Fixed
 
+- Conversation opening shows a centered loading circle above the composer.
+- Single and bulk task creation now record timestamps by default. iPhone tasks
+  preserve their original creation time through offline retries and sync conflicts.
 - iPhone chat gives each tool call its own expandable row, pairs parallel
   results by provider call ID, and limits output to a six-line preview with
   a separate full-output viewer. Tool patches start with eight lines.

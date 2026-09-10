@@ -11,6 +11,7 @@ import { WebSocket } from "ws";
 import { planAgentHooks, upgradeKeys } from "./install.js";
 import { TranscriptReader, transcriptPath, visibleEvent, historicalImage } from "./transcripts.js";
 import { dispatch } from "./transport.js";
+import { workspaceSnapshot } from "./herdr.js";
 
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
@@ -23,6 +24,18 @@ describe("Phren Hook boundaries", () => {
     for (const fixture of cases) for (const event of fixture.events) {
       expect(visibleEvent(event, fixture.source)).toEqual(event);
     }
+  });
+  it("exports focus only when workspace, tab and pane belong together", () => {
+    const snapshot = {
+      focused_workspace_id: "w2", focused_tab_id: "w2:t1", focused_pane_id: "w2:p1",
+      workspaces: [{ workspace_id: "w1", label: "First" }, { workspace_id: "w2", label: "Focused" }],
+      tabs: [{ workspace_id: "w1", tab_id: "w1:t1", label: "1" }, { workspace_id: "w2", tab_id: "w2:t1", label: "1" }],
+      panes: [{ workspace_id: "w2", tab_id: "w2:t1", pane_id: "w2:p1" }],
+    };
+    expect(workspaceSnapshot(snapshot).focus).toEqual({ workspaceID: "w2", tabID: "w2:t1", paneID: "w2:p1" });
+    expect(workspaceSnapshot({ ...snapshot, focused_workspace_id: "w1" }).focus).toBeUndefined();
+    expect(workspaceSnapshot({ ...snapshot, focused_pane_id: "missing" }).focus).toBeUndefined();
+    expect(workspaceSnapshot({ ...snapshot, focused_pane_id: undefined }).focus).toBeUndefined();
   });
   it("migrates only recognized Phren keys and preserves unrelated restrictions", () => {
     const key = 'restrict,port-forwarding,permitopen="127.0.0.1:*",command="python3 ~/.local/share/phren/chat-progress.py" ssh-ed25519 AAAA phren-iphone\n';

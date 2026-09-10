@@ -61,7 +61,16 @@ export async function servers(): Promise<Json[]> {
 
 export async function snapshot(server: string): Promise<Json> { return object((await rpc(server, "session.snapshot")).snapshot); }
 export function workspaceSnapshot(s: Json): Json {
-  return { kind: "herdr", groups: objects(s.workspaces).map(w => ({ id: w.workspace_id, label: w.label,
+  const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
+    && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
+  const focus = focusedPane && id.safeParse(s.focused_workspace_id).success
+    && id.safeParse(s.focused_tab_id).success && id.safeParse(s.focused_pane_id).success
+    && objects(s.tabs).some(t => t.tab_id === s.focused_tab_id && t.workspace_id === s.focused_workspace_id)
+    && objects(s.workspaces).some(w => w.workspace_id === s.focused_workspace_id)
+    ? { workspaceID: s.focused_workspace_id, tabID: s.focused_tab_id, paneID: s.focused_pane_id } : undefined;
+  // Focus identifies a pane to inspect. Its conversation is still resolved and
+  // validated independently through panes(), never inferred from a directory.
+  return { kind: "herdr", focus, groups: objects(s.workspaces).map(w => ({ id: w.workspace_id, label: w.label,
     children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
       const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id);
       const agent = panes.find(p => p.agent);
