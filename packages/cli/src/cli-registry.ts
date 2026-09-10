@@ -185,6 +185,15 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 // ── Registry ─────────────────────────────────────────────────────────────────
 
 export const REGISTRY: Command[] = [
+  {
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall>",
+    summary: "Install and manage Phren Hook for iPhone agent connections",
+    run: async args => {
+      const { runBridge } = await import("./bridge/command.js");
+      const { VERSION } = await import("./package-metadata.js");
+      return runBridge(args, VERSION);
+    },
+  },
   // Setup (featured: init, quickstart)
   {
     name: "init",

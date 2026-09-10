@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Knowledge layer for AI agents — CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
@@ -114,6 +114,7 @@
     "inquirer": "^14.1.0",
     "js-yaml": "^5.3.0",
     "sql.js-fts5": "^1.4.0",
+    "ws": "8.21.3",
     "zod": "^4.4.3"
   },
   "engines": {
@@ -135,6 +136,7 @@
   },
   "devDependencies": {
     "3d-force-graph": "^1.80.0",
+    "@types/ws": "8.18.1",
     "three": "^0.185.1"
   },
   "publishConfig": {
