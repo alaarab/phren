@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phren Hook · your agents, connected</title>
+<meta name="description" content="Connect the Phren iPhone app to Codex, Claude Code, Copilot, and Herdr on your own computers through SSH.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="style.css">
+<style>
+body{margin:0;background:#171a23;color:#eeeaf4;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:800px;margin:auto;padding:48px 24px 88px}nav{display:flex;gap:24px;margin-bottom:70px}a{color:#91d7e1}h1{font-size:clamp(38px,7vw,68px);line-height:1.08;letter-spacing:-.04em;margin:16px 0 28px}h2{font-size:25px;margin-top:44px}p{color:#c4c7d4}pre{padding:20px;border:1px solid #424653;border-radius:16px;background:#20232e;overflow:auto;font-size:14px}code{font-family:ui-monospace,SFMono-Regular,monospace}.eyebrow{color:#a9a1d0;letter-spacing:.12em;font-size:13px;text-transform:uppercase}.lead{font-size:21px;max-width:650px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin:36px 0}.grid p{margin:8px 0}.grid h3{margin:0;font-size:18px}.note{padding-left:18px;border-left:2px solid #a9a1d0}footer{margin-top:64px;font-size:14px}li{margin:8px 0}a:focus-visible{outline:2px solid #91d7e1;outline-offset:5px}
+</style></head><body><main>
+<nav aria-label="Main"><a href="index.html">← phren</a><a href="docs.html">Documentation</a><a href="https://github.com/alaarab/phren">Source</a></nav>
+<div class="eyebrow">Phren Hook · open source</div>
+<h1>Your agents.<br>Your computers.<br>One place to pick up.</h1>
+<p class="lead">Bring live conversations and Herdr terminals into Phren on your iPhone, alongside the memory, skills, and projects your agents use.</p>
+<div class="grid"><section><h3>Continue the conversation</h3><p>Codex, Claude Code, and Copilot chat, images, live updates, and the usage each agent reports.</p></section><section><h3>Keep the context</h3><p>Use project memory and skills in chat. Read diffs, explore running web apps, and switch to the exact terminal.</p></section><section><h3>Stay on your machines</h3><p>The helper runs locally. Your phone connects through pinned SSH, with Tailscale when you’re away.</p></section></div>
+<h2>Install on each computer</h2><p>You’ll need macOS or Linux, Node 20+, Herdr, SSH, and <code>lsof</code>. Run as the same user who runs your agents.</p>
+<pre><code>npx --yes @phren/cli@0.2.11 bridge install
+npx --yes @phren/cli@0.2.11 bridge doctor</code></pre>
+<p>The installer adds a LaunchAgent on macOS or a systemd user service on Linux. It preserves other agent hooks and SSH keys, and backs up files it changes.</p>
+<ol><li>In Phren, open <strong>Agents → Add computer</strong>.</li><li>Copy the SSH authorization line into that computer’s <code>~/.ssh/authorized_keys</code>. Existing recognized Phren keys are migrated by the installer.</li><li>Verify the SSH fingerprint shown by Phren against the computer.</li><li>Keep Tailscale connected on both devices for remote access. No public port or Funnel is needed.</li></ol>
+<p class="note">In Codex, review Phren’s new callbacks in <code>/hooks</code>. Resume existing agents if needed to load the callbacks. The helper connects to agents you run; it doesn’t start a coding agent automatically.</p>
+<h2>Know what’s happening</h2><p>Chat updates follow the agent’s transcript writes. Token counts come from the agent. Phren keeps an exact computer, server, workspace, tab, pane, and conversation identity before sending a message.</p><p>Codex and Claude permission requests can appear in chat while you’re watching that conversation. Requests without a supported callback, including choice questions, stay accessible through Phren’s terminal.</p>
+<h2>Maintain your connection</h2><pre><code>npx --yes @phren/cli@0.2.11 bridge status
+npx --yes @phren/cli@0.2.11 bridge update
+npx --yes @phren/cli@0.2.11 bridge rollback
+npx --yes @phren/cli@0.2.11 bridge uninstall</code></pre>
+<p>Updates install the CLI version you invoke. Rollback restores the previous helper version. Uninstall removes the service and Phren callbacks while retaining local data and backups. Remove the phone’s SSH key to revoke access.</p>
+<p>Having trouble? Run <code>bridge doctor</code>, confirm SSH and Herdr are running, and check the phone’s authorization line. On Linux, use <code>journalctl --user -u phren-hook</code>; macOS logs live at <code>~/.local/share/phren/bridge/service.log</code>.</p>
+<footer><a href="https://github.com/alaarab/phren/blob/main/apps/ios/AGENT_CONNECTIONS.md">Protocol, storage, and security details</a> · <a href="https://github.com/alaarab/phren/blob/main/apps/ios/README.md">iPhone app setup</a></footer>
+</main></body></html>

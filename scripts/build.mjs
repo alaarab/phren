@@ -111,6 +111,16 @@ try {
     shell: process.platform === "win32",
   });
   copySupplementalAssets(tempRoot);
+  // One self-contained artifact survives npx cache cleanup and does not depend
+  // on another application's helper or an npm install at service startup.
+  await esbuild({
+    entryPoints: [path.join(srcRoot, "bridge/hook-main.ts")],
+    outfile: path.join(tempRoot, "bridge-hook.mjs"), bundle: true,
+    platform: "node", target: "node20", format: "esm",
+    banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+    external: ["bufferutil", "utf-8-validate"],
+    define: { PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version) },
+  });
   const entryPath = path.join(tempRoot, "index.js");
   if (fs.existsSync(entryPath)) {
     fs.chmodSync(entryPath, 0o755);

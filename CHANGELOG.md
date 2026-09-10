@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-09-10
+
+### Added
+
+- **Phren Hook**: an independent computer helper for the iPhone app. Install,
+  update, diagnose, roll back, and uninstall with `phren bridge`. It runs as a
+  user service on macOS/Linux and serves a private socket through pinned SSH.
+- Native Herdr terminals now use SSH PTYs with receive backpressure. Chat,
+  images, history, real token counters, diffs, and local web-server discovery
+  use Phren's versioned protocol. Codex, Claude Code, and Copilot share exact
+  computer/server/workspace/tab/pane/conversation targeting.
+- Agent lifecycle callbacks and explicit Codex/Claude approval responses;
+  a bounded local activity journal records project status changes.
+
+### Changed
+
+- Chat loads earlier messages automatically as you scroll upward, retaining the current reading position.
+- Removed “Open in Moshi” actions and the external-chat preference. Project
+  actions open Phren chat or its native Herdr terminal.
+- The installer preserves existing device keys, project mappings, and drafts.
+  Recognized Phren SSH keys are migrated with a backup; other keys and other
+  applications' hooks remain intact.
+
+
 ## [0.2.10] - 2026-09-06
 
 ### Security

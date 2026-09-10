@@ -25,6 +25,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/graph-viewer.md`: The 3D memory viewer (web UI Graph tab and VS Code webview): navigation, contents pane, review mode, bulk actions.
 - `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
 - `docs/claude-code-plugin.md`: Installing phren as a Claude Code plugin, and how that differs from `phren init`.
+- `docs/phren-hook.md`: Install and maintain the independent computer helper for the iPhone app.
 - `apps/ios/README.md`: phren for iOS (SwiftUI app, widgets, Siri intents) and its App Store material.
 - Screenshots used by the site and README: `shell-*.png` (terminal), `webui-graph.png` (the memory viewer, shared by the web UI and VS Code), `splash.gif`.
 - `docs/feature-flags.md`: Feature flag reference (`PHREN_FEATURE_*` env vars).

@@ -116,3 +116,13 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 | `PHREN_FEATURE_SEMANTIC_DEDUP` | disabled | Set to `1` to enable LLM-based paraphrase dedup when adding findings. |
 | `PHREN_FEATURE_SEMANTIC_CONFLICT` | disabled | Set to `1` to enable LLM-based contradiction detection when adding findings. |
 | `PHREN_FEATURE_GH_MINING` | disabled | Set to `1` to mine GitHub signals in `phren maintain extract`. |
+
+### Phren Hook locations
+
+The optional iPhone helper is installed with `phren bridge install`; it uses
+`PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
+and `PHREN_HERDR_HOME` to override `~/.config/herdr`. Normal phone installations
+use the defaults. Transcript and callback settings respect `CODEX_HOME`,
+`CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. The installed service uses its own user
+session environment; keep these paths consistent with the coding agents.
+See [Phren Hook setup](phren-hook.md) and [written files](footprint.md).

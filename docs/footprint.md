@@ -76,3 +76,27 @@ and entries phren created — user-owned files are left untouched.
 
 Switching to a lower-touch preset (`phren preset assisted|manual`) performs the
 same teardown for the surfaces the new preset no longer manages.
+
+## Optional iPhone connection: Phren Hook
+
+`phren bridge install` is separate from the memory-store setup. It installs a
+standalone helper in `~/.local/share/phren/bridge/versions/<version>`, with a
+`current` symlink, `dispatch` entry point, and `installed.json` rollback record.
+The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
+`computer-id`, process-bound `bindings/`, bounded `activity.jsonl` and
+`activity.jsonl.previous`, and `uploads/<conversation>/` remain on that computer.
+Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
+are removed on the next upload. Activity stores status and project metadata,
+not conversation text. See [Phren Hook](phren-hook.md).
+
+The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
+`~/.config/systemd/user/phren-hook.service` on Linux. Agent callbacks are merged
+into `~/.codex/hooks.json`, `~/.claude/settings.json`, and
+`~/.copilot/hooks/phren.json`. Recognized `phren-iphone` entries in
+`~/.ssh/authorized_keys` are migrated to the restricted Phren dispatcher with
+PTY support. Other hooks and keys remain intact. Changed settings and key files
+receive sibling `.phren-hook-<timestamp>.bak` backups. Codex requires review of
+new callbacks in `/hooks`.
+
+`phren bridge uninstall` removes its service and callbacks. It retains helper
+data, versions, and backups. Remove Phren device keys to revoke SSH access.
