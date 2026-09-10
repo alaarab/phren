@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Swipe down on the chat message box, its icon row, or the Herdr shortcut row
+  to dismiss the keyboard while keeping the draft.
 - iOS CI runs only by manual dispatch; the full native UI suite requires an
   additional opt-in. Bound job/test runtime, cancel superseded runs, and retain
   native UI artifacts for three days. Regular CI jobs have 10-minute limits.
