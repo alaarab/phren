@@ -502,7 +502,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
       line,
       checked: false,
       priority: normalizePriority(line),
-      createdAt: opts?.createdAt,
+      createdAt: opts?.createdAt ?? new Date().toISOString(),
       sessionId: opts?.sessionId,
       scope: opts?.scope,
       parentFinding: opts?.parentFinding,
@@ -540,6 +540,7 @@ export function addTasks(phrenPath: string, project: string, items: string[], op
         checked: false,
         priority: normalizePriority(line),
         scope: opts?.scope,
+        createdAt: new Date().toISOString(),
       });
       added.push(line);
     }

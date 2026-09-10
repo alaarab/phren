@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, grantAdmin, resultMsg } from "../test-helpers.js";
@@ -56,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   tmpCleanup();
 });
 
@@ -127,6 +128,24 @@ describe("addTask", () => {
     expect(queueLines).toContain("New task item");
   });
 
+  it("timestamps new tasks and preserves their date through edits and completion", () => {
+    writeTaskFile(SAMPLE_TASKS);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-10T12:34:56.789Z"));
+    const added = addTask(tmpDir, PROJECT, "Date me");
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.data.createdAt).toBe("2026-09-10T12:34:56.789Z");
+    vi.setSystemTime(new Date("2026-10-20T01:02:03Z"));
+    expect(updateTask(tmpDir, PROJECT, added.data.stableId!, { text: "Renamed", section: "Active" }).ok).toBe(true);
+    expect(completeTask(tmpDir, PROJECT, added.data.stableId!).ok).toBe(true);
+    const after = readTasks(tmpDir, PROJECT);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.items.Done.find(t => t.stableId === added.data.stableId)?.createdAt).toBe("2026-09-10T12:34:56.789Z");
+    expect(after.data.items.Queue.every(t => t.createdAt === undefined)).toBe(true);
+  });
+
   it("creates task file when none exists", () => {
     const result = addTask(tmpDir, PROJECT, "First task");
     expect(result.ok).toBe(true);
@@ -189,6 +208,18 @@ describe("addTasks", () => {
     if (!result.ok) return;
     expect(result.data.added).toHaveLength(3);
     expect(result.data.errors).toHaveLength(0);
+  });
+
+  it("persists creation timestamps for every bulk-added task", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-10T12:34:56.789Z"));
+    expect(addTasks(tmpDir, PROJECT, ["First", "Second"]).ok).toBe(true);
+    const after = readTasks(tmpDir, PROJECT);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.data.items.Queue.map(t => t.createdAt)).toEqual([
+      "2026-09-10T12:34:56.789Z", "2026-09-10T12:34:56.789Z",
+    ]);
   });
 
   it("reports empty items as errors", () => {
