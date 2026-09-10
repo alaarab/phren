@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Upgrade js-yaml 4 to 4.3.2 in the VS Code packaging dependency chain.
+  The full workspace dependency audit now reports zero vulnerabilities.
+
 ## [0.2.13] - 2026-09-10
 
 ### Added
