@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- iPhone chat gives each tool call its own expandable row, pairs parallel
+  results by provider call ID, and limits output to a six-line preview with
+  a separate full-output viewer. Tool patches start with eight lines.
 - Upgrade js-yaml 4 to 4.3.2 in the VS Code packaging dependency chain.
   The full workspace dependency audit now reports zero vulnerabilities.
 
