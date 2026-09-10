@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-09-10
+
+### Fixed
+
+- Phren Hook image uploads now include the success flag expected by the iPhone
+  app. New app builds also accept the original protocol-v1 path response, so
+  images work with computers still running 0.2.11.
+
+### Changed
+
+- Removed the status/token row above the iPhone chat composer. Activity stays
+  in the existing header; token details and reconnect live in its options menu.
+
 ## [0.2.11] - 2026-09-10
 
 ### Added

@@ -135,7 +135,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   it("stores images privately and rejects traversal filenames", async () => {
     const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=", "base64");
     const response = await api("/v1/upload", { target, name: "fixture.png", data: bytes.toString("base64") });
-    expect(response.status).toBe(200); expect(await readFile(response.data.path)).toEqual(bytes);
+    expect(response.status).toBe(200);
+    expect(response.data.ok).toBe(true);
+    expect(await readFile(response.data.path)).toEqual(bytes);
     expect((await api("/v1/upload", { target, name: "../../settings.json", data: "AAAA" })).status).toBe(400);
     expect((await api("/v1/upload", { target, name: "script.png", data: Buffer.from("#!/bin/sh").toString("base64") })).status).toBe(400);
   });

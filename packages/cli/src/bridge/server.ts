@@ -103,7 +103,7 @@ export async function serve(version: string): Promise<void> {
             const encoded = z.string().max(11_184_812).regex(/^[A-Za-z0-9+/]*={0,2}$/).parse(data.data);
             const bytes = Buffer.from(encoded, "base64");
             if (!bytes.length || bytes.length > MAX_FRAME) throw new BridgeError(413, "The image is too large.");
-            result = { path: await saveUpload(target.session, name, bytes) };
+            result = { ok: true, path: await saveUpload(target.session, name, bytes) };
           } else if (url.pathname === "/v1/diff") result = await repositoryDiff(await trustedDirectory(pane));
           else if (url.pathname === "/v1/approvals/answer") {
             await agentHooks.answer(target, z.string().uuid().parse(data.actionId), data.decision); result = { ok: true };
