@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- iPhone appearance settings with four live theme previews: Midnight, Amethyst,
+  Graphite, and Slate. The default Midnight palette pairs a black canvas with
+  bright purple text; the selected theme persists across launches.
+
+### Fixed
+
+- Removed accumulated space below the last chat message and blank transcript
+  lines around tool activity. Keyboard dismissal and upward history loading
+  retain the compact conversation layout.
+
 ## [0.2.12] - 2026-09-10
 
 ### Fixed
