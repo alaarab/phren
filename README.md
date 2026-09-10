@@ -131,7 +131,7 @@ Drop custom slash commands into `~/.phren/global/skills/`. Hooks run on user pro
 Working inside [Herdr](https://herdr.dev)? `herdr plugin install alaarab/phren/integrations/herdr` binds the dashboard to a key: tasks, findings, and the review queue for whatever project the pane is sitting in, popped over your layout and gone again when you close it. See [integrations/herdr](integrations/herdr).
 
 ### iOS app
-[`apps/ios`](apps/ios) is a native SwiftUI app for your project memory and running agents. GitHub sync keeps findings, notes, tasks, and skills available on your phone; Phren Hook adds native Codex, Claude Code, and Copilot chat, Herdr terminals, repository diffs, and local app previews over pinned SSH/Tailscale. Includes the memory graph, widgets, and Siri intents. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.2.11 bridge install`.
+[`apps/ios`](apps/ios) is a native SwiftUI app for your project memory and running agents. GitHub sync keeps findings, notes, tasks, and skills available on your phone; Phren Hook adds native Codex, Claude Code, and Copilot chat, Herdr terminals, repository diffs, and local app previews over pinned SSH/Tailscale. Includes the memory graph, widgets, and Siri intents. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.2.12 bridge install`.
 
 ---
 
