@@ -241,6 +241,8 @@ Web UI (`phren web-ui`) is hardened by default:
 - sets CSP and anti-framing headers (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`)
 
 Mutating endpoints require both auth and CSRF.
+Malformed URI components return HTTP 400; unexpected route failures return a
+generic HTTP 500 without exposing internal details or stopping the server.
 
 ## Telemetry Model
 

@@ -16,12 +16,25 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; message: string; timer: NodeJS.Timeout }
+interface Pending { target: Target; response: ServerResponse; tool: string; message: string; expiresAt: string; timer: NodeJS.Timeout }
+
+/** An explicit foreground overview poll renews interest for a bounded interval.
+ * A disconnected phone never leaves future terminal prompts waiting forever. */
+export class ApprovalWatchLeases {
+  private servers = new Map<string, number>();
+  constructor(private now = Date.now) {}
+  renew(server: string) {
+    for (const [key, expiry] of this.servers) if (expiry <= this.now()) this.servers.delete(key);
+    if (this.servers.has(server) || this.servers.size < 64) this.servers.set(server, this.now() + 25_000);
+  }
+  has(server: string) { return (this.servers.get(server) || 0) > this.now(); }
+}
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
 export class AgentHooks {
   private pending = new Map<string, Pending>();
   private watching = new Map<string, number>();
+  readonly overview = new ApprovalWatchLeases();
   private server?: Server;
   watch(target: Target): () => void {
     const key = JSON.stringify(target);
@@ -30,7 +43,15 @@ export class AgentHooks {
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    return pending ? { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message } : undefined;
+    return pending ? { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt } : undefined;
+  }
+  pendingPanes(server: string, state: Json): Set<string> {
+    const panes = objects(state.panes);
+    return new Set([...this.pending.values()].filter(p => p.target.server === server && panes.some(pane => {
+      if (pane.pane_id !== p.target.pane || pane.workspace_id !== p.target.workspace || pane.tab_id !== p.target.tab || pane.agent !== p.target.source) return false;
+      const reported = object(pane.agent_session);
+      return reported.kind !== "id" || (reported.agent === p.target.source && reported.value === p.target.session);
+    })).map(p => p.target.pane));
   }
   async answer(target: Target, id: string, decision: unknown) {
     const entry = this.pending.get(id);
@@ -66,14 +87,15 @@ export class AgentHooks {
         const temporary = file + "." + randomUUID();
         await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
-        if (body.event !== "PermissionRequest" || target.source === "copilot" || !this.watching.has(JSON.stringify(target))) { res.end("{}"); return; }
-        // Only wait while a phone is watching this exact session; otherwise the
-        // agent's ordinary terminal permission prompt remains immediate.
+        if (body.event !== "PermissionRequest" || target.source === "copilot"
+          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server))) { res.end("{}"); return; }
+        // An exact chat watcher or explicit foreground overview lease is needed.
+        // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
         const timer = setTimeout(() => { this.pending.delete(action); res.end("{}"); }, 55_000);
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200),
-          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), timer });
+          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt: new Date(Date.now() + 55_000).toISOString(), timer });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); });
       } catch { if (!res.headersSent) res.statusCode = 400; res.end("{}"); }
     });

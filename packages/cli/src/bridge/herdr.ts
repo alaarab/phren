@@ -60,7 +60,7 @@ export async function servers(): Promise<Json[]> {
 }
 
 export async function snapshot(server: string): Promise<Json> { return object((await rpc(server, "session.snapshot")).snapshot); }
-export function workspaceSnapshot(s: Json): Json {
+export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
   const focus = focusedPane && id.safeParse(s.focused_workspace_id).success
@@ -72,10 +72,12 @@ export function workspaceSnapshot(s: Json): Json {
   // validated independently through panes(), never inferred from a directory.
   return { kind: "herdr", focus, groups: objects(s.workspaces).map(w => ({ id: w.workspace_id, label: w.label,
     children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
-      const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id);
+      const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id && p.workspace_id === t.workspace_id);
       const agent = panes.find(p => p.agent);
       return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
+        approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
+        contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
         agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };
     }) })) };
 }

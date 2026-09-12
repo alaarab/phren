@@ -1,4 +1,4 @@
-import { connect } from "node:net";
+import { connect, type NetConnectOpts } from "node:net";
 import { request } from "node:http";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -24,20 +24,37 @@ export async function health(): Promise<Json> {
   });
 }
 
+async function pipe(destination: NetConnectOpts): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect(destination);
+    const end = () => socket.end();
+    const stop = () => socket.destroy();
+    socket.on("connect", () => { process.stdin.pipe(socket); socket.pipe(process.stdout); });
+    socket.on("error", reject);
+    socket.on("close", () => {
+      process.stdin.unpipe(socket); process.stdin.pause();
+      process.stdin.removeListener("end", end); process.stdout.removeListener("error", stop);
+      resolve();
+    });
+    process.stdin.once("end", end); process.stdout.once("error", stop);
+  });
+}
+
 /** The SSH key is forced to this allowlisted dispatcher. The supplied command is data, never a shell. */
 export async function dispatch(command: string): Promise<void> {
   if (command === "phren-hook v1 pipe") {
-    await new Promise<void>((resolve, reject) => {
-      const socket = connect(socketPath());
-      socket.on("connect", () => { process.stdin.pipe(socket); socket.pipe(process.stdout); });
-      socket.on("error", reject); socket.on("close", () => { process.stdin.unpipe(socket); process.stdin.pause(); resolve(); });
-      process.stdin.once("end", () => socket.end());
-      process.stdout.once("error", () => socket.destroy());
-    });
+    await pipe({ path: socketPath() });
+    return;
+  }
+  // SSH port-forwarding also permits Unix sockets, bypassing the callback and
+  // Herdr boundaries. Preview bytes instead use this exact loopback command.
+  const preview = /^phren-hook v1 web (127\.0\.0\.1|::1) ([1-9][0-9]{0,4})$/.exec(command);
+  if (preview && preview[0] === command && Number(preview[2]) <= 65535) {
+    await pipe({ host: preview[1], port: Number(preview[2]) });
     return;
   }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);
-  if (!terminal) throw new BridgeError(403, "This SSH key only permits Phren Hook and existing Herdr terminals.");
+  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, and existing Herdr terminals.");
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
   // Verify the named server exists; never create a workspace or an agent implicitly.
