@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer as createNetServer, type Server } from "node:net";
 import { request } from "node:http";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,8 +13,10 @@ import { planAgentHooks, upgradeKeys } from "./install.js";
 import { TranscriptReader, transcriptPath, visibleEvent, historicalImage } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
+import { repositoryBranch } from "./projects.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 
+const execFileAsync = promisify(execFile);
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
 const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/dist/bridge-hook.mjs");
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
@@ -72,6 +75,21 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent({ type: "assistant", isSidechain: true, message: {} }, "claude")).toBeUndefined();
     expect(visibleEvent({ type: "assistant.message", agentId: "subagent", data: { content: "private" } }, "copilot")).toBeUndefined();
     expect(JSON.stringify(visibleEvent({ type: "assistant", message: { content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "Visible" }] } }, "claude"))).not.toContain("private");
+  });
+  it("exports only the model from a Codex turn context", () => {
+    const context = { type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra", cwd: "/private/work", approval_policy: "never", instructions: "private" } };
+    expect(visibleEvent(context, "codex")).toEqual({ type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra" } });
+    expect(visibleEvent({ type: "turn_context", payload: { cwd: "/private/work" } }, "codex")).toBeUndefined();
+  });
+  it("reports the pane's branch with a short cache and nothing for a plain folder", async () => {
+    const repo = await mkdtemp(path.join(tmpdir(), "phren-branch-"));
+    const git = (...args: string[]) => execFileAsync("git", ["-C", repo, ...args], { env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: repo } });
+    await git("init", "-q", "-b", "trunk");
+    expect(await repositoryBranch(repo)).toBe("trunk");
+    await git("checkout", "-q", "-b", "feature");
+    expect(await repositoryBranch(repo)).toBe("trunk"); // cached for a few seconds
+    const plain = await mkdtemp(path.join(tmpdir(), "phren-plain-"));
+    expect(await repositoryBranch(plain)).toBeUndefined();
   });
 });
 

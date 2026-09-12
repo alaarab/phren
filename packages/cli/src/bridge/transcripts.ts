@@ -60,6 +60,9 @@ export async function transcriptPath(source: Provider, session: string): Promise
 export function visibleEvent(raw: Json, source: Provider): Json | undefined {
   if (source === "codex") {
     const p = object(raw.payload);
+    // The model answering this turn is the only field of turn_context the
+    // phone shows; its policies and instructions stay on the computer.
+    if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp, payload: { model: p.model } } : undefined;
     if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
     if (raw.type !== "response_item") return undefined;
     if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") return raw;
