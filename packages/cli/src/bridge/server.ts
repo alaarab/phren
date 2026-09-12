@@ -12,9 +12,10 @@ import { repositoryDiff, webServers } from "./projects.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { saveUpload } from "./uploads.js";
+import { WorkspaceContextUsage } from "./context.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", herdr: true, diff: true, webServers: true, activity: true,
+  terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, providers: ["codex", "claude", "copilot"] };
 
 async function body(request: IncomingMessage): Promise<Json> {
@@ -49,6 +50,7 @@ export async function serve(version: string): Promise<void> {
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
+  const contextUsage = new WorkspaceContextUsage();
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
@@ -75,7 +77,9 @@ export async function serve(version: string): Promise<void> {
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
-            await journal.record(server, objects(s.panes)); result = { ...workspaceSnapshot(s), phren: info }; break;
+            if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
+            const context = await contextUsage.read(server, s);
+            await journal.record(server, objects(s.panes)); result = { ...workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s)), phren: info }; break;
           }
           case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
           case "/v1/transcripts/blob": {
@@ -140,7 +144,6 @@ export async function serve(version: string): Promise<void> {
     } catch { socket.destroy(); }
   });
   async function stream(client: WebSocket, url: URL) {
-    const target = targetFromURL(url);
     const abort = new AbortController();
     let reader: TranscriptReader | undefined, timer: ReturnType<typeof setInterval> | undefined;
     let unwatch: (() => void) | undefined;
@@ -149,6 +152,9 @@ export async function serve(version: string): Promise<void> {
     const pending: number[] = [];
     const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
     client.once("close", stop); client.once("error", stop);
+    // Even rejected upgrades may already contain invalid WebSocket frames.
+    // Handle their errors before parsing any untrusted destination fields.
+    const target = targetFromURL(url);
     const tick = async () => {
       if (busy || !ready || abort.signal.aborted) return; busy = true;
       try {

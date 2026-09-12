@@ -72,6 +72,7 @@ struct LiveSessionsView: View {
                     }
                 }
             }
+            .listSectionSpacing(12)
             .opacity(hosts.isEmpty || overview.ready ? 1 : 0)
             .allowsHitTesting(hosts.isEmpty || overview.ready)
             .accessibilityHidden(!hosts.isEmpty && !overview.ready)
@@ -131,16 +132,16 @@ struct LiveSessionsView: View {
         ForEach(groups) { group in
             Section {
                 ForEach(group.sessions) { session in
-                    LiveSessionCard(session: session, fresh: group.fresh, showHost: true, onChat: { chatSession = session }) {
+                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { chatSession = session }) {
                         if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
                             selected = OverviewSelection(session: session, monitor: computer.monitor)
                         }
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                    .separatedSessionRow()
                 }
             } header: { Text("\(group.title) · \(group.sessions.count)") }
             footer: {
-                if !group.fresh { Text("These computers aren't connected. Reconnect before opening a session.") }
+                if group.id == "previous" { Text("These computers aren't connected. Reconnect before opening a session.") }
             }
         }
         let problems = overview.computers.filter { $0.monitor.message != nil }
@@ -226,7 +227,7 @@ final class LiveHostMonitor {
             let other = remote ? "Inspect logs" : "Check project status"
             return try LiveWorkspaces.read(Data("""
             {"kind":"herdr","groups":[{"id":"w1","label":"Shared project","children":[
-            {"id":"w1:t1","label":"1","title":"\(title)","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone"},
+            {"id":"w1:t1","label":"1","title":"\(title)","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone","contextUsedPercent":\(remote ? 62 : 37)},
             {"id":"w1:t2","label":"2","title":"\(other)","agent":"codex","agentStatus":"idle","cwd":"/work/phone"}]}]}
             """.utf8))
         }
@@ -290,8 +291,10 @@ private struct LiveHostView: View {
         return monitor.snapshot?.sessions(on: host) ?? []
     }
     private var visible: [LiveAgentSession] {
-        sessions.filter { session in
-            let project = preferences?.projectMatch(hostID: hostID, cwd: session.tab.cwd, projects: model.sessionProjects)
+        let preferences = preferences
+        let projects = model.sessionProjects
+        return sessions.filter { session in
+            let project = preferences?.projectMatch(hostID: hostID, cwd: session.tab.cwd, projects: projects)
             return session.matches(query, projectName: project?.project.name)
         }
     }
@@ -307,6 +310,14 @@ private struct LiveHostView: View {
                     .pickerStyle(.segmented)
                     .padding(.vertical, 4)
 
+                    let visible = visible
+                    let preferences = preferences
+                    let pinned = visible.filter { preferences?.isPinned($0.id) == true }
+                    let unpinned = visible.filter { preferences?.isPinned($0.id) != true }
+                    if !pinned.isEmpty {
+                        sectionHeading("Pinned", count: pinned.count)
+                        sessionCards(pinned)
+                    }
                     if visible.isEmpty {
                         PhrenEmptyState(title: sessions.isEmpty ? "No sessions running" : "No matching sessions",
                                         message: sessions.isEmpty ? "Open a workspace on this computer to see it here." : "Try a title, project, agent, or folder name.")
@@ -315,7 +326,7 @@ private struct LiveHostView: View {
                         switch mode {
                         case .workspaces:
                             ForEach(monitor.snapshot?.groups ?? []) { group in
-                                let entries = visible.filter { $0.workspaceID == group.id }
+                                let entries = unpinned.filter { $0.workspaceID == group.id }
                                 if !entries.isEmpty {
                                     sectionHeading(group.label, count: entries.count)
                                     sessionCards(entries)
@@ -323,7 +334,7 @@ private struct LiveHostView: View {
                             }
                         case .activity:
                             ForEach(LiveWorkspaces.Tab.Activity.allCases, id: \.self) { activity in
-                                let entries = visible.filter { $0.tab.activity == activity }
+                                let entries = unpinned.filter { $0.tab.activity == activity }
                                 if !entries.isEmpty {
                                     sectionHeading(activity.rawValue, count: entries.count)
                                     sessionCards(entries)
@@ -452,28 +463,6 @@ extension LiveHostMonitor {
     }
 }
 
-private extension LiveWorkspaces.Tab.Activity {
-    var color: Color {
-        switch self {
-        case .working: PhrenTheme.cyan
-        case .waiting: PhrenTheme.warning
-        case .error: PhrenTheme.danger
-        case .done: PhrenTheme.success
-        case .idle, .unknown: PhrenTheme.textMuted
-        }
-    }
-    var icon: String {
-        switch self {
-        case .working: "bolt.fill"
-        case .waiting: "pause.fill"
-        case .error: "exclamationmark"
-        case .done: "checkmark"
-        case .idle: "moon"
-        case .unknown: "questionmark"
-        }
-    }
-}
-
 private struct SessionStatusIcon: View {
     let activity: LiveWorkspaces.Tab.Activity
     let fresh: Bool
@@ -497,46 +486,35 @@ private struct LiveSessionCard: View {
     var showHost = false
     var onChat: (() -> Void)? = nil
     let onDetails: () -> Void
-    private var match: SessionProjectMatch? {
-        (try? LiveSessionPreferences.read(data))?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
-                                                            projects: model.sessionProjects)
-    }
 
     var body: some View {
+        let preferences = try? LiveSessionPreferences.read(data)
+        let project = preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd,
+                                                projects: model.sessionProjects)?.project.name
+        let subtitle = [showHost ? session.host.name : nil, project ?? session.workspaceName,
+                        session.tab.agent, session.tab.status + (fresh ? "" : " · stale")]
+            .compactMap { $0 }.joined(separator: " · ")
+        let prefix = showHost ? "overview" : "live"
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
-                HStack(spacing: 10) {
-                    Image(systemName: session.tab.activity.icon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(fresh ? session.tab.activity.color : PhrenTheme.textMuted)
-                        .frame(width: 28, height: 32)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(session.tab.displayTitle).font(.subheadline.weight(.semibold))
-                            .foregroundStyle(PhrenTheme.text).lineLimit(showHost ? 1 : 2)
-                        Text([showHost ? session.host.name : nil, match?.project.name ?? session.workspaceName, session.tab.agent,
-                              session.tab.status + (fresh ? "" : " · stale")].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.vertical, 12).padding(.leading, 10)
-                .frame(minHeight: 72).contentShape(Rectangle())
+                SessionCardContent(session: session, fresh: fresh, subtitle: subtitle, identifierPrefix: prefix)
             }
             .buttonStyle(.plain)
-            .accessibilityIdentifier(showHost ? "overview-chat:\(session.host.id):\(session.host.muxID):\(session.workspaceID):\(session.tab.id)"
+            .accessibilityIdentifier(showHost ? "overview-chat:\(session.accessibilityKey)"
                                      : "live-chat:\(session.workspaceID):\(session.tab.id)")
             .disabled(!fresh)
+            SessionPinButton(session: session, pinned: preferences?.isPinned(session.id) == true,
+                             identifierPrefix: prefix, data: $data)
             Button(action: onDetails) {
-                Image(systemName: "info.circle").font(.system(size: 17))
+                Image(systemName: "info.circle").font(.system(size: 15))
                     .foregroundStyle(PhrenTheme.textMuted).frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain).accessibilityLabel("Session details")
-            .accessibilityIdentifier(showHost ? "overview-detail:\(session.host.id):\(session.host.muxID):\(session.workspaceID):\(session.tab.id)"
+            .accessibilityIdentifier(showHost ? "overview-detail:\(session.accessibilityKey)"
                                      : "live-detail:\(session.workspaceID):\(session.tab.id)")
         }
-        .padding(.trailing, 2)
-        .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .sessionCard()
     }
 }
 

@@ -307,6 +307,39 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testApprovalStaysVisibleAboveHistoryAndCanBeDenied() {
+        let app = launch(extra: ["--chat-approval", "--chat-long-history"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let deny = app.buttons["chat-approval-deny"]
+        XCTAssertTrue(deny.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["chat-approval-terminal"].isHittable)
+        app.scrollViews["chat-transcript"].swipeDown()
+        XCTAssertTrue(deny.isHittable)
+        capture(app, "Pinned permission controls")
+        deny.tap()
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: deny)
+        waitForExpectations(timeout: 8)
+        XCTAssertFalse(deny.exists)
+    }
+
+    @MainActor
+    func testLiveActivityCanDenyTheExactRequest() {
+        let app = launch(extra: ["--chat-approval", "--approval-live-activity"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-approval-deny"].waitForExistence(timeout: 10))
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.025)).press(forDuration: 1.5)
+        XCTAssertTrue(springboard.buttons["Deny"].waitForExistence(timeout: 10))
+        capture(springboard, "Permission Live Activity")
+        springboard.buttons["Deny"].tap()
+        XCTAssertTrue(app.alerts["Permission request"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Denial sent."].exists)
+        app.alerts.buttons["OK"].tap()
+    }
+
+    @MainActor
     func testHistoricalImageDiffAndNativeHerdrNavigation() {
         let app = launch(extra: ["--chat-historical-image"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -363,10 +396,63 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Independent tool rows with six-line output preview")
         app.buttons["chat-tool-output:3:0"].tap()
         XCTAssertTrue(app.navigationBars["Tool Result"].waitForExistence(timeout: 3))
+        app.buttons["chat-tool-output-last"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final output marker 0")).firstMatch.exists)
         app.buttons["chat-tool-output-done"].tap()
         rows.firstMatch.tap()
         XCTAssertEqual(rows.firstMatch.value as? String, "Collapsed")
+        XCTAssertTrue(app.buttons["chat-close"].isHittable)
+    }
+
+    @MainActor
+    func testDenseToolOutputPagesKeepEveryLineReachable() {
+        let app = launch(extra: ["--chat-dense-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8))
+        rows.firstMatch.tap()
+        app.buttons["chat-tool-output:3:0"].tap()
+        XCTAssertTrue(app.navigationBars["Tool Result"].waitForExistence(timeout: 3))
+        let range = app.staticTexts["chat-tool-output-page-range"]
+        guard range.waitForExistence(timeout: 3) else {
+            XCTFail("Dense output must use bounded pages instead of laying out all 8,001 lines")
+            return
+        }
+        XCTAssertEqual(range.label, "Lines 1–120 of 8001")
+        app.buttons["chat-tool-output-next"].tap()
+        XCTAssertEqual(range.label, "Lines 121–240 of 8001")
+        app.buttons["chat-tool-output-last"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final dense output marker 0")).firstMatch.exists)
+        app.buttons["chat-tool-output-previous"].tap()
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final dense output marker 0")).firstMatch.exists)
+        app.buttons["chat-tool-output-first"].tap()
+        XCTAssertEqual(range.label, "Lines 1–120 of 8001")
+        app.buttons["chat-tool-output-done"].tap()
+        XCTAssertEqual(rows.element(boundBy: 1).value as? String, "Collapsed")
+        XCTAssertTrue(app.buttons["chat-close"].isHittable)
+    }
+
+    @MainActor
+    func testDensePatchPagesPreserveSemanticRowsAndCollapse() {
+        let app = launch(extra: ["--chat-dense-diff"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 8))
+        group.tap()
+        let expand = app.buttons["chat-patch-expand"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 3))
+        expand.tap()
+        let range = app.staticTexts["chat-patch-page-range"]
+        XCTAssertTrue(range.waitForExistence(timeout: 3))
+        XCTAssertEqual(range.label, "Lines 1–120 of 2002")
+        app.buttons["chat-patch-next"].tap()
+        XCTAssertEqual(range.label, "Lines 121–240 of 2002")
+        app.buttons["chat-patch-last"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+Final dense patch marker")).firstMatch.exists)
+        XCTAssertTrue(app.buttons["Copy patch"].exists)
+        expand.tap()
+        XCTAssertFalse(range.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+Final dense patch marker")).firstMatch.exists)
         XCTAssertTrue(app.buttons["chat-close"].isHittable)
     }
 
@@ -485,7 +571,7 @@ final class AgentChatTests: XCTestCase {
     @MainActor
     func testSwitchAgentAcrossComputersPreservesSeparateDrafts() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture"]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
         app.tabBars.buttons["Agents"].tap()

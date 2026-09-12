@@ -32,7 +32,7 @@ struct ProjectSessionActions: View {
 struct SessionLaunchAlert: ViewModifier {
     @Binding var error: String?
     func body(content: Content) -> some View {
-        content.alert("Couldn't open session", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+        content.alert("Couldn't open session", isPresented: $error.isPresent()) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
     }

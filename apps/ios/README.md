@@ -66,11 +66,30 @@ phren backend. The GitHub token is stored in the device Keychain and sent only
 to GitHub. Optional live sessions use a separate SSH connection to a computer
 the user adds, using its private Phren Hook service.
 
+GitHub request paths encode repository names, branches, and file names as
+literal path components. Authenticated API redirects stay on
+`https://api.github.com`; other hosts, HTTP downgrades, and alternate ports
+are refused before forwarding credentials or write bodies.
+
+Web previews use the restricted SSH dispatcher (`phren-hook v1 web`), with
+loopback destinations validated by the helper. Phone authorization lines keep
+`restrict,pty,command=…` and grant no SSH forwarding: OpenSSH's `permitopen`
+does not restrict Unix-socket forwarding, which could bypass the dispatcher.
+On each connected computer, install the updated CLI and run
+`phren bridge install` to migrate existing Phren keys and install the preview
+command together. The legacy `enable-web-previews.py` script now directs users
+to that installer without modifying keys. The app checks
+`capabilities.webPreview == "ssh-exec"` before opening a preview; older helpers,
+including released 0.2.14, show an update instruction. Existing chat and terminal
+connections continue to use their current dispatcher commands.
+
 ```
 apps/ios/
   project.yml            # XcodeGen definition (the .xcodeproj is generated)
   Phren/                 # SwiftUI app target
     AppModel.swift       # root state: auth, store, snapshot, sync status
+    AppRuntime.swift     # shared launch mode and preferences domain
+    UITestFixtures.swift # isolated bootstrap data, Debug simulators only
     WidgetBridge.swift   # writes the JSON snapshot the widgets read
     Intents/             # App Intents: "Hey Siri, add a task to phren"
     Onboarding/          # welcome → sign-in → repo picker → initial sync
@@ -92,6 +111,25 @@ apps/ios/
     Tests/               # fixture-driven tests (see "Fixtures" below)
   scripts/generate-fixtures.mjs
 ```
+
+Task screens share one filtered/sorted row set per render. Bulk actions resolve
+the current writable selection when tapped. Search parses document dates once
+when constructing its index and computes their age at query time, keeping
+recency current without repeating date parsing on every keystroke.
+
+Live session lists use compact, separated cards. Tap the pin beside a session
+to keep it in **Pinned** in the agent overview, and tap it again to unpin.
+Project lists put pinned sessions first. Pins stay on this device
+across launches and identify the computer, Herdr server, workspace, and tab.
+They do not make an offline session available for chat.
+
+An active session has a left activity bar and rotating circle. The circle shows
+context usage when the agent reports both current token usage and a context
+limit. Hook currently supplies this for unambiguous Codex sessions; other or
+unavailable metrics use the status symbol instead of an invented percentage.
+The outer arc uses a continuous 0.9-second rotation without a frame timer.
+Offline, hidden, and background indicators stop animating; Reduce Motion keeps
+them still.
 
 ### The format contract
 
@@ -338,6 +376,13 @@ per-token output when an agent only writes completed messages. Slash suggestions
 are vertical; the full command menu opens the running agent's own terminal menu,
 including installed skills and custom commands.
 
+Tool calls expand independently with a short output preview. Open **Full output**
+to read lengthy results in pages; First, Previous, Next, and Last keep every line
+reachable without laying out the entire result at once. **Copy** includes the
+whole output, regardless of the current page.
+Expanded patches also use pages, preserving colored changes and line numbers;
+**Copy patch** includes all supplied lines.
+
 The installed lifecycle callbacks bind agent session IDs to the exact Herdr pane
 and foreground process. On Codex, review new Phren entries in `/hooks`; Codex
 requires trust for new hook definitions. Resume existing agents if their version
@@ -346,8 +391,9 @@ existing conversations without restarting them. An ambiguous identity disables
 chat instead of selecting another agent.
 
 Codex and Claude PermissionRequest callbacks can show a native approval while
-Phren is watching that exact conversation. Only an explicit answer resolves the
-pending request. If the phone is not watching, the normal terminal prompt appears
+Phren watches that conversation or the foreground session overview. Only an
+explicit answer resolves the pending request. If the phone is not watching,
+the normal terminal prompt appears
 immediately; unanswered phone requests return to the terminal after 55 seconds.
 Question dialogs and unsupported provider interactions use Phren's native
 terminal. No agent is launched automatically.
@@ -634,15 +680,26 @@ the app:
 - **accessoryCircular** / **accessoryRectangular** (Lock Screen) — memory
   count, and memory count + top task line respectively.
 
-The widget can't link PhrenKit or the app target (Apple keeps extensions
-dependency-thin, and this one stays fully offline besides). The bridge is a
-JSON file: `AppModel.refresh()` — the same place the per-store sync status
+The widget does not link PhrenKit or the app target. The app and extension
+compile the same small models in `Shared/`, avoiding duplicated JSON contracts.
+The glance-widget bridge is a JSON file: `AppModel.refresh()` — where per-store sync status
 settles every ~7s live-poll cycle — writes a `WidgetSnapshot` (memory and project
 counts, top task, last-sync date, and legacy review fields) to the `group.com.phren.ios`
-App Group container, then calls `WidgetCenter.shared.reloadAllTimelines()`
+App Group container through an actor off the main thread, skipping identical
+snapshots, then calls `WidgetCenter.shared.reloadAllTimelines()`
 **only** when the visible content actually changed, so a quiet poll never
 touches the widget refresh budget. Before the app has ever run, the widgets
 show an "open phren" state rather than fake numbers or a blank card.
+
+The extension also renders permission Live Activities. Requests received in chat
+show an explanation and Deny/Approve buttons on the Lock Screen and Dynamic
+Island. Actions authenticate, open Phren, and consume a private, protected
+request record before sending the exact answer over pinned SSH. Existing
+Keychain protection remains `WhenUnlockedThisDeviceOnly`. Host changes, expiry
+and repeated actions are rejected; ambiguous delivery is never retried.
+The activity contains display text and an opaque local ID only. Live Activities
+do not keep SSH running in the background: receiving new requests while the app
+is suspended needs a push relay, which is not currently configured.
 
 Tapping a widget delivers straight to `PhrenApp`'s `onOpenURL` (no
 `CFBundleURLTypes` registration needed for widget-originated opens), which

@@ -11,6 +11,10 @@ struct GraphView: View {
     @State private var project = ""
     @State private var filter: GraphPayload.ContentFilter = .all
     @State private var payload: GraphPayload?
+    @State private var payloadRevision = UUID()
+    @State private var filtered: GraphPayload?
+    @State private var visible: GraphPayload?
+    @State private var payloadJSON: String?
     @State private var error: String?
     @State private var selection: GraphNodeRef?
     @State private var command: GraphCommand?
@@ -40,16 +44,11 @@ struct GraphView: View {
         return value
     }
     private var projects: [String] { model.snapshot(for: selectedStore).projects.map(\.name).sorted() }
-    private var filtered: GraphPayload? { payload?.filtered(by: filter) }
-    private var visible: GraphPayload? {
-        guard let filtered else { return nil }
-        return focusedNodeID.map { filtered.neighborhood(of: $0, steps: connectionSteps) } ?? filtered
-    }
     private var savedViews: [GraphSavedView] {
         (try? JSONDecoder().decode([GraphSavedView].self, from: savedViewData)) ?? []
     }
     private var refreshKey: RefreshKey {
-        RefreshKey(store: selectedStore, project: selectedProject, date: model.syncStatus.lastSyncedAt)
+        RefreshKey(store: selectedStore, project: selectedProject, revision: model.snapshot(for: selectedStore).revision)
     }
 
     var body: some View {
@@ -57,14 +56,14 @@ struct GraphView: View {
             LiveStatusBar()
             controls
             ZStack(alignment: .bottomTrailing) {
-                if let visible, let json = try? visible.jsonString(), !visible.nodes.isEmpty {
+                if let visible, let json = payloadJSON, !visible.nodes.isEmpty {
                     GraphWebView(payloadJSON: json, command: command,
                                  onSelect: receiveSelection,
                                  onError: { error = $0 })
                         .id(rendererID)
                         .accessibilityLabel("Interactive memory graph")
                     cameraControls.padding(12)
-                } else if payload != nil {
+                } else if visible != nil {
                     PhrenEmptyState(title: "No graph content yet",
                                     message: "Findings, tasks, and projects appear here after your store syncs.")
                 } else if error == nil {
@@ -127,6 +126,19 @@ struct GraphView: View {
             }
         }
         .task(id: refreshKey) { await rebuild() }
+        .task(id: PresentationKey(revision: payloadRevision, filter: filter, focus: focusedNodeID, steps: connectionSteps)) {
+            guard let payload else { return }
+            let filter = filter, focus = focusedNodeID, steps = connectionSteps
+            do {
+                let presentation = try await Task.detached(priority: .userInitiated) {
+                    let filtered = payload.filtered(by: filter)
+                    let visible = focus.map { filtered.neighborhood(of: $0, steps: steps) } ?? filtered
+                    return (filtered, visible, try visible.jsonString())
+                }.value
+                try Task.checkCancellation()
+                filtered = presentation.0; visible = presentation.1; payloadJSON = presentation.2
+            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        }
         .sheet(item: $selection, onDismiss: {
             switch command?.action {
             case .reset, .reveal: break
@@ -144,7 +156,7 @@ struct GraphView: View {
             Button("Save") { saveCurrentView() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Save this store, project, content filter, and connection focus on this iPhone.") }
-        .alert("Graph view", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+        .alert("Graph view", isPresented: $notice.isPresent()) {
             Button("OK") { notice = nil }
         } message: { Text(notice ?? "") }
         .sheet(isPresented: $showingInfo) {
@@ -367,6 +379,7 @@ struct GraphView: View {
             try Task.checkCancellation()
             guard request.store == selectedStore, request.project == selectedProject else { return }
             payload = next
+            payloadRevision = UUID()
             let currentIDs = Set(next.filtered(by: filter).nodes.map(\.id))
             focusHistory = focusHistory.filter { currentIDs.contains($0) }
             if let restoringView, restoringView.storeID == request.store, restoringView.project == request.project {
@@ -380,7 +393,7 @@ struct GraphView: View {
                     return
                 }
             }
-            if let focusedNodeID, !next.filtered(by: filter).nodes.contains(where: { $0.id == focusedNodeID }) {
+            if let focusedNodeID, !currentIDs.contains(focusedNodeID) {
                 clearFocus()
                 notice = "The focused node is no longer in this view. Showing the current graph."
             }
@@ -402,7 +415,14 @@ struct GraphView: View {
     private struct RefreshKey: Hashable {
         let store: String
         let project: String?
-        let date: Date?
+        let revision: UUID
+    }
+
+    private struct PresentationKey: Equatable {
+        let revision: UUID
+        let filter: GraphPayload.ContentFilter
+        let focus: String?
+        let steps: Int
     }
 }
 

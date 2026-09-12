@@ -86,9 +86,6 @@ struct TaskListView: View {
         return TaskBrowsing.rows(result, query: query, priority: priority, age: age, sort: sort)
     }
 
-    private var queueRows: [TaskListRow] { rows(in: .queue) }
-    private var visibleRows: [TaskListRow] { rows(in: section) }
-
     private var projectNames: [String] {
         // Key paths can't traverse tuple elements — use a closure.
         Array(Set(model.mergedTaskDocs.map { $0.doc.project })).sorted()
@@ -102,8 +99,12 @@ struct TaskListView: View {
     }
 
     var body: some View {
+        // Sorting and date parsing scale with the task count. Share one result
+        // across this render; the next observed change computes fresh rows.
+        let visibleRows = rows(in: section)
+        let writableRows = visibleRows.filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
         VStack(spacing: 0) {
-            controls
+            controls(visibleCount: visibleRows.count, writableCount: writableRows.count)
             if showSearch && !isSelecting {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
@@ -137,8 +138,9 @@ struct TaskListView: View {
                                 .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                         }
                         .padding(.vertical, 10)
-                        if !queueRows.isEmpty {
-                            Button("View backlog (\(queueRows.count))") { section = .queue }
+                        let backlogCount = rows(in: .queue).count
+                        if backlogCount > 0 {
+                            Button("View backlog (\(backlogCount))") { section = .queue }
                         }
                     }
                 }
@@ -207,7 +209,7 @@ struct TaskListView: View {
         }
     }
 
-    private var controls: some View {
+    private func controls(visibleCount: Int, writableCount: Int) -> some View {
         @Bindable var model = model
         return HStack(spacing: 0) {
             Menu {
@@ -220,7 +222,7 @@ struct TaskListView: View {
                 HStack(spacing: 6) {
                     Text(section == .queue ? "Backlog" : section.rawValue).fontWeight(.semibold)
                     Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
-                    Text(isSelecting ? "\(selectedIDs.count)/\(visibleRows.count)" : visibleRows.count.formatted())
+                    Text(isSelecting ? "\(selectedIDs.count)/\(visibleCount)" : visibleCount.formatted())
                         .foregroundStyle(PhrenTheme.textMuted)
                 }
                 .frame(minHeight: 44)
@@ -230,7 +232,8 @@ struct TaskListView: View {
             .disabled(isMoving)
             Spacer(minLength: 4)
             if isSelecting {
-                Button(selectedIDs.count == writableRows.count ? "Deselect all" : "Select all") {
+                Button(selectedIDs.count == writableCount ? "Deselect all" : "Select all") {
+                    let writableRows = currentWritableRows()
                     selectedIDs = selectedIDs.count == writableRows.count ? [] : Set(writableRows.map(\.id))
                 }
                 .disabled(isMoving)
@@ -305,15 +308,17 @@ struct TaskListView: View {
         return "Add a task with the + button."
     }
 
-    private var writableRows: [TaskListRow] {
-        visibleRows.filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
+    /// Actions resolve the current selection at tap time, since sync or store
+    /// permissions may have changed since the last render.
+    private func currentWritableRows() -> [TaskListRow] {
+        rows(in: section).filter { model.canWrite(storeId: $0.storeId, project: $0.project) }
     }
 
     private var selectionActions: some View {
         HStack(spacing: 8) {
             ForEach(TaskMove.allCases, id: \.self) { action in
                 Button {
-                    move(writableRows.filter { selectedIDs.contains($0.id) }, using: action)
+                    move(currentWritableRows().filter { selectedIDs.contains($0.id) }, using: action)
                 } label: {
                     Label(action.rawValue, systemImage: action.symbol)
                         .font(.subheadline.weight(.medium))

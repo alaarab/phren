@@ -1,37 +1,43 @@
 import PhrenKit
 import SwiftUI
 
-struct ChatApprovalCard: View {
+struct ChatApprovalCard<Terminal: View>: View {
     let approval: AgentApproval
     let busy: Bool
+    @ViewBuilder let terminal: () -> Terminal
     let answer: (Bool) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Approval needed", systemImage: "hand.raised").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
-            Text(approval.title ?? approval.toolName ?? "Allow this action?").font(.headline)
+            Label("Permission needed", systemImage: "hand.raised").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.warning)
+                .accessibilityIdentifier("chat-approval")
+            Text(approval.title ?? approval.toolName ?? "Allow this action?").font(.headline).lineLimit(2)
+            if let explanation = approval.explanation {
+                Text(explanation).font(.subheadline).lineLimit(4).textSelection(.enabled)
+            }
             if let message = approval.message, !message.isEmpty {
                 DisclosureGroup("Action details") {
                     ScrollView { Text(message).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 220)
                 }
             }
+            terminal().buttonStyle(.bordered).frame(maxWidth: .infinity)
             if typeSize.isAccessibilitySize {
                 VStack(spacing: 12) { deny; approve }.disabled(busy)
             } else {
                 HStack { deny; Spacer(); approve }.disabled(busy)
             }
             if busy { ProgressView() }
-        }.padding(16).phrenCard().accessibilityIdentifier("chat-approval")
+        }.padding(12).phrenCard().accessibilityElement(children: .contain)
     }
     private var deny: some View {
         Button(role: .destructive) { answer(false) } label: {
-            Text("Deny").lineLimit(1).frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil)
-        }.buttonStyle(.bordered)
+            Text("Deny").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
+        }.buttonStyle(.bordered).accessibilityIdentifier("chat-approval-deny")
     }
     private var approve: some View {
         Button { answer(true) } label: {
-            Text("Approve").lineLimit(1).frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil)
-        }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan)
+            Text("Approve").lineLimit(1).frame(maxWidth: .infinity, minHeight: 32)
+        }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).accessibilityIdentifier("chat-approval-approve")
     }
 }
 

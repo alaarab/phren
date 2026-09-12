@@ -75,7 +75,7 @@ struct HerdrWorkspacesView: View {
         .toolbar {
             Button("New workspace", systemImage: "plus") { name = ""; cwd = snapshot?.groups.flatMap(\.children).compactMap(\.cwd).first ?? ""; operation = .init(workspace: nil, title: "New workspace") }.disabled(busy || host == nil)
         }
-        .alert(operation?.title ?? "Workspace", isPresented: Binding(get: { operation != nil }, set: { if !$0 { operation = nil } })) {
+        .alert(operation?.title ?? "Workspace", isPresented: $operation.isPresent()) {
             TextField("Name", text: $name)
             if operation?.workspace == nil { TextField("Full folder path on computer", text: $cwd).textInputAutocapitalization(.never).autocorrectionDisabled() }
             Button("Cancel", role: .cancel) { operation = nil }
@@ -84,7 +84,7 @@ struct HerdrWorkspacesView: View {
                 operation = nil
             }
         }
-        .confirmationDialog("Close \(closing?.title ?? "workspace")?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }), titleVisibility: .visible) {
+        .confirmationDialog("Close \(closing?.title ?? "workspace")?", isPresented: $closing.isPresent(), titleVisibility: .visible) {
             Button("Close and stop its processes", role: .destructive) {
                 if let op = closing, let host { perform(.close, host: host, workspace: op.workspace, tab: op.tab) }
                 closing = nil

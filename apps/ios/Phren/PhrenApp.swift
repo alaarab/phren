@@ -5,6 +5,7 @@ import PhrenKit
 struct PhrenApp: App {
     @State private var model = AppModel()
     @State private var appearance = PhrenAppearance.shared
+    @State private var approvals = ApprovalActivityController.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -15,7 +16,7 @@ struct PhrenApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .defaultAppStorage(AppModel.isUITesting ? UserDefaults(suiteName: "phren.ui-tests")! : .standard)
+                .defaultAppStorage(AppRuntime.defaults)
                 .tint(PhrenTheme.navigation)
                 .foregroundStyle(PhrenTheme.text)
                 // All current palettes use dark system controls and keyboards.
@@ -23,6 +24,9 @@ struct PhrenApp: App {
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
                 .task { await model.bootstrap() }
+                .alert("Permission request", isPresented: $approvals.message.isPresent()) {
+                    Button("OK") { approvals.message = nil }
+                } message: { Text(approvals.message ?? "") }
                 .onChange(of: scenePhase) { _, phase in
                     // Live sync runs only while the app is visible; returning
                     // to the foreground triggers an immediate catch-up pull.

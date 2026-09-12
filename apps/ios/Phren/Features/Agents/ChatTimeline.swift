@@ -61,12 +61,13 @@ struct ChatToolSummary {
     }
 }
 
-struct ChatToolActivity: View {
+struct ChatToolActivity: View, Equatable {
     let messages: [AgentChatMessage]
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var summary: ChatToolSummary { .init(messages) }
     var body: some View {
+        let summary = ChatToolSummary(messages)
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
@@ -140,32 +141,104 @@ private struct ToolDetailView: View {
                     .font(.caption2).foregroundStyle(PhrenTheme.textDim).padding(.vertical, 4)
             }
         }
-        .sheet(item: $fullOutput) { output in
-            NavigationStack {
-                ScrollView([.horizontal, .vertical]) {
-                    Text(output.text).font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(PhrenTheme.text).textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: true).padding(16)
-                }
-                .background(PhrenTheme.chatPanel).navigationTitle(output.title).navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { fullOutput = nil }.accessibilityIdentifier("chat-tool-output-done")
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Copy output", systemImage: "doc.on.doc") { UIPasteboard.general.string = output.text }
-                    }
-                }
-                .accessibilityIdentifier("chat-full-tool-output")
-            }.presentationDetents([.large])
-        }
+        .sheet(item: $fullOutput) { output in FullToolOutputView(output: output) }
     }
 }
 
 private struct FullToolOutput: Identifiable {
     let id = UUID()
     let title: String
-    let text: String
+    let contents: ToolOutputPages
+    init(title: String, text: String) {
+        self.title = title; contents = .init(text)
+    }
+}
+
+private struct FullToolOutputView: View {
+    let output: FullToolOutput
+    @State private var page = 0
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        let contents = output.contents
+        let current = contents.pages[page]
+        NavigationStack {
+            ScrollView([.horizontal, .vertical]) {
+                Text(current.displayText).font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(PhrenTheme.text).textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true).padding(16)
+            }
+            .id(page)
+            .background(PhrenTheme.chatPanel).navigationTitle(output.title).navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if contents.pages.count > 1 {
+                    HStack(spacing: 4) {
+                        pageButton("First page", "chevron.left.2", "first", destination: 0)
+                        pageButton("Previous page", "chevron.left", "previous", destination: page - 1)
+                        Spacer(minLength: 4)
+                        VStack(spacing: 2) {
+                            Text(verbatim: "Page \(page + 1) of \(contents.pages.count)")
+                            Text(verbatim: "Lines \(current.firstLine)–\(current.lastLine) of \(contents.totalLines)")
+                                .font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                                .accessibilityIdentifier("chat-tool-output-page-range")
+                        }.font(.caption).monospacedDigit()
+                        Spacer(minLength: 4)
+                        pageButton("Next page", "chevron.right", "next", destination: page + 1)
+                        pageButton("Last page", "chevron.right.2", "last", destination: contents.pages.count - 1)
+                    }.padding(.horizontal, 12).padding(.vertical, 4)
+                        .background(PhrenTheme.chatPanel)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }.accessibilityIdentifier("chat-tool-output-done")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Copy output", systemImage: "doc.on.doc") { UIPasteboard.general.string = contents.source }
+                }
+            }
+        }.presentationDetents([.large])
+    }
+    private func pageButton(_ title: String, _ icon: String, _ id: String, destination: Int) -> some View {
+        Button { page = destination } label: {
+            Image(systemName: icon).frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+            .accessibilityLabel(title)
+            .disabled(destination < 0 || destination >= output.contents.pages.count || destination == page)
+            .accessibilityIdentifier("chat-tool-output-\(id)")
+    }
+}
+
+/// Keep full-output text layout bounded independently of its byte size. A
+/// small newline-heavy string can otherwise lay out tens of thousands of rows.
+/// Pages retain every source character; Copy always uses the original text.
+struct ToolOutputPages {
+    struct Page {
+        let text: String
+        let firstLine: Int
+        let lastLine: Int
+        var displayText: String { text.last?.isNewline == true ? String(text.dropLast()) : text }
+    }
+    let source: String
+    let pages: [Page]
+    let totalLines: Int
+    init(_ source: String) {
+        self.source = source
+        var pages: [Page] = []
+        var start = source.startIndex, index = start
+        var line = 1, firstLine = 1, characters = 0
+        while index < source.endIndex {
+            let character = source[index]
+            index = source.index(after: index); characters += 1
+            let lastLine = line
+            if character.isNewline { line += 1 }
+            if index < source.endIndex && (characters >= 4_000 || line - firstLine >= 120) {
+                pages.append(.init(text: String(source[start..<index]), firstLine: firstLine, lastLine: lastLine))
+                start = index; firstLine = line; characters = 0
+            }
+        }
+        pages.append(.init(text: String(source[start...]), firstLine: firstLine, lastLine: line))
+        self.pages = pages; totalLines = line
+    }
 }
 
 /// Bound layout work as well as visible height. Full provider text is retained
@@ -173,9 +246,10 @@ private struct FullToolOutput: Identifiable {
 struct ToolOutputPreview {
     let text: String
     init(_ output: String) {
-        let prefix = String(output.prefix(640))
+        let bounded = output.prefix(641)
+        let prefix = String(bounded.prefix(640))
         let lines = prefix.components(separatedBy: .newlines)
         let visible = lines.prefix(6).joined(separator: "\n")
-        text = visible + (visible.count < output.count ? "…" : "")
+        text = visible + (bounded.count > 640 || lines.count > 6 ? "…" : "")
     }
 }

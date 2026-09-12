@@ -114,7 +114,7 @@ struct GatewayRequest: Sendable {
     var terminalColumns = 80
     var terminalRows = 24
     var timeoutSeconds: Int?
-    static let workspaces = Self(path: "/v1/workspaces")
+    static let workspaces = Self(path: "/v1/workspaces?watchApprovals=1")
     static func panes(_ workspace: String, _ tab: String) -> Self {
         Self(path: path("/v1/workspaces/panes", ["groupId": workspace, "childId": tab]))
     }

@@ -78,7 +78,7 @@ struct DocumentEditorSheet: View {
                 Button("Discard changes", role: .destructive) { dismiss() }
                 Button("Keep editing", role: .cancel) {}
             }
-            .alert("Couldn't save", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            .alert("Couldn't save", isPresented: $error.isPresent()) {
                 if latestContent != expectedContent {
                     Button("Compare versions") {
                         comparison = DocumentDraft(path: draft.path, content: latestContent)

@@ -127,6 +127,41 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(ToolOutputPreview("Small output").text, "Small output")
     }
 
+    func testDenseOutputPagesBoundLayoutAndPreserveEverySourceByte() {
+        let source = String(repeating: "x\n", count: 8_000) + "Final output marker"
+        let output = ToolOutputPages(source)
+        XCTAssertEqual(output.totalLines, 8_001)
+        XCTAssertEqual(output.pages.first?.firstLine, 1)
+        XCTAssertEqual(output.pages.first?.lastLine, 120)
+        XCTAssertEqual(output.pages[1].firstLine, 121)
+        XCTAssertEqual(output.pages.last?.lastLine, 8_001)
+        XCTAssertTrue(output.pages.last!.text.contains("Final output marker"))
+        XCTAssertEqual(Data(output.pages.map(\.text).joined().utf8), Data(source.utf8))
+        XCTAssertEqual(output.source, source, "Copy output retains the complete provider text")
+        for page in output.pages {
+            XCTAssertLessThanOrEqual(page.text.count, 4_000)
+            XCTAssertLessThanOrEqual(page.displayText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count, 120)
+        }
+    }
+
+    func testOutputPagesPreserveLongUnicodeLinesMixedNewlinesAndEmptyOutput() {
+        let sources = ["", "Small output\n", String(repeating: "👩🏽‍💻", count: 12_000) + "Final marker",
+                       String(repeating: "first\r\n\n👩🏽‍💻 e\u{301}\rline\u{2028}", count: 500) + "tail\n"]
+        for source in sources {
+            let output = ToolOutputPages(source)
+            XCTAssertFalse(output.pages.isEmpty)
+            XCTAssertEqual(Data(output.pages.map(\.text).joined().utf8), Data(source.utf8))
+            for page in output.pages {
+                XCTAssertLessThanOrEqual(page.text.count, 4_000)
+                XCTAssertLessThanOrEqual(page.displayText.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count, 120)
+            }
+        }
+        let longLine = ToolOutputPages(sources[2])
+        XCTAssertEqual(longLine.pages.count, 4)
+        XCTAssertTrue(longLine.pages.allSatisfy { $0.firstLine == 1 && $0.lastLine == 1 })
+        XCTAssertEqual(ToolPresentation(title: "Tool result", text: "\n\nPreview\n" + sources[2]).preview, "Preview")
+    }
+
     private func read(_ payloads: [[String: Any]]) throws -> [AgentChatMessage] {
         try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "totalLines": payloads.count,
             "entries": payloads.enumerated().map { ["line": $0.offset, "raw": ["type": "response_item", "payload": $0.element]] }]), source: "codex").messages

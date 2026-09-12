@@ -8,8 +8,12 @@ import PhrenKit
 
 public enum WebPreviewError: LocalizedError, Equatable {
     case unavailable
+    case updateRequired
     public var errorDescription: String? {
-        "The app stopped or SSH blocked its port. Refresh the server list. For an older connection, replace its Phren authorization line with the one in Connection settings to enable web previews."
+        switch self {
+        case .unavailable: return "The app stopped or the preview connection closed. Refresh the server list."
+        case .updateRequired: return "Update Phren on this computer, then run phren bridge install to enable secure web previews and update this phone's SSH authorization."
+        }
     }
 }
 
@@ -33,6 +37,12 @@ public final class WebPreviewTunnel: @unchecked Sendable {
     public static func open(host: LiveHost, privateKey: Data, server: WebServer) async throws -> WebPreviewTunnel {
         try host.validate()
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)
+        let health = try await PhrenConnection.fetchData(host: host, key: key, request: GatewayRequest(path: "/v1/health"))
+        guard let info = try JSONSerialization.jsonObject(with: health) as? [String: Any],
+              info["product"] as? String == "phren-hook", info["protocol"] as? Int == 1,
+              (info["capabilities"] as? [String: Any])?["webPreview"] as? String == "ssh-exec" else {
+            throw WebPreviewError.updateRequired
+        }
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let state = PreviewTunnelState(loop: loop, destination: server.loopbackHost, port: server.port)
         let ready = Exchange(result: loop.makePromise(of: Data.self))
@@ -57,7 +67,7 @@ public final class WebPreviewTunnel: @unchecked Sendable {
                 bootstrap.connect(host: host.address, port: host.port).whenFailure { ready.finish(.failure($0)) }
                 _ = try await ready.result.futureResult.get()
                 try Task.checkCancellation()
-                // Probe before presenting a blank browser; permission failures are actionable.
+                // Check the dispatcher's SSH exec channel before presenting the browser.
                 let probe = try await loop.flatSubmit { state.openChannel() }.get()
                 try await probe.close()
                 let listener = ServerBootstrap(group: loop)
@@ -111,19 +121,18 @@ private final class PreviewTunnelState: @unchecked Sendable {
     func openChannel(local: Channel? = nil) -> EventLoopFuture<Channel> {
         guard !closed, let parent, parent.isActive else { return loop.makeFailedFuture(LiveConnectionError.disconnected) }
         let promise = loop.makePromise(of: Channel.self)
+        let opened = loop.makePromise(of: Channel.self)
         let deadline = loop.scheduleTask(in: .seconds(10)) { self.close() }
         promise.futureResult.whenComplete { _ in deadline.cancel() }
         do {
             let ssh = try parent.pipeline.syncOperations.handler(type: NIOSSHHandler.self)
-            let target = SSHChannelType.DirectTCPIP(targetHost: destination, targetPort: port,
-                originatorAddress: try SocketAddress(ipAddress: "127.0.0.1", port: 0))
-            ssh.createChannel(promise, channelType: .directTCPIP(target)) { remote, _ in
-                remote.setOption(ChannelOptions.autoRead, value: false).flatMap {
-                    if let local { return remote.pipeline.addHandlers(SSHHTTPBytes(), PreviewRelay(peer: local)) }
-                    return remote.eventLoop.makeSucceededVoidFuture()
-                }
+            ssh.createChannel(opened, channelType: .session) { remote, _ in
+                var handlers: [ChannelHandler] = [PreviewExecChannel(destination: self.destination, port: self.port, ready: promise)]
+                if let local { handlers += [SSHHTTPBytes(), PreviewRelay(peer: local)] }
+                return remote.pipeline.addHandlers(handlers)
             }
-        } catch { promise.fail(error) }
+        } catch { opened.fail(error) }
+        opened.futureResult.whenFailure { promise.fail($0) }
         return promise.futureResult.flatMapError { _ in self.loop.makeFailedFuture(WebPreviewError.unavailable) }
     }
 
@@ -147,6 +156,44 @@ private final class PreviewTunnelState: @unchecked Sendable {
             local.close(promise: nil)
             return self.loop.makeFailedFuture(error)
         }
+    }
+}
+
+/// OpenSSH forwarding bypasses forced commands, including for Unix sockets.
+/// Previews therefore use an allowlisted exec command on a session channel.
+private final class PreviewExecChannel: ChannelInboundHandler {
+    typealias InboundIn = SSHChannelData
+    let destination: String
+    let port: Int
+    let ready: EventLoopPromise<Channel>
+    private var completed = false
+    init(destination: String, port: Int, ready: EventLoopPromise<Channel>) {
+        self.destination = destination; self.port = port; self.ready = ready
+    }
+    func channelActive(context: ChannelHandlerContext) {
+        context.triggerUserOutboundEvent(SSHChannelRequestEvent.ExecRequest(
+            command: "phren-hook v1 web \(destination) \(port)", wantReply: true), promise: nil)
+    }
+    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if event is ChannelSuccessEvent, !completed {
+            completed = true
+            context.channel.setOption(ChannelOptions.autoRead, value: false).map {
+                // The relay becomes active only after the dispatcher accepts exec.
+                context.fireChannelActive()
+                return context.channel
+            }.cascade(to: ready)
+        } else if event is ChannelFailureEvent { fail() }
+        else { context.fireUserInboundEventTriggered(event) }
+    }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        // A dispatcher's stderr is diagnostic text, never browser response bytes.
+        if unwrapInboundIn(data).type == .channel { context.fireChannelRead(data) }
+    }
+    func channelInactive(context: ChannelHandlerContext) { fail(); context.fireChannelInactive() }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { fail(); context.close(promise: nil) }
+    private func fail() {
+        guard !completed else { return }
+        completed = true; ready.fail(WebPreviewError.unavailable)
     }
 }
 

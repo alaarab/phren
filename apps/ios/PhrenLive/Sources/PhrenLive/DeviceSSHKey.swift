@@ -5,7 +5,8 @@ import PhrenKit
 import Security
 
 /// A separate key per host; private bytes never enter preferences, logs, Git,
-/// iCloud Keychain, or backups. The exported line permits loopback forwarding.
+/// iCloud Keychain, or backups. Every operation goes through the dispatcher;
+/// SSH forwarding would also grant access to private Unix sockets.
 public enum DeviceSSHKey {
     private static func query(_ id: UUID) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -48,7 +49,7 @@ public enum DeviceSSHKey {
 
     static func authorizedKey(privateKey: Curve25519.Signing.PrivateKey) -> String {
         let publicKey = String(openSSHPublicKey: NIOSSHPrivateKey(ed25519Key: privateKey).publicKey)
-        return "restrict,pty,port-forwarding,permitopen=\"127.0.0.1:*\",permitopen=\"[::1]:*\",command=\"sh ~/.local/share/phren/bridge/dispatch\" \(publicKey) phren-iphone"
+        return "restrict,pty,command=\"sh ~/.local/share/phren/bridge/dispatch\" \(publicKey) phren-iphone"
     }
 
     public static func delete(_ id: UUID) throws {

@@ -2,7 +2,7 @@ import Foundation
 
 /// An agent conversation belongs to a specific pane on a specific computer.
 /// Workspace labels and the newest transcript are never used for routing.
-public struct AgentChatTarget: Equatable, Hashable, Sendable, Identifiable {
+public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifiable {
     public let hostID: UUID
     public let workspaceID: String
     public let tabID: String
@@ -23,6 +23,15 @@ public struct AgentChatTarget: Equatable, Hashable, Sendable, Identifiable {
     }
 
     public var providerName: String { source == "claude" ? "Claude" : source == "copilot" ? "Copilot" : "Codex" }
+
+    private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(hostID: values.decode(UUID.self, forKey: .hostID),
+                      workspaceID: values.decode(String.self, forKey: .workspaceID), tabID: values.decode(String.self, forKey: .tabID),
+                      paneID: values.decode(String.self, forKey: .paneID), source: values.decode(String.self, forKey: .source),
+                      sessionID: values.decode(String.self, forKey: .sessionID), muxID: values.decode(String.self, forKey: .muxID))
+    }
 
     public static func validID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200
@@ -91,6 +100,13 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
 /// prompts, hook metadata, and terminal escape sequences are never rendered.
 public struct AgentChatTranscript: Equatable, Sendable {
     public enum Kind: String, Sendable { case backlog, append, older }
+    public enum LimitError: Error, LocalizedError, Sendable {
+        case tooManyMessages
+        public var errorDescription: String? {
+            "This conversation has too many message blocks to load. Open the terminal to view it."
+        }
+    }
+    static let maximumMessages = 4_000
     public let kind: Kind
     public let messages: [AgentChatMessage]
     public let hasMore: Bool
@@ -115,11 +131,12 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var seen: Set<String> = []
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
+            let parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw)
+                : claude(raw, maximumParts: maximumMessages - messages.count)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
-            let parts = source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : claude(raw)
             for (index, part) in parts.enumerated() {
-                let id = "\(line):\(index)"
+                let id = "\(line):\(part.idIndex ?? index)"
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
                 messages.append(.init(id: id, line: line, role: part.role, title: part.title,
@@ -138,6 +155,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
         let text: String
         var imageBlocks: [Int] = []
         var toolCallID: String? = nil
+        var idIndex: Int? = nil
     }
     private static func text(_ value: Any?) -> String {
         if let value = value as? String { return value }
@@ -187,18 +205,42 @@ public struct AgentChatTranscript: Equatable, Sendable {
         default: return []
         }
     }
-    private static func claude(_ raw: [String: Any]) -> [Part] {
+    private static func claude(_ raw: [String: Any], maximumParts: Int) throws -> [Part] {
         guard raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true,
               let message = raw["message"] as? [String: Any],
               let role = AgentChatMessage.Role(rawValue: message["role"] as? String ?? ""), role != .tool else { return [] }
-        if let content = message["content"] as? String { return [Part(role: role, text: content)] }
+        if let content = message["content"] as? String {
+            guard content.isEmpty || maximumParts > 0 else { throw LimitError.tooManyMessages }
+            return [Part(role: role, text: content)]
+        }
         guard let blocks = message["content"] as? [[String: Any]] else { return [] }
-        return blocks.enumerated().compactMap { index, block in
+        // A single provider row can contain thousands of blocks. Enforce the
+        // history's message ceiling before allocating Parts and display text;
+        // raw-entry and byte limits alone do not bound this expansion. Reject
+        // the whole frame, since paging by source line cannot recover a cut row.
+        var visible = 0
+        for block in blocks {
             switch block["type"] as? String {
-            case "text": return Part(role: role, text: block["text"] as? String ?? "")
-            case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index])
-            case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String)
-            case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]), toolCallID: block["tool_use_id"] as? String)
+            case "text": if (block["text"] as? String ?? "").isEmpty { continue }
+            case "image", "tool_use", "tool_result": break
+            default: continue
+            }
+            visible += 1
+            guard visible <= maximumParts else { throw LimitError.tooManyMessages }
+        }
+        var normalizedIndex = 0
+        return blocks.enumerated().compactMap { index, block in
+            guard let type = block["type"] as? String, ["text", "image", "tool_use", "tool_result"].contains(type) else { return nil }
+            // Empty text used to occupy a Part before being discarded. Keep
+            // later message IDs stable without allocating those empty Parts.
+            let idIndex = normalizedIndex; normalizedIndex += 1
+            switch block["type"] as? String {
+            case "text":
+                guard let text = block["text"] as? String, !text.isEmpty else { return nil }
+                return Part(role: role, text: text, idIndex: idIndex)
+            case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: idIndex)
+            case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)
+            case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]), toolCallID: block["tool_use_id"] as? String, idIndex: idIndex)
             default: return nil
             }
         }

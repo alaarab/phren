@@ -200,7 +200,7 @@ struct SkillEditorView: View {
         .sheet(item: $draft) { DocumentEditorSheet(title: "Edit skill", storeId: entry.storeId, draft: $0) }
         .sheet(item: $moving) { MoveSkillSheet(entry: $0) { dismiss() } }
         .confirmationDialog("Delete \(entry.skill.name)?",
-                            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            isPresented: $deleting.isPresent(),
                             titleVisibility: .visible) {
             if let deleting {
                 Button("Delete skill", role: .destructive) { Task { await remove(deleting) } }
@@ -209,7 +209,7 @@ struct SkillEditorView: View {
             Text("The skill's instructions will be removed from \(entry.storeName) on sync."
                  + (entry.skill.format == .folder ? " Supporting files will remain in its folder." : ""))
         }
-        .alert("Couldn't update skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+        .alert("Couldn't update skill", isPresented: $error.isPresent()) {
             Button("OK") { error = nil }
         } message: { Text(error ?? "") }
     }
@@ -283,7 +283,7 @@ private struct MoveSkillSheet: View {
                 }
             }
             .onAppear { if scope.isEmpty { scope = destinations.first ?? "" } }
-            .alert("Couldn't move skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            .alert("Couldn't move skill", isPresented: $error.isPresent()) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
         }
@@ -388,7 +388,7 @@ private struct NewSkillSheet: View {
             .confirmationDialog("Discard this skill?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
                 Button("Discard", role: .destructive) { dismiss() }
             }
-            .alert("Couldn't create skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            .alert("Couldn't create skill", isPresented: $error.isPresent()) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
         }

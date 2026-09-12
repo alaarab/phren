@@ -64,7 +64,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     }
 
     @objc private func twoFingerSwipe(_ gesture: UISwipeGestureRecognizer) {
-        let defaults = AppModel.isUITesting ? UserDefaults(suiteName: "phren.ui-tests")! : .standard
+        let defaults = AppRuntime.defaults
         guard defaults.object(forKey: "terminal.twoFingerGestures.v1") as? Bool != false,
               gesture.state == .ended else { return }
         if gesture.direction == .down { _ = resignFirstResponder() }

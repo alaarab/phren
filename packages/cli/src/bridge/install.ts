@@ -11,14 +11,34 @@ const exec = promisify(execFile);
 const label = "com.phren.hook";
 const unit = "phren-hook.service";
 export const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
+function keyOptions(line: string): { options: string[]; rest: string } | undefined {
+  const options: string[] = [];
+  let quoted = false, start = 0;
+  for (let i = 0; i < line.length; i++) {
+    const character = line[i];
+    if (quoted && character === "\\" && line[i + 1] === '"') { i++; continue; }
+    if (character === '"') { quoted = !quoted; continue; }
+    if (!quoted && (character === "," || /\s/.test(character))) {
+      options.push(line.slice(start, i)); start = i + 1;
+      if (character !== ",") return { options, rest: line.slice(i) };
+    }
+  }
+  return undefined;
+}
+
 export function upgradeKeys(text: string): { text: string; changed: number } {
   let changed = 0;
   const result = text.split(/(?<=\n)/).map(line => {
-    if (!/ ssh-ed25519 [A-Za-z0-9+/=]+ phren-iphone\s*$/.test(line) || !line.startsWith("restrict,") || !line.includes('permitopen="127.0.0.1:')) return line;
-    const old = /command="(?:\/usr\/bin\/false|python3 ~\/\.local\/share\/phren\/chat-progress\.py|sh ~\/\.local\/share\/phren\/bridge\/dispatch)"/;
-    if (!old.test(line)) return line;
-    let next = line.replace(old, forcedCommand);
-    if (!/(^|,)pty,/.test(next)) next = next.replace(/^restrict,/, "restrict,pty,");
+    const parsed = keyOptions(line);
+    if (!parsed || parsed.options[0] !== "restrict" || !/^\s+ssh-ed25519 [A-Za-z0-9+/=]+ phren-iphone\s*$/.test(parsed.rest)) return line;
+    const old = /^command="(?:\/usr\/bin\/false|python3 ~\/\.local\/share\/phren\/chat-progress\.py|sh ~\/\.local\/share\/phren\/bridge\/dispatch)"$/;
+    if (!parsed.options.some(option => old.test(option))) return line;
+    // permitopen restricts TCP destinations only. Removing generic forwarding
+    // also prevents access to private Unix sockets through this device key.
+    const options = parsed.options.filter(option => option.toLowerCase() !== "port-forwarding" && !option.toLowerCase().startsWith("permitopen="))
+      .map(option => old.test(option) ? forcedCommand : option);
+    if (!options.includes("pty")) options.splice(1, 0, "pty");
+    const next = options.join(",") + parsed.rest;
     if (next !== line) changed++;
     return next;
   }).join("");

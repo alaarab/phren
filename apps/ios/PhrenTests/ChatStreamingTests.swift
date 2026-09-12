@@ -4,6 +4,25 @@ import PhrenKit
 
 @MainActor
 final class ChatStreamingTests: XCTestCase {
+    @MainActor
+    func testRejectedTranscriptDoesNotRetryAfterPanePollingFailure() throws {
+        let model = AgentChatModel()
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "claude", sessionID: "fixture")
+        model.target = target
+        model.accept(try frame("backlog", text: "Keep the loaded conversation", line: 0))
+        model.handleStreamFailure(AgentChatTranscript.LimitError.tooManyMessages, target: target)
+        XCTAssertFalse(model.shouldBeginStream(target))
+        XCTAssertTrue(model.automaticReconnectSuspended)
+        let explanation = model.error
+        model.handleConnectionFailure(PhrenKitError.validation("Temporary computer connection failure"))
+        XCTAssertFalse(model.shouldBeginStream(target), "Host recovery must not reload the same rejected backlog")
+        XCTAssertEqual(model.error, explanation)
+        XCTAssertEqual(model.messages.map(\.text), ["Keep the loaded conversation"])
+        model.chooseAnother()
+        XCTAssertTrue(model.shouldBeginStream(target), "Explicit session selection permits a new attempt")
+        XCTAssertFalse(model.automaticReconnectSuspended)
+    }
+
     func testCurrentActivityOverridesHistoricalWorkingWithoutReplayingOldFrames() throws {
         let model = AgentChatModel()
         let started = try AgentChatTranscript.read(Data(#"{"type":"backlog","source":"codex","totalLines":2,"entries":[{"line":1,"raw":{"type":"event_msg","payload":{"type":"task_started"}}}]}"#.utf8), source: "codex")

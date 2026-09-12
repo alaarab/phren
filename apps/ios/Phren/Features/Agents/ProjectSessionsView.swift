@@ -80,8 +80,10 @@ struct ProjectSessionsView: View {
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var target: SessionProject { SessionProject(storeID: storeID, name: project) }
     private var matches: [LiveAgentSession] {
-        discovery.sessions.filter {
-            preferences?.projectMatch(hostID: $0.host.id, cwd: $0.tab.cwd, projects: model.sessionProjects)?.project == target
+        let preferences = preferences
+        let projects = model.sessionProjects
+        return discovery.sessions.filter {
+            preferences?.projectMatch(hostID: $0.host.id, cwd: $0.tab.cwd, projects: projects)?.project == target
         }
     }
 
@@ -105,12 +107,16 @@ struct ProjectSessionsView: View {
                 }
                 if !matches.isEmpty {
                     Section("Project sessions") {
-                        ForEach(matches) { session in sessionRow(session, assign: false) }
+                        ForEach(preferences?.pinnedFirst(matches) ?? matches) { session in
+                            sessionRow(session, assign: false).separatedSessionRow()
+                        }
                     }
                 }
                 if matches.isEmpty && !discovery.sessions.isEmpty {
                     Section {
-                        ForEach(discovery.sessions) { session in sessionRow(session, assign: true) }
+                        ForEach(preferences?.pinnedFirst(discovery.sessions) ?? discovery.sessions) { session in
+                            sessionRow(session, assign: true).separatedSessionRow()
+                        }
                     } header: { Text("Choose a session") } footer: {
                         Text("Opening a chosen session remembers its directory for this project on this iPhone.")
                     }
@@ -119,6 +125,7 @@ struct ProjectSessionsView: View {
                     Text("No Herdr sessions are running on the connected computers.").foregroundStyle(.secondary)
                 }
             }
+            .listSectionSpacing(12)
             .navigationTitle("Project sessions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -136,7 +143,7 @@ struct ProjectSessionsView: View {
             }
             .onAppear { visible = true }
             .onDisappear { visible = false }
-            .task(id: DiscoveryIdentity(data: data, active: visible && scenePhase == .active, refresh: refreshID)) {
+            .task(id: DiscoveryIdentity(hosts: preferences?.hosts ?? [], active: visible && scenePhase == .active, refresh: refreshID)) {
                 guard visible, scenePhase == .active, let preferences, !preferences.hosts.isEmpty else { return }
                 while !Task.isCancelled {
                     await discovery.refresh(hosts: preferences.hosts)
@@ -150,23 +157,21 @@ struct ProjectSessionsView: View {
     private func sessionRow(_ session: LiveAgentSession, assign: Bool) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
-            Button { open(session, assign: assign) } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(session.tab.displayTitle).font(.headline).lineLimit(2)
-                    Text("\(session.host.name) · \(session.workspaceName)").font(.caption).lineLimit(1)
-                    Text("\(session.tab.agent ?? "Terminal") · \(session.tab.status)\(fresh ? "" : " · refresh needed")").font(.caption)
-                    if let cwd = session.tab.cwd { Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                    Label(openChat ? (assign ? "Use for \(project) and chat" : "Chat with agent")
-                          : (assign ? "Use for \(project) and open terminal" : "Open terminal"),
-                          systemImage: openChat ? "bubble.left.and.bubble.right" : "terminal")
-                        .font(.callout).foregroundStyle(PhrenTheme.accent)
+            HStack(spacing: 0) {
+                Button { open(session, assign: assign) } label: {
+                    SessionCardContent(session: session, fresh: fresh,
+                                       subtitle: "\(session.host.name) · \(session.workspaceName) · \(session.tab.status)\(fresh ? "" : " · stale")",
+                                       identifierPrefix: "discovered")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityHint(openChat ? (assign ? "Use for \(project) and chat" : "Chat with agent")
+                                   : (assign ? "Use for \(project) and open terminal" : "Open terminal"))
+                .disabled(!fresh || (assign && session.tab.cwd == nil))
+                .accessibilityIdentifier("discovered-session:\(session.host.id):\(session.workspaceID):\(session.tab.id)")
+                SessionPinButton(session: session, pinned: preferences?.isPinned(session.id) == true,
+                                 identifierPrefix: "discovered", data: $data)
             }
-            .buttonStyle(.plain)
-            .disabled(!fresh || (assign && session.tab.cwd == nil))
-            .accessibilityIdentifier("discovered-session:\(session.host.id):\(session.workspaceID):\(session.tab.id)")
+            .sessionCard()
         }
     }
 
@@ -190,7 +195,7 @@ struct ProjectSessionsView: View {
     }
 
     private struct DiscoveryIdentity: Equatable {
-        let data: Data
+        let hosts: [LiveHost]
         let active: Bool
         let refresh: UUID
     }

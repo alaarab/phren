@@ -16,7 +16,7 @@ final class PhrenConnectionTests: XCTestCase {
         let result = try await PhrenConnection.fetch(host: server.host(), privateKey: server.deviceKey.rawRepresentation)
         XCTAssertEqual(result.groups.first?.children.first?.status, "Working")
         let request = try await server.request.futureResult.get()
-        XCTAssertTrue(request.hasPrefix("GET /v1/workspaces?mux=herdr:default HTTP/1.1\r\n"))
+        XCTAssertTrue(request.hasPrefix("GET /v1/workspaces?watchApprovals=1&mux=herdr:default HTTP/1.1\r\n"))
         XCTAssertTrue(request.contains("Host: phren.local\r\n"))
         try await server.disconnected.futureResult.get()
     }
@@ -80,7 +80,9 @@ final class PhrenConnectionTests: XCTestCase {
     func testPublicAuthorizationLineContainsOnlyPublicKeyAndForwardRestriction() throws {
         let key = Curve25519.Signing.PrivateKey()
         let line = DeviceSSHKey.authorizedKey(privateKey: key)
-        XCTAssertTrue(line.hasPrefix("restrict,pty,port-forwarding,permitopen=\"127.0.0.1:*\",permitopen=\"[::1]:*\",command=\"sh ~/.local/share/phren/bridge/dispatch\" ssh-ed25519 "))
+        XCTAssertTrue(line.hasPrefix("restrict,pty,command=\"sh ~/.local/share/phren/bridge/dispatch\" ssh-ed25519 "))
+        XCTAssertFalse(line.contains("port-forwarding"), "Forwarding also enables direct Unix sockets outside the forced command")
+        XCTAssertFalse(line.contains("permitopen"))
         XCTAssertFalse(line.contains(key.rawRepresentation.base64EncodedString()))
         XCTAssertNotNil(PhrenConnection.fingerprint(publicKey: String(openSSHPublicKey: NIOSSHPrivateKey(ed25519Key: key).publicKey)))
     }

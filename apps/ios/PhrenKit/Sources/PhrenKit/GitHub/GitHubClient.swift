@@ -39,7 +39,8 @@ public actor GitHubClient {
         guard let token else { throw GitHubError.notAuthenticated }
         // Not appendingPathComponent — several paths carry query strings
         // ("?recursive=1"), which it would percent-encode.
-        guard let url = URL(string: path, relativeTo: Self.apiBase) else {
+        guard let url = URL(string: path, relativeTo: Self.apiBase)?.absoluteURL,
+              GitHubRedirectPolicy.allows(url) else {
             throw GitHubError.invalidResponse
         }
         var req = URLRequest(url: url)
@@ -55,7 +56,7 @@ public actor GitHubClient {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, response) = try await session.data(for: req)
+        let (data, response) = try await session.data(for: req, delegate: GitHubRedirectPolicy.shared)
         guard let http = response as? HTTPURLResponse else { throw GitHubError.invalidResponse }
 
         if http.statusCode == 403 || http.statusCode == 429,
@@ -109,6 +110,29 @@ public actor GitHubClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    /// Dynamic values are path data, never URL syntax. In particular, Git
+    /// permits `#` and `%` in branch names; resolving those raw reads another
+    /// ref while contents writes still use the original branch from JSON.
+    private static func encodePath(_ value: String, nested: Bool = false) throws -> String {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard (nested || parts.count == 1),
+              parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+              !value.contains("\\"), value.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw GitHubError.invalidResponse
+        }
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        return try parts.map { part in
+            guard let encoded = String(part).addingPercentEncoding(withAllowedCharacters: unreserved) else {
+                throw GitHubError.invalidResponse
+            }
+            return encoded
+        }.joined(separator: "/")
+    }
+
+    private static func repoPath(owner: String, repo: String) throws -> String {
+        try "repos/\(encodePath(owner))/\(encodePath(repo))"
+    }
+
     /// `method`/`path` are carried into the error so `errorDescription` can
     /// explain a 403/404 as the token-scope problem it usually is.
     static func ensureOK(_ http: HTTPURLResponse, data: Data,
@@ -150,7 +174,7 @@ public actor GitHubClient {
     }
 
     public func repo(owner: String, name: String) async throws -> GitHubRepo {
-        try await get("repos/\(owner)/\(name)", as: GitHubRepo.self)
+        try await get(Self.repoPath(owner: owner, repo: name), as: GitHubRepo.self)
     }
 
     /// What a store probe learned. `noAccess` exists because GitHub answers
@@ -176,7 +200,7 @@ public actor GitHubClient {
     public func probeStore(owner: String, name: String,
                            disambiguate404: Bool = true) async -> StoreProbe {
         do {
-            let (_, http) = try await request("repos/\(owner)/\(name)/contents/phren.root.yaml")
+            let (_, http) = try await request(Self.repoPath(owner: owner, repo: name) + "/contents/phren.root.yaml")
             switch http.statusCode {
             case 200..<300:
                 return .isStore
@@ -203,7 +227,7 @@ public actor GitHubClient {
     }
 
     private func repoIsReadable(owner: String, name: String) async -> Bool {
-        guard let (_, http) = try? await request("repos/\(owner)/\(name)") else { return false }
+        guard let (_, http) = try? await request(Self.repoPath(owner: owner, repo: name)) else { return false }
         return (200..<300).contains(http.statusCode)
     }
 
@@ -220,7 +244,7 @@ public actor GitHubClient {
     /// matches (HTTP 304) — nothing changed, and the poll was free.
     public func headSha(owner: String, repo: String, branch: String) async throws -> String? {
         let key = "ref:\(owner)/\(repo)/\(branch)"
-        let path = "repos/\(owner)/\(repo)/git/ref/heads/\(branch)"
+        let path = try Self.repoPath(owner: owner, repo: repo) + "/git/ref/heads/" + Self.encodePath(branch, nested: true)
         let (data, http) = try await request(path, etagKey: key)
         if http.statusCode == 304 { return nil }
         try Self.ensureOK(http, data: data, path: path)
@@ -228,13 +252,15 @@ public actor GitHubClient {
     }
 
     public func tree(owner: String, repo: String, sha: String) async throws -> GitTree {
-        let tree = try await get("repos/\(owner)/\(repo)/git/trees/\(sha)?recursive=1", as: GitTree.self)
+        let path = try Self.repoPath(owner: owner, repo: repo) + "/git/trees/" + Self.encodePath(sha) + "?recursive=1"
+        let tree = try await get(path, as: GitTree.self)
         guard !tree.truncated else { throw GitHubError.treeTruncated }
         return tree
     }
 
     public func blob(owner: String, repo: String, sha: String) async throws -> Data {
-        let blob = try await get("repos/\(owner)/\(repo)/git/blobs/\(sha)", as: GitBlob.self)
+        let path = try Self.repoPath(owner: owner, repo: repo) + "/git/blobs/" + Self.encodePath(sha)
+        let blob = try await get(path, as: GitBlob.self)
         guard let data = blob.decoded else { throw GitHubError.invalidResponse }
         return data
     }
@@ -253,7 +279,7 @@ public actor GitHubClient {
         ]
         if let sha { payload["sha"] = sha }
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let endpoint = "repos/\(owner)/\(repo)/contents/\(path)"
+        let endpoint = try Self.repoPath(owner: owner, repo: repo) + "/contents/" + Self.encodePath(path, nested: true)
         let (data, http) = try await request(endpoint, method: "PUT", body: body)
         if http.statusCode == 409 || http.statusCode == 422 {
             throw GitHubError.shaConflict(path: path)
@@ -266,7 +292,7 @@ public actor GitHubClient {
                            message: String, sha: String) async throws {
         let payload: [String: Any] = ["message": message, "sha": sha, "branch": branch]
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let endpoint = "repos/\(owner)/\(repo)/contents/\(path)"
+        let endpoint = try Self.repoPath(owner: owner, repo: repo) + "/contents/" + Self.encodePath(path, nested: true)
         let (data, http) = try await request(endpoint, method: "DELETE", body: body)
         if http.statusCode == 409 || http.statusCode == 422 {
             throw GitHubError.shaConflict(path: path)

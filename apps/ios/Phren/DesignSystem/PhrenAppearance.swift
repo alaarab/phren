@@ -64,8 +64,7 @@ struct PhrenCustomTheme: Codable, Identifiable, Equatable {
         var schemaVersion = 2
         let themes: [PhrenCustomTheme]
     }
-    static let shared = PhrenAppearance(defaults: ProcessInfo.processInfo.arguments.contains("--ui-testing")
-                                        ? UserDefaults(suiteName: "phren.ui-tests")! : .standard)
+    static let shared = PhrenAppearance(defaults: AppRuntime.defaults)
     private let defaults: UserDefaults
     private(set) var storageIssue: String?
     var selectedID: String {

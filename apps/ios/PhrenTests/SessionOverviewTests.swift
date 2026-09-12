@@ -83,6 +83,72 @@ final class SessionOverviewTests: XCTestCase {
         run.cancel(); await run.value
     }
 
+    func testPinningMovesOnlyTheSelectedComputersTabAndUnpinningRestoresItsActivityGroup() async throws {
+        let first = try host("Mac"), second = try host("Linux")
+        let working = try snapshot("working"), waiting = try snapshot("waiting")
+        let selected = waiting.sessions(on: second)[0].id
+        var data = try LiveSessionPreferences.saving(first, in: Data())
+        data = try LiveSessionPreferences.saving(second, in: data)
+        data = try LiveSessionPreferences.setPinned(true, for: selected, in: data)
+        let preferences = try LiveSessionPreferences.read(data)
+        let model = SessionOverviewMonitor { LiveHostMonitor { host, _ in host.id == first.id ? working : waiting } }
+        let run = Task { await model.run(hosts: [second, first]) }
+        await eventually { model.connectedCount(at: .now) == 2 }
+
+        let pinned = groups(model, preferences: preferences)
+        XCTAssertEqual(pinned.map(\.title), ["Pinned", "Working"])
+        XCTAssertEqual(pinned.first?.sessions.map(\.id), [selected])
+        XCTAssertEqual(pinned.last?.sessions.map(\.host.id), [first.id])
+        XCTAssertEqual(pinned.flatMap(\.sessions).count, 2, "A pin must move a session, not duplicate it")
+        XCTAssertEqual(groups(model, query: "Mac", preferences: preferences).map(\.title), ["Working"])
+        XCTAssertEqual(groups(model, query: "Linux", preferences: preferences).first?.sessions.map(\.id), [selected])
+
+        data = try LiveSessionPreferences.setPinned(false, for: selected, in: data)
+        let unpinned = groups(model, preferences: try LiveSessionPreferences.read(data))
+        XCTAssertEqual(unpinned.map(\.title), ["Working", "Needs input"])
+        XCTAssertEqual(unpinned.last?.sessions.map(\.id), [selected])
+        run.cancel(); await run.value
+    }
+
+    func testPinnedFreshAndOfflineSessionsKeepTheirOwnFreshnessAndUnpinningRestoresLastSeen() async throws {
+        let first = try host("Mac"), second = try host("Linux")
+        let working = try snapshot("working")
+        let liveSession = working.sessions(on: first)[0], offlineSession = working.sessions(on: second)[0]
+        var data = try LiveSessionPreferences.saving(first, in: Data())
+        data = try LiveSessionPreferences.saving(second, in: data)
+        for session in [liveSession, offlineSession] {
+            data = try LiveSessionPreferences.setPinned(true, for: session.id, in: data)
+        }
+        let preferences = try LiveSessionPreferences.read(data)
+        var failSecond = false
+        let model = SessionOverviewMonitor {
+            LiveHostMonitor(pollInterval: .milliseconds(20)) { host, _ in
+                if host.id == second.id && failSecond { throw LiveConnectionError.disconnected }
+                return working
+            }
+        }
+        let run = Task { await model.run(hosts: [first, second]) }
+        await eventually { model.connectedCount(at: .now) == 2 }
+        XCTAssertTrue(groups(model, preferences: preferences).first?.fresh == true)
+        failSecond = true
+        await eventually { model.computers.first { $0.id == second.id }?.monitor.message != nil }
+
+        let pinned = groups(model, preferences: preferences)
+        XCTAssertEqual(pinned.map(\.title), ["Pinned"])
+        XCTAssertEqual(Set(pinned.flatMap(\.sessions).map(\.id)), [liveSession.id, offlineSession.id])
+        XCTAssertFalse(pinned[0].fresh)
+        XCTAssertTrue(model.isFresh(liveSession, at: .now), "An offline pin must not disable another computer's session")
+        XCTAssertFalse(model.isFresh(offlineSession, at: .now), "Pinning must never make stale work appear active")
+
+        data = try LiveSessionPreferences.setPinned(false, for: offlineSession.id, in: data)
+        let unpinned = groups(model, preferences: try LiveSessionPreferences.read(data))
+        XCTAssertEqual(unpinned.map(\.title), ["Pinned", "Last seen"])
+        XCTAssertEqual(unpinned.first?.sessions.map(\.id), [liveSession.id])
+        XCTAssertEqual(unpinned.last?.sessions.map(\.id), [offlineSession.id])
+        XCTAssertTrue(unpinned[0].fresh); XCTAssertFalse(unpinned[1].fresh)
+        run.cancel(); await run.value
+    }
+
     func testFailureRetainsOnlyThatComputersStaleRowsAndClosedSessionsDisappear() async throws {
         let first = try host("Mac"), second = try host("Linux")
         let working = try snapshot("working"), empty = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))
@@ -125,8 +191,8 @@ final class SessionOverviewTests: XCTestCase {
         next.cancel(); await next.value
     }
 
-    private func groups(_ model: SessionOverviewMonitor, query: String = "") -> [SessionOverviewMonitor.Group] {
-        model.groups(at: .now, query: query, preferences: nil, projects: [])
+    private func groups(_ model: SessionOverviewMonitor, query: String = "", preferences: LiveSessionPreferences? = nil) -> [SessionOverviewMonitor.Group] {
+        model.groups(at: .now, query: query, preferences: preferences, projects: [])
     }
     private func host(_ name: String) throws -> LiveHost { try LiveHost(name: name, address: name.lowercased() + ".invalid", username: "fixture") }
     private func snapshot(_ status: String) throws -> LiveWorkspaces {

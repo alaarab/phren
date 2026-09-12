@@ -200,6 +200,13 @@ public actor LocalStore {
 
     private let root: URL
     private var manifest: Manifest
+    private struct FileState: Equatable {
+        let path: String
+        let identity: String
+        let modified: Date
+        let size: Int
+    }
+    private var cachedSnapshot: (files: [FileState], value: Snapshot)?
     /// Persistence problems hit while opening this store. Kept for per-store
     /// attribution; the app surfaces them through `StorageIssueLog`, which
     /// already has them.
@@ -263,6 +270,7 @@ public actor LocalStore {
     }
 
     public func write(_ path: String, content: String, blobSha: String?) throws {
+        cachedSnapshot = nil
         let url = fileURL(path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
@@ -275,6 +283,7 @@ public actor LocalStore {
     }
 
     public func delete(_ path: String) throws {
+        cachedSnapshot = nil
         try? FileManager.default.removeItem(at: fileURL(path))
         try updateManifest { $0.blobShas.removeValue(forKey: path) }
     }
@@ -304,6 +313,7 @@ public actor LocalStore {
     }
 
     public func wipe() throws {
+        cachedSnapshot = nil
         try? FileManager.default.removeItem(at: root)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("files"),
                                                 withIntermediateDirectories: true)
@@ -316,6 +326,8 @@ public actor LocalStore {
     // MARK: - Snapshot (parsed view for the UI)
 
     public struct Snapshot: Sendable {
+        /// Stable while the cached files are unchanged; not persisted or synced.
+        public let revision = UUID()
         public var projects: [Project]
         public var findings: [String: [Finding]]
         public var tasks: [String: TaskDoc]
@@ -342,9 +354,26 @@ public actor LocalStore {
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
 
-    /// Parses every cached file into the UI model. Sorting of the cross-project
-    /// review queue mirrors `readReviewQueueAcrossProjects` (access.ts:797).
+    /// Check filesystem metadata before reusing the parsed snapshot. Atomic writes
+    /// from another LocalStore (for example an App Intent) change file identity,
+    /// even if their byte count and modification date happen to match.
+    private func fileStates(_ paths: [String]) -> [FileState]? {
+        var files: [FileState] = []
+        for path in paths {
+            guard let values = try? fileURL(path).resourceValues(forKeys: [.fileResourceIdentifierKey, .contentModificationDateKey, .fileSizeKey]),
+                  let identity = values.fileResourceIdentifier, let modified = values.contentModificationDate,
+                  let size = values.fileSize else { return nil }
+            files.append(FileState(path: path, identity: String(describing: identity), modified: modified, size: size))
+        }
+        return files
+    }
+
+    /// Reparse only after a cached file changes. Status/manifest timestamps alone
+    /// do not invalidate content. Failed metadata reads never reuse stale data.
     public func snapshot() -> Snapshot {
+        let paths = allPaths()
+        let files = fileStates(paths)
+        if let files, let cachedSnapshot, files == cachedSnapshot.files { return cachedSnapshot.value }
         var findings: [String: [Finding]] = [:]
         var tasks: [String: TaskDoc] = [:]
         var notes: [String: [Note]] = [:]
@@ -357,7 +386,7 @@ public actor LocalStore {
         var skills: [Skill] = []
         var instructions: [String: String] = [:]
 
-        for path in allPaths() {
+        for path in paths {
             let parts = path.split(separator: "/").map(String.init)
 
             // Skills come first: they are the only synced content that can sit
@@ -432,13 +461,14 @@ public actor LocalStore {
 
         queue.sort(by: Self.reviewQueueOrder)
 
+        let reviewCounts = Dictionary(grouping: queue, by: \.project).mapValues(\.count)
         let projects = projectNames.sorted().map { name in
             Project(
                 name: name,
                 findingCount: findings[name]?.count ?? 0,
                 taskCount: tasks[name].map { $0.active.count + $0.queue.count } ?? 0,
                 noteCount: notes[name]?.count ?? 0,
-                reviewCount: queue.filter { $0.project == name }.count
+                reviewCount: reviewCounts[name] ?? 0
             )
         }
 
@@ -453,12 +483,14 @@ public actor LocalStore {
             return left.name.localizedStandardCompare(right.name) == .orderedAscending
         }
 
-        return Snapshot(
+        let result = Snapshot(
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
             truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
             skillPreferencesContent: read(SkillPreferences.path)
         )
+        cachedSnapshot = files.map { ($0, result) }
+        return result
     }
 
     /// Raw material for the on-device graph. The payload builder works from the
@@ -468,33 +500,16 @@ public actor LocalStore {
     public func graphInput(storeName: String) -> GraphBuilder.Input {
         let snapshot = snapshot()
         var findingsMarkdown: [String: String] = [:]
-        var tasks: [String: TaskDoc] = [:]
-        var projectNames = Set(snapshot.projects.map(\.name))
-
-        for path in allPaths() {
-            let parts = path.split(separator: "/").map(String.init)
-            guard parts.count == 2, Self.isReadableProjectDirName(parts[0]) else { continue }
-            let project = parts[0]
-            guard let content = read(path) else { continue }
-            switch parts[1] {
-            case "FINDINGS.md":
-                // Preserve raw bullets for identity hashes, but do not draw
-                // archived blocks as current knowledge.
-                findingsMarkdown[project] = FindingsFile(content: content).parse()
-                    .filter { !$0.archived }
-                    .map { "## \($0.date)\n\($0.rawLine)" }.joined(separator: "\n")
-                projectNames.insert(project)
-            case "tasks.md":
-                tasks[project] = TasksFile(project: project, content: content).doc
-                projectNames.insert(project)
-            default:
-                continue
-            }
+        for (project, findings) in snapshot.findings {
+            // Parsed findings retain their original bullet, including identity
+            // tags. Journals travel separately so each source appears once.
+            findingsMarkdown[project] = findings.filter { !$0.archived && !$0.isJournalEntry }
+                .map { "## \($0.date)\n\($0.rawLine)" }.joined(separator: "\n")
         }
 
         return GraphBuilder.Input(
-            findingsMarkdown: findingsMarkdown, tasks: tasks,
-            projects: projectNames.sorted(), storeName: storeName,
+            findingsMarkdown: findingsMarkdown, tasks: snapshot.tasks,
+            projects: snapshot.projects.map(\.name).sorted(), storeName: storeName,
             journalFindings: snapshot.findings.mapValues { $0.filter(\.isJournalEntry) }
         )
     }

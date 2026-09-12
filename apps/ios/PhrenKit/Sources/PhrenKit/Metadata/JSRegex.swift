@@ -5,6 +5,20 @@ import Foundation
 /// identically to their TypeScript originals.
 struct JSRegex: @unchecked Sendable {
     let regex: NSRegularExpression
+    // NSCache is thread-safe and evictable; patterns/options are the complete key.
+    private static let compiled: NSCache<NSString, NSRegularExpression> = {
+        let cache = NSCache<NSString, NSRegularExpression>()
+        cache.countLimit = 256
+        return cache
+    }()
+
+    private static func expression(_ pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression {
+        let key = "\(options.rawValue):\(pattern)" as NSString
+        if let cached = compiled.object(forKey: key) { return cached }
+        let regex = try! NSRegularExpression(pattern: pattern, options: options)
+        compiled.setObject(regex, forKey: key)
+        return regex
+    }
 
     init(_ pattern: String, caseInsensitive: Bool = false) {
         var options: NSRegularExpression.Options = []
@@ -12,13 +26,13 @@ struct JSRegex: @unchecked Sendable {
         // Patterns are compile-time constants transcribed from the CLI; a failure
         // to parse is a programmer error.
         // swiftlint:disable:next force_try
-        self.regex = try! NSRegularExpression(pattern: pattern, options: options)
+        self.regex = Self.expression(pattern, options: options)
     }
 
     init(multiline pattern: String) {
         // JS `m` flag: ^/$ match at line boundaries.
         // swiftlint:disable:next force_try
-        self.regex = try! NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines])
+        self.regex = Self.expression(pattern, options: [.anchorsMatchLines])
     }
 
     func test(_ s: String) -> Bool {

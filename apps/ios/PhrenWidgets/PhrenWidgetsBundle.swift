@@ -5,5 +5,6 @@ import SwiftUI
 struct PhrenWidgetsBundle: WidgetBundle {
     var body: some Widget {
         PhrenGlanceWidget()
+        ApprovalActivityWidget()
     }
 }

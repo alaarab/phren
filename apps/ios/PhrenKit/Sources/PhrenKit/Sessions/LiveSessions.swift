@@ -8,10 +8,34 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         public let label: String
         public let title: String?
         public let agentStatus: String?
+        public let approvalPending: Bool?
         public let agent: String?
         public let cwd: String?
         public let agentPaneCount: Int?
         public let paneCount: Int?
+        private let reportedContextUsedPercent: ContextUsedPercent?
+
+        /// Provider-reported percentage, when available. Missing or malformed
+        /// metrics stay unknown; token counts alone cannot establish a limit.
+        public var contextUsedPercent: Double? {
+            guard agentPaneCount == nil || agentPaneCount == 1 else { return nil }
+            return reportedContextUsedPercent?.value
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, label, title, agentStatus, approvalPending, agent, cwd, agentPaneCount, paneCount
+            case reportedContextUsedPercent = "contextUsedPercent"
+        }
+
+        private struct ContextUsedPercent: Decodable, Equatable, Sendable {
+            let value: Double?
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                let number = try? container.decode(Double.self)
+                value = number.flatMap { $0.isFinite && (0...100).contains($0) ? $0 : nil }
+            }
+        }
 
         public var displayTitle: String {
             let value = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -24,6 +48,7 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
 
         public var activity: Activity {
+            if approvalPending == true { return .waiting }
             switch agentStatus {
             case "working": return .working
             case "idle": return .idle
@@ -33,7 +58,7 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
             default: return .unknown
             }
         }
-        public var status: String { activity.rawValue }
+        public var status: String { approvalPending == true ? "Permission needed" : activity.rawValue }
     }
     public struct Group: Decodable, Equatable, Sendable, Identifiable {
         public let id: String
@@ -118,7 +143,7 @@ public struct LiveHost: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// Device-local host settings and explicit directory → store/project mappings.
+/// Device-local host settings, pinned tabs, and explicit directory → store/project mappings.
 /// Credentials and observed session data do not belong in this document.
 public struct LiveSessionPreferences: Codable, Equatable, Sendable {
     public struct Mapping: Codable, Equatable, Sendable {
@@ -130,6 +155,27 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
     public private(set) var schemaVersion = 1
     public private(set) var hosts: [LiveHost] = []
     public private(set) var mappings: [Mapping] = []
+    /// Pins follow the host, Herdr server, workspace, and tab identity used by
+    /// navigation. Conversation/title changes within that tab keep its pin;
+    /// another tab or server does not inherit it. Offline snapshots never prune pins.
+    public private(set) var pinnedSessions: [LiveAgentSession.ID] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, hosts, mappings, pinnedSessions
+    }
+
+    private init() {}
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        hosts = try values.decode([LiveHost].self, forKey: .hosts)
+        mappings = try values.decode([Mapping].self, forKey: .mappings)
+        // Only an absent field is an older preference document. A present but
+        // malformed field must fail before any saved connections are overwritten.
+        pinnedSessions = values.contains(.pinnedSessions)
+            ? try values.decode([LiveAgentSession.ID].self, forKey: .pinnedSessions) : []
+    }
 
     public static func read(_ data: Data) throws -> Self {
         if data.isEmpty { return Self() }
@@ -148,6 +194,12 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
                 throw PhrenKitError.validation("Invalid live project mapping.")
             }
         }
+        var pins: Set<LiveAgentSession.ID> = []
+        for sessionID in value.pinnedSessions {
+            guard ids.contains(sessionID.hostID), validPin(sessionID), pins.insert(sessionID).inserted else {
+                throw PhrenKitError.validation("Invalid pinned live session.")
+            }
+        }
         return value
     }
 
@@ -163,7 +215,41 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
         var value = try read(data)
         value.hosts.removeAll { $0.id == hostID }
         value.mappings.removeAll { $0.hostID == hostID }
+        value.pinnedSessions.removeAll { $0.hostID == hostID }
         return try JSONEncoder().encode(value)
+    }
+
+    public func isPinned(_ sessionID: LiveAgentSession.ID) -> Bool {
+        pinnedSessions.contains(sessionID)
+    }
+
+    /// Preserve the incoming order within the pinned and unpinned sections.
+    public func pinnedFirst(_ sessions: [LiveAgentSession]) -> [LiveAgentSession] {
+        let pins = Set(pinnedSessions)
+        return sessions.filter { pins.contains($0.id) } + sessions.filter { !pins.contains($0.id) }
+    }
+
+    public static func setPinned(_ isPinned: Bool, for sessionID: LiveAgentSession.ID, in data: Data) throws -> Data {
+        var value = try read(data)
+        guard let host = value.hosts.first(where: { $0.id == sessionID.hostID }) else {
+            throw PhrenKitError.validation("Connection no longer exists.")
+        }
+        guard validPin(sessionID) else { throw PhrenKitError.validation("Invalid pinned live session.") }
+        if isPinned {
+            guard host.muxID == sessionID.muxID else {
+                throw PhrenKitError.validation("The Herdr server changed. Refresh the computer before pinning this session.")
+            }
+            if !value.isPinned(sessionID) { value.pinnedSessions.append(sessionID) }
+        } else {
+            value.pinnedSessions.removeAll { $0 == sessionID }
+        }
+        return try JSONEncoder().encode(value)
+    }
+
+    private static func validPin(_ sessionID: LiveAgentSession.ID) -> Bool {
+        let server = String(sessionID.muxID.dropFirst("herdr:".count))
+        return !sessionID.workspace.isEmpty && !sessionID.tab.isEmpty
+            && sessionID.muxID.hasPrefix("herdr:") && AgentChatTarget.validID(server) && !server.contains(":")
     }
 
     public static func assigning(hostID: UUID, directory: String, storeID: String?, project: String?, in data: Data) throws -> Data {

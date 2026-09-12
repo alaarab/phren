@@ -39,11 +39,15 @@ extension LiveSessionPreferences {
 /// The tab selected on a known computer. Its destination comes from the hook's
 /// workspace and (when needed) tab IDs, never the agent `sessionId` or label.
 public struct LiveAgentSession: Equatable, Identifiable, Sendable {
-    public struct ID: Hashable, Sendable {
+    public struct ID: Codable, Hashable, Sendable {
         public let hostID: UUID
         public let workspace: String
         public let tab: String
         public var muxID: String = "herdr:default"
+
+        public init(hostID: UUID, workspace: String, tab: String, muxID: String = "herdr:default") {
+            self.hostID = hostID; self.workspace = workspace; self.tab = tab; self.muxID = muxID
+        }
     }
     public let host: LiveHost
     public let workspaceID: String

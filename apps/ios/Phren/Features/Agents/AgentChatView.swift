@@ -44,7 +44,6 @@ struct AgentChatView: View {
     let initialPane: AgentChatPanes.Pane?
     @Binding var incomingAttachments: [AgentAttachment]
     @State private var initialized = false
-    @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -149,9 +148,9 @@ struct AgentChatView: View {
                                 })
                                 .accessibilityIdentifier("chat-history")
                             }
-                            ForEach(ChatTimelineEntry.group(model.messages)) { entry in
+                            ForEach(model.timeline) { entry in
                                 if entry.isActivity {
-                                    ChatToolActivity(messages: entry.messages).id(entry.id)
+                                    ChatToolActivity(messages: entry.messages).equatable().id(entry.id)
                                 } else if let message = entry.messages.first {
                                     ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
                                         message.role == .user && item.path.map { message.text.contains($0) } == true
@@ -168,10 +167,6 @@ struct AgentChatView: View {
                                 ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { selections in
                                     sendTask = Task { await model.answer(session, question: prompt, selections: selections) }
                                 }.id(prompt.id)
-                            } else if let approval = model.approval {
-                                ChatApprovalCard(approval: approval, busy: model.answering || !active || !model.interactionConnected) { approve in
-                                    sendTask = Task { await model.answer(session, approval: approval, approve: approve) }
-                                }.id(approval.id)
                             }
                             if model.connected && model.messages.isEmpty { Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40) }
                         }
@@ -206,9 +201,13 @@ struct AgentChatView: View {
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in
                     Color.clear.onAppear { scrollHeight = geometry.size.height }
-                        .onChange(of: geometry.size.height) { _, height in scrollHeight = height }
+                        .onChange(of: geometry.size.height) { _, height in
+                            if abs(height - scrollHeight) > 0.5 { scrollHeight = height }
+                        }
                 })
-                .onPreferenceChange(ChatBottomPosition.self) { bottomPosition = $0 }
+                .onPreferenceChange(ChatBottomPosition.self) { position in
+                    if abs(position - bottomPosition) > 0.5 { bottomPosition = position }
+                }
                 .overlay {
                     if model.loading && model.messages.isEmpty {
                         ProgressView()
@@ -241,6 +240,17 @@ struct AgentChatView: View {
                     if atBottom && !model.loadingHistory { proxy.scrollTo("chat-bottom", anchor: .bottom) }
                 }
             }
+            if let approval = model.approval {
+                ChatApprovalCard(approval: approval, busy: model.answering || !active || !model.interactionConnected) {
+                    NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
+                        Label("Open terminal", systemImage: "terminal").frame(maxWidth: .infinity, minHeight: 32)
+                    }.accessibilityIdentifier("chat-approval-terminal")
+                } answer: { approve in
+                    sendTask = Task { await model.answer(session, approval: approval, approve: approve) }
+                }
+                .id(approval.id)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
@@ -257,6 +267,7 @@ struct AgentChatView: View {
             visible = true
         }
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
+        .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
         .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() } }
@@ -338,11 +349,9 @@ struct AgentChatView: View {
         }
         .sheet(item: $previewImage) { item in
             NavigationStack {
-                if let image = UIImage(data: item.attachment.data) {
-                    Image(uiImage: image).resizable().scaledToFit().padding()
-                        .navigationTitle(item.attachment.name).navigationBarTitleDisplayMode(.inline)
-                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { previewImage = nil } } }
-                }
+                ChatAttachmentImage(attachment: item.attachment, maximumPixels: 2_048).padding()
+                    .navigationTitle(item.attachment.name).navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { previewImage = nil } } }
             }
         }
         .sheet(isPresented: $showingContext) {
@@ -390,13 +399,11 @@ struct AgentChatView: View {
 
     private var chatHeader: some View {
         HStack(spacing: 10) {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).frame(width: 36, height: 44).contentShape(Rectangle())
-            }.accessibilityLabel("Done").accessibilityIdentifier("chat-close")
+            ChatDismissButton()
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
                     ChatActivityIndicator(connected: model.connected && active,
-                                          reconnecting: active && model.target != nil && !model.connected && !model.loading,
+                                          reconnecting: active && model.target != nil && !model.connected && !model.loading && !model.automaticReconnectSuspended,
                                           waiting: model.awaitingReply, revealing: model.reveal.isRevealing,
                                           needsAnswer: model.needsAnswer || model.approval != nil,
                                           phase: model.activityPhase)
@@ -484,8 +491,8 @@ struct AgentChatView: View {
                             VStack(spacing: 4) {
                                 HStack(spacing: 6) {
                                     Button { if item.attachment.isImage { previewImage = item } } label: {
-                                        if item.attachment.isImage, let image = UIImage(data: item.attachment.data) {
-                                            Image(uiImage: image).resizable().scaledToFill().frame(width: 56, height: 56).clipped().clipShape(RoundedRectangle(cornerRadius: 10))
+                                        if item.attachment.isImage {
+                                            ChatAttachmentImage(attachment: item.attachment, maximumPixels: 168).frame(width: 56, height: 56).clipped().clipShape(RoundedRectangle(cornerRadius: 10))
                                         } else { Image(systemName: "doc").frame(width: 56, height: 56) }
                                     }.accessibilityLabel("Preview \(item.attachment.name)")
                                     Button {
@@ -504,9 +511,9 @@ struct AgentChatView: View {
                 SlashCommandMenu(source: model.target?.source ?? "", draft: model.draft,
                                  choose: { model.draft = $0 + " " }, openAll: openCommandMenu)
             }
-            if model.needsAnswer {
+            if model.needsAnswer && model.approval == nil {
                 NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
-                    Label(model.approval != nil || model.question != nil ? "Or answer in Herdr" : "Answer in Herdr terminal", systemImage: "terminal")
+                    Label(model.question != nil ? "Or answer in Herdr" : "Answer in Herdr terminal", systemImage: "terminal")
                         .font(.caption).foregroundStyle(PhrenTheme.warning)
                 }.accessibilityIdentifier("chat-answer-terminal")
             }
@@ -632,14 +639,13 @@ private struct ChatMessageRow<Historical: View>: View {
             if message.role == .user { Spacer(minLength: 30) }
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(images) { item in
-                    if let image = UIImage(data: item.attachment.data) {
                         Button { preview(item) } label: {
-                            Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
+                            ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
                         }.accessibilityLabel("View attached \(item.attachment.name)")
-                    }
                 }
                 historical()
-                if !displayText.isEmpty && !(displayText == "[Image attachment]" && !message.imageBlocks.isEmpty) { ChatRichText(text: displayText) }
+                let text = displayText
+                if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) { ChatRichText(text: text).equatable() }
                 if revealedText != nil {
                     Capsule().fill(PhrenTheme.cyan).frame(width: 4, height: 13).accessibilityHidden(true)
                 }
@@ -661,6 +667,17 @@ private struct ChatMessageRow<Historical: View>: View {
 private struct ChatHistoryPosition: PreferenceKey {
     static var defaultValue: CGFloat = -CGFloat.greatestFiniteMagnitude
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The presenter's dismiss action can change during its one-second status
+/// refresh. Keep that dependency out of the transcript and its open menus.
+private struct ChatDismissButton: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        Button { dismiss() } label: {
+            Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).frame(width: 36, height: 44).contentShape(Rectangle())
+        }.accessibilityLabel("Done").accessibilityIdentifier("chat-close")
+    }
 }
 
 private struct ChatHistoryScrollObserver: ViewModifier {

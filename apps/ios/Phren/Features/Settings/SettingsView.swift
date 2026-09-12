@@ -255,10 +255,7 @@ struct SettingsView: View {
             }
             .confirmationDialog(
                 "Remove \(removingStore?.id ?? "this store") from this device? The GitHub repository is not affected.",
-                isPresented: Binding(
-                    get: { removingStore != nil },
-                    set: { if !$0 { removingStore = nil } }
-                ),
+                isPresented: $removingStore.isPresent(),
                 titleVisibility: .visible
             ) {
                 Button("Remove store", role: .destructive) {

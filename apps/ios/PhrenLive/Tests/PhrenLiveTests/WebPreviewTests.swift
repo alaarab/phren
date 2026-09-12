@@ -11,7 +11,7 @@ import XCTest
 final class WebPreviewTests: XCTestCase {
     func testBrowserRequestsAssetsRedirectUploadsAndWebSocketThroughPinnedSSH() async throws {
         let site = try await startSite("computer-one")
-        let relay = try await ChatRelaySSH.start(forwardPorts: [19472: site.localAddress!.port!])
+        let relay = try await ChatRelaySSH.start(forwardPorts: [19472: site.localAddress!.port!], webPreviewHealth: "ssh-exec")
         addTeardownBlock { try await relay.close(); try await site.close() }
         let server = try entry(port: 19472)
         let tunnel = try await WebPreviewTunnel.open(host: relay.host(), privateKey: relay.deviceKey.rawRepresentation, server: server)
@@ -58,10 +58,10 @@ final class WebPreviewTests: XCTestCase {
         catch { }
     }
 
-    func testSamePortOnDifferentComputersAndBlockedForwarding() async throws {
+    func testSamePortOnDifferentComputersAndDeniedWebCommand() async throws {
         let first = try await startSite("first"), second = try await startSite("second")
-        let a = try await ChatRelaySSH.start(forwardPorts: [19475: first.localAddress!.port!])
-        let b = try await ChatRelaySSH.start(forwardPorts: [19475: second.localAddress!.port!])
+        let a = try await ChatRelaySSH.start(forwardPorts: [19475: first.localAddress!.port!], webPreviewHealth: "ssh-exec")
+        let b = try await ChatRelaySSH.start(forwardPorts: [19475: second.localAddress!.port!], webPreviewHealth: "ssh-exec")
         addTeardownBlock { try await a.close(); try await b.close(); try await first.close(); try await second.close() }
         let server = try entry(port: 19475)
         let tunnelA = try await WebPreviewTunnel.open(host: a.host(), privateKey: a.deviceKey.rawRepresentation, server: server)
@@ -83,13 +83,25 @@ final class WebPreviewTests: XCTestCase {
         } catch { guard case LiveConnectionError.untrustedHost = error else { return XCTFail("Expected fingerprint check") } }
     }
 
+    func testOlderHelperRequiresUpdateBeforeOpeningPreview() async throws {
+        let relay = try await ChatRelaySSH.start(webPreviewHealth: "")
+        addTeardownBlock { try await relay.close() }
+        do {
+            _ = try await WebPreviewTunnel.open(host: relay.host(), privateKey: relay.deviceKey.rawRepresentation, server: entry(port: 19475))
+            XCTFail("An older helper must not use unrestricted SSH forwarding")
+        } catch {
+            XCTAssertEqual(error as? WebPreviewError, .updateRequired)
+            XCTAssertTrue(error.localizedDescription.contains("phren bridge install"))
+        }
+    }
+
     func testInstalledDiscoveryAndAppThroughSSHWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["PHREN_TEST_WEB_SERVERS"] == "1" else { throw XCTSkip("Optional real helper and app check") }
         let relay = try await ChatRelaySSH.start()
         defer { Task { try? await relay.close() } }
         let servers = try await PhrenConnection.webServers(host: relay.host(), privateKey: relay.deviceKey.rawRepresentation)
         guard let server = servers.first(where: { $0.scheme == "http" }) else { return XCTFail("Expected a local fixture app") }
-        let webRelay = try await ChatRelaySSH.start(forwardPorts: [server.port: server.port])
+        let webRelay = try await ChatRelaySSH.start(forwardPorts: [server.port: server.port], webPreviewHealth: "ssh-exec")
         defer { Task { try? await webRelay.close() } }
         let tunnel = try await WebPreviewTunnel.open(host: webRelay.host(), privateKey: webRelay.deviceKey.rawRepresentation, server: server)
         defer { tunnel.close() }

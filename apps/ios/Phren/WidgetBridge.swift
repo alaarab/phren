@@ -2,50 +2,6 @@ import Foundation
 import WidgetKit
 import PhrenKit
 
-/// The JSON contract between the app and the `PhrenWidgets` extension.
-///
-/// Mirrors `WidgetSnapshot` in `PhrenWidgets/WidgetSnapshot.swift`
-/// field-for-field — the widget target can't link PhrenKit or this app
-/// target, so a hand-kept duplicate struct plus the JSON file written to the
-/// shared App Group container is the entire contract. If you add a field
-/// here, add it there too.
-struct WidgetSnapshot: Codable, Equatable {
-    struct StoreCount: Codable, Equatable {
-        var storeName: String
-        var count: Int
-    }
-
-    struct TopTask: Codable, Equatable {
-        var text: String
-        var project: String
-    }
-
-    var memoryCount: Int? = nil
-    var projectCount: Int? = nil
-    var totalReviewCount: Int
-    var storeBreakdown: [StoreCount]
-    var topTask: TopTask?
-    var lastSyncedAt: Date?
-
-    /// The subset that matters for deciding whether the widget's on-screen
-    /// content actually needs to change. `lastSyncedAt` ticks forward on
-    /// almost every live poll — `SyncEngine.setStatus` calls `notify()` (and
-    /// hence `AppModel.refresh()`) on every status mutation, not just
-    /// content changes, so it moves roughly every ~7s while the app is
-    /// foregrounded. Comparing full snapshot bytes including it would make
-    /// change-detection a no-op and spam `WidgetCenter.reloadAllTimelines()`
-    /// well past its daily budget.
-    struct Content: Codable, Equatable {
-        var memoryCount: Int?
-        var projectCount: Int?
-        var topTask: TopTask?
-    }
-
-    var content: Content {
-        Content(memoryCount: memoryCount, projectCount: projectCount, topTask: topTask)
-    }
-}
-
 /// Writes `WidgetSnapshot` to the `group.com.phren.ios` shared container so
 /// the WidgetKit extension — which reads only this JSON file, never GitHub
 /// or PhrenKit directly — can render memory count / top task without the
@@ -55,44 +11,19 @@ struct WidgetSnapshot: Codable, Equatable {
 /// (`syncStatus`, per-store `status`) settles each cycle: live-mode polling
 /// re-runs `refresh()` roughly every ~7s per store while foregrounded, so
 /// the snapshot file is always written with this cycle's freshest counts.
-/// The disk write is unconditional (cheap, local); the widget-visible
+/// Identical snapshots skip the disk write; the widget-visible
 /// `reloadAllTimelines()` call is gated on `Content` actually changing so a
 /// quiet poll (nothing approved, nothing new) never touches the widget
 /// refresh budget.
 @MainActor
 enum WidgetBridge {
     static let appGroupID = "group.com.phren.ios"
-    private static let snapshotFilename = "widget-snapshot.json"
 
-    private static let encoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return encoder
-    }()
+    private static let writer = WidgetSnapshotWriter()
 
-    /// Encoded `Content` bytes from the last publish that changed the
-    /// widget-visible picture — `nil` at launch, so the first refresh of
-    /// every cold start always reloads once (cheap, and it's exactly the
-    /// case the "app-side reload keeps it fresher" story is for).
-    private static var lastPublishedContent: Data?
-
-    private static var containerURL: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
-    }
-
-    static func publish(from model: AppModel) {
-        guard let url = containerURL?.appendingPathComponent(snapshotFilename) else { return }
+    static func publish(from model: AppModel) async {
         let snapshot = buildSnapshot(from: model)
-
-        guard let fullData = try? encoder.encode(snapshot) else { return }
-        try? fullData.write(to: url, options: .atomic)
-
-        guard let contentData = try? encoder.encode(snapshot.content), contentData != lastPublishedContent else {
-            return
-        }
-        lastPublishedContent = contentData
-        WidgetCenter.shared.reloadAllTimelines()
+        await writer.publish(snapshot)
     }
 
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
@@ -137,5 +68,27 @@ enum WidgetBridge {
         let bRank = b.rank ?? Int.max
         if aRank != bRank { return aRank < bRank }
         return aProject < bProject
+    }
+}
+
+/// Serialize writes off the main actor. Unchanged snapshots avoid encoding and
+/// disk I/O; only changed visible content spends WidgetKit's refresh budget.
+private actor WidgetSnapshotWriter {
+    private var lastSnapshot: WidgetSnapshot?
+    private var lastContent: WidgetSnapshot.Content?
+
+    func publish(_ snapshot: WidgetSnapshot) {
+        guard snapshot != lastSnapshot,
+              let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.phren.ios")?
+                .appendingPathComponent("widget-snapshot.json") else { return }
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
+        do {
+            try encoder.encode(snapshot).write(to: url, options: .atomic)
+            lastSnapshot = snapshot
+            if lastContent != snapshot.content {
+                lastContent = snapshot.content
+                WidgetCenter.shared.reloadAllTimelines()
+            }
+        } catch { /* Keep the previous good snapshot and retry on the next refresh. */ }
     }
 }

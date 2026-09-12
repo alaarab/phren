@@ -78,6 +78,26 @@ final class SessionRecoveryTests: XCTestCase {
         await assertCachedSession(relaunched)
     }
 
+    func testStatusRefreshesKeepSearchIndexAndExternalEditsRefreshIt() async throws {
+        let model = makeModel()
+        await model.bootstrap()
+        await model.enterBackground()
+        await model.refresh()
+        let revision = model.searchRevision
+        async let first: Void = model.refresh()
+        async let second: Void = model.refresh()
+        _ = await (first, second)
+        XCTAssertEqual(revision, model.searchRevision)
+        let other = try LocalStore(rootDirectory: root.appendingPathComponent(descriptor.id), owner: "sample", repo: "brain", branch: "main")
+        try await other.write("demo/FINDINGS.md", content: "# Findings\n- Freshly searchable pineapple\n", blobSha: nil)
+        await model.refresh()
+        XCTAssertNotEqual(revision, model.searchRevision)
+        XCTAssertEqual(model.searchIndex.search("pineapple").count, 1)
+        await model.signOut()
+        await model.refresh()
+        XCTAssertTrue(model.searchIndex.search("pineapple").isEmpty)
+    }
+
     func testTransientErrorsNeverSignOut() async {
         let failures: [SessionURLProtocol.Response] = [
             .failure(.timedOut), .failure(.networkConnectionLost), .failure(.cannotFindHost),

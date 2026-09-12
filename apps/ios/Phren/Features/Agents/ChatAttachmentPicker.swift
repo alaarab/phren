@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 
 /// Downsample before rendering; newly encoded images omit source metadata.
 enum ChatAttachmentPreparation {
+    static func preparedImage(_ data: Data, name: String = "Image") async throws -> AgentAttachment {
+        try await Task.detached(priority: .userInitiated) { try image(data, name: name) }.value
+    }
     static func preview(_ attachment: AgentAttachment) -> AgentAttachment? {
         guard let source = CGImageSourceCreateWithData(attachment.data as CFData, nil),
               let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -85,7 +88,7 @@ struct ChatAttachmentPicker: View {
                                 do {
                                     if let failure { throw failure }
                                     guard let data else { throw PhrenKitError.validation("No image was found on the clipboard.") }
-                                    add(try ChatAttachmentPreparation.image(data, name: "Clipboard")); dismiss()
+                                    add(try await ChatAttachmentPreparation.preparedImage(data, name: "Clipboard")); dismiss()
                                 } catch { self.error = error.localizedDescription }
                             }
                         }
@@ -107,7 +110,8 @@ struct ChatAttachmentPicker: View {
                 if let error { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) }
             }
             .navigationTitle("Add attachment").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) } }
+            .interactiveDismissDisabled(busy)
             .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: 4, matching: .images)
             .task {
                 guard !openedInitialSource, let initialSource, canAdd else { return }
@@ -124,20 +128,35 @@ struct ChatAttachmentPicker: View {
                 }
             }
             .fileImporter(isPresented: $files, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                do {
-                    let urls = try result.get()
-                    for url in urls.prefix(4) { add(try ChatAttachmentPreparation.file(url)) }
-                    dismiss()
-                } catch { self.error = error.localizedDescription }
+                busy = true
+                Task {
+                    defer { busy = false }
+                    do {
+                        let urls = try result.get()
+                        for url in urls.prefix(4) {
+                            add(try await Task.detached(priority: .userInitiated) { try ChatAttachmentPreparation.file(url) }.value)
+                        }
+                        dismiss()
+                    } catch { self.error = error.localizedDescription }
+                }
             }
             .fullScreenCover(isPresented: $camera) {
                 ChatCamera { image in
                     camera = false
                     guard let image else { return }
-                    do {
-                        guard let data = image.jpegData(compressionQuality: 0.9) else { return }
-                        add(try ChatAttachmentPreparation.image(data, name: "Camera")); dismiss()
-                    } catch { self.error = error.localizedDescription }
+                    busy = true
+                    Task {
+                        defer { busy = false }
+                        do {
+                            let attachment = try await Task.detached(priority: .userInitiated) {
+                                guard let data = image.jpegData(compressionQuality: 0.9) else {
+                                    throw PhrenKitError.validation("The photo couldn't be prepared. Try another photo.")
+                                }
+                                return try ChatAttachmentPreparation.image(data, name: "Camera")
+                            }.value
+                            add(attachment); dismiss()
+                        } catch { self.error = error.localizedDescription }
+                    }
                 }.ignoresSafeArea()
             }
             .onChange(of: photos) { _, items in
@@ -146,7 +165,7 @@ struct ChatAttachmentPicker: View {
                     defer { busy = false }
                     do {
                         for item in items {
-                            if let data = try await item.loadTransferable(type: Data.self) { add(try ChatAttachmentPreparation.image(data)) }
+                            if let data = try await item.loadTransferable(type: Data.self) { add(try await ChatAttachmentPreparation.preparedImage(data)) }
                         }
                         if !items.isEmpty { dismiss() }
                     } catch { self.error = error.localizedDescription }

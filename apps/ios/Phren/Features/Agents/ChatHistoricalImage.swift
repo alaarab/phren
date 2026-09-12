@@ -21,9 +21,9 @@ struct ChatHistoricalImage: View {
     @State private var refresh = UUID()
     var body: some View {
         Group {
-            if let attachment, let image = UIImage(data: attachment.data) {
+            if let attachment {
                 Button { preview(.init(attachment: attachment)) } label: {
-                    Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 240).clipShape(RoundedRectangle(cornerRadius: 12))
+                    ChatAttachmentImage(attachment: attachment).frame(maxHeight: 240).clipShape(RoundedRectangle(cornerRadius: 12))
                 }.accessibilityLabel("View conversation image")
             } else if let error {
                 Button { refresh = UUID() } label: { Label(error, systemImage: "arrow.clockwise").font(.caption) }
@@ -45,14 +45,19 @@ struct ChatHistoricalImage: View {
                     #endif
                 }
                 try Task.checkCancellation()
-                guard let bytes, let source = CGImageSourceCreateWithData(bytes as CFData, nil),
-                      let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 1_600, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
-                      let reduced = UIImage(cgImage: image).jpegData(compressionQuality: 0.9) else {
-                    throw PhrenKitError.validation("The image is unavailable.")
-                }
+                guard let bytes else { throw PhrenKitError.validation("The image is unavailable.") }
+                let prepared = try await Task.detached(priority: .userInitiated) {
+                    guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+                          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 1_600, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
+                          let reduced = UIImage(cgImage: image).jpegData(compressionQuality: 0.9) else {
+                        throw PhrenKitError.validation("The image is unavailable.")
+                    }
+                    return try AgentAttachment(name: "Conversation image.jpg", data: reduced, isImage: true)
+                }.value
+                try Task.checkCancellation()
                 TranscriptImageCache.data.setObject(bytes as NSData, forKey: key, cost: bytes.count)
-                attachment = try AgentAttachment(name: "Conversation image.jpg", data: reduced, isImage: true)
+                attachment = prepared
             } catch { if !Task.isCancelled { self.error = "Image unavailable · Retry" } }
         }
     }

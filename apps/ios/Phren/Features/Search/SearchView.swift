@@ -9,8 +9,17 @@ struct SearchView: View {
     @State private var projectFilter: String?
     @State private var kindFilter: SearchIndex.DocKind?
 
-    private var results: [SearchIndex.Result] {
-        model.searchIndex.search(query, store: storeIdFilter, project: projectFilter, kind: kindFilter)
+    @State private var results: [SearchIndex.Result] = []
+    @State private var searching = false
+    private struct Request: Equatable {
+        let query: String
+        let store: String?
+        let project: String?
+        let kind: SearchIndex.DocKind?
+        let revision: UUID
+    }
+    private var request: Request {
+        Request(query: query, store: storeIdFilter, project: projectFilter, kind: kindFilter, revision: model.searchRevision)
     }
 
     var body: some View {
@@ -51,6 +60,8 @@ struct SearchView: View {
                 .overlay {
                     if query.isEmpty {
                         PhrenEmptyState(title: "Search your memory", message: "Find a decision, a useful note, or your next task. Searches current memory saved on this iPhone.")
+                    } else if searching && results.isEmpty {
+                        ProgressView("Searching…")
                     } else if results.isEmpty {
                         ContentUnavailableView.search(text: query)
                     }
@@ -58,6 +69,22 @@ struct SearchView: View {
             }
             .phrenScreen()
             .searchable(text: $query, prompt: "Search findings, notes, tasks…")
+            .task(id: request) {
+                let request = request
+                guard !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    results = []; searching = false; return
+                }
+                searching = true
+                do {
+                    try await Task.sleep(for: .milliseconds(120))
+                    let index = model.searchIndex
+                    let matches = await Task.detached(priority: .userInitiated) {
+                        index.search(request.query, store: request.store, project: request.project, kind: request.kind)
+                    }.value
+                    try Task.checkCancellation()
+                    results = matches; searching = false
+                } catch {}
+            }
             .navigationTitle("Search")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

@@ -5,7 +5,26 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     public let title: String?
     public let toolName: String?
     public let message: String?
+    public let expiresAt: String?
     public var id: String { actionId }
+
+    public var expiration: Date? {
+        guard let expiresAt else { return nil }
+        return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(expiresAt))
+            ?? (try? Date.ISO8601FormatStyle().parse(expiresAt))
+    }
+
+    /// Show the human explanation first; keep the complete tool input available
+    /// separately for inspection. Hook providers often send a JSON tool input.
+    public var explanation: String? {
+        guard let message, !message.isEmpty else { return nil }
+        if let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] {
+            for key in ["justification", "description", "command", "cmd"] {
+                if let text = input[key] as? String, !text.isEmpty { return text }
+            }
+        }
+        return message
+    }
 }
 
 public struct AgentInteractionStatus: Equatable, Sendable {

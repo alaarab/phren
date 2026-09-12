@@ -70,7 +70,13 @@ final class SessionOverviewMonitor {
             (.working, "Working"), (.waiting, "Needs input"), (.error, "Needs attention"),
             (.idle, "Idle"), (.done, "Done"), (.unknown, "Other sessions"),
         ]
-        var groups = order.compactMap { activity, title -> Group? in
+        let pinned = (live + previous).filter { preferences?.isPinned($0.id) == true }.sorted(by: Self.ordered)
+        live.removeAll { preferences?.isPinned($0.id) == true }
+        previous.removeAll { preferences?.isPinned($0.id) == true }
+        var groups: [Group] = pinned.isEmpty ? [] : [
+            Group(id: "pinned", title: "Pinned", sessions: pinned, fresh: pinned.allSatisfy { isFresh($0, at: date) }),
+        ]
+        groups += order.compactMap { activity, title -> Group? in
             let matches = live.filter { $0.tab.activity == activity }.sorted(by: Self.ordered)
             return matches.isEmpty ? nil : Group(id: activity.rawValue, title: title, sessions: matches, fresh: true)
         }
@@ -81,6 +87,10 @@ final class SessionOverviewMonitor {
     }
 
     func connectedCount(at date: Date) -> Int { ready ? computers.filter { $0.monitor.isFresh(at: date) }.count : 0 }
+
+    func isFresh(_ session: LiveAgentSession, at date: Date) -> Bool {
+        computers.first { $0.host == session.host }?.monitor.isFresh(at: date) == true
+    }
 
     private static func ordered(_ lhs: LiveAgentSession, _ rhs: LiveAgentSession) -> Bool {
         (lhs.host.name.lowercased(), lhs.host.id.uuidString, lhs.workspaceName.lowercased(), lhs.tab.id)

@@ -8,7 +8,11 @@ struct ToolPresentation {
     let patch: String?
     let path: String?
     let raw: String
-    var preview: String { path ?? String(body.split(whereSeparator: \.isNewline).first?.prefix(180) ?? "") }
+    var preview: String {
+        if let path { return path }
+        let start = body.firstIndex(where: { !$0.isNewline }) ?? body.endIndex
+        return String(body[start...].prefix(180).prefix { !$0.isNewline })
+    }
 
     init(title rawTitle: String, text: String) {
         raw = text

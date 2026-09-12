@@ -1,6 +1,17 @@
 import SwiftUI
 import PhrenKit
 
+extension Binding {
+    /// Present while an optional value exists, then clear that value on
+    /// dismissal. Setting true cannot invent the content of an alert/dialog.
+    func isPresent<Wrapped>() -> Binding<Bool> where Value == Wrapped? {
+        Binding<Bool>(
+            get: { wrappedValue != nil },
+            set: { if !$0 { wrappedValue = nil } }
+        )
+    }
+}
+
 extension View {
     /// A thumb drag dismisses the keyboard without consuming taps or horizontal
     /// text/toolbar gestures. Global coordinates stay stable as the keyboard moves.

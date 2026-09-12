@@ -2,6 +2,26 @@ import XCTest
 
 final class WorkflowTests: XCTestCase {
     @MainActor
+    func testGlobalSearchPublishesLatestQueryAndClearsOldResults() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Search"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Search"].tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("offline")
+        let finding = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Cache repeated requests for offline use")).firstMatch
+        XCTAssertTrue(finding.waitForExistence(timeout: 8))
+        field.buttons["Clear text"].tap()
+        field.typeText("nomatchabcdef")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "No Results")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertFalse(finding.exists)
+        field.buttons["Clear text"].tap()
+        XCTAssertTrue(app.staticTexts["Search your memory"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testBacklogIsOptionalAndLongTasksStayScannable() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--workflow-fixture"]

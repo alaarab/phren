@@ -29,6 +29,7 @@ public struct SearchIndex: Sendable {
         let kind: DocKind
         let text: String
         let date: String?
+        let recencyDate: Date?
         let typeTag: String?
         let tokens: [String: Int]
     }
@@ -42,11 +43,25 @@ public struct SearchIndex: Sendable {
     }
 
     public init(snapshots: [(store: String, snapshot: LocalStore.Snapshot)]) {
+        // Dates are immutable for this index. Parse them once with a shared
+        // formatter; only their age changes between searches.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        func doc(id: String, store: String, project: String, kind: DocKind,
+                 text: String, date: String?, typeTag: String?) -> Doc {
+            let recencyDate = date.flatMap { $0.count == 10 ? formatter.date(from: $0) : nil }
+            return Doc(id: id, store: store, project: project, kind: kind, text: text, date: date,
+                       recencyDate: recencyDate, typeTag: typeTag, tokens: Self.tokenFrequencies(text))
+        }
+
         var docs: [Doc] = []
         for (store, snapshot) in snapshots {
             for (project, findings) in snapshot.findings {
                 for finding in findings where !finding.archived {
-                    docs.append(Self.doc(
+                    docs.append(doc(
                         id: "f:\(store):\(project):\(finding.stableId ?? finding.id)",
                         store: store, project: project, kind: .finding, text: finding.text,
                         date: finding.date, typeTag: finding.typeTag
@@ -55,7 +70,7 @@ public struct SearchIndex: Sendable {
             }
             for (project, notes) in snapshot.notes {
                 for note in notes {
-                    docs.append(Self.doc(
+                    docs.append(doc(
                         id: "n:\(store):\(project):\(note.stableId)",
                         store: store, project: project, kind: .note, text: note.text,
                         date: note.date, typeTag: nil
@@ -64,7 +79,7 @@ public struct SearchIndex: Sendable {
             }
             for (project, taskDoc) in snapshot.tasks {
                 for task in taskDoc.allItems {
-                    docs.append(Self.doc(
+                    docs.append(doc(
                         id: "t:\(store):\(project):\(task.stableId ?? task.id)",
                         store: store, project: project, kind: .task, text: task.line,
                         date: task.createdAt.map { String($0.prefix(10)) }, typeTag: nil
@@ -76,7 +91,7 @@ public struct SearchIndex: Sendable {
             // the index for exactly the reason archived findings don't.
             for (project, truths) in snapshot.truths {
                 for truth in truths {
-                    docs.append(Self.doc(
+                    docs.append(doc(
                         id: "p:\(store):\(project):\(truth.id)",
                         store: store, project: project, kind: .truth, text: truth.text,
                         date: truth.addedDate, typeTag: nil
@@ -87,7 +102,7 @@ public struct SearchIndex: Sendable {
                 for (i, paragraph) in summary.components(separatedBy: "\n\n").enumerated() {
                     let trimmed = paragraph.jsTrimmed
                     guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
-                    docs.append(Self.doc(
+                    docs.append(doc(
                         id: "s:\(store):\(project):\(i)",
                         store: store, project: project, kind: .summary, text: trimmed,
                         date: nil, typeTag: nil
@@ -96,12 +111,6 @@ public struct SearchIndex: Sendable {
             }
         }
         self.docs = docs
-    }
-
-    private static func doc(id: String, store: String, project: String, kind: DocKind,
-                            text: String, date: String?, typeTag: String?) -> Doc {
-        Doc(id: id, store: store, project: project, kind: kind, text: text, date: date,
-            typeTag: typeTag, tokens: tokenFrequencies(text))
     }
 
     static func tokenize(_ text: String) -> [String] {
@@ -123,6 +132,14 @@ public struct SearchIndex: Sendable {
     public func search(_ query: String, store: String? = nil, project: String? = nil,
                        kind: DocKind? = nil, typeTag: String? = nil,
                        limit: Int = 50) -> [Result] {
+        search(query, store: store, project: project, kind: kind, typeTag: typeTag, limit: limit, now: Date())
+    }
+
+    /// One timestamp scores every match consistently and lets tests advance
+    /// time without rebuilding the index or depending on the wall clock.
+    func search(_ query: String, store: String? = nil, project: String? = nil,
+                kind: DocKind? = nil, typeTag: String? = nil,
+                limit: Int = 50, now: Date) -> [Result] {
         let queryTokens = Self.tokenize(query)
         guard !queryTokens.isEmpty else { return [] }
 
@@ -149,8 +166,8 @@ public struct SearchIndex: Sendable {
             guard matchedAll, score > 0 else { continue }
 
             // Recency boost: newer date headings rank higher.
-            if let date = doc.date, date.count == 10 {
-                score += Self.recencyBoost(date)
+            if let date = doc.recencyDate {
+                score += Self.recencyBoost(date, now: now)
             }
             results.append(Result(
                 id: doc.id, store: doc.store, project: doc.project, kind: doc.kind,
@@ -160,13 +177,8 @@ public struct SearchIndex: Sendable {
         return results.sorted { $0.score > $1.score }.prefix(limit).map { $0 }
     }
 
-    private static func recencyBoost(_ date: String) -> Double {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd"
-        guard let parsed = formatter.date(from: date) else { return 0 }
-        let ageDays = max(0, -parsed.timeIntervalSinceNow / 86_400)
+    private static func recencyBoost(_ date: Date, now: Date) -> Double {
+        let ageDays = max(0, now.timeIntervalSince(date) / 86_400)
         return max(0, 2.0 - ageDays / 90.0)
     }
 }

@@ -28,7 +28,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         super.init()
         terminal.terminalDelegate = self
         terminal.configureTouchInput()
-        let defaults = AppModel.isUITesting ? UserDefaults(suiteName: "phren.ui-tests")! : .standard
+        let defaults = AppRuntime.defaults
         // Gesture fixtures always begin at a known size; production restores
         // the user's choice across terminals and app launches.
         let savedSize = AppModel.isUITesting ? 12 : defaults.double(forKey: "terminal.textSize.v1")

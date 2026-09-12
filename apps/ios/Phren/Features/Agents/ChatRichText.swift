@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Native Markdown paragraphs and fenced code; no remote web content is loaded.
-struct ChatRichText: View {
+struct ChatRichText: View, Equatable {
     let text: String
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
     @ScaledMetric(relativeTo: .body) private var textSize = 14.0
     @ScaledMetric(relativeTo: .headline) private var headingSize = 15.0
     private struct Block: Identifiable {

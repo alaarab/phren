@@ -38,7 +38,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(history.messages.map(\.line), [0, 1, 2, 3, 8, 9, 10, 11])
         XCTAssertEqual(history.startLine, 0)
         XCTAssertFalse(history.hasMore)
+        let unchanged = history
+        history.receive(try page("backlog", [8, 9, 10, 11]))
+        XCTAssertEqual(history, unchanged, "Repeated snapshots must not invalidate the chat view")
         history.receive(try page("backlog", [0, 1], total: 2))
+        XCTAssertNotEqual(history, unchanged)
         XCTAssertEqual(history.messages.map(\.line), [0, 1])
     }
 
@@ -97,6 +101,43 @@ final class AgentChatTests: XCTestCase {
         let data = Data(#"{"kind":"herdr","groupId":"w7","childId":"w7:t1","panes":[{"id":"w7:p1","label":"1"},{"id":"w7:p1","label":"2"}]}"#.utf8)
         XCTAssertThrowsError(try AgentChatPanes.read(data, workspaceID: "w8", tabID: "w8:t1"))
         XCTAssertThrowsError(try AgentChatPanes.read(data, workspaceID: "w7", tabID: "w7:t1"))
+    }
+
+    func testSingleOversizedClaudeRowIsRejectedBeforeReplacingHistory() throws {
+        let blocks = Array(repeating: ["type": "text", "text": "x"], count: 65_000)
+        let oversized = try frame([["type": "assistant", "message": ["role": "assistant", "content": blocks]]], source: "claude")
+        XCTAssertLessThan(oversized.count, 2 * 1_024 * 1_024, "A small byte payload can still expand into thousands of messages")
+        var history = AgentChatHistory()
+        let recent = try AgentChatTranscript.read(frame([["type": "assistant", "message": ["role": "assistant", "content": "Keep this conversation"]]], source: "claude"), source: "claude")
+        history.receive(recent)
+        XCTAssertThrowsError(try history.receive(AgentChatTranscript.read(oversized, source: "claude"))) {
+            XCTAssertTrue($0 is AgentChatTranscript.LimitError)
+        }
+        XCTAssertEqual(history.messages, recent.messages)
+    }
+
+    func testClaudeMessageBudgetCoversMixedBlocksAcrossRows() throws {
+        var blocks: [[String: Any]] = Array(repeating: ["type": "text", "text": "x"], count: 3_997)
+        blocks += [["type": "thinking", "thinking": "Hidden"], ["type": "text", "text": ""],
+                   ["type": "image"], ["type": "tool_use", "name": "Read", "id": "read-1", "input": [:]]]
+        let first: [String: Any] = ["type": "assistant", "message": ["role": "assistant", "content": blocks]]
+        let last: [String: Any] = ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "read-1", "content": "Result"]]]]
+        let accepted = try AgentChatTranscript.read(frame([first, last], source: "claude"), source: "claude")
+        XCTAssertEqual(accepted.messages.count, 4_000)
+        XCTAssertEqual(accepted.messages.last?.text, "Result")
+        XCTAssertThrowsError(try AgentChatTranscript.read(frame([first, last, last], source: "claude"), source: "claude")) {
+            XCTAssertTrue($0 is AgentChatTranscript.LimitError)
+        }
+        let plain: [String: Any] = ["type": "assistant", "message": ["role": "assistant", "content": "One more"]]
+        XCTAssertThrowsError(try AgentChatTranscript.read(frame([first, last, plain], source: "claude"), source: "claude"))
+    }
+
+    func testEmptyClaudeBlocksDoNotConsumeVisibleMessageBudget() throws {
+        var blocks: [[String: Any]] = Array(repeating: ["type": "text", "text": ""], count: 65_000)
+        blocks.append(["type": "text", "text": "Visible message"])
+        let value = try AgentChatTranscript.read(frame([["type": "assistant", "message": ["role": "assistant", "content": blocks]]], source: "claude"), source: "claude")
+        XCTAssertEqual(value.messages.map(\.text), ["Visible message"])
+        XCTAssertEqual(value.messages.first?.id, "0:65000", "Discarding empty Parts must not shift the existing message identities")
     }
 
     func testCodexMessagesAndToolsExcludeSystemAndEncryptedReasoning() throws {

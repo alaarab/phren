@@ -150,15 +150,7 @@ final class AppModel {
     private var authenticationGeneration = UUID()
     private(set) var authenticationMessage: String?
 
-    /// Deterministic, isolated simulator data for the native interaction suite.
-    /// This entry point is absent from every device and Release build.
-    static var isUITesting: Bool {
-        #if DEBUG && targetEnvironment(simulator)
-        return ProcessInfo.processInfo.arguments.contains("--ui-testing")
-        #else
-        return false
-        #endif
-    }
+    static var isUITesting: Bool { AppRuntime.isUITesting }
 
     enum Phase {
         case loading
@@ -172,6 +164,12 @@ final class AppModel {
     private(set) var user: GitHubUser?
     private(set) var storeContexts: [StoreContext] = []
     private(set) var searchIndex = SearchIndex()
+    private(set) var searchRevision = UUID()
+    @ObservationIgnored private var indexedSnapshots: [String: UUID] = [:]
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshRequested = false
+    @ObservationIgnored private var foreground = true
+    @ObservationIgnored private var liveGeneration = UUID()
     private(set) var syncStatus = SyncEngine.Status()
     /// Global store filter (store id) applied by list screens when set.
     var storeFilter: String?
@@ -490,82 +488,16 @@ final class AppModel {
         guard phase == .loading else { return }
         #if DEBUG && targetEnvironment(simulator)
         if Self.isUITesting {
-            if ProcessInfo.processInfo.arguments.contains("--agents-without-github") {
-                let host = try! LiveHost(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,
-                                        name: "Test Mac", address: "fixture.invalid", username: "fixture",
-                                        fingerprint: "SHA256:" + String(repeating: "A", count: 43))
-                UserDefaults(suiteName: "phren.ui-tests")!.set(try! LiveSessionPreferences.saving(host, in: Data()), forKey: "sessions.live.preferences.v1")
-                phase = .signedOut; selectedTab = .agents
-                return
-            }
             do {
-                // Keep discovery fixtures from changing later tests' connection setup.
-                let defaults = UserDefaults(suiteName: "phren.ui-tests")!
-                let fixtureHostIDs = ["A1000000-0000-0000-0000-000000000001", "A1000000-0000-0000-0000-000000000002"].map { UUID(uuidString: $0)! }
-                if !ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture"),
-                   let data = defaults.data(forKey: "sessions.live.preferences.v1"),
-                   let saved = try? LiveSessionPreferences.read(data) {
-                    var cleaned = data
-                    for id in fixtureHostIDs where saved.hosts.contains(where: { $0.id == id }) {
-                        cleaned = try LiveSessionPreferences.removing(id, from: cleaned)
-                    }
-                    if cleaned != data { defaults.set(cleaned, forKey: "sessions.live.preferences.v1") }
+                switch try await UITestFixtures.bootstrap() {
+                case .agentsOnly:
+                    phase = .signedOut
+                    selectedTab = .agents
+                case .memory(let contexts):
+                    storeContexts = contexts
+                    await refresh()
+                    phase = .ready
                 }
-                if ProcessInfo.processInfo.arguments.contains("--workflow-fixture") {
-                    defaults.set("Queue", forKey: "tasks.section.v1")
-                    defaults.set("Task order", forKey: "tasks.sort.v1")
-                }
-                for owner in ["sample", "team"] {
-                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")
-                    let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
-                    try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
-                    try await store.write("demo/skills/audit.md", content: SkillFile.template(name: "audit", description: "Review the project", instructions: "Run the checks."), blobSha: nil)
-                    if ProcessInfo.processInfo.arguments.contains("--project-skills-fixture") {
-                        try await store.write("global/skills/review-style.md", content: SkillFile.template(name: "review-style", description: "Review shared style", instructions: "Use clear names."), blobSha: nil)
-                        try await store.write("other/skills/other-check.md", content: SkillFile.template(name: "other-check", description: "Review another project", instructions: "Check the other project."), blobSha: nil)
-                    }
-                    if owner == "sample", ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
-                        try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
-                        let host = try LiveHost(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000001")!,
-                                                name: "Test Mac", address: "fixture.invalid", username: "fixture",
-                                                fingerprint: "SHA256:" + String(repeating: "A", count: 43))
-                        let defaults = UserDefaults(suiteName: "phren.ui-tests")!
-                        defaults.set(try LiveSessionPreferences.saving(host, in: Data()), forKey: "sessions.live.preferences.v1")
-                        if ProcessInfo.processInfo.arguments.contains("--all-sessions-fixture") {
-                            let remote = try LiveHost(id: UUID(uuidString: "A1000000-0000-0000-0000-000000000002")!,
-                                                      name: "Test Linux", address: "remote.fixture.invalid", username: "fixture",
-                                                      fingerprint: "SHA256:" + String(repeating: "B", count: 43))
-                            defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: "sessions.live.preferences.v1")!),
-                                         forKey: "sessions.live.preferences.v1")
-                        }
-                    }
-                    if ProcessInfo.processInfo.arguments.contains("--workflow-fixture") {
-                        let longTask = "Large migration plan. " + String(repeating: "Update the shared modules and verify behavior across projects. ", count: 18) + "END OF PLAN"
-                        try await store.write("demo/tasks.md", content: """
-                        # Demo tasks
-                        ## Active
-                        ## Queue
-                        - [ ] \(longTask) [high] <!-- bid:dead0001 created:2026-01-01T12:00:00.000Z -->
-                          Context: Keep the full plan available from task details.
-                        - [ ] A short follow-up task <!-- bid:dead0002 created:\(Date().ISO8601Format()) -->
-                        - [ ] Check the finished app <!-- bid:dead0003 -->
-                        ## Done
-                        """, blobSha: nil)
-                        try await store.write("demo/review.md", content: """
-                        # Review
-                        ## Review
-                        - [2026-09-06] Candidate for \(owner) memory
-                        - [2026-09-06] Another candidate for \(owner) memory
-                        ## Stale
-                        - [2026-09-05] Recheck an older convention
-                        """, blobSha: nil)
-                    }
-                    // A fresh tokenless client refuses before making any request.
-                    let engine = SyncEngine(client: GitHubClient(), store: store, stateDirectory: directory)
-                    storeContexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: "brain", branch: "main", canPush: true), store: store, engine: engine))
-                }
-                await refresh()
-                phase = .ready
             } catch { lastActionError = error.localizedDescription }
             return
         }
@@ -629,24 +561,30 @@ final class AppModel {
     }
 
     func enterForeground() async {
+        foreground = true
         guard phase == .ready else { return }
         await startLiveAll()
         await refreshAccount()
     }
 
     func enterBackground() async {
+        foreground = false
+        liveGeneration = UUID()
         for context in storeContexts {
             await context.engine.stopLive()
         }
     }
 
     private func startLiveAll() async {
-        guard !Self.isUITesting else { return }
+        guard !Self.isUITesting, foreground else { return }
+        let generation = liveGeneration
         // Stagger starts so N stores don't wake the radio simultaneously.
         for (i, context) in storeContexts.enumerated() {
             if i > 0 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
             }
+            guard foreground, liveGeneration == generation, !Task.isCancelled else { return }
+            guard storeContexts.contains(where: { $0 === context }) else { continue }
             await context.engine.startLive()
         }
     }
@@ -719,6 +657,8 @@ final class AppModel {
 
     func signOut() async {
         authenticationGeneration = UUID()
+        liveGeneration = UUID()
+        await ApprovalActivityController.shared.clear()
         for context in storeContexts {
             await context.engine.stopLive()
             try? await context.store.wipe()
@@ -736,6 +676,8 @@ final class AppModel {
         appliedJournalRouting = [:]
         lastRegistryRaw = [:]
         searchIndex = SearchIndex()
+        indexedSnapshots = [:]
+        searchRevision = UUID()
         syncStatus = SyncEngine.Status()
         // Sign-out deleted the local copies, quarantined ones included, so
         // stop promising the user they're still recoverable on the device.
@@ -830,17 +772,45 @@ final class AppModel {
     // MARK: - Data refresh
 
     func refresh() async {
+        refreshRequested = true
+        if let refreshTask { await refreshTask.value; return }
+        let task = Task { [self] in
+            defer { refreshTask = nil }
+            while refreshRequested {
+                refreshRequested = false
+                await refreshOnce()
+            }
+        }
+        refreshTask = task
+        await task.value
+    }
+
+    private func refreshOnce() async {
+        let generation = authenticationGeneration
         for context in storeContexts {
-            context.snapshot = await context.store.snapshot()
-            context.status = await context.engine.currentStatus()
-            context.coldSummaries = await context.engine.coldStore.projectSummaries()
+            let snapshot = await context.store.snapshot()
+            guard generation == authenticationGeneration else { return }
+            if context.snapshot.revision != snapshot.revision { context.snapshot = snapshot }
+            let status = await context.engine.currentStatus()
+            if context.status != status { context.status = status }
+            let coldSummaries = await context.engine.coldStore.projectSummaries()
+            if context.coldSummaries != coldSummaries { context.coldSummaries = coldSummaries }
         }
         // Key by store id (owner/name) — display names alone collide when two
         // owners have same-named repos. The UI translates via storeName(for:).
-        searchIndex = SearchIndex(snapshots: storeContexts.map {
-            (store: $0.id, snapshot: $0.snapshot)
-        })
-        syncStatus = aggregateStatus()
+        guard generation == authenticationGeneration else { return }
+        let snapshots = storeContexts.map { (store: $0.id, snapshot: $0.snapshot) }
+        let revisions = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.store, $0.snapshot.revision) })
+        if revisions != indexedSnapshots {
+            let index = await Task.detached(priority: .userInitiated) { SearchIndex(snapshots: snapshots) }.value
+            guard generation == authenticationGeneration,
+                  revisions == Dictionary(uniqueKeysWithValues: storeContexts.map { ($0.id, $0.snapshot.revision) }) else { return }
+            searchIndex = index
+            indexedSnapshots = revisions
+            searchRevision = UUID()
+        }
+        let status = aggregateStatus()
+        if syncStatus != status { syncStatus = status }
         collectStorageIssues()
         await refreshStoreRegistry()
         await applyWriteContexts()
@@ -848,7 +818,7 @@ final class AppModel {
         // needs both settle right here — the same generation, every ~7s
         // live-poll cycle. WidgetBridge itself gates the widget-visible
         // reload on content actually changing.
-        WidgetBridge.publish(from: self)
+        await WidgetBridge.publish(from: self)
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
@@ -978,66 +948,7 @@ final class AppModel {
         if let focusProject, !input.projects.contains(focusProject) {
             return GraphPayload(nodes: [], links: [], topics: [], total: 0)
         }
-        return GraphBuilder.build(input, focusProject: focusProject)
-    }
-
-    /// Applies an inline edit made in the graph's project pane. The node's
-    /// score key pins the exact source line, so two findings differing only by
-    /// `[tag]` stay distinguishable; the displayed text is the fallback when
-    /// the key no longer resolves.
-    func applyGraphEdit(node: GraphNodeRef, newText: String) async throws {
-        let (storeId, project, match) = try await resolveGraphNode(node)
-        if node.isTask {
-            try await enqueue(.updateTask(project: project, match: match, text: newText,
-                                          priority: nil, section: nil), in: storeId)
-        } else {
-            try await enqueue(.editFinding(project: project, match: match, newText: newText), in: storeId)
-        }
-        await refresh()
-    }
-
-    func applyGraphDelete(node: GraphNodeRef) async throws {
-        let (storeId, project, match) = try await resolveGraphNode(node)
-        if node.isTask {
-            try await enqueue(.removeTask(project: project, match: match), in: storeId)
-        } else {
-            try await enqueue(.removeFinding(project: project, match: match), in: storeId)
-        }
-        await refresh()
-    }
-
-    /// Locates the store holding a graph node and the markdown text its
-    /// mutation should match on.
-    private func resolveGraphNode(_ node: GraphNodeRef) async throws -> (storeId: String, project: String, match: String) {
-        guard node.isFinding || node.isTask else {
-            throw PhrenKitError.validation("Only findings and tasks can be edited from the graph.")
-        }
-        guard let project = node.project else {
-            throw PhrenKitError.validation("That node is not attached to a project.")
-        }
-        guard let context = storeContexts.first(where: { context in
-            context.id == node.store && context.snapshot.projects.contains { $0.name == project }
-        }) else {
-            throw PhrenKitError.validation("No open store holds \(project).")
-        }
-
-        if node.isTask {
-            guard let text = node.sourceText, !text.isEmpty else {
-                throw PhrenKitError.validation("That task has no text to match on.")
-            }
-            return (context.id, project, text)
-        }
-
-        let resolved: String?
-        if let scoreKey = node.scoreKey {
-            resolved = await context.store.findingBulletText(project: project, scoreKey: scoreKey)
-        } else {
-            resolved = nil
-        }
-        guard let match = resolved, !match.isEmpty else {
-            throw PhrenKitError.validation("Could not find that finding in \(project)/FINDINGS.md.")
-        }
-        return (context.id, project, match)
+        return await Task.detached(priority: .userInitiated) { GraphBuilder.build(input, focusProject: focusProject) }.value
     }
 
     func perform(_ op: PendingOp, in storeId: String) async {

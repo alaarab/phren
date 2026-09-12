@@ -105,7 +105,7 @@ final class ChatRelaySSH: @unchecked Sendable {
         try LiveHost(name: "Chat fixture", address: "127.0.0.1", port: listener.localAddress!.port!, username: "fixture",
                      fingerprint: PhrenConnection.fingerprint(publicKey: String(openSSHPublicKey: NIOSSHPrivateKey(ed25519Key: hostKey).publicKey)))
     }
-    static func start(forwardPorts: [Int: Int] = [:]) async throws -> ChatRelaySSH {
+    static func start(forwardPorts: [Int: Int] = [:], webPreviewHealth: String? = nil) async throws -> ChatRelaySSH {
         let loop = MultiThreadedEventLoopGroup.singleton.next()
         let device = Curve25519.Signing.PrivateKey(), host = Curve25519.Signing.PrivateKey()
         let listener = try await ServerBootstrap(group: loop).childChannelInitializer { parent in
@@ -113,17 +113,10 @@ final class ChatRelaySSH: @unchecked Sendable {
                 try parent.pipeline.syncOperations.addHandler(NIOSSHHandler(role: .server(.init(hostKeys: [.init(ed25519Key: host)], userAuthDelegate: ChatRelayAuth(key: device))),
                 allocator: parent.allocator, inboundChildChannelInitializer: { child, type in
                     if case .session = type {
-                        return child.pipeline.addHandler(ChatRelayExec(port: forwardPorts[24543]))
+                        return child.pipeline.addHandler(ChatRelayExec(ports: forwardPorts, webPreviewHealth: webPreviewHealth))
                     }
-                    guard case .directTCPIP(let target) = type, target.targetHost == "127.0.0.1", let port = forwardPorts[target.targetPort] else {
-                        return child.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
-                    }
-                    return ClientBootstrap(group: child.eventLoop).channelInitializer { tcp in
-                        tcp.pipeline.addHandler(ChatRelayTCP(peer: child))
-                    }.connect(host: "127.0.0.1", port: port).flatMap { tcp in
-                        child.closeFuture.whenComplete { _ in tcp.close(promise: nil) }
-                        return child.pipeline.addHandler(ChatRelayChild(peer: tcp))
-                    }
+                    // Match restrict keys: SSH forwarding never reaches private sockets or TCP.
+                    return child.eventLoop.makeFailedFuture(LiveConnectionError.disconnected)
                 }))
             }
         }.bind(host: "127.0.0.1", port: 0).get()
@@ -160,13 +153,31 @@ private final class ChatRelayChild: ChannelInboundHandler {
 
 private final class ChatRelayExec: ChannelInboundHandler {
     typealias InboundIn = SSHChannelData
-    let port: Int?
-    init(port: Int?) { self.port = port }
+    let ports: [Int: Int]
+    let webPreviewHealth: String?
+    init(ports: [Int: Int], webPreviewHealth: String?) { self.ports = ports; self.webPreviewHealth = webPreviewHealth }
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
-        guard let command = event as? SSHChannelRequestEvent.ExecRequest, command.command == "phren-hook v1 pipe" else {
+        guard let command = event as? SSHChannelRequestEvent.ExecRequest else {
             context.triggerUserOutboundEvent(ChannelFailureEvent(), promise: nil); return
         }
         let child = context.channel
+        let port: Int?
+        if command.command == "phren-hook v1 pipe" {
+            if let webPreviewHealth {
+                child.pipeline.addHandler(ChatRelayHealth(capability: webPreviewHealth)).whenSuccess {
+                    child.triggerUserOutboundEvent(ChannelSuccessEvent(), promise: nil)
+                }
+                return
+            }
+            port = ports[24543]
+        } else {
+            let parts = command.command.split(separator: " ")
+            guard parts.count == 5, parts.prefix(3) == ["phren-hook", "v1", "web"],
+                  ["127.0.0.1", "::1"].contains(parts[3]), let requested = Int(parts[4]), let mapped = ports[requested] else {
+                context.triggerUserOutboundEvent(ChannelFailureEvent(), promise: nil); return
+            }
+            port = mapped
+        }
         let bootstrap = ClientBootstrap(group: child.eventLoop).channelInitializer { tcp in tcp.pipeline.addHandler(ChatRelayTCP(peer: child)) }
         let root = ProcessInfo.processInfo.environment["PHREN_BRIDGE_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/phren/bridge").path
         let connection = port.map { bootstrap.connect(host: "127.0.0.1", port: $0) } ?? bootstrap.connect(unixDomainSocketPath: root + "/hook.sock")
@@ -179,5 +190,21 @@ private final class ChatRelayExec: ChannelInboundHandler {
             case .failure: child.close(promise: nil)
             }
         }
+    }
+}
+
+private final class ChatRelayHealth: ChannelInboundHandler {
+    typealias InboundIn = SSHChannelData
+    let capability: String
+    var received = ""
+    init(capability: String) { self.capability = capability }
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard case .byteBuffer(let bytes) = unwrapInboundIn(data).data else { return }
+        received += String(decoding: bytes.readableBytesView, as: UTF8.self)
+        guard received.contains("\r\n\r\n") else { return }
+        XCTAssertTrue(received.hasPrefix("GET /v1/health"))
+        let body = "{\"product\":\"phren-hook\",\"protocol\":1,\"capabilities\":{\"webPreview\":\"\(capability)\"}}"
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n" + body
+        context.writeAndFlush(NIOAny(SSHChannelData(type: .channel, data: .byteBuffer(ByteBuffer(string: response)))), promise: nil)
     }
 }

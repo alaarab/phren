@@ -21,9 +21,11 @@ import UIKit
     static let streamingReply = "The reply is arriving word by word. " + String(repeating: "You can follow the changes as they arrive without losing your place in the conversation. ", count: 8)
     static var stopped = false
     static var answered = false
+    static var denied = false
+    static let approvalExpiry = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(Date().addingTimeInterval(55))
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard flag("--chat-approval"), !answered else { return nil }
-        return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": "Run project tests", "message": "npm test"]]]), target: target)?.approval
+        return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": "Run project tests", "message": "npm test", "expiresAt": approvalExpiry]]]), target: target)?.approval
     }
     static var uploads = 0
     static var image: AgentAttachment {
@@ -83,17 +85,21 @@ import UIKit
             }
             append("assistant", "The conversation has a quieter layout now. Commands and results stay together; expand one Shell row at a time.\n\nThe terminal is one tap away in the header, and your draft stays with this session when you come back.")
         }
-        if flag("--chat-long-tools") {
+        if flag("--chat-long-tools") || flag("--chat-dense-tools") {
             for index in 0..<3 {
                 let id = "long-tool-\(index)"
-                let output = (0..<1_500).map { "Tool \(index) line \($0): build output" }.joined(separator: "\n") + "\nFinal output marker \(index)"
+                let output = flag("--chat-dense-tools")
+                    ? String(repeating: "x\n", count: 8_000) + "Final dense output marker \(index)"
+                    : (0..<1_500).map { "Tool \(index) line \($0): build output" }.joined(separator: "\n") + "\nFinal output marker \(index)"
                 entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": id, "name": "exec_command", "arguments": "{\"cmd\":\"check-step-\(index)\"}"]]])
                 entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": id, "output": output]]])
             }
             append("assistant", "Each command has its own output.")
         }
-        if flag("--chat-diffs") {
-            let patch = "*** Begin Patch\n*** Update File: Theme.swift\n@@\n-let action = green\n+let action = phrenPurple\n*** End Patch"
+        if flag("--chat-diffs") || flag("--chat-dense-diff") {
+            let patch = flag("--chat-dense-diff")
+                ? "*** Begin Patch\n*** Update File: Dense.swift\n@@\n" + String(repeating: "+x\n", count: 2_000) + "+Final dense patch marker\n*** End Patch"
+                : "*** Begin Patch\n*** Update File: Theme.swift\n@@\n-let action = green\n+let action = phrenPurple\n*** End Patch"
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "custom_tool_call", "name": "apply_patch", "input": patch]]])
             let output = String(decoding: try JSONSerialization.data(withJSONObject: ["chunk_id": "fixture", "output": "Updated Theme.swift", "exit_code": 0]), as: UTF8.self)
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "output": [["type": "input_text", "text": output]]]]])
@@ -112,6 +118,7 @@ import UIKit
             entries.append(["line": entries.count, "raw": raw])
         }
         if answered { append("assistant", "Answer received in this conversation.") }
+        if denied { append("assistant", "Permission denied in this conversation.") }
         if stopped { append("assistant", "Turn stopped in the selected pane.") }
         for (id, text) in sent where id == target.id {
             append("user", text)

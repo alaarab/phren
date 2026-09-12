@@ -1,7 +1,7 @@
 import Foundation
 
 /// Merge reconnect snapshots, live appends, and older pages by absolute line.
-public struct AgentChatHistory: Sendable {
+public struct AgentChatHistory: Equatable, Sendable {
     public private(set) var messages: [AgentChatMessage] = []
     public private(set) var startLine: Int?
     public private(set) var totalLines = 0
