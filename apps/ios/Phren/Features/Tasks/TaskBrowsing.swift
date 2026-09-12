@@ -30,14 +30,7 @@ enum TaskAge: String, CaseIterable {
 }
 
 enum TaskBrowsing {
-    static func creationDate(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        if let date = try? Date(value, strategy: .iso8601) { return date }
-        if let date = try? Date(value, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) { return date }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return value.count == 10 ? formatter.date(from: value) : nil
-    }
+    static func creationDate(_ value: String?) -> Date? { ISO8601Dates.parse(value) }
 
     static func rows(_ rows: [TaskListRow], query: String, priority: PhrenTask.Priority?, age: TaskAge,
                      sort: TaskSort, now: Date = .now) -> [TaskListRow] {

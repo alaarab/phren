@@ -11,10 +11,10 @@ import PhrenKit
 /// (`syncStatus`, per-store `status`) settles each cycle: live-mode polling
 /// re-runs `refresh()` roughly every ~7s per store while foregrounded, so
 /// the snapshot file is always written with this cycle's freshest counts.
-/// Identical snapshots skip the disk write; the widget-visible
-/// `reloadAllTimelines()` call is gated on `Content` actually changing so a
-/// quiet poll (nothing approved, nothing new) never touches the widget
-/// refresh budget.
+/// The disk write is gated on `Content` changing or `lastSyncedAt` moving by
+/// a minute; the widget-visible `reloadAllTimelines()` call is gated on
+/// `Content` alone, so a quiet poll (nothing approved, nothing new) never
+/// touches the disk or the widget refresh budget.
 @MainActor
 enum WidgetBridge {
     static let appGroupID = "group.com.phren.ios"
@@ -27,14 +27,9 @@ enum WidgetBridge {
     }
 
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
-        let breakdown = model.storeContexts
-            .map { WidgetSnapshot.StoreCount(storeName: $0.descriptor.displayName, count: $0.snapshot.reviewQueue.count) }
-            .sorted { $0.storeName < $1.storeName }
-        return WidgetSnapshot(
+        WidgetSnapshot(
             memoryCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.reduce(0) { $0 + $1.findingCount } },
             projectCount: model.storeContexts.reduce(0) { $0 + $1.snapshot.projects.filter { $0.name != "global" }.count },
-            totalReviewCount: model.totalReviewCount,
-            storeBreakdown: breakdown,
             topTask: topActiveTask(model: model),
             lastSyncedAt: model.syncStatus.lastSyncedAt
         )
@@ -71,24 +66,34 @@ enum WidgetBridge {
     }
 }
 
-/// Serialize writes off the main actor. Unchanged snapshots avoid encoding and
-/// disk I/O; only changed visible content spends WidgetKit's refresh budget.
+/// Serialize writes off the main actor. The file is rewritten when the
+/// visible content changes or the sync stamp has moved by at least a minute
+/// — not on every ~7s poll, which the widget would never read anyway; only
+/// changed visible content spends WidgetKit's refresh budget.
 private actor WidgetSnapshotWriter {
+    private static let stampInterval: TimeInterval = 60
+
     private var lastSnapshot: WidgetSnapshot?
-    private var lastContent: WidgetSnapshot.Content?
 
     func publish(_ snapshot: WidgetSnapshot) {
-        guard snapshot != lastSnapshot,
+        let contentChanged = snapshot.content != lastSnapshot?.content
+        guard contentChanged || stampMoved(to: snapshot.lastSyncedAt),
               let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.phren.ios")?
                 .appendingPathComponent("widget-snapshot.json") else { return }
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
         do {
             try encoder.encode(snapshot).write(to: url, options: .atomic)
             lastSnapshot = snapshot
-            if lastContent != snapshot.content {
-                lastContent = snapshot.content
-                WidgetCenter.shared.reloadAllTimelines()
-            }
+            if contentChanged { WidgetCenter.shared.reloadAllTimelines() }
         } catch { /* Keep the previous good snapshot and retry on the next refresh. */ }
+    }
+
+    private func stampMoved(to stamp: Date?) -> Bool {
+        switch (lastSnapshot?.lastSyncedAt, stamp) {
+        case (nil, nil): return lastSnapshot == nil
+        case (nil, .some), (.some, nil): return true
+        case let (.some(previous), .some(current)):
+            return abs(current.timeIntervalSince(previous)) >= Self.stampInterval
+        }
     }
 }

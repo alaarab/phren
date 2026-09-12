@@ -75,9 +75,20 @@ public actor SyncEngine {
     /// `StorageIssueLog`, which already has them.
     public private(set) var storageIssues: [StorageIssue] = []
 
+    /// What an `onUpdate` callback is being told about, so the app can price
+    /// its response: a status flip is a couple of field reads, a content
+    /// change is a re-parse of the store.
+    public enum Update: Sendable {
+        /// Files in the local cache changed (remote pull or local apply) —
+        /// re-read the snapshot.
+        case content
+        /// Only `Status` moved (syncing/live flags, timestamps, counts, error).
+        case status
+    }
+
     /// Fires after any content change (remote pull or local apply) and on
-    /// status transitions — the app re-reads the snapshot and re-renders.
-    private var onUpdate: (@Sendable () -> Void)?
+    /// status transitions, tagged with which of the two it was.
+    private var onUpdate: (@Sendable (Update) -> Void)?
 
     public init(client: any GitHubAPI, store: LocalStore, stateDirectory: URL) {
         self.client = client
@@ -95,7 +106,7 @@ public actor SyncEngine {
         self.status.failedCount = queue.failed.count
     }
 
-    public func setOnUpdate(_ callback: @escaping @Sendable () -> Void) {
+    public func setOnUpdate(_ callback: @escaping @Sendable (Update) -> Void) {
         onUpdate = callback
     }
 
@@ -105,15 +116,15 @@ public actor SyncEngine {
 
     public func currentStatus() -> Status { status }
 
-    private func notify() {
-        onUpdate?()
+    private func notify(_ update: Update) {
+        onUpdate?(update)
     }
 
     private func setStatus(_ mutate: (inout Status) -> Void) {
         mutate(&status)
         status.pendingCount = queue.pending.count
         status.failedCount = queue.failed.count
-        notify()
+        notify(.status)
     }
 
     // MARK: - Pull
@@ -214,7 +225,7 @@ public actor SyncEngine {
                 m.lastSyncedAt = Date()
             }
             setStatus { $0.lastSyncedAt = Date() }
-            if changed { notify() }
+            if changed { notify(.content) }
         } catch {
             setStatus { $0.lastError = error.localizedDescription }
         }
@@ -729,7 +740,7 @@ public actor SyncEngine {
                 try? await store.delete(path)
             }
         }
-        notify()
+        notify(.content)
 
         for index in applied.indices {
             let shas = applied[index].paths?.compactMap { path in
@@ -764,7 +775,7 @@ public actor SyncEngine {
                 try await store.delete(edit.path)
             }
         }
-        notify()
+        notify(.content)
         return (paths, deletedShas)
     }
 

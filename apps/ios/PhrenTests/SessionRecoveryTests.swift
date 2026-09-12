@@ -36,7 +36,7 @@ final class SessionRecoveryTests: XCTestCase {
         for model in models {
             await model.enterBackground()
             for context in model.storeContexts {
-                await context.engine.setOnUpdate({})
+                await context.engine.setOnUpdate({ _ in })
                 await context.engine.setAutoFlush(false)
                 await context.engine.flushNow()
             }

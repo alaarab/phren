@@ -293,23 +293,48 @@ public actor LocalStore {
     }
 
     public func allPaths() -> [String] {
-        // Resolve symlinks on both sides before prefix-stripping: enumerated
-        // URLs come back resolved (/private/var/…) while the stored root may
-        // be the unresolved alias (/var/…), and a naive substring replace
-        // mangles the relative path.
+        scanFiles().paths
+    }
+
+    /// One walk of `files/`: every regular file's relative path, plus the
+    /// metadata the snapshot cache compares — fetched in the same
+    /// `resourceValues` call as the regular-file check, so a cache probe costs
+    /// one stat per file rather than two. `states` is nil when any file's
+    /// metadata couldn't be read; the snapshot then reparses rather than trust
+    /// stale data.
+    private func scanFiles() -> (paths: [String], states: [FileState]?) {
+        // Resolve the root once before prefix-stripping: enumerated URLs can
+        // come back resolved (/private/var/…) while the stored root is the
+        // unresolved alias (/var/…), and a naive substring replace mangles
+        // the relative path. Each child is only resolved when its path does
+        // not already carry the resolved prefix — a realpath per file was the
+        // most expensive part of this walk.
         let filesRoot = root.appendingPathComponent("files").resolvingSymlinksInPath()
         let rootPrefix = filesRoot.path.hasSuffix("/") ? filesRoot.path : filesRoot.path + "/"
-        guard let enumerator = FileManager.default.enumerator(at: filesRoot, includingPropertiesForKeys: [.isRegularFileKey]) else {
-            return []
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey, .fileResourceIdentifierKey, .contentModificationDateKey, .fileSizeKey,
+        ]
+        guard let enumerator = FileManager.default.enumerator(at: filesRoot, includingPropertiesForKeys: Array(keys)) else {
+            return ([], nil)
         }
-        var paths: [String] = []
+        var files: [FileState] = []
+        var complete = true
         for case let url as URL in enumerator {
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
-            let filePath = url.resolvingSymlinksInPath().path
+            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            var filePath = url.path
+            if !filePath.hasPrefix(rootPrefix) { filePath = url.resolvingSymlinksInPath().path }
             guard filePath.hasPrefix(rootPrefix) else { continue }
-            paths.append(String(filePath.dropFirst(rootPrefix.count)))
+            let path = String(filePath.dropFirst(rootPrefix.count))
+            if let identity = values.fileResourceIdentifier, let modified = values.contentModificationDate,
+               let size = values.fileSize {
+                files.append(FileState(path: path, identity: String(describing: identity), modified: modified, size: size))
+            } else {
+                complete = false
+                files.append(FileState(path: path, identity: "", modified: .distantPast, size: -1))
+            }
         }
-        return paths.sorted()
+        files.sort { $0.path < $1.path }
+        return (files.map(\.path), complete ? files : nil)
     }
 
     public func wipe() throws {
@@ -354,25 +379,13 @@ public actor LocalStore {
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
 
-    /// Check filesystem metadata before reusing the parsed snapshot. Atomic writes
-    /// from another LocalStore (for example an App Intent) change file identity,
-    /// even if their byte count and modification date happen to match.
-    private func fileStates(_ paths: [String]) -> [FileState]? {
-        var files: [FileState] = []
-        for path in paths {
-            guard let values = try? fileURL(path).resourceValues(forKeys: [.fileResourceIdentifierKey, .contentModificationDateKey, .fileSizeKey]),
-                  let identity = values.fileResourceIdentifier, let modified = values.contentModificationDate,
-                  let size = values.fileSize else { return nil }
-            files.append(FileState(path: path, identity: String(describing: identity), modified: modified, size: size))
-        }
-        return files
-    }
-
     /// Reparse only after a cached file changes. Status/manifest timestamps alone
     /// do not invalidate content. Failed metadata reads never reuse stale data.
+    /// Atomic writes from another LocalStore (for example an App Intent) change
+    /// file identity even if byte count and modification date happen to match,
+    /// which is why identity is part of the comparison.
     public func snapshot() -> Snapshot {
-        let paths = allPaths()
-        let files = fileStates(paths)
+        let (paths, files) = scanFiles()
         if let files, let cachedSnapshot, files == cachedSnapshot.files { return cachedSnapshot.value }
         var findings: [String: [Finding]] = [:]
         var tasks: [String: TaskDoc] = [:]

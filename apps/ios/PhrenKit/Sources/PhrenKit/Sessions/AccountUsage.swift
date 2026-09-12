@@ -40,9 +40,5 @@ public struct AccountUsageSnapshot: Decodable, Equatable, Sendable {
               }) else { throw PhrenKitError.validation("The computer returned invalid account usage. Refresh to try again.") }
         return value
     }
-    private static func date(_ text: String?) -> Date? {
-        guard let text else { return nil }
-        return (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(text))
-            ?? (try? Date.ISO8601FormatStyle().parse(text))
-    }
+    private static func date(_ text: String?) -> Date? { ISO8601Dates.parse(text) }
 }

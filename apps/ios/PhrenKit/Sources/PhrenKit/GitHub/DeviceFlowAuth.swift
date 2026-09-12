@@ -112,19 +112,3 @@ public actor DeviceFlowAuth {
         return .expired
     }
 }
-
-/// Validation for pasted personal access tokens (fine-grained `github_pat_…`
-/// or classic `ghp_…`). Fine-grained PATs need Contents: Read and write +
-/// Metadata: Read on the store repo.
-public enum PATValidator {
-    public static func looksLikeToken(_ raw: String) -> Bool {
-        let t = raw.jsTrimmed
-        return t.hasPrefix("github_pat_") || t.hasPrefix("ghp_") || t.hasPrefix("gho_")
-    }
-
-    /// Returns the authenticated user when the token is valid.
-    public static func validate(_ token: String, session: URLSession = .shared) async throws -> GitHubUser {
-        let client = GitHubClient(session: session, token: token.jsTrimmed)
-        return try await client.currentUser()
-    }
-}

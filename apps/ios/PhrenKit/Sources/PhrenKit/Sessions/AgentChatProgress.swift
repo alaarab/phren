@@ -69,9 +69,7 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
     }
     private static func date(_ value: Any?, fallback: Any?) -> Date? {
         if let number = value as? Double, number.isFinite, number > 0, number < 100_000_000_000 { return Date(timeIntervalSince1970: number) }
-        guard let text = fallback as? String else { return nil }
-        let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return format.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+        return ISO8601Dates.parse(fallback as? String)
     }
 }
 

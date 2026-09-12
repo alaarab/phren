@@ -2,12 +2,6 @@ import Foundation
 
 /// Shared JSON contract, compiled into both app and widget without app dependencies.
 struct WidgetSnapshot: Codable, Equatable, Sendable {
-    struct StoreCount: Codable, Equatable, Sendable, Identifiable {
-        var id: String { storeName }
-        var storeName: String
-        var count: Int
-    }
-
     struct TopTask: Codable, Equatable, Sendable {
         var text: String
         var project: String
@@ -15,19 +9,15 @@ struct WidgetSnapshot: Codable, Equatable, Sendable {
 
     var memoryCount: Int? = nil
     var projectCount: Int? = nil
-    var totalReviewCount: Int
-    var storeBreakdown: [StoreCount]
     var topTask: TopTask?
     var lastSyncedAt: Date?
 
-    /// The subset that matters for deciding whether the widget's on-screen
-    /// content actually needs to change. `lastSyncedAt` ticks forward on
-    /// almost every live poll — `SyncEngine.setStatus` calls `notify()` (and
-    /// hence `AppModel.refresh()`) on every status mutation, not just
-    /// content changes, so it moves roughly every ~7s while the app is
-    /// foregrounded. Comparing full snapshot bytes including it would make
-    /// change-detection a no-op and spam `WidgetCenter.reloadAllTimelines()`
-    /// well past its daily budget.
+    /// Everything the widget views actually render, minus `lastSyncedAt`.
+    /// That stamp ticks forward on every live poll (~7s while the app is
+    /// foregrounded), so it is neither a reason to reload the widget nor —
+    /// see `WidgetSnapshotWriter` — a reason to rewrite the file more than
+    /// about once a minute; the widget only reads the file on a content
+    /// reload or its own 15-minute backstop anyway.
     struct Content: Codable, Equatable, Sendable {
         var memoryCount: Int?
         var projectCount: Int?

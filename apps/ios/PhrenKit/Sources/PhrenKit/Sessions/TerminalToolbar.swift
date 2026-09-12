@@ -85,7 +85,11 @@ public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
     private var valid: Bool {
         version == 1 && items.count <= Self.maximumItems && items.contains(.keyboard) && Set(items).count == items.count
     }
+    private static let memo = DecodeMemo<Self>()
     public static func read(_ data: Data) throws -> Self {
+        try memo.value(for: data, decode: decode)
+    }
+    private static func decode(_ data: Data) throws -> Self {
         if data.isEmpty { return defaults }
         guard data.count <= 8_192 else { throw PhrenKitError.validation("Saved terminal controls could not be read.") }
         let value = try JSONDecoder().decode(Self.self, from: data)

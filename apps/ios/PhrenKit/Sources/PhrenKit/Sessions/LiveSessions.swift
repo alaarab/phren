@@ -177,7 +177,17 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
             ? try values.decode([LiveAgentSession.ID].self, forKey: .pinnedSessions) : []
     }
 
+    /// Views read this from computed properties inside `body`, so the same
+    /// bytes are decoded many times a second. One-entry memo: `@AppStorage`
+    /// hands every reader the identical `Data`, and equality on a few hundred
+    /// bytes is far cheaper than a decode plus validation.
+    private static let memo = DecodeMemo<Self>()
+
     public static func read(_ data: Data) throws -> Self {
+        try memo.value(for: data, decode: decode)
+    }
+
+    private static func decode(_ data: Data) throws -> Self {
         if data.isEmpty { return Self() }
         let value = try JSONDecoder().decode(Self.self, from: data)
         guard value.schemaVersion == 1 else { throw PhrenKitError.validation("Update phren to read these live connections.") }
@@ -278,5 +288,28 @@ public struct LiveSessionPreferences: Codable, Equatable, Sendable {
             throw PhrenKitError.validation("Choose an absolute project directory without . or .. components.")
         }
         return "/" + parts.joined(separator: "/")
+    }
+}
+
+/// Remembers the last `(bytes, outcome)` a `read(_:)` produced — outcome
+/// including the thrown error, so a malformed blob isn't re-decoded per frame
+/// either. A plain lock rather than an actor: callers are synchronous view
+/// code on the main thread, and the critical section is a `Data` compare.
+final class DecodeMemo<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last: (data: Data, result: Result<Value, Error>)?
+
+    func value(for data: Data, decode: (Data) throws -> Value) throws -> Value {
+        lock.lock()
+        if let last, last.data == data {
+            lock.unlock()
+            return try last.result.get()
+        }
+        lock.unlock()
+        let result = Result { try decode(data) }
+        lock.lock()
+        last = (data, result)
+        lock.unlock()
+        return try result.get()
     }
 }

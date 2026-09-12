@@ -325,10 +325,6 @@ final class AppModel {
         snapshot(for: storeId).consolidated[project]
     }
 
-    var totalReviewCount: Int {
-        storeContexts.reduce(0) { $0 + $1.snapshot.reviewQueue.count }
-    }
-
     // MARK: - Cold tier (archived findings)
 
     /// What this project's archive weighs, without reading any of it.
@@ -751,9 +747,12 @@ final class AppModel {
             // before anything can be enqueued, on every path that opens a
             // store.
             appliedJournalRouting.removeValue(forKey: descriptor.id)
-            await engine.setOnUpdate { [weak self] in
+            await engine.setOnUpdate { [weak self] update in
                 Task { @MainActor [weak self] in
-                    await self?.refresh()
+                    switch update {
+                    case .content: await self?.refresh()
+                    case .status: await self?.refreshStatus()
+                    }
                 }
             }
         } catch {
@@ -822,6 +821,26 @@ final class AppModel {
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
+    }
+
+    /// The status-only counterpart of `refreshOnce`, for a `SyncEngine.Update`
+    /// of `.status`. A pull flips `isSyncing` on, stamps `lastSyncedAt`, and
+    /// flips `isSyncing` off — three status notifications per poll per store,
+    /// each of which used to run the full refresh and so re-stat every file in
+    /// every store. Nothing in the local cache moved, so this reads the
+    /// engines' status and stops there; the snapshot, search index, registry
+    /// and Siri donations wait for a `.content` update.
+    private func refreshStatus() async {
+        let generation = authenticationGeneration
+        for context in storeContexts {
+            let status = await context.engine.currentStatus()
+            guard generation == authenticationGeneration else { return }
+            if context.status != status { context.status = status }
+        }
+        let status = aggregateStatus()
+        if syncStatus != status { syncStatus = status }
+        collectStorageIssues()
+        await WidgetBridge.publish(from: self)
     }
 
     /// Drains the process-wide persistence log into the model.

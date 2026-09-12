@@ -128,7 +128,11 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                             first = false; receivedBefore = true
                             recovery.connected(at: ProcessInfo.processInfo.systemUptime)
                         }
-                        terminal.feed(byteArray: ArraySlice(bytes)); connected = true; reconnecting = false
+                        terminal.feed(byteArray: ArraySlice(bytes))
+                        // @Observable notifies on every set, changed or not; the
+                        // terminal paints itself, so don't re-render the chrome per packet.
+                        if !connected { connected = true }
+                        if reconnecting { reconnecting = false }
                         if commandMenu && !commandMenuOpened {
                             commandMenuOpened = true
                             if canOpenCommands { try await socket.input("/") }
