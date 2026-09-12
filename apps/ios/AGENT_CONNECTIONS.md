@@ -88,7 +88,11 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive
   `beforeLine`, returning one older page without first reading the latest page.
-- `WS /v1/status`: exact-conversation activity, pending approval, and capabilities.
+- `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
+  and the pane's current git `branch` (read on the computer, cached ~10s).
+  The model name comes from the transcript instead: Claude rows carry
+  `message.model` and `gitBranch`; Codex `turn_context` rows are exported
+  with only their `model`.
 - `POST /v1/prompt`, `/v1/keys`, `/v1/upload`, `/v1/diff`
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.

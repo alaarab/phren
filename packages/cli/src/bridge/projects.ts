@@ -30,6 +30,24 @@ export async function repositoryDiff(cwd: string): Promise<Json> {
   return { branch, root, launchPath: cwd, files };
 }
 
+/** The pane's current branch for the chat header. Cached briefly per
+ * directory: the status stream asks every 1.5s and a branch rarely moves. */
+const branches = new Map<string, { at: number; value?: string }>();
+export async function repositoryBranch(cwd: string): Promise<string | undefined> {
+  const cached = branches.get(cwd);
+  if (cached && Date.now() - cached.at < 10_000) return cached.value;
+  let value: string | undefined;
+  try {
+    const { stdout } = await exec("git", ["-C", cwd, "--no-pager", "branch", "--show-current"], {
+      timeout: 5_000, maxBuffer: 65_536, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" },
+    });
+    value = stdout.trim().slice(0, 200) || undefined;
+  } catch { value = undefined; }
+  if (branches.size >= 64) branches.delete(branches.keys().next().value!);
+  branches.set(cwd, { at: Date.now(), value });
+  return value;
+}
+
 export interface LocalServer { name: string; port: number; origin: string; process?: string; pid?: number }
 function probe(port: number, host: string): Promise<string | null> {
   return new Promise(resolve => {

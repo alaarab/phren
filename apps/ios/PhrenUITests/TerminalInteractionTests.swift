@@ -165,8 +165,8 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         let toolbar = app.descendants(matching: .any).matching(identifier: "terminal-toolbar").firstMatch
         XCTAssertLessThanOrEqual(toolbar.frame.height, 48)
-        for title in ["Esc", "Tab", "Ctrl"] {
-            let keys = app.buttons.matching(NSPredicate(format: "label ==[c] %@", title))
+        for item in ["escape", "tab", "control"] {
+            let keys = app.buttons.matching(NSPredicate(format: "identifier == %@", "terminal-control:\(item)"))
             XCTAssertEqual(keys.count, 1,
                            "The terminal must not install a second key row")
             XCTAssertGreaterThanOrEqual(keys.firstMatch.frame.height, 44)

@@ -114,6 +114,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public let startLine: Int?
     public var questionEvents: [AgentQuestionEvent] = []
     public var progressEvents: [AgentChatProgressEvent] = []
+    /// What the newest rows say about the session itself: the model
+    /// answering and the branch the agent was on.
+    public var context = AgentSessionContext()
 
     public static func read(_ data: Data, source: String) throws -> Self {
         guard ["codex", "claude", "copilot"].contains(source), data.count <= 8_388_608,
@@ -128,9 +131,11 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var messages: [AgentChatMessage] = []
         var questionEvents: [AgentQuestionEvent] = []
         var progressEvents: [AgentChatProgressEvent] = []
+        var context = AgentSessionContext()
         var seen: Set<String> = []
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
+            context.merge(AgentSessionContext.read(raw, source: source, line: line))
             let parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
@@ -146,7 +151,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
         return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(), questionEvents: questionEvents,
-                    progressEvents: progressEvents)
+                    progressEvents: progressEvents, context: context)
     }
 
     private struct Part {
@@ -244,5 +249,50 @@ public struct AgentChatTranscript: Equatable, Sendable {
             default: return nil
             }
         }
+    }
+}
+
+/// The model and git branch a transcript reports for its session, each from
+/// the newest row that carried it. Claude Code stamps `gitBranch` on every
+/// row and `message.model` on assistant rows; Codex records `model` in a
+/// `turn_context` row (which Phren Hook exports with only that field). A
+/// row that lacks a field never clears an older value, so a status-only row
+/// can't blank the model the last reply named.
+public struct AgentSessionContext: Equatable, Sendable {
+    public var modelName: String?
+    public var branch: String?
+    /// The newest transcript line either value came from; -1 when neither
+    /// has been seen, so an older history page never overrides a newer one.
+    public var line = -1
+
+    public init(modelName: String? = nil, branch: String? = nil, line: Int = -1) {
+        self.modelName = modelName; self.branch = branch; self.line = line
+    }
+
+    static func read(_ raw: [String: Any], source: String, line: Int) -> Self {
+        var found = Self(line: line)
+        if source == "claude", raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true {
+            if let message = raw["message"] as? [String: Any], message["role"] as? String == "assistant" {
+                found.modelName = name(message["model"])
+            }
+            found.branch = name(raw["gitBranch"], limit: 200)
+        } else if source == "codex", raw["type"] as? String == "turn_context" {
+            found.modelName = name((raw["payload"] as? [String: Any])?["model"])
+        }
+        return found
+    }
+
+    /// Takes `other`'s values when it is at least as new as what is held.
+    public mutating func merge(_ other: Self) {
+        guard other.modelName != nil || other.branch != nil, other.line >= line else { return }
+        if let modelName = other.modelName { self.modelName = modelName }
+        if let branch = other.branch { self.branch = branch }
+        line = other.line
+    }
+
+    private static func name(_ value: Any?, limit: Int = 100) -> String? {
+        guard let text = value as? String else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(limit))
     }
 }

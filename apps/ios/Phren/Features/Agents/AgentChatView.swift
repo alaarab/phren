@@ -130,7 +130,7 @@ struct AgentChatView: View {
                                         .font(.footnote)
                                 }
                             }
-                            if let error = model.error { connectionIssue(error) }
+                            if let error = model.error { connectionIssue(error, retry: !model.connected && model.target != nil) }
                             if currentHost != session.host { connectionIssue("This computer's connection changed. Reopen chat from the current session list.") }
                             if model.hasMore {
                                 VStack(spacing: 8) {
@@ -397,29 +397,55 @@ struct AgentChatView: View {
         }
     }
 
+    /// Where this conversation lives, in the terms the person thinks in:
+    /// the project, then the model answering and the branch it is on. The
+    /// computer is already the session list's business.
+    private var chatLocation: String {
+        let modelName = model.modelName.map { name in
+            name.hasPrefix("claude-") ? String(name.dropFirst("claude-".count)) : name
+        }
+        return [project?.name ?? session.workspaceName, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The computer and workspace left the visible line; VoiceOver still
+    /// says them, ahead of the project the workspace resolved to.
+    private var chatLocationSpoken: String {
+        var parts = [session.host.name]
+        if project != nil { parts.append(session.workspaceName) }
+        parts.append(chatLocation)
+        return parts.joined(separator: " · ")
+    }
+
     private var chatHeader: some View {
         HStack(spacing: 10) {
             ChatDismissButton()
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 7) {
+            AgentProviderGlyph(source: model.target?.source)
+                .overlay(alignment: .bottomTrailing) {
                     ChatActivityIndicator(connected: model.connected && active,
                                           reconnecting: active && model.target != nil && !model.connected && !model.loading && !model.automaticReconnectSuspended,
                                           waiting: model.awaitingReply, revealing: model.reveal.isRevealing,
                                           needsAnswer: model.needsAnswer || model.approval != nil,
                                           phase: model.activityPhase)
-                    Text(selectedPane?.displayTitle ?? session.workspaceName)
-                        .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
+                        .padding(1).background(PhrenTheme.chatPanel, in: Circle())
+                        .offset(x: 4, y: 4)
                 }
-                Text("\(session.host.name) · \(session.workspaceName) · \(model.target?.providerName ?? "Agent")")
+                .accessibilityElement(children: .contain)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(selectedPane?.displayTitle ?? session.workspaceName)
+                    .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
+                Text(chatLocation)
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(1).accessibilityIdentifier("chat-location")
+                    .lineLimit(1)
+                    .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
-            NavigationLink {
-                HerdrTerminalView(host: session.host, session: session, target: model.target)
-            } label: {
-                Image(systemName: "terminal").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
-                    .foregroundStyle(PhrenTheme.cyan)
-            }.accessibilityLabel("Open Herdr terminal").accessibilityIdentifier("chat-terminal")
+            if let target = model.target {
+                NavigationLink {
+                    AgentDiffView(session: session, target: target)
+                } label: {
+                    Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
+                        .foregroundStyle(PhrenTheme.cyan)
+                }.accessibilityLabel("Repository changes").accessibilityIdentifier("chat-diff")
+            }
             chatOptions
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
@@ -432,24 +458,17 @@ struct AgentChatView: View {
     }
 
     private var chatOptions: some View {
+        // Only what has no home elsewhere on this screen: the terminal,
+        // repository changes, slash commands, dictation and reconnecting all
+        // live in the header, the composer, or the connection notice.
         Menu {
-            NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: { Label("Herdr terminal", systemImage: "terminal") }
             NavigationLink { HerdrWorkspacesView(hostID: session.host.id) } label: { Label("Herdr workspaces", systemImage: "rectangle.split.3x1") }
-            if let target = model.target {
-                NavigationLink { AgentDiffView(session: session, target: target) } label: { Label("Repository changes", systemImage: "arrow.triangle.branch") }
-            }
             if let project {
                 NavigationLink("Project memory") { ProjectDetailView(storeId: project.storeID, project: project.name) }
                 NavigationLink("Project skills") { SkillsView(project: project.name, storeId: project.storeID) }
                 NavigationLink("Explore graph") { GraphView(focusProject: project.name, initialStoreId: project.storeID) }
             }
-            Button("Slash commands", systemImage: "slash.circle") { openCommandMenu() }
-                .disabled(model.target == nil || model.sending)
-            Button(model.connected ? "Refresh conversation" : "Reconnect") { refresh = UUID() }
-                .accessibilityIdentifier("chat-reconnect")
             tokenUsage
-            Button("Dictate message", systemImage: "mic") { showingDictation = true }
-                .disabled(model.target == nil || model.sending)
             if project != nil {
                 Button("Add project context", systemImage: "brain") { showingContext = true }
             }
@@ -463,9 +482,16 @@ struct AgentChatView: View {
         .accessibilityLabel("Chat options")
     }
 
-    private func connectionIssue(_ message: String) -> some View {
-        Label(message, systemImage: "wifi.exclamationmark")
-            .font(.footnote).foregroundStyle(PhrenTheme.warning).padding(12).phrenCard()
+    private func connectionIssue(_ message: String, retry: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "wifi.exclamationmark")
+            if retry {
+                Button("Reconnect", systemImage: "arrow.clockwise") { refresh = UUID() }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(PhrenTheme.cyan)
+                    .accessibilityIdentifier("chat-reconnect")
+            }
+        }
+        .font(.footnote).foregroundStyle(PhrenTheme.warning).padding(12).phrenCard()
     }
 
     @ViewBuilder private var tokenUsage: some View {

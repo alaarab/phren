@@ -113,7 +113,7 @@ final class AgentChatTests: XCTestCase {
         let app = launch(extra: ["--chat-copilot"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.staticTexts["Copilot is connected to this project. What would you like to change?"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Copilot"))
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "chat-provider").firstMatch.label, "Copilot")
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Check the layout")
         app.buttons["chat-send"].tap()
@@ -149,7 +149,7 @@ final class AgentChatTests: XCTestCase {
             return value?["input"] as? String == "/"
         }, object: report)], timeout: 5), .completed)
         XCTAssertFalse(app.keyboards.firstMatch.exists)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["herdr-terminal-back"].tap()
         XCTAssertEqual(composer.value as? String, "/model ")
     }
 
@@ -203,9 +203,9 @@ final class AgentChatTests: XCTestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep the Phren details")
         capture(app, "Integrated composer with keyboard")
-        app.buttons["chat-terminal"].tap()
+        app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["herdr-terminal-back"].tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Agent chat"].exists)
         XCTAssertEqual(composer.value as? String, "Keep the Phren details")
@@ -218,7 +218,7 @@ final class AgentChatTests: XCTestCase {
         let app = launch(extra: ["--chat-design", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
-        for identifier in ["chat-close", "chat-terminal", "Chat options", "Add attachment", "Dictate message"] {
+        for identifier in ["chat-close", "chat-diff", "Chat options", "chat-composer-terminal", "Add attachment", "Dictate message"] {
             XCTAssertTrue(app.buttons[identifier].isHittable, identifier)
         }
         capture(app, "Custom chat at accessibility text size")
@@ -282,8 +282,10 @@ final class AgentChatTests: XCTestCase {
         app.buttons["work"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Herdr server", "work")).firstMatch.waitForExistence(timeout: 8))
         app.buttons["Open Herdr terminal"].tap()
-        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["Test Mac · work"].waitForExistence(timeout: 8))
+        let header = app.otherElements["herdr-terminal-header"]
+        XCTAssertTrue(header.waitForExistence(timeout: 8))
+        XCTAssertTrue(header.staticTexts["Test Mac"].waitForExistence(timeout: 8))
+        XCTAssertTrue(header.staticTexts["work"].exists)
     }
     @MainActor
     func testInlineApprovalAndQuestionAnswers() {
@@ -347,16 +349,14 @@ final class AgentChatTests: XCTestCase {
         app.buttons["View conversation image"].tap()
         XCTAssertTrue(app.navigationBars["Conversation image.jpg"].waitForExistence(timeout: 5))
         app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
-        app.buttons["Chat options"].tap()
-        app.buttons["Repository changes"].tap()
+        app.buttons["chat-diff"].tap()
         XCTAssertTrue(app.staticTexts["Theme.swift"].waitForExistence(timeout: 5))
         app.staticTexts["Theme.swift"].tap()
         capture(app, "Native repository diff")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.exists)
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.buttons["Chat options"].tap()
-        app.buttons["Herdr terminal"].tap()
+        app.buttons["chat-composer-terminal"].tap()
         XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["Toggle terminal keyboard"].waitForExistence(timeout: 8))
         capture(app, "Native Herdr terminal")
@@ -676,15 +676,19 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
-    func testOfflineReconnectLivesInHeaderMenuWithoutLosingDraft() {
+    func testOfflineReconnectLivesInConnectionNoticeWithoutLosingDraft() {
         let app = launch(extra: ["--chat-offline"])
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.staticTexts["The project screen is ready. What would you like to change?"].waitForExistence(timeout: 5))
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("Keep this while offline")
-        XCTAssertFalse(app.buttons["chat-reconnect"].exists)
-        app.buttons["Chat options"].tap()
         let reconnect = app.buttons["chat-reconnect"]
+        XCTAssertTrue(reconnect.waitForExistence(timeout: 8))
+        app.buttons["Chat options"].tap()
+        XCTAssertTrue(app.buttons["Herdr workspaces"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Herdr terminal"].exists)
+        XCTAssertFalse(app.buttons["Slash commands"].exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() // dismiss the menu
         XCTAssertTrue(reconnect.waitForExistence(timeout: 8))
         XCTAssertFalse(app.buttons["chat-send"].isEnabled)
         reconnect.tap()

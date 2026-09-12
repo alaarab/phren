@@ -72,6 +72,14 @@ Herdr uses a single compact header for back, computer/status, and reconnect.
 The terminal starts directly below it; the keyboard stays hidden until requested.
 Swipe down on its shortcut row to dismiss the keyboard.
 
+The chat header names the agent (Claude, Codex, or Copilot glyph, with the
+connection state as a small badge), the pane's title, and then the project,
+model, and git branch — the computer is already the session list's business.
+Its right side opens repository changes and a short options menu (Herdr
+workspaces, project memory, skills, graph, usage, context, switching agent);
+the terminal, slash commands, and dictation stay in the composer, and a
+connection notice offers Reconnect when the conversation drops.
+
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new
 message brings Send back so you can steer the agent. **Switch agent**, beside

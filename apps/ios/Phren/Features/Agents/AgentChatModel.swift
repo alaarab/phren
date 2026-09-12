@@ -82,6 +82,12 @@ final class AgentChatModel {
         liveActivity = activity; preferProgressActivity = false
     }
     var modelName: String?
+    /// The model and branch the transcript names, kept across status ticks;
+    /// the live branch from Phren Hook wins over the transcript's stamp
+    /// because it is read from git now rather than when the row was written.
+    private var transcriptContext = AgentSessionContext()
+    private var statusBranch: String?
+    var branch: String? { statusBranch ?? transcriptContext.branch }
     var questionsSupported = true
     var progressUnavailable = false
     var messages: [AgentChatMessage] { history.messages }
@@ -148,6 +154,7 @@ final class AgentChatModel {
             }
             history = .init(); progress = .init(); reveal.finish(); hasTranscript = false
             awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil; preferProgressActivity = false
+            transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; question = nil; answeredQuestions = []
         } catch { self.error = error.localizedDescription }
@@ -193,6 +200,7 @@ final class AgentChatModel {
         target = nil; history = .init(); connected = false
         rejectedStreamTarget = nil
         progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil
+        transcriptContext = .init(); statusBranch = nil
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
     }
     func add(_ attachment: AgentAttachment) {
@@ -307,7 +315,15 @@ final class AgentChatModel {
         reveal.receive(frame, previous: messages, animated: animateReplies && hasTranscript)
         if frame.messages.contains(where: { $0.line > submittedAfterLine && $0.role != .user }) { awaitingReply = false }
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
+        acceptContext(frame)
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+    }
+
+    /// A backlog replaces what the transcript said (the conversation was
+    /// reopened or reset); an append or older page only adds to it.
+    private func acceptContext(_ frame: AgentChatTranscript) {
+        if frame.kind == .backlog { transcriptContext = frame.context } else { transcriptContext.merge(frame.context) }
+        if let name = transcriptContext.modelName, modelName != name { modelName = name }
     }
 
     private func mergeHistory(_ frame: AgentChatTranscript) {
@@ -356,7 +372,9 @@ final class AgentChatModel {
                         guard self.target == target, generation == run, statusGeneration == statusRun else { return }
                         if awaitingReply, liveActivity != "working", status.activity == "working" { awaitingReply = false }
                         approval = status.approval.flatMap { ApprovalActivityController.shared.wasHandled($0, target: target) ? nil : $0 }
-                        questionsSupported = status.questionsSupported; acceptActivity(status.activity); modelName = status.modelName; interactionConnected = true
+                        questionsSupported = status.questionsSupported; acceptActivity(status.activity); interactionConnected = true
+                        if let name = status.modelName, modelName != name { modelName = name }
+                        if statusBranch != status.branch { statusBranch = status.branch }
                         if approval != nil || ["waiting", "blocked"].contains(status.activity ?? "") { awaitingReply = false }
                         await ApprovalActivityController.shared.sync(approval, session: session, target: target)
                     }
