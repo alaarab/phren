@@ -80,6 +80,14 @@ workspaces, project memory, skills, graph, usage, context, switching agent);
 the terminal, slash commands, and dictation stay in the composer, and a
 connection notice offers Reconnect when the conversation drops.
 
+**Repository changes** follows VS Code's Source Control view: Staged Changes
+and Changes, each file with its status letter (M, A, D, R, U), name, folder,
+and line counts. A file opens in a diff editor with old/new line numbers in
+the gutter, tinted inserted and removed rows with the changed characters
+tinted harder, hunk rules, next/previous change, inline or side-by-side
+layout, and copy. Patches an agent applies render in the chat with the same
+rows.
+
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new
 message brings Send back so you can steer the agent. **Switch agent**, beside

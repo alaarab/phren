@@ -131,6 +131,10 @@ public struct AgentRepositoryDiff: Decodable, Sendable {
         public let binary: Bool?
         public let loadState: String?
         public let patch: String?
+
+        public init(id: String, kind: String, binary: Bool? = nil, loadState: String? = nil, patch: String? = nil) {
+            self.id = id; self.kind = kind; self.binary = binary; self.loadState = loadState; self.patch = patch
+        }
     }
     public let branch: String?
     public let root: String
