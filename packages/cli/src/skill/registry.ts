@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getProjectDirs } from "../shared.js";
 import { parseSkillFrontmatter } from "../link/skills.js";
-import { isSkillEnabled } from "./state.js";
+import { readSkillEnabledState, type SkillEnabledResolver } from "./state.js";
 import { safeProjectPath } from "../utils.js";
 
 export interface SkillEntry {
@@ -61,9 +61,9 @@ function normalizeCommand(raw: unknown, fallbackName: string): string {
   return value.startsWith("/") ? value : `/${value}`;
 }
 
-function normalizeAliases(raw: unknown): string[] {
+function normalizeAliases(raw: unknown, command: string): string[] {
   if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
+  const seen = new Set([command.toLowerCase()]);
   const aliases: string[] = [];
   for (const value of raw) {
     if (typeof value !== "string" || !value.trim()) continue;
@@ -77,7 +77,7 @@ function normalizeAliases(raw: unknown): string[] {
 }
 
 function collectSkills(
-  phrenPath: string,
+  isEnabled: SkillEnabledResolver,
   root: string,
   sourceLabel: string,
   scopeType: "global" | "project",
@@ -114,6 +114,7 @@ function collectSkills(
 
     const name = isFolder ? entry.name : entry.name.replace(/\.md$/, "");
     const { frontmatter } = parseSkillFrontmatter(fs.readFileSync(filePath, "utf8"));
+    const command = normalizeCommand(frontmatter?.command, name);
     results.push({
       name,
       source: sourceLabel,
@@ -123,24 +124,24 @@ function collectSkills(
       path: filePath,
       root: isFolder ? path.dirname(filePath) : filePath,
       description: frontmatter?.description as string | undefined,
-      enabled: isSkillEnabled(phrenPath, sourceLabel, name),
-      command: normalizeCommand(frontmatter?.command, name),
-      aliases: normalizeAliases(frontmatter?.aliases),
+      enabled: isEnabled(sourceLabel, name),
+      command,
+      aliases: normalizeAliases(frontmatter?.aliases, command),
     });
   }
 
   return results;
 }
 
-function getGlobalSkills(phrenPath: string): SkillEntry[] {
+function getGlobalSkills(phrenPath: string, isEnabled: SkillEnabledResolver): SkillEntry[] {
   const seen = new Set<string>();
-  return collectSkills(phrenPath, path.join(phrenPath, "global", "skills"), "global", "global", "canonical", seen);
+  return collectSkills(isEnabled, path.join(phrenPath, "global", "skills"), "global", "global", "canonical", seen);
 }
 
-function getProjectLocalSkills(phrenPath: string, project: string): SkillEntry[] {
+function getProjectLocalSkills(phrenPath: string, project: string, isEnabled: SkillEnabledResolver): SkillEntry[] {
   const seen = new Set<string>();
   const projectDir = path.join(phrenPath, project);
-  return collectSkills(phrenPath, path.join(projectDir, "skills"), project, "project", "canonical", seen);
+  return collectSkills(isEnabled, path.join(projectDir, "skills"), project, "project", "canonical", seen);
 }
 
 function skillPriority(skill: SkillEntry): number {
@@ -276,24 +277,27 @@ function toResolvedSkill(skill: SkillEntry): ResolvedSkill {
 }
 
 export function getAllSkills(phrenPath: string, profile: string): SkillEntry[] {
-  const all = getGlobalSkills(phrenPath);
+  const isEnabled = readSkillEnabledState(phrenPath);
+  const all = getGlobalSkills(phrenPath, isEnabled);
   for (const dir of getProjectDirs(phrenPath, profile)) {
     const source = path.basename(dir);
     if (source === "global") continue;
-    all.push(...getProjectLocalSkills(phrenPath, source));
+    all.push(...getProjectLocalSkills(phrenPath, source, isEnabled));
   }
   return all;
 }
 
 function getLocalSkills(phrenPath: string, scope: string): SkillEntry[] {
-  if (scope.toLowerCase() === "global") return getGlobalSkills(phrenPath);
-  return getProjectLocalSkills(phrenPath, scope);
+  const isEnabled = readSkillEnabledState(phrenPath);
+  if (scope.toLowerCase() === "global") return getGlobalSkills(phrenPath, isEnabled);
+  return getProjectLocalSkills(phrenPath, scope, isEnabled);
 }
 
 export function buildSkillManifest(phrenPath: string, profile: string, scope: string, mirrorDir?: string): SkillManifest {
+  const isEnabled = readSkillEnabledState(phrenPath);
   const manifest = scope.toLowerCase() === "global"
-    ? buildResolvedSkills(getGlobalSkills(phrenPath), mirrorDir)
-    : buildResolvedSkills([...getGlobalSkills(phrenPath), ...getProjectLocalSkills(phrenPath, scope)], mirrorDir);
+    ? buildResolvedSkills(getGlobalSkills(phrenPath, isEnabled), mirrorDir)
+    : buildResolvedSkills([...getGlobalSkills(phrenPath, isEnabled), ...getProjectLocalSkills(phrenPath, scope, isEnabled)], mirrorDir);
   manifest.scope = scope;
   manifest.project = scope.toLowerCase() === "global" ? undefined : scope;
   manifest.generatedAt = new Date().toISOString();

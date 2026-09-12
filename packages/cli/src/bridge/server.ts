@@ -13,10 +13,11 @@ import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts
 import { AgentHooks } from "./agent-hooks.js";
 import { saveUpload } from "./uploads.js";
 import { WorkspaceContextUsage } from "./context.js";
+import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
-  approvals: true, questions: false, providers: ["codex", "claude", "copilot"] };
+  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot"] };
 
 async function body(request: IncomingMessage): Promise<Json> {
   let size = 0; const chunks: Buffer[] = [];
@@ -51,6 +52,7 @@ export async function serve(version: string): Promise<void> {
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
   const contextUsage = new WorkspaceContextUsage();
+  const accountUsage = new AccountUsageReader();
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
@@ -75,6 +77,7 @@ export async function serve(version: string): Promise<void> {
           case "/v1/muxes": result = { muxes: await servers() }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
+          case "/v1/usage": result = await accountUsage.read(); break;
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);

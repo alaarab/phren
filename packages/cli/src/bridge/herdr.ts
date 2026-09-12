@@ -110,7 +110,11 @@ export async function paneIdentity(server: string, pane: Json): Promise<string |
   });
   if (new Set(candidates).size === 1) return candidates[0];
   // A lifecycle callback is bound to the process and terminal, never just cwd.
-  return candidates.length === 0 ? recordedSession(server, pane, pids) : undefined;
+  // Codex can hold its parent and subagent transcripts in the same process.
+  // Use the verified binding to disambiguate only if its log is still open;
+  // a stale binding must not override evidence of other conversations.
+  const recorded = await recordedSession(server, pane, pids);
+  return candidates.length === 0 || (recorded && candidates.includes(recorded)) ? recorded : undefined;
 }
 
 export async function panes(server: string, workspace: string, tab: string): Promise<Json> {

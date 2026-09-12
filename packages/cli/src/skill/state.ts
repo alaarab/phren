@@ -5,6 +5,7 @@ import { atomicWriteText, debugLog } from "../phren-paths.js";
 import { withFileLock } from "../governance/locks.js";
 
 export type SkillScope = string;
+export type SkillEnabledResolver = (scope: SkillScope, name: string) => boolean;
 export const SKILL_PREFERENCES_PATH = ".config/skill-preferences.json";
 
 interface SkillPreferences {
@@ -32,18 +33,26 @@ export function readSkillPreferences(phrenPath: string): SkillPreferences {
   return prefs as SkillPreferences;
 }
 
-export function isSkillEnabled(phrenPath: string, scope: SkillScope, name: string): boolean {
-  const key = skillStateKey(scope, name);
+/** Read one snapshot per discovery pass; the next pass observes fresh settings. */
+export function readSkillEnabledState(phrenPath: string): SkillEnabledResolver {
+  let shared: Record<string, boolean>;
   try {
-    const shared = readSkillPreferences(phrenPath).enabledSkills;
-    if (Object.hasOwn(shared, key)) return shared[key];
+    shared = readSkillPreferences(phrenPath).enabledSkills;
   } catch (error) {
     // A broken settings file must not accidentally re-enable disabled skills.
     debugLog(`skill preferences: ${String(error)}`);
-    return false;
+    return () => false;
   }
   // Older machine-local choices remain effective until a synced choice exists.
-  return readInstallPreferences(phrenPath).disabledSkills?.[key] !== true;
+  const disabled = readInstallPreferences(phrenPath).disabledSkills;
+  return (scope, name) => {
+    const key = skillStateKey(scope, name);
+    return Object.hasOwn(shared, key) ? shared[key] : disabled?.[key] !== true;
+  };
+}
+
+export function isSkillEnabled(phrenPath: string, scope: SkillScope, name: string): boolean {
+  return readSkillEnabledState(phrenPath)(scope, name);
 }
 
 export function setSkillEnabled(phrenPath: string, scope: SkillScope, name: string, enabled: boolean): void {
