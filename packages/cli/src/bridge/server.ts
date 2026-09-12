@@ -8,7 +8,7 @@ import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
 import { panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
 import { BridgeError, bridgeRoot, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
-import { repositoryDiff, webServers } from "./projects.js";
+import { repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { saveUpload } from "./uploads.js";
@@ -169,8 +169,10 @@ export async function serve(version: string): Promise<void> {
               session: target.session });
           } else {
             const pendingApproval = agentHooks.approval(target);
+            const cwd = await trustedDirectory(pane).catch(() => undefined);
+            const branch = cwd ? await repositoryBranch(cwd) : undefined;
             send(client, { agentStatus: { source: target.source, session: target.session,
-              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, capabilities } });
+              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, capabilities, branch } });
           }
           first = false;
         }
