@@ -41,6 +41,33 @@ and link colors with swatches or hex values. Preview before saving; edit,
 duplicate, or delete saved themes. Choices persist across launches and apply
 throughout the app and terminal while preserving navigation and chat drafts.
 
+**Settings → Terminal toolbar** lets you add, remove, and reorder up to eight
+terminal controls. Choose keys such as Enter, Escape, Tab, Control, and arrows,
+or actions such as Paste, Attach image, Workspaces, and Web servers. Keyboard
+stays available. The layout is saved on this iPhone and can be restored to defaults.
+
+**Settings → Shortcut panels** customizes the entire Ctrl long-press panel.
+Enable, disable, and reorder Favorites, agent panels, Uploads, Herdr, Keys,
+Ctrl, and Tmux. Open any panel to reorder its shortcuts, disable or re-enable
+them, delete inactive entries, and add or edit shortcuts. The builder supports
+Ctrl/Opt/Shift, named keys, custom text, advanced multi-step bindings, optional
+button labels, descriptions, and icons. Hold any live shortcut to edit it or
+add it to Favorites; the panel's settings button also opens customization.
+Existing Favorites migrate automatically. Commands insert text by default;
+**Send Enter after shortcut** explicitly opts into submission. For example,
+`Ctrl` + custom text `b1` sends a tmux prefix then `1`, and advanced
+`C-b, S-t` sends a prefix then capital `T`, with a short delay between steps.
+Modified special keys use distinct terminal sequences; the remote application
+must support the chosen combination. Changes stay on this iPhone.
+
+**Agents → Account usage** (the chart icon), also available in Settings, shows
+Claude and Codex account limits, percentages used, and reset dates/countdowns
+for each connected computer. Codex refreshes up to once a minute. Claude reports
+usage after a response through its status-line integration, installed by
+`phren bridge install`. Last-reported times distinguish older observations from
+current readings. These are account allowances shared across computers signed
+into the same account, separate from the chat's per-response token details.
+
 Herdr uses a single compact header for back, computer/status, and reconnect.
 The terminal starts directly below it; the keyboard stays hidden until requested.
 Swipe down on its shortcut row to dismiss the keyboard.

@@ -16,15 +16,56 @@ struct TerminalControls: View {
     @State private var directions = false
     @State private var workspaces = false
     @State private var servers = false
+    @AppStorage(TerminalToolbarPreferences.storageKey) private var toolbarData = Data()
+    private var toolbarItems: [TerminalToolbarItem] { ((try? TerminalToolbarPreferences.read(toolbarData)) ?? .defaults).items }
 
     var body: some View {
         HStack(spacing: 2) {
+            ForEach(toolbarItems) { item in
+                controlView(item).accessibilityIdentifier("terminal-control:\(item.rawValue)")
+            }
+        }
+        .font(.system(size: 15, weight: .medium, design: .monospaced))
+        .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(PhrenTheme.chatPanel, in: Capsule())
+        .overlay { Capsule().strokeBorder(PhrenTheme.borderStrong, lineWidth: 0.5) }
+        .contentShape(Capsule())
+        .dismissKeyboardOnDownwardDrag { _ = terminal.resignFirstResponder() }
+        .padding(.horizontal, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("terminal-toolbar")
+        .disabled(!enabled)
+        .onChange(of: toolbarItems) { _, items in
+            if !items.contains(.control) { terminal.controlModifier = false; control = false }
+        }
+        .popover(isPresented: $shortcuts) {
+            TerminalShortcutMenu(source: source, enabled: enabled, send: send, close: { shortcuts = false },
+                                 openWorkspaces: { shortcuts = false; workspaces = true },
+                                 openServers: { shortcuts = false; servers = true },
+                                 upload: { source in shortcuts = false; attachmentSource = source })
+                .presentationBackground(PhrenTheme.chatPanel)
+                .presentationCompactAdaptation(.popover)
+        }
+        .sheet(item: $attachmentSource, onDismiss: {
+            if !pendingAttachments.isEmpty { let items = pendingAttachments; pendingAttachments = []; attach(items) }
+        }) { source in
+            ChatAttachmentPicker(initialSource: source, canAdd: pendingAttachments.count < 4, add: {
+                if pendingAttachments.count < 4 { pendingAttachments.append($0) }
+            }, context: nil)
+        }
+        .navigationDestination(isPresented: $workspaces) { HerdrWorkspacesView(hostID: hostID) }
+        .navigationDestination(isPresented: $servers) { WebServersView(hostID: hostID) }
+    }
+
+    @ViewBuilder private func controlView(_ item: TerminalToolbarItem) -> some View {
+        switch item {
+        case .control:
             TerminalControlKey(selected: control, tap: {
                 terminal.controlModifier.toggle(); control = terminal.controlModifier
             }, hold: { shortcuts = true })
                 .frame(maxWidth: .infinity).frame(height: 44)
-            key("Esc", "\u{1B}")
-            key("Tab", "\t")
+        case .arrows:
             icon("dpad", "Arrow keys") { directions.toggle() }
                 .popover(isPresented: $directions) {
                     VStack(spacing: 5) {
@@ -43,38 +84,18 @@ struct TerminalControls: View {
                         .presentationBackground(PhrenTheme.chatPanel)
                         .presentationCompactAdaptation(.popover)
                 }
-            icon("command", "Terminal shortcuts") { shortcuts.toggle() }
-            icon("document.on.clipboard", "Paste into terminal") { terminal.paste(nil) }
-            icon("keyboard", "Toggle terminal keyboard") { terminal.toggleKeyboard() }
+        case .shortcuts: icon(item.symbol, item.title) { shortcuts.toggle() }
+        case .paste: icon(item.symbol, item.title) { terminal.paste(nil) }
+        case .keyboard: icon(item.symbol, item.title) { terminal.toggleKeyboard() }
+        case .attachments: icon(item.symbol, item.title) { attachmentSource = .photos }
+        case .workspaces: icon(item.symbol, item.title) { workspaces = true }
+        case .webServers: icon(item.symbol, item.title) { servers = true }
+        default:
+            if let sequence = item.sequence {
+                if let label = item.keyLabel { key(label, sequence).accessibilityLabel(item.title) }
+                else { icon(item.symbol, item.title) { send(sequence) } }
+            }
         }
-        .font(.system(size: 15, weight: .medium, design: .monospaced))
-        .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
-        .padding(.horizontal, 5).padding(.vertical, 2)
-        .background(PhrenTheme.chatPanel, in: Capsule())
-        .overlay { Capsule().strokeBorder(PhrenTheme.borderStrong, lineWidth: 0.5) }
-        .contentShape(Capsule())
-        .dismissKeyboardOnDownwardDrag { _ = terminal.resignFirstResponder() }
-        .padding(.horizontal, 6)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("terminal-toolbar")
-        .disabled(!enabled)
-        .popover(isPresented: $shortcuts) {
-            TerminalShortcutMenu(source: source, enabled: enabled, send: send, close: { shortcuts = false },
-                                 openWorkspaces: { shortcuts = false; workspaces = true },
-                                 openServers: { shortcuts = false; servers = true },
-                                 upload: { source in shortcuts = false; attachmentSource = source })
-                .presentationBackground(PhrenTheme.chatPanel)
-                .presentationCompactAdaptation(.popover)
-        }
-        .sheet(item: $attachmentSource, onDismiss: {
-            if !pendingAttachments.isEmpty { let items = pendingAttachments; pendingAttachments = []; attach(items) }
-        }) { source in
-            ChatAttachmentPicker(initialSource: source, canAdd: pendingAttachments.count < 4, add: {
-                if pendingAttachments.count < 4 { pendingAttachments.append($0) }
-            }, context: nil)
-        }
-        .navigationDestination(isPresented: $workspaces) { HerdrWorkspacesView(hostID: hostID) }
-        .navigationDestination(isPresented: $servers) { WebServersView(hostID: hostID) }
     }
 
     private func key(_ title: String, _ sequence: String) -> some View {
@@ -146,162 +167,181 @@ private struct TerminalShortcutMenu: View {
     let openWorkspaces: () -> Void
     let openServers: () -> Void
     let upload: (ChatAttachmentSource) -> Void
+    var storage = TerminalShortcutStorage()
     @State private var tab = ""
     @State private var settings = false
-    @ScaledMetric(relativeTo: .caption) private var tileWidth = 75.0
-    @AppStorage("terminal.favorites.v1") private var favorites = "codex:/model,claude:/compact,copilot:/help"
-    private let tabs = ["Favorites", "Uploads", "Codex", "Claude", "Copilot", "Herdr", "Keys"]
-    private var selected: String { tab.isEmpty ? (tabs.first { $0.lowercased() == source } ?? "Keys") : tab }
+    @State private var customize = false
+    @State private var editing: TerminalShortcut?
+    @State private var editingPanel: TerminalShortcutPanelID = .favorites
+    @State private var error: String?
+    @State private var sequenceTask: Task<Void, Never>?
+    @ScaledMetric(relativeTo: .caption) private var tileWidth = 100.0
+    private var preferences: TerminalShortcutPreferences { storage.preferences }
+    private var selected: TerminalShortcutPanel { preferences.selectedPanel(preferred: tab, source: source) }
 
     var body: some View {
         VStack(spacing: 10) {
             header
             if settings {
                 TerminalGestureSettings()
+                Button { customize = true } label: { Label("Customize shortcut panels", systemImage: "rectangle.grid.2x2") }
+                    .frame(minHeight: 44).accessibilityIdentifier("terminal-customize-shortcuts")
             } else {
-                ScrollView { shortcutContent }.frame(maxHeight: 220)
-                if !["Keys", "Herdr", "Uploads"].contains(selected) {
-                    Text("Insert a command, then use Enter when ready.").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                ScrollView {
+                    if selected.active.isEmpty {
+                        Text("Add a shortcut here, or hold a shortcut in another panel to add it to Favorites.")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding()
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth))], spacing: 8) {
+                        ForEach(selected.active) { shortcut in shortcutTile(shortcut) }
+                    }
+                }.frame(maxHeight: 220)
+                HStack {
+                    Text("Hold a shortcut to edit it.").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    Spacer()
+                    Button {
+                        editingPanel = selected.id; editing = TerminalShortcut()
+                    } label: { Label("Add", systemImage: "plus").font(.caption).frame(minHeight: 36) }
+                        .disabled(storage.saved == nil || selected.shortcuts.count >= 64)
+                        .accessibilityIdentifier("terminal-add-shortcut")
                 }
             }
+            if let error { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning) }
         }.padding(10).frame(idealWidth: 370, maxWidth: 400)
             .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
             .accessibilityElement(children: .contain).accessibilityIdentifier("terminal-shortcut-menu")
+            .sheet(isPresented: $customize) {
+                NavigationStack {
+                    TerminalShortcutSettingsView().toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { customize = false } }
+                    }
+                }
+            }
+            .sheet(item: $editing) { shortcut in
+                NavigationStack {
+                    TerminalShortcutEditor(shortcut: shortcut, isNew: !preferences.panels.flatMap(\.shortcuts).contains { $0.id == shortcut.id }) { updated in
+                        var value = preferences
+                        guard let index = value.panels.firstIndex(where: { $0.id == editingPanel }) else { return }
+                        if let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == updated.id }) {
+                            value.panels[index].shortcuts[row] = updated
+                        } else { value.panels[index].shortcuts.append(updated) }
+                        try storage.save(value)
+                    }
+                }
+            }
+            .onDisappear { sequenceTask?.cancel() }
+            .onChange(of: enabled) { _, enabled in if !enabled { sequenceTask?.cancel() } }
     }
 
     private var header: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 4) {
-                    ForEach(tabs, id: \.self) { name in tabButton(name) }
+                    ForEach(preferences.visiblePanels) { panel in tabButton(panel.id) }
                 }
             }.scrollIndicators(.hidden)
             Button { settings.toggle() } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44) }
                 .accessibilityLabel("Terminal gestures")
+                .accessibilityHint("Gesture options and shortcut customization")
             Button(action: close) { Image(systemName: "xmark").frame(width: 44, height: 44) }
                 .accessibilityLabel("Close shortcuts")
         }
     }
 
-    private func tabButton(_ name: String) -> some View {
-        Button { tab = name; settings = false } label: {
+    private func tabButton(_ id: TerminalShortcutPanelID) -> some View {
+        Button { tab = id.rawValue; settings = false } label: {
             Group {
-                if name == "Favorites" { Image(systemName: "star") }
-                else if name == "Uploads" { Image(systemName: "square.and.arrow.up") }
-                else { Text(name) }
+                if id == .favorites || id == .uploads { Image(systemName: id.symbol) }
+                else { Text(id.title) }
             }
                 .font(.caption.weight(.semibold)).padding(.horizontal, 11).frame(height: 44)
-                .foregroundStyle(selected == name ? PhrenTheme.lavender : PhrenTheme.text)
-                .background(selected == name ? PhrenTheme.lavender.opacity(0.14) : .clear, in: Capsule())
-        }.accessibilityLabel(name + " shortcuts")
-            .accessibilityAddTraits(selected == name ? .isSelected : [])
+                .foregroundStyle(selected.id == id ? PhrenTheme.lavender : PhrenTheme.text)
+                .background(selected.id == id ? PhrenTheme.lavender.opacity(0.14) : .clear, in: Capsule())
+        }.accessibilityLabel(id.title + " shortcuts")
+            .accessibilityAddTraits(selected.id == id ? .isSelected : [])
     }
 
-    @ViewBuilder private var shortcutContent: some View {
-        if selected == "Uploads" {
-            HStack(spacing: 8) {
-                uploadButton("Photos", "photo.on.rectangle", .photos)
-                if UIImagePickerController.isSourceTypeAvailable(.camera) { uploadButton("Camera", "camera", .camera) }
-                uploadButton("Files", "doc", .files)
-            }
-            Text("Attach to the agent in Phren chat.").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
-        } else if selected == "Herdr" {
-            VStack(spacing: 8) {
-                Button(action: openWorkspaces) {
-                    shortcutLabel("Workspaces & panes", "Switch tabs, focus panes, and manage workspaces", "rectangle.split.3x1")
-                }
-                Button(action: openServers) {
-                    shortcutLabel("Web servers", "Open a running app in the browser", "globe")
-                }
-            }
-        } else if selected == "Keys" {
-            editingKeys
-        } else {
-            commandGrid
-        }
-    }
-
-    private func uploadButton(_ title: String, _ symbol: String, _ source: ChatAttachmentSource) -> some View {
-        Button { upload(source) } label: {
-            VStack(spacing: 7) {
-                Image(systemName: symbol).font(.title3)
-                Text(title).font(.caption)
-            }
-            .frame(maxWidth: .infinity, minHeight: 70)
-            .background(PhrenTheme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
-        }.accessibilityLabel("Attach from " + title)
-    }
-
-    private var editingKeys: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-            keyTile("Clear line", "End · Ctrl U", "\u{05}\u{15}")
-            keyTile("Backspace", "Delete character", "\u{7F}")
-            keyTile("Enter", "Submit", "\r")
-            keyTile("⇧ Tab", "Previous field", "\u{1B}[Z")
-            keyTile("Home", "Start of line", "\u{01}")
-            keyTile("End", "End of line", "\u{05}")
-        }
-    }
-
-    private var commands: [(provider: String, command: AgentSlashCommand.Command)] {
-        let providers = selected == "Favorites" ? ["codex", "claude", "copilot"] : [selected.lowercased()]
-        let saved = Set(favorites.split(separator: ",").map(String.init))
-        return providers.flatMap { provider in
-            AgentSlashCommand.menu(source: provider).compactMap { command in
-                guard selected != "Favorites" || saved.contains(provider + ":" + command.name) else { return nil }
-                return (provider: provider, command: command)
-            }
-        }
-    }
-
-    @ViewBuilder private var commandGrid: some View {
-        let entries = commands
-        if entries.isEmpty { Text("Hold a command to add it to Favorites.").font(.caption).padding() }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth))], spacing: 8) {
-            ForEach(Array(entries.enumerated()), id: \.offset) { entry in
-                commandTile(provider: entry.element.provider, command: entry.element.command)
-            }
-        }
-    }
-
-    private func commandTile(provider: String, command: AgentSlashCommand.Command) -> some View {
-        Button { send(command.name + " ") } label: {
+    private func shortcutTile(_ shortcut: TerminalShortcut) -> some View {
+        Button { run(shortcut) } label: {
             VStack(alignment: .leading, spacing: 5) {
-                Text(command.name).font(.system(.caption, design: .monospaced)).lineLimit(1)
-                Text(selected == "Favorites" ? provider.capitalized : hint(command.name))
-                    .font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                HStack(spacing: 5) {
+                    if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).foregroundStyle(PhrenTheme.cyan) }
+                    Text(shortcut.displayLabel).font(.system(.caption, design: .monospaced)).lineLimit(2)
+                }
+                if !shortcut.hint.isEmpty {
+                    Text(shortcut.hint).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
+                }
             }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(8)
                 .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
-        }.accessibilityIdentifier("terminal-command:\(provider):\(command.name)")
-            .accessibilityLabel(command.name + ", " + command.detail + ", " + provider.capitalized)
-            .disabled(!enabled)
+        }.accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
+            .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
+                                ? "Attach from " + shortcut.displayLabel
+                                : shortcut.displayLabel + (shortcut.hint.isEmpty ? "" : ", " + shortcut.hint))
+            .disabled(!enabled || sequenceTask != nil || (shortcut.kind == .action && shortcut.value == "camera" && !UIImagePickerController.isSourceTypeAvailable(.camera)))
             .contextMenu {
-                let id = provider + ":" + command.name
-                let saved = favorites.split(separator: ",").map(String.init)
-                Button(saved.contains(id) ? "Remove from Favorites" : "Add to Favorites", systemImage: "star") {
-                    favorites = (saved.contains(id) ? saved.filter { $0 != id } : saved + [id]).joined(separator: ",")
+                Button("Edit Shortcut", systemImage: "pencil") { editingPanel = selected.id; editing = shortcut }
+                if selected.id == .favorites {
+                    Button("Remove from Favorites", systemImage: "star.slash") {
+                        change { value in
+                            if let index = value.panels.firstIndex(where: { $0.id == .favorites }) {
+                                value.panels[index].shortcuts.removeAll { $0.id == shortcut.id }
+                            }
+                        }
+                    }
+                } else {
+                    Button("Add to Favorites", systemImage: "star") {
+                        change { value in
+                            guard let index = value.panels.firstIndex(where: { $0.id == .favorites }) else { return }
+                            var copy = shortcut; copy.id = "favorite:" + shortcut.id; copy.enabled = true
+                            if let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == copy.id }) {
+                                value.panels[index].shortcuts[row] = copy
+                            } else { value.panels[index].shortcuts.append(copy) }
+                        }
+                    }
+                }
+                Button("Disable Shortcut", systemImage: "minus.circle") {
+                    change { value in
+                        guard let index = value.panels.firstIndex(where: { $0.id == selected.id }),
+                              let row = value.panels[index].shortcuts.firstIndex(where: { $0.id == shortcut.id }) else { return }
+                        value.panels[index].shortcuts[row].enabled = false
+                    }
+                }
+            }.disabled(storage.saved == nil)
+    }
+
+    private func run(_ shortcut: TerminalShortcut) {
+        guard enabled, sequenceTask == nil else { return }
+        do {
+            try shortcut.validate()
+            if shortcut.kind == .action {
+                switch shortcut.value {
+                case "photos": upload(.photos)
+                case "camera": upload(.camera)
+                case "files": upload(.files)
+                case "workspaces": openWorkspaces()
+                case "webServers": openServers()
+                default: break
+                }
+                return
+            }
+            let steps = try shortcut.steps()
+            error = nil
+            sequenceTask = Task { @MainActor in
+                defer { sequenceTask = nil }
+                for (index, step) in steps.enumerated() {
+                    guard !Task.isCancelled, enabled else { return }
+                    if index > 0 {
+                        do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+                    }
+                    guard !Task.isCancelled else { return }
+                    send(step)
                 }
             }
+        } catch { self.error = error.localizedDescription }
     }
-    private func shortcutLabel(_ title: String, _ detail: String, _ icon: String) -> some View {
-        HStack {
-            Image(systemName: icon).foregroundStyle(PhrenTheme.cyan)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(detail).font(.caption).foregroundStyle(PhrenTheme.textMuted)
-            }
-            Spacer(); Image(systemName: "chevron.right").font(.caption)
-        }.padding(12).background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
-    }
-    private func keyTile(_ title: String, _ detail: String, _ sequence: String) -> some View {
-        Button { send(sequence) } label: { shortcutLabel(title, detail, "keyboard") }
-            .disabled(!enabled)
-    }
-    private func hint(_ command: String) -> String {
-        ["/model": "switch", "/permissions": "access", "/diff": "changes", "/review": "inspect",
-         "/status": "session", "/skills": "browse", "/compact": "context", "/resume": "continue",
-         "/new": "fresh", "/clear": "fresh", "/mcp": "tools", "/help": "commands",
-         "/agent": "switch", "/context": "inspect", "/usage": "stats"][command] ?? "open"
+    private func change(_ edit: (inout TerminalShortcutPreferences) -> Void) {
+        var value = preferences; edit(&value)
+        do { try storage.save(value); error = nil } catch { self.error = error.localizedDescription }
     }
 }
 

@@ -96,6 +96,8 @@ struct LiveSessionsView: View {
         .textInputAutocapitalization(.never).autocorrectionDisabled()
         .phrenScreen()
         .toolbar {
+            NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
+                .accessibilityIdentifier("all-account-usage")
             NavigationLink { WebServersView() } label: { Label("Web servers", systemImage: "globe") }
                 .accessibilityIdentifier("all-web-servers")
             Button("Refresh all sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }

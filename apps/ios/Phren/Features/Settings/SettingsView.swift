@@ -40,6 +40,10 @@ struct SettingsView: View {
                             Text(PhrenAppearance.shared.name).foregroundStyle(PhrenTheme.textMuted)
                         }
                     }.accessibilityIdentifier("settings-theme")
+                    NavigationLink { TerminalToolbarSettingsView() } label: { Label("Terminal toolbar", systemImage: "keyboard") }
+                        .accessibilityIdentifier("settings-terminal-toolbar")
+                    NavigationLink { TerminalShortcutSettingsView() } label: { Label("Shortcut panels", systemImage: "rectangle.grid.2x2") }
+                        .accessibilityIdentifier("settings-terminal-shortcuts")
                 }
                 if model.phase == .ready {
                 Section {
@@ -82,6 +86,8 @@ struct SettingsView: View {
 
                 Section("Agent connections") {
                     NavigationLink("Computers & Phren Hook") { LiveSessionsView() }
+                    NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
+                        .accessibilityIdentifier("settings-account-usage")
                     Text("Chat, terminals, and project memory stay together in Phren. Connect the agents already running on your computers.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

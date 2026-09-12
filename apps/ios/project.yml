@@ -118,6 +118,10 @@ targets:
           NSExceptionDomains:
             "127.0.0.1":
               NSExceptionAllowsInsecureHTTPLoads: true
+            # This exact browser origin is carried over the authenticated SSH
+            # preview proxy. NSAllowsLocalNetworking does not cover .localhost.
+            "phren-preview.localhost":
+              NSExceptionAllowsInsecureHTTPLoads: true
         # Siri hears "phren" as "friend" or "fren" more often than not —
         # dictation has no entry for the word. These are the app names Siri
         # will also accept for "…to phren" phrases; the pronunciation hint

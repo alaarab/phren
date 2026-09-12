@@ -2,6 +2,20 @@ import Foundation
 import PhrenKit
 
 extension PhrenConnection {
+    public static func accountUsage(host: LiveHost, privateKey: Data) async throws -> AccountUsageSnapshot {
+        do {
+            let bytes = try await fetchData(host: host, key: .init(rawRepresentation: privateKey),
+                                           request: .init(path: "/v1/usage", maximumResponseBytes: 65_536))
+            return try AccountUsageSnapshot.read(bytes)
+        } catch let error as LiveConnectionError {
+            switch error {
+            case .response(404), .gatewayRejection(status: 404, reason: _):
+                throw PhrenKitError.validation("Update Phren Hook on this computer and run phren bridge install to enable account usage.")
+            default: throw error
+            }
+        }
+    }
+
     public static func interactionUpdates(host: LiveHost, privateKey: Data, target: AgentChatTarget) -> AsyncThrowingStream<AgentInteractionStatus, Error> {
         AsyncThrowingStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
             let task = Task {

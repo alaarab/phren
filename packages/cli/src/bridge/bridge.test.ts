@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer as createNetServer, type Server } from "node:net";
 import { request } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -78,6 +78,7 @@ describe("Phren Hook boundaries", () => {
 describe.skipIf(process.platform === "win32")("standalone Phren service", () => {
   let root: string, hook: ChildProcess, herdr: Server, log: string, record: string, commands: { method: string; params: Record<string, unknown> }[];
   let current = session;
+  let reportIdentity = true;
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
@@ -98,7 +99,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root.length > 55) {
       const short = await mkdtemp("/tmp/phren-hook-"); await rm(root, { recursive: true }); root = short;
     }
-    commands = []; current = session; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
+    commands = []; current = session; reportIdentity = true; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
@@ -118,7 +119,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           deliveries.push({ method: req.method, session: current });
         }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: "term-one", agent: "codex", agent_status: "working",
-          agent_session: { kind: "id", agent: "codex", value: current }, cwd: root };
+          agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
         const snapshot = { panes: [pane], workspaces: [{ workspace_id: "w1", label: "Project" }], tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
           : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: process.pid }] } } : { ok: true } }) + "\n");
@@ -159,6 +160,49 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await overview()).contextUsedPercent).toBe(45);
     current = "bbbbbbbb-1111-4111-8111-111111111111";
     expect((await overview()).contextUsedPercent).toBeUndefined();
+  });
+  it("uses the bound parent conversation when Codex also holds subagent logs open", async () => {
+    reportIdentity = false;
+    const child = "bbbbbbbb-1111-4111-8111-111111111111";
+    const childRecord = record.replace(session, child);
+    await writeFile(childRecord, JSON.stringify({ type: "session_meta", payload: {
+      id: child, source: { subagent: { thread_spawn: { parent_thread_id: session } } },
+    } }) + "\n");
+    // Real descriptors reproduce the foreground-process discovery path on
+    // both macOS (lsof) and Linux (/proc), without an explicit Herdr identity.
+    const handles = [];
+    try {
+      handles.push(await open(record, "r"));
+      handles.push(await open(childRecord, "r"));
+      const discover = async () => (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0].sessionId;
+      expect(await discover()).toBeUndefined();
+      const binding = { terminal: "term-one", source: "codex", session, pids: [process.pid] };
+      const folder = path.join(root, "bridge/bindings/default");
+      await mkdir(folder, { recursive: true });
+      const bind = (value: typeof binding) => writeFile(path.join(folder, "w1%3Ap1.json"), JSON.stringify(value));
+      for (const wrong of [
+        { ...binding, terminal: "replaced-terminal" },
+        { ...binding, source: "claude" },
+        { ...binding, pids: [] },
+        { ...binding, session: "cccccccc-1111-4111-8111-111111111111" },
+      ]) {
+        await bind(wrong);
+        expect(await discover()).toBeUndefined();
+      }
+      await bind(binding);
+      expect(await discover()).toBe(session);
+      const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "2" }));
+      expect(page.status).toBe(200);
+      expect(JSON.stringify(page.data)).toContain("First message");
+      expect((await api("/v1/prompt", { target, text: "parent only" })).status).toBe(200);
+      expect((await api("/v1/prompt", { target: { ...target, session: child }, text: "must not send" })).status).toBe(409);
+      expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
+      // Once the parent's descriptor closes, its old binding must not override
+      // the sole conversation still held by the current process.
+      await handles[0].close();
+      expect(await discover()).toBe(child);
+      expect((await api("/v1/prompt", { target, text: "stale parent" })).status).toBe(409);
+    } finally { await Promise.all(handles.map(handle => handle.close())); }
   });
   it("validates the full destination at send time and never retries uncertain delivery", async () => {
     expect((await api("/v1/prompt", { target, text: "one message" })).status).toBe(200);

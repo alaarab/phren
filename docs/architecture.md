@@ -207,8 +207,9 @@ Task checkpoints include task ID/text, edited files, failing tests, and resume h
 Skill resolution is deterministic and policy-aware:
 
 - precedence: project scope overrides global scope for same skill name
-- alias collisions: colliding commands/aliases are marked unregistered
+- alias collisions: aliases are deduplicated against their own primary command; commands/aliases shared by different skills are marked unregistered (case-insensitive)
 - visibility gating: disabled skills stay on disk but are hidden from active agent mirrors
+- preferences: each discovery or linking pass reads shared and legacy settings once, preserving shared-setting precedence and refreshing on the next pass; malformed shared settings keep skills disabled
 - generated artifacts:
   - `.claude/skill-manifest.json`
   - `.claude/skill-commands.json`

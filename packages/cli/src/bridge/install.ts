@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { usageStatusLine } from "./usage.js";
 import { chmod, copyFile, mkdir, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -206,6 +207,10 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
       }
     }
     config.hooks = hooks;
+    if (source === "claude") {
+      const statusLine = usageStatusLine(config.statusLine, program, remove);
+      if (statusLine === undefined) delete config.statusLine; else config.statusLine = statusLine;
+    }
     const after = JSON.stringify(config, null, 2) + "\n";
     if (after === before) continue;
     edits.push({ file, before, after });

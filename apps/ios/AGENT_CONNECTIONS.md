@@ -77,6 +77,9 @@ Herdr's public newline JSON socket API provides snapshots and targeted controls.
 Conversation identity comes from a reported Herdr session ID, a transcript file
 descriptor held by the foreground process, or a Phren lifecycle callback bound to
 that terminal and process. Directory names are for project association only.
+When Codex holds parent and subagent logs in one process, the lifecycle binding
+selects its conversation only if that conversation is among the open logs.
+Unbound or conflicting identities remain unavailable for chat and attachments.
 
 ## Conversation protocol
 
@@ -91,6 +94,21 @@ that terminal and process. Directory names are for project association only.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
 - `POST /v1/workspaces/{create,rename,focus,close}` with an explicit server.
 - `GET /v1/web-servers`, `/v1/activity`
+- `GET /v1/usage`: account-limit percentages and reset times, grouped by provider.
+
+Account usage is separate from conversation token counts. Codex uses the installed
+CLI's read-only `account/rateLimits/read` app-server method; Phren initializes that
+connection without creating threads or turns, caches results for one minute, and
+never exports credentials. All reported limit buckets retain their window lengths.
+Claude uses the documented `rate_limits` status-line payload. Installation wraps
+and preserves any existing status-line command, options, input, and output. The
+observer stores only percentages, reset times, and the observation timestamp in a
+private file; data first appears after Claude replies with subscription limits.
+Old observations and passed reset times remain labeled as last reported instead
+of being presented as a fresh zero. An unavailable account stays unavailable.
+
+Provider contracts: [Codex app server](https://learn.chatgpt.com/docs/app-server)
+and [Claude status line](https://code.claude.com/docs/en/statusline).
 
 Transcript readers retain bounded pages, wait for complete JSONL rows, detect
 truncation/rotation, skip individual legacy rows over 64 MiB, exclude private reasoning and sidechain messages, and close
@@ -133,6 +151,19 @@ in output. These counts are neither account quota nor conversation totals.
 SSH terminal receive credit follows rendered bytes. Terminal output has a
 bounded buffer and supports cancellation without closing remote shells. The
 app's existing terminal gestures, keyboard dock, and reconnect policy apply.
+
+Terminal toolbar and Ctrl-panel customization use separate versioned preference
+documents. Panel preferences preserve inactive panels and shortcuts, migrate the
+legacy Favorites list, validate all bindings before sending, and retain unreadable
+data until the user explicitly restores defaults. Modifiers, named/function keys,
+literal text, and multi-step bindings compile to bounded terminal input. Only an
+explicit Enter key or auto-Enter setting submits. Multi-step shortcuts run in
+order with a short delay and cancel when the panel disappears or disconnects.
+Editing and previewing never send input. Named keys use xterm sequences, with
+CSI-u to distinguish modified special keys such as Shift+Enter.
+
+Interaction reference: [Moshi shortcut builder](https://getmoshi.app/docs/keyboard).
+Key encoding reference: [terminal keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/).
 
 ## Local agent callbacks
 
@@ -210,6 +241,9 @@ CSS, scripts, uploads, and WebSockets share the app origin. Deliberate links to
 unrelated pages open outside the privileged WebKit view. Apps that hardcode a
 different origin or depend on local TLS certificates may need their development
 server's public/base URL configured for the preview origin.
+The app includes an HTTP transport exception for exactly `phren-preview.localhost`;
+the existing local-network exception does not cover that dotted `.localhost` name.
+The preview proxy still requires authentication and carries remote traffic over SSH.
 
 ## Verification
 

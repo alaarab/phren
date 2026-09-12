@@ -7,7 +7,7 @@ import { errorMessage } from "../utils.js";
 import { buildSharedLifecycleCommands } from "../hooks.js";
 import { VERSION } from "../package-metadata.js";
 import { getToolCount, renderToolCatalogMarkdown } from "../tool-registry.js";
-import { isSkillEnabled } from "../skill/state.js";
+import { readSkillEnabledState } from "../skill/state.js";
 import { logger } from "../logger.js";
 
 // ── Skill frontmatter parsing and validation ────────────────────────────────
@@ -245,12 +245,13 @@ export function linkSkillsDir(
   fs.mkdirSync(destDir, { recursive: true });
   const expectedNames = new Set<string>();
   const collisions: SkillCollision[] = [];
+  const isEnabled = opts?.phrenPath && opts.scope ? readSkillEnabledState(opts.phrenPath) : undefined;
 
   for (const entry of fs.readdirSync(srcDir)) {
     const srcPath = path.join(srcDir, entry);
     const stat = fs.statSync(srcPath);
     const skillName = stat.isDirectory() ? entry : entry.replace(/\.md$/, "");
-    if (opts?.phrenPath && opts.scope && !isSkillEnabled(opts.phrenPath, opts.scope, skillName)) {
+    if (isEnabled && opts?.scope && !isEnabled(opts.scope, skillName)) {
       continue;
     }
 
