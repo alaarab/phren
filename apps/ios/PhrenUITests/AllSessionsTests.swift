@@ -85,8 +85,9 @@ final class AllSessionsTests: XCTestCase {
             XCTAssertFalse(indicator(app, kind: "running", host: host, tab: "w1:t2").exists)
             let pin = pin(app, host: host, tab: "w1:t2")
             XCTAssertEqual(pin.label, "Pin session")
-            XCTAssertGreaterThanOrEqual(pin.frame.height, 44)
-            XCTAssertGreaterThanOrEqual(pin.frame.width, 44)
+            // Frames land on subpixel offsets; 43.99 is a 44-point target.
+            XCTAssertGreaterThanOrEqual(pin.frame.height, 43.5)
+            XCTAssertGreaterThanOrEqual(pin.frame.width, 43.5)
         }
         capture(app, "Separate compact cards with reported and unavailable context")
     }

@@ -33,6 +33,15 @@ enum PhrenTheme {
     static let warning = Color(hex: 0xE0BC7F)
     static let danger = Color(hex: 0xEF9898)
 
+    /// The transcript reads in plain white and grey whatever the theme's
+    /// tinted text tokens are — Amethyst and Graphite cast their muted greys
+    /// lavender, which is right for chrome and wrong for a wall of prose and
+    /// shell commands. The theme's accent stays on Send and Stop.
+    static let chatText = Color.white
+    static let chatNeutral = Color(hex: 0xA9AEB6)
+    static let chatNeutralDim = Color(hex: 0x868B93)
+    static let chatUserBubble = Color.white.opacity(0.08)
+
     // Aliases kept for call-site readability
     static let green = success
     static let amber = warning

@@ -34,7 +34,9 @@ final class AgentsLayoutTests: XCTestCase {
         for _ in 0..<4 where intro.frame.minY < app.navigationBars.firstMatch.frame.maxY {
             app.collectionViews.firstMatch.swipeDown()
         }
-        XCTAssertGreaterThanOrEqual(intro.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        // Give the pop animation a moment to settle before reading the frame.
+        let settled = NSPredicate { _, _ in intro.frame.minY >= app.navigationBars.firstMatch.frame.maxY }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: settled, object: nil)], timeout: 5), .completed)
         assertRenderedTitle(app, title: "Live sessions")
         capture(app, name: "Agents after navigating back")
     }

@@ -4,8 +4,8 @@ import SwiftUI
 struct ChatRichText: View, Equatable {
     let text: String
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
-    @ScaledMetric(relativeTo: .body) private var textSize = 14.0
-    @ScaledMetric(relativeTo: .headline) private var headingSize = 15.0
+    @ScaledMetric(relativeTo: .body) private var textSize = 14.5
+    @ScaledMetric(relativeTo: .headline) private var headingSize = 15.5
     private struct Block: Identifiable {
         let id: Int
         let text: String
@@ -46,15 +46,17 @@ struct ChatRichText: View, Equatable {
                             Spacer()
                             Button("Copy code", systemImage: "doc.on.doc") { UIPasteboard.general.string = block.text }
                                 .font(.caption).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 32)
-                        }.foregroundStyle(PhrenTheme.textMuted)
+                        }.foregroundStyle(PhrenTheme.chatNeutral)
                         ScrollView(.horizontal) {
-                            Text(block.text).font(.system(size: textSize, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                            Text(block.text).font(.system(size: textSize, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                                .textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
                         }
                     }.padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
                 } else {
                     Text((try? AttributedString(markdown: block.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(block.text))
                         .font(.system(size: block.heading ? headingSize : textSize, weight: block.heading ? .semibold : .regular, design: .monospaced))
+                        .foregroundStyle(PhrenTheme.chatText)
                         .lineSpacing(3).textSelection(.enabled).tint(PhrenTheme.link)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

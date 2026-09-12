@@ -211,7 +211,7 @@ struct AgentChatView: View {
                 .overlay {
                     if model.loading && model.messages.isEmpty {
                         ProgressView()
-                            .tint(PhrenTheme.accent)
+                            .tint(PhrenTheme.chatNeutral)
                             .accessibilityLabel("Opening conversation")
                             .accessibilityIdentifier("chat-opening-spinner")
                     }
@@ -434,7 +434,7 @@ struct AgentChatView: View {
                 Text(selectedPane?.displayTitle ?? session.workspaceName)
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
                 Text(chatLocation)
-                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.textMuted)
+                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
                     .lineLimit(1)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -443,12 +443,12 @@ struct AgentChatView: View {
                     AgentDiffView(session: session, target: target)
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
-                        .foregroundStyle(PhrenTheme.cyan)
+                        .foregroundStyle(PhrenTheme.chatText)
                 }.accessibilityLabel("Repository changes").accessibilityIdentifier("chat-diff")
             }
             chatOptions
         }
-        .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+        .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 8).padding(.vertical, 8)
         .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(PhrenTheme.borderStrong, lineWidth: 1))
@@ -615,7 +615,7 @@ struct AgentChatView: View {
             .accessibilityIdentifier("chat-message-box")
             .disabled(model.restoringDraft)
         }
-        .buttonStyle(.plain).foregroundStyle(PhrenTheme.textSecondary)
+        .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
     }
@@ -673,12 +673,12 @@ private struct ChatMessageRow<Historical: View>: View {
                 let text = displayText
                 if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) { ChatRichText(text: text).equatable() }
                 if revealedText != nil {
-                    Capsule().fill(PhrenTheme.cyan).frame(width: 4, height: 13).accessibilityHidden(true)
+                    Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
                 }
             }
             .padding(message.role == .user ? 14 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(message.role == .user ? PhrenTheme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
@@ -701,8 +701,8 @@ private struct ChatDismissButton: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         Button { dismiss() } label: {
-            Image(systemName: "xmark").font(.system(size: 15, weight: .medium)).frame(width: 36, height: 44).contentShape(Rectangle())
-        }.accessibilityLabel("Done").accessibilityIdentifier("chat-close")
+            Image(systemName: "chevron.left").font(.system(size: 18, weight: .medium)).frame(width: 36, height: 44).contentShape(Rectangle())
+        }.accessibilityLabel("Back").accessibilityIdentifier("chat-close")
     }
 }
 

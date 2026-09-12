@@ -73,18 +73,18 @@ struct ChatToolActivity: View, Equatable {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: summary.icon).foregroundStyle(PhrenTheme.textDim).frame(width: 14)
-                    Text(summary.title).fontWeight(.semibold).foregroundStyle(PhrenTheme.textSecondary).lineLimit(1)
-                    if summary.count > 1 { Text("×\(summary.count)").foregroundStyle(PhrenTheme.textDim) }
-                    Text(summary.preview).foregroundStyle(PhrenTheme.textMuted).lineLimit(1).truncationMode(.middle)
+                    Image(systemName: summary.icon).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Text(summary.title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
+                    if summary.count > 1 { Text("×\(summary.count)").foregroundStyle(PhrenTheme.chatNeutralDim) }
+                    Text(summary.preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if messages.contains(where: \.isToolResult) {
-                        Image(systemName: "checkmark").font(.system(size: 10, weight: .medium)).foregroundStyle(PhrenTheme.textDim)
+                        Image(systemName: "checkmark").font(.system(size: 10, weight: .medium)).foregroundStyle(PhrenTheme.chatNeutralDim)
                     }
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                        .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.textDim)
+                        .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }
-                .font(.system(.caption2, design: .monospaced))
+                .font(.system(.caption, design: .monospaced))
                 .padding(.horizontal, 12).padding(.vertical, 4).frame(minHeight: 34)
                 .contentShape(Rectangle().inset(by: -5))
             }.buttonStyle(.plain)
@@ -99,7 +99,7 @@ struct ChatToolActivity: View, Equatable {
                         if !message.isToolResult, presentation.patch == nil, messages.contains(where: \.isToolResult) {
                             DisclosureGroup("Input details") {
                                 ToolDetailView(presentation: presentation, id: message.id)
-                            }.font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                            }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                         } else {
                             ToolDetailView(presentation: presentation, id: message.id)
                         }
@@ -129,16 +129,16 @@ private struct ToolDetailView: View {
                         .accessibilityIdentifier("chat-tool-output:\(id)")
                     Button("Copy tool details", systemImage: "doc.on.doc") { UIPasteboard.general.string = presentation.body }
                         .frame(width: 36, height: 32).contentShape(Rectangle())
-                }.font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .labelStyle(.iconOnly).buttonStyle(.plain).frame(minHeight: 32)
                 Text(presentation.body.isEmpty ? "No output" : ToolOutputPreview(presentation.body).text)
-                    .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.text)
+                    .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
                     .lineLimit(6).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("chat-tool-preview:\(id)")
             }
             if presentation.raw != presentation.body {
                 Button("Raw details") { fullOutput = .init(title: "Raw details", text: presentation.raw) }
-                    .font(.caption2).foregroundStyle(PhrenTheme.textDim).padding(.vertical, 4)
+                    .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.vertical, 4)
             }
         }
         .sheet(item: $fullOutput) { output in FullToolOutputView(output: output) }
@@ -164,7 +164,7 @@ private struct FullToolOutputView: View {
         NavigationStack {
             ScrollView([.horizontal, .vertical]) {
                 Text(current.displayText).font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(PhrenTheme.text).textSelection(.enabled)
+                    .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: true).padding(16)
             }
             .id(page)

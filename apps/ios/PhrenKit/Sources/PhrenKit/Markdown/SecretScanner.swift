@@ -25,16 +25,20 @@ public enum SecretScanner {
 
     private static let plainHex40 = JSRegex(#"^[0-9a-f]{40}$"#)
     private static let hex40Global = JSRegex(#"[0-9a-f]{40}"#)
-    private static let base64Blob = JSRegex(#"(?=[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]*)[A-Za-z0-9+/]{40,}={0,2}"#)
+    /// secrets.ts: the run must carry a `+` or `/` *and* a digit. 40 random
+    /// base64 characters lack a digit ~0.1% of the time; a slash-joined path
+    /// or identifier chain (`/Projects/AbletonExtensions/critic/mudpie`)
+    /// never has one, and that shape was being refused as a credential.
+    private static let base64Blob = JSRegex(#"(?=[A-Za-z0-9+/]*[+/])(?=[A-Za-z+/]*[0-9])[A-Za-z0-9+/]{40,}={0,2}"#)
 
     /// Returns the detected secret type, or nil when clean.
     public static func scan(_ text: String) -> String? {
-        // Ordered exactly as dedup.ts — the base64 check sits between JWT and
+        // Ordered as secrets.ts — the base64 check sits between JWT and
         // connection strings there.
         for (index, check) in checks.enumerated() {
             if index == 3 {
-                // dedup.ts: long base64 blob check, exempting 40-char lowercase
-                // hex digests (git commit SHAs).
+                // secrets.ts: long base64 blob check, exempting 40-char
+                // lowercase hex digests (git commit SHAs).
                 if !plainHex40.test(text), base64Blob.test(hex40Global.replaceAll(text, with: "")) {
                     return "long base64 secret"
                 }

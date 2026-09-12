@@ -88,6 +88,12 @@ tinted harder, hunk rules, next/previous change, inline or side-by-side
 layout, and copy. Patches an agent applies render in the chat with the same
 rows.
 
+The transcript reads in plain white and grey in every theme: prose and tool
+titles (Shell, Agent, Patch) in white, commands and icons in neutral grey,
+your own messages on a neutral bubble, and a green connection badge — the
+theme's accent stays on Send and Stop. The header's left control is a back
+chevron.
+
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new
 message brings Send back so you can steer the agent. **Switch agent**, beside

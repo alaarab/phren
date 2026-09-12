@@ -22,11 +22,11 @@ struct ChatActivityIndicator: View {
     }
     var body: some View {
         Group {
-            if busy { ProgressView().controlSize(.mini).tint(PhrenTheme.cyan) }
+            if busy { ProgressView().controlSize(.mini).tint(PhrenTheme.success) }
             else { Image(systemName: reconnecting ? "wifi.exclamationmark" : needsAnswer ? "pause.circle" : "circle.fill").font(.system(size: 9)) }
         }
         .frame(width: 12, height: 12)
-        .foregroundStyle(reconnecting || needsAnswer ? PhrenTheme.warning : connected ? PhrenTheme.cyan : PhrenTheme.textDim)
+        .foregroundStyle(reconnecting || needsAnswer ? PhrenTheme.warning : connected ? PhrenTheme.success : PhrenTheme.textDim)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label).accessibilityIdentifier("chat-activity")
     }

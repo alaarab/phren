@@ -26,15 +26,6 @@ struct LiveSessionsView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             PhrenList {
-                Section {
-                    let connected = overview.connectedCount(at: context.date)
-                    Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
-                         : "Sessions across your computers · \(connected)/\(hosts.count) connected")
-                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                        .accessibilityIdentifier("agents-introduction")
-                        .padding(.vertical, 2)
-                        .listRowBackground(Color.clear)
-                }
                 sessionSections(at: context.date)
                 Section {
                     if let preferences = try? LiveSessionPreferences.read(data) {
@@ -116,12 +107,25 @@ struct LiveSessionsView: View {
         }
     }
 
+    /// The one-line status above the sessions. It rides in the first
+    /// section's header rather than a section of its own, which used to put
+    /// a row's worth of space above and below a single caption.
+    private func caption(at date: Date) -> some View {
+        let connected = overview.connectedCount(at: date)
+        return Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
+                    : "Sessions across your computers · \(connected)/\(hosts.count) connected")
+            .font(.caption).foregroundStyle(PhrenTheme.textMuted).textCase(nil)
+            .accessibilityIdentifier("agents-introduction")
+    }
+
     @ViewBuilder
     private func sessionSections(at date: Date) -> some View {
         let groups = overview.groups(at: date, query: query, preferences: preferences, projects: model.sessionProjects)
-        if !hosts.isEmpty && groups.isEmpty {
+        if groups.isEmpty {
             Section {
-                if overview.computers.isEmpty || overview.computers.contains(where: { $0.monitor.snapshot == nil && $0.monitor.refreshing }) {
+                if hosts.isEmpty {
+                    // Nothing to report yet; the caption header says what to do.
+                } else if overview.computers.isEmpty || overview.computers.contains(where: { $0.monitor.snapshot == nil && $0.monitor.refreshing }) {
                     HStack { ProgressView(); Text("Finding sessions…") }.font(.subheadline)
                 } else {
                     Text(!query.isEmpty ? "No matching sessions"
@@ -129,9 +133,9 @@ struct LiveSessionsView: View {
                          ? "No computers connected" : "No sessions running on the connected computers")
                         .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                 }
-            }
+            } header: { caption(at: date) }
         }
-        ForEach(groups) { group in
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
                     LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { chatSession = session }) {
@@ -141,7 +145,12 @@ struct LiveSessionsView: View {
                     }
                     .separatedSessionRow()
                 }
-            } header: { Text("\(group.title) · \(group.sessions.count)") }
+            } header: {
+                VStack(alignment: .leading, spacing: 10) {
+                    if index == 0 { caption(at: date) }
+                    Text("\(group.title) · \(group.sessions.count)")
+                }
+            }
             footer: {
                 if group.id == "previous" { Text("These computers aren't connected. Reconnect before opening a session.") }
             }
