@@ -7,15 +7,40 @@ import { BridgeError, object, objects, type Json, type Provider } from "./protoc
 
 export interface Entry { line: number; raw: Json }
 
-/** Preserve image block indexes without putting base64 payloads on the chat socket. */
+/** Preserve content positions and image types; original bytes stay in the
+ * transcript for the separate image route. Only provider content blocks are
+ * interpreted, never text strings or arbitrary tool arguments. */
+function imageReferences(content: unknown, toolResults = false): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map(value => {
+    const block = object(value);
+    if (["image", "input_image"].includes(String(block.type))) return { type: block.type };
+    if (toolResults && block.type === "tool_result") return { ...block, content: toolOutputReferences(block.content) };
+    return value;
+  });
+}
+
+function toolOutputReferences(output: unknown): unknown {
+  if (Array.isArray(output)) return imageReferences(output);
+  const result = object(output);
+  return Array.isArray(result.content) ? { ...result, content: imageReferences(result.content) } : output;
+}
+
 function chatFrame(raw: Json, source: Provider): Json {
+  if (source === "copilot") {
+    const data = object(raw.data);
+    return { ...raw, data: { ...data,
+      ...(Array.isArray(data.content) ? { content: imageReferences(data.content) } : {}),
+      ...(data.result !== undefined ? { result: toolOutputReferences(data.result) } : {}),
+    } };
+  }
   const key = source === "codex" ? "payload" : "message";
   const message = object(raw[key]);
-  if (!Array.isArray(message.content)) return raw;
-  return { ...raw, [key]: { ...message, content: message.content.map(value => {
-    const block = object(value);
-    return ["image", "input_image"].includes(String(block.type)) ? { type: block.type } : block;
-  }) } };
+  if (source === "codex" && ["function_call_output", "custom_tool_call_output"].includes(String(message.type))) {
+    return { ...raw, [key]: { ...message, output: toolOutputReferences(message.output) } };
+  }
+  return Array.isArray(message.content)
+    ? { ...raw, [key]: { ...message, content: imageReferences(message.content, source === "claude") } } : raw;
 }
 export async function transcriptPath(source: Provider, session: string): Promise<string> {
   if (!/^[a-f0-9-]{36}$/i.test(session)) throw new BridgeError(400, "Invalid conversation identity.");

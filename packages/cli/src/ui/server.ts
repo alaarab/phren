@@ -397,6 +397,20 @@ function jsonErr(res: Res, error: string, status = 200): void {
   res.end(JSON.stringify({ ok: false, error }));
 }
 
+function handleRequestError(res: Res, err: unknown): void {
+  if (res.destroyed || res.writableEnded) return;
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  if (err instanceof URIError) {
+    jsonErr(res, "Invalid URL encoding", 400);
+  } else {
+    logger.debug("web-ui", `request failed: ${errorMessage(err)}`);
+    jsonErr(res, "Internal server error", 500);
+  }
+}
+
 function withPostBody(
   req: Req, res: Res, url: string, ctx: RouteCtx,
   handler: (parsed: querystring.ParsedUrlQuery) => void,
@@ -406,7 +420,7 @@ function withPostBody(
     if (!requirePostAuth(req, res, url, parsed, ctx.authToken, true)) return;
     if (!requireCsrf(res, parsed, ctx.csrfTokens, true)) return;
     handler(parsed);
-  });
+  }).catch((err: unknown) => handleRequestError(res, err));
 }
 
 // ── GET handlers ──────────────────────────────────────────────────────────────
@@ -1314,7 +1328,7 @@ export function createWebUiHttpServer(
     phrenPath, profile, authToken: opts?.authToken, csrfTokens: opts?.csrfTokens, renderPage,
   };
 
-  return http.createServer(async (req, res) => {
+  const handleRequest = async (req: Req, res: Res): Promise<void> => {
     const url = req.url || "/";
     const pathname = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
@@ -1401,6 +1415,12 @@ export function createWebUiHttpServer(
 
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("Not found");
+  };
+
+  return http.createServer((req, res) => {
+    // Node does not handle rejected promises from request listeners. Contain
+    // malformed URI components and unexpected route failures to this request.
+    void handleRequest(req, res).catch((err: unknown) => handleRequestError(res, err));
   });
 }
 

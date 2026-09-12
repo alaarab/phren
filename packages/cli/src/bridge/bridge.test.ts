@@ -12,13 +12,28 @@ import { planAgentHooks, upgradeKeys } from "./install.js";
 import { TranscriptReader, transcriptPath, visibleEvent, historicalImage } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
+import { ApprovalWatchLeases } from "./agent-hooks.js";
 
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
+const hookBundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/dist/bridge-hook.mjs");
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session };
 const row = (text: string) => ({ type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] } });
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("Phren Hook boundaries", () => {
+  it("expires overview approval watches and isolates servers", () => {
+    let now = 100;
+    const leases = new ApprovalWatchLeases(() => now);
+    leases.renew("default");
+    expect(leases.has("default")).toBe(true);
+    expect(leases.has("another")).toBe(false);
+    now += 24_999;
+    expect(leases.has("default")).toBe(true);
+    now++;
+    expect(leases.has("default")).toBe(false);
+    leases.renew("default");
+    expect(leases.has("default")).toBe(true);
+  });
   it("exports the shared iPhone lifecycle and usage contract", async () => {
     const cases = JSON.parse(await readFile(new URL("../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/hook-events.json", import.meta.url), "utf8"));
     for (const fixture of cases) for (const event of fixture.events) {
@@ -43,7 +58,7 @@ describe("Phren Hook boundaries", () => {
     const custom = key.replace("python3 ~/.local/share/phren/chat-progress.py", "/custom/policy");
     const result = upgradeKeys(key + other + custom);
     expect(result.changed).toBe(1);
-    expect(result.text).toContain('restrict,pty,port-forwarding,permitopen="127.0.0.1:*",command="sh ~/.local/share/phren/bridge/dispatch"');
+    expect(result.text).toContain('restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch"');
     expect(result.text).toContain(other + custom);
     expect(upgradeKeys(result.text).changed).toBe(0);
   });
@@ -64,6 +79,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let root: string, hook: ChildProcess, herdr: Server, log: string, record: string, commands: { method: string; params: Record<string, unknown> }[];
   let current = session;
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
+  let replaceBeforeMutation = false;
+  let deliveries: { method: string; session: string }[];
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -82,6 +99,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       const short = await mkdtemp("/tmp/phren-hook-"); await rm(root, { recursive: true }); root = short;
     }
     commands = []; current = session; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
+    replaceBeforeMutation = false; deliveries = [];
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -92,6 +110,13 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         pending += bytes;
         if (!pending.includes("\n")) return;
         const req = JSON.parse(pending.split("\n")[0]); commands.push(req);
+        if (["agent.prompt", "agent.send_keys"].includes(req.method)) {
+          // Herdr 0.8.2/protocol 20 and 0.9.0 resolve the current pane occupant.
+          // Replace it at dispatch, after every possible snapshot preflight.
+          // Unknown params cannot bind an expected session in that contract.
+          if (replaceBeforeMutation) current = "bbbbbbbb-1111-4111-8111-111111111111";
+          deliveries.push({ method: req.method, session: current });
+        }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: "term-one", agent: "codex", agent_status: "working",
           agent_session: { kind: "id", agent: "codex", value: current }, cwd: root };
         const snapshot = { panes: [pane], workspaces: [{ workspace_id: "w1", label: "Project" }], tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }] };
@@ -102,7 +127,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       });
     });
     await new Promise<void>(resolve => herdr.listen(path.join(root, "herdr/herdr.sock"), resolve));
-    hook = spawn(process.execPath, [path.resolve("packages/cli/dist/bridge-hook.mjs"), "serve"], { env: { ...process.env,
+    hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -125,6 +150,16 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const permissions = await import("node:fs/promises").then(fs => fs.stat(path.join(root, "bridge/hook.sock")));
     expect(permissions.mode & 0o777).toBe(0o600);
   });
+  it("reports available Codex context without opening chat and drops a replaced session's usage", async () => {
+    const overview = async () => (await api("/v1/workspaces?mux=herdr:default")).data.groups[0].children[0];
+    expect((await overview()).contextUsedPercent).toBeUndefined();
+    await appendFile(record, JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: {
+      last_token_usage: { total_tokens: 45_000 }, model_context_window: 100_000,
+    } } }) + "\n");
+    expect((await overview()).contextUsedPercent).toBe(45);
+    current = "bbbbbbbb-1111-4111-8111-111111111111";
+    expect((await overview()).contextUsedPercent).toBeUndefined();
+  });
   it("validates the full destination at send time and never retries uncertain delivery", async () => {
     expect((await api("/v1/prompt", { target, text: "one message" })).status).toBe(200);
     expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
@@ -134,6 +169,17 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     }
     expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
     expect((await api("/v1/prompt", { target: { ...target, server: "../default" }, text: "must not send" })).status).toBe(400);
+  });
+  // Known failure, task d78a0916: this requires an atomic Herdr contract.
+  // Keep the desired rejection assertion executable; an unexpected pass fails
+  // the suite so that it can become a normal regression once support exists.
+  it.fails.each([
+    ["prompt", "/v1/prompt", { text: "must stay in the original conversation" }],
+    ["stop", "/v1/keys", { keys: ["Escape"] }],
+  ] as const)("rejects %s if the conversation is replaced between validation and dispatch (Herdr limitation)", async (_operation, route, payload) => {
+    replaceBeforeMutation = true;
+    const result = await api(route, { target, ...payload });
+    expect({ status: result.status, deliveries }).toEqual({ status: 409, deliveries: [] });
   });
   it("streams incremental transcript and real usage frames, then closes after a conversation replacement", async () => {
     const query = new URLSearchParams(target).toString();
@@ -205,11 +251,41 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     for (let i = 0; i < 100 && !frames.some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
     const approval = frames.find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
     expect(approval?.message).toContain("fixture-command");
+    expect(Date.parse(approval?.expiresAt)).toBeGreaterThan(Date.now());
     const wrong = await api("/v1/approvals/answer", { target: { ...target, session: "bbbbbbbb-1111-4111-8111-111111111111" }, actionId: approval.actionId, decision: "approve" });
     expect(wrong.status).toBe(409);
     expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "deny" })).status).toBe(200);
     expect((await reply).hookSpecificOutput.decision.behavior).toBe("deny");
     expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve" })).status).toBe(409);
+    socket.close(); await once(socket, "close");
+  });
+  it("holds overview requests only with an explicit watch and lets the phone approve", async () => {
+    const callback = () => new Promise<any>((resolve, reject) => {
+      const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "fixture-command" } });
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+        let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+      }); req.on("error", reject); req.end(payload);
+    });
+    await api("/v1/workspaces");
+    expect(await callback()).toEqual({});
+    await api("/v1/workspaces?watchApprovals=1");
+    const reply = callback();
+    let pending = false;
+    for (let i = 0; i < 60 && !pending; i++) {
+      await sleep(25);
+      pending = (await api("/v1/workspaces")).data.groups.some((g: any) => g.children.some((t: any) => t.approvalPending));
+    }
+    expect(pending).toBe(true);
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+    const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+    await once(socket, "open");
+    for (let i = 0; i < 60 && !frames.some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
+    const approval = frames.find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
+    expect(approval?.actionId).toBeTruthy();
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve" })).status).toBe(200);
+    expect((await reply).hookSpecificOutput.decision.behavior).toBe("allow");
+    expect((await api("/v1/workspaces")).data.groups.some((g: any) => g.children.some((t: any) => t.approvalPending))).toBe(false);
     socket.close(); await once(socket, "close");
   });
   it("preserves large images as references and retrieves their original bytes", async () => {
