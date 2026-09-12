@@ -933,6 +933,18 @@ final class AppModel {
         await refresh()
     }
 
+    /// Moves a skill to `global` or another project within its own store.
+    func moveSkill(_ entry: StoreSkill, to scope: String) async throws {
+        guard let context = storeContexts.first(where: { $0.id == entry.storeId }) else {
+            throw StoreWriteError.storeNotOpen(entry.storeId)
+        }
+        guard context.descriptor.canPush else {
+            throw StoreWriteError.readOnly(context.descriptor.displayName)
+        }
+        try await context.engine.moveSkill(entry.skill, to: scope)
+        await refresh()
+    }
+
     func instructions(scope: String, in storeId: String) -> String? {
         storeContexts.first { $0.id == storeId }?.snapshot.instructions[scope]
     }

@@ -325,6 +325,33 @@ public actor SyncEngine {
         scheduleFlush()
     }
 
+    /// Moves a skill's instructions to another scope (`global` or a project in
+    /// this store), keeping its name and file shape. Composed from the existing
+    /// authored-file ops rather than a new persisted case, so older builds keep
+    /// reading the queue. Create runs before delete: a failure between the two
+    /// leaves a duplicate, never a lost skill. An explicit enabled/disabled
+    /// choice follows the skill to its new key; supporting files in a folder
+    /// skill are not synced and stay where they were.
+    public func moveSkill(_ skill: Skill, to scope: String) async throws {
+        guard scope != skill.scope.source else {
+            throw PhrenKitError.validation("The skill is already in \(scope).")
+        }
+        let destination = skill.format == .folder
+            ? "\(scope)/skills/\(skill.name)/SKILL.md"
+            : "\(scope)/skills/\(skill.name).md"
+        guard LocalStore.isSkillPath(destination) else {
+            throw PhrenKitError.validation("Invalid skill scope or name.")
+        }
+        let preferences = try SkillPreferences.parse(await store.read(SkillPreferences.path))
+        let enabled = preferences.explicitSetting(scope: skill.scope.source, name: skill.name)
+        try await enqueue(.saveAuthoredFile(path: destination, content: skill.content, expectedContent: nil))
+        try await enqueue(.deleteAuthoredFile(path: skill.path, expectedContent: skill.content))
+        if let enabled {
+            try await enqueue(.setSkillEnabled(scope: scope, name: skill.name, enabled: enabled,
+                                               expectedEnabled: preferences.explicitSetting(scope: scope, name: skill.name)))
+        }
+    }
+
     /// Re-queues everything in "Needs attention". An op parked before its edit
     /// reached the local document (its target had vanished when the group was
     /// re-applied) is applied again here — the flush pushes the local document

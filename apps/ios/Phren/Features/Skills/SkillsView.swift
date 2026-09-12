@@ -113,6 +113,7 @@ struct SkillEditorView: View {
     var returnToProject: (() -> Void)?
     @State private var draft: DocumentDraft?
     @State private var deleting: StoreSkill?
+    @State private var moving: StoreSkill?
     @State private var error: String?
     @State private var busy = false
 
@@ -184,6 +185,12 @@ struct SkillEditorView: View {
                     Button("Edit") { draft = DocumentDraft(path: current.skill.path, content: current.skill.content) }.disabled(busy)
                 }
                 ToolbarItem(placement: .secondaryAction) {
+                    Button { moving = current } label: {
+                        Label("Move to…", systemImage: "folder")
+                    }
+                    .disabled(busy)
+                }
+                ToolbarItem(placement: .secondaryAction) {
                     Button(role: .destructive) { deleting = current } label: {
                         Label("Delete skill", systemImage: "trash")
                     }.disabled(busy)
@@ -191,6 +198,7 @@ struct SkillEditorView: View {
             }
         }
         .sheet(item: $draft) { DocumentEditorSheet(title: "Edit skill", storeId: entry.storeId, draft: $0) }
+        .sheet(item: $moving) { MoveSkillSheet(entry: $0) { dismiss() } }
         .confirmationDialog("Delete \(entry.skill.name)?",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
                             titleVisibility: .visible) {
@@ -218,6 +226,80 @@ struct SkillEditorView: View {
         defer { busy = false }
         do { try await model.setSkillEnabled(entry, enabled: enabled) }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct MoveSkillSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let entry: StoreSkill
+    let onMoved: () -> Void
+    @State private var scope = ""
+    @State private var error: String?
+    @State private var moving = false
+
+    /// Destinations in the skill's own store, minus where it already lives.
+    private var destinations: [String] {
+        let projects = model.writableProjects.filter { $0.storeId == entry.storeId }.map(\.project.name)
+        return (["global"] + projects.sorted()).filter { $0 != entry.skill.scope.source }
+    }
+    private var occupied: Bool {
+        model.skills(in: entry.storeId).contains {
+            $0.scope.source == scope && $0.name.lowercased() == entry.skill.name.lowercased()
+        }
+    }
+    private var valid: Bool { destinations.contains(scope) && !occupied }
+
+    var body: some View {
+        NavigationStack {
+            PhrenForm {
+                Section {
+                    Picker("Move to", selection: $scope) {
+                        ForEach(destinations, id: \.self) { Text($0 == "global" ? "Global · all projects" : $0).tag($0) }
+                    }
+                    .accessibilityIdentifier("skill-move-destination")
+                    if occupied {
+                        Text("A skill named \(entry.skill.name) already exists there.").font(.caption).foregroundStyle(.red)
+                    }
+                } header: { Text("Destination") } footer: {
+                    Text("Moves the skill's instructions out of \(entry.skill.scope.source) on sync."
+                         + (entry.skill.format == .folder ? " Supporting files in its folder stay behind." : ""))
+                }
+            }
+            .disabled(moving)
+            .navigationTitle("Move \(entry.skill.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(moving) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(moving ? "Moving…" : "Move") { Task { await move() } }
+                        .disabled(!valid || moving)
+                        .accessibilityIdentifier("skill-move-confirm")
+                }
+            }
+            .overlay {
+                if destinations.isEmpty {
+                    PhrenEmptyState(title: "Nowhere to move", message: "This store has no other project to hold the skill.")
+                }
+            }
+            .onAppear { if scope.isEmpty { scope = destinations.first ?? "" } }
+            .alert("Couldn't move skill", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("OK") { error = nil }
+            } message: { Text(error ?? "") }
+        }
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled(moving)
+    }
+
+    private func move() async {
+        guard valid, !moving else { return }
+        moving = true
+        defer { moving = false }
+        do {
+            try await model.moveSkill(entry, to: scope)
+            dismiss()
+            onMoved()
+        } catch { self.error = error.localizedDescription }
     }
 }
 

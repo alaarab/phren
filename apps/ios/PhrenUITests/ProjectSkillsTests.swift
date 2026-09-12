@@ -56,6 +56,44 @@ final class ProjectSkillsTests: XCTestCase {
     }
 
     @MainActor
+    func testMovingASkillToAnotherProjectLeavesTheCurrentProjectList() {
+        let app = launch()
+        app.buttons["project-skills"].tap()
+        let local = app.buttons["skill:sample/brain:demo/skills/audit.md"]
+        XCTAssertTrue(local.waitForExistence(timeout: 5))
+        local.tap()
+        XCTAssertTrue(app.navigationBars["audit"].waitForExistence(timeout: 5))
+        app.buttons["More"].tap()
+        let move = app.buttons["Move to…"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5))
+        move.tap()
+        let picker = app.buttons["skill-move-destination"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        app.buttons["other"].tap()
+        capture(app, "Move skill destination")
+        app.buttons["skill-move-confirm"].tap()
+        // The editor closes with the skill; the project list no longer holds it.
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["audit"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 5), .completed)
+        XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["skill:sample/brain:demo/skills/audit.md"].exists)
+        XCTAssertTrue(app.buttons["skill:sample/brain:global/skills/review-style.md"].exists)
+        // The destination project now lists it next to its own skill.
+        app.buttons["skills-return-to-project"].tap()
+        XCTAssertTrue(app.navigationBars["demo · brain"].waitForExistence(timeout: 5))
+        app.navigationBars["demo · brain"].buttons.element(boundBy: 0).tap()
+        let other = app.buttons["project:sample/brain:other"]
+        XCTAssertTrue(other.waitForExistence(timeout: 5))
+        other.tap()
+        XCTAssertTrue(app.buttons["project-skills"].waitForExistence(timeout: 5))
+        app.buttons["project-skills"].tap()
+        XCTAssertTrue(app.buttons["skill:sample/brain:other/skills/audit.md"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["skill:sample/brain:other/skills/other-check.md"].exists)
+        capture(app, "Skill moved to another project")
+    }
+
+    @MainActor
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--project-skills-fixture"]

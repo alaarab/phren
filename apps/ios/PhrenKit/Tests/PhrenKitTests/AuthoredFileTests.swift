@@ -84,6 +84,51 @@ final class AuthoredFileTests: XCTestCase {
         XCTAssertNil(AuthoredFile.conflictingSkillPath(for: skillPath, among: ["global/skills/audit.md"]))
     }
 
+    func testMoveSkillCreatesBeforeDeletingAndCarriesItsSetting() async throws {
+        let content = "---\nname: audit\ndescription: 'x'\n---\n\nRules\n"
+        let preferences = "{\n  \"enabledSkills\" : {\n    \"demo:audit\" : false\n  },\n  \"schemaVersion\" : 1\n}\n"
+        let (engine, store, client) = try await makeEngine(local: [skillPath: content, SkillPreferences.path: preferences])
+        let skill = try XCTUnwrap(Skill.parse(path: skillPath, content: content))
+        try await engine.moveSkill(skill, to: "other")
+
+        let pending = await engine.pendingOps().map(\.op)
+        XCTAssertEqual(pending, [
+            .saveAuthoredFile(path: "other/skills/audit.md", content: content, expectedContent: nil),
+            .deleteAuthoredFile(path: skillPath, expectedContent: content),
+            .setSkillEnabled(scope: "other", name: "audit", enabled: false, expectedEnabled: nil),
+        ])
+        let snapshot = await store.snapshot()
+        XCTAssertEqual(snapshot.skills.map(\.path), ["other/skills/audit.md"])
+        let moved = try SkillPreferences.parse(await store.read(SkillPreferences.path))
+        XCTAssertEqual(moved.explicitSetting(scope: "other", name: "audit"), false)
+
+        await engine.flushNow()
+        let remote = await client.remoteContent("other/skills/audit.md")
+        let old = await client.remoteContent(skillPath)
+        XCTAssertEqual(remote, content)
+        XCTAssertNil(old)
+    }
+
+    func testMoveSkillKeepsFolderShapeAndRefusesOccupiedDestination() async throws {
+        let folderPath = "demo/skills/audit/SKILL.md"
+        let (engine, store, _) = try await makeEngine(local: [folderPath: "Folder", "global/skills/Audit.md": "Taken"])
+        let skill = try XCTUnwrap(Skill.parse(path: folderPath, content: "Folder"))
+        do {
+            try await engine.moveSkill(skill, to: "global")
+            XCTFail("Must not shadow the existing global skill")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("already exists"))
+        }
+        let untouched = await store.read(folderPath)
+        let pending = await engine.pendingOps()
+        XCTAssertEqual(untouched, "Folder")
+        XCTAssertTrue(pending.isEmpty)
+
+        try await engine.moveSkill(skill, to: "other")
+        let paths = await store.snapshot().skills.map(\.path).sorted()
+        XCTAssertEqual(paths, ["global/skills/Audit.md", "other/skills/audit/SKILL.md"])
+    }
+
     func testBackgroundPullPreservesPendingDraftAndOriginalSHA() async throws {
         let (engine, store, client) = try await makeEngine(local: [instructionsPath: "Opened"])
         let op = PendingOp.saveAuthoredFile(path: instructionsPath, content: "Phone", expectedContent: "Opened")
