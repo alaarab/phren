@@ -55,7 +55,7 @@ struct ChatToolSummary {
         let presentations = calls.map { ToolPresentation(title: $0.title ?? "Tool", text: $0.text) }
         let names = presentations.map(\.title)
         title = Set(names).count == 1 ? names[0] : calls.isEmpty ? "Tool results" : "Activity"
-        icon = title == "Shell" ? "terminal" : title == "Browse" ? "globe" : title == "Patch" ? "pencil.line" : "wrench.and.screwdriver"
+        icon = title == "Shell" ? "terminal" : title == "Browse" ? "globe" : title == "Patch" ? "pencil.line" : title == "Write" ? "doc.badge.plus" : "wrench.and.screwdriver"
         count = max(1, calls.isEmpty ? messages.count : calls.count)
         preview = presentations.last?.preview ?? messages.last.map { ToolPresentation(title: $0.title ?? "Tool result", text: $0.text).preview } ?? ""
     }
@@ -95,14 +95,11 @@ struct ChatToolActivity: View, Equatable {
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(messages) { message in
-                        let presentation = ToolPresentation(title: message.title ?? "Tool activity", text: message.text)
-                        if !message.isToolResult, presentation.patch == nil, messages.contains(where: \.isToolResult) {
-                            DisclosureGroup("Input details") {
-                                ToolDetailView(presentation: presentation, id: message.id)
-                            }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
-                        } else {
-                            ToolDetailView(presentation: presentation, id: message.id)
-                        }
+                        // The call and its output, both in full: the command
+                        // is what tells you what happened, so it is never
+                        // folded behind a disclosure.
+                        ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
+                                       id: message.id, isResult: message.isToolResult)
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
@@ -115,26 +112,57 @@ struct ChatToolActivity: View, Equatable {
 private struct ToolDetailView: View {
     let presentation: ToolPresentation
     let id: String
+    var isResult = false
     @State private var fullOutput: FullToolOutput?
+    @State private var showMore = false
+    /// Six lines in the card, eighty once opened; the sheet has the rest.
+    private static let previewLines = 6, moreLines = 80
+
+    private var lineCount: Int { presentation.body.components(separatedBy: "\n").count }
+    private var hasMore: Bool { lineCount > Self.previewLines || presentation.body.count > 640 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let patch = presentation.patch { CodeDiffView(patch: patch, previewLineLimit: 8) }
             else {
                 HStack(spacing: 8) {
-                    Text(presentation.title == "Tool Result" ? "Output" : presentation.title).fontWeight(.medium)
+                    Text(isResult ? "Output" : presentation.title).fontWeight(.medium)
                     Spacer()
                     Button("View full output", systemImage: "arrow.up.left.and.arrow.down.right") {
-                        fullOutput = .init(title: presentation.title, text: presentation.body)
+                        fullOutput = .init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body)
                     }.frame(width: 36, height: 32).contentShape(Rectangle())
                         .accessibilityIdentifier("chat-tool-output:\(id)")
                     Button("Copy tool details", systemImage: "doc.on.doc") { UIPasteboard.general.string = presentation.body }
                         .frame(width: 36, height: 32).contentShape(Rectangle())
                 }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .labelStyle(.iconOnly).buttonStyle(.plain).frame(minHeight: 32)
-                Text(presentation.body.isEmpty ? "No output" : ToolOutputPreview(presentation.body).text)
-                    .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
-                    .lineLimit(6).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("chat-tool-preview:\(id)")
+                if isResult {
+                    // Terminal output keeps its columns: scroll sideways
+                    // rather than wrapping a table or a stack trace.
+                    ScrollView(.horizontal) {
+                        Text(presentation.body.isEmpty ? "No output"
+                             : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : Self.previewLines,
+                                                 characters: showMore ? 16_000 : 640).text)
+                            .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                            .fixedSize(horizontal: true, vertical: false).textSelection(.enabled)
+                            .accessibilityIdentifier("chat-tool-preview:\(id)")
+                    }
+                } else {
+                    // A command wraps — every character of it matters more
+                    // than its columns.
+                    Text(presentation.body.isEmpty ? "No input"
+                         : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : 12, characters: showMore ? 16_000 : 2_000).text)
+                        .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("chat-tool-input:\(id)")
+                }
+                if hasMore {
+                    Button(showMore ? "Show less" : "Show \(min(lineCount, Self.moreLines) - Self.previewLines > 0 ? "\(min(lineCount, Self.moreLines) - Self.previewLines) more lines" : "more")") {
+                        showMore.toggle()
+                    }
+                    .font(.caption).foregroundStyle(PhrenTheme.accent).padding(.vertical, 4)
+                    .accessibilityIdentifier("chat-tool-more:\(id)")
+                }
             }
             if presentation.raw != presentation.body {
                 Button("Raw details") { fullOutput = .init(title: "Raw details", text: presentation.raw) }
@@ -245,11 +273,11 @@ struct ToolOutputPages {
 /// separately, so expanding a row never lays out thousands of output lines.
 struct ToolOutputPreview {
     let text: String
-    init(_ output: String) {
-        let bounded = output.prefix(641)
-        let prefix = String(bounded.prefix(640))
+    init(_ output: String, lines maximumLines: Int = 6, characters: Int = 640) {
+        let bounded = output.prefix(characters + 1)
+        let prefix = String(bounded.prefix(characters))
         let lines = prefix.components(separatedBy: .newlines)
-        let visible = lines.prefix(6).joined(separator: "\n")
-        text = visible + (bounded.count > 640 || lines.count > 6 ? "…" : "")
+        let visible = lines.prefix(maximumLines).joined(separator: "\n")
+        text = visible + (bounded.count > characters || lines.count > maximumLines ? "…" : "")
     }
 }

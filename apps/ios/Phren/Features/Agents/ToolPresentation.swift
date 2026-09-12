@@ -7,9 +7,13 @@ struct ToolPresentation {
     let body: String
     let patch: String?
     let path: String?
+    /// A short qualifier after the path — "lines 10–50", "in src/".
+    var note: String? = nil
     let raw: String
     var preview: String {
-        if let path { return path }
+        // The file, not its whole absolute path: the last two components
+        // read like VS Code's "folder/file" and leave room for the counts.
+        if let path { return Self.short(path) + (note.map { " · " + $0 } ?? "") }
         let start = body.firstIndex(where: { !$0.isNewline }) ?? body.endIndex
         return String(body[start...].prefix(180).prefix { !$0.isNewline })
     }
@@ -25,13 +29,38 @@ struct ToolPresentation {
             body = Self.unwrap(text)
         } else if let fields {
             path = fields["file_path"] as? String ?? fields["path"] as? String
+            let edits = (fields["edits"] as? [[String: Any]] ?? []).compactMap { edit -> (String, String)? in
+                guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String else { return nil }
+                return (old, new)
+            }
             if let old = fields["old_string"] as? String, let new = fields["new_string"] as? String {
-                body = "*** Update File: \(path ?? "File")\n@@\n"
-                    + old.components(separatedBy: "\n").map { "-" + $0 }.joined(separator: "\n") + "\n"
-                    + new.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")
-                title = "Patch"
+                body = Self.updatePatch(path, edits: [(old, new)]); title = "Patch"
+            } else if !edits.isEmpty {
+                // MultiEdit: one file, several replacements — one hunk each.
+                body = Self.updatePatch(path, edits: edits); title = "Patch"
+            } else if let content = fields["content"] as? String, path != nil {
+                // Write: the whole file as it now stands, every line new.
+                body = "*** Add File: \(path!)\n"
+                    + content.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")
+                title = "Write"
+            } else if name == "Read", let file = path {
+                // Claude Code's Read: the file and, when paged, the window.
+                let offset = fields["offset"] as? Int, limit = fields["limit"] as? Int
+                if let offset { note = "lines \(offset)–\(limit.map { offset + $0 - 1 }.map(String.init) ?? "end")" }
+                else if let limit { note = "first \(limit) lines" }
+                body = file + (note.map { " · " + $0 } ?? "")
+            } else if ["Grep", "Glob"].contains(name), let pattern = fields["pattern"] as? String {
+                let scope = (fields["path"] as? String).map(Self.short) ?? (fields["glob"] as? String)
+                body = pattern + (scope.map { " in " + $0 } ?? "")
+                path = nil
+            } else if let todos = fields["todos"] as? [[String: Any]], !todos.isEmpty {
+                body = todos.compactMap { todo -> String? in
+                    guard let content = todo["content"] as? String else { return nil }
+                    let status = todo["status"] as? String ?? ""
+                    return (status == "completed" ? "☑ " : status == "in_progress" ? "◐ " : "☐ ") + content
+                }.joined(separator: "\n")
             } else {
-                body = ["cmd", "command", "patch", "input", "query", "q", "description"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
+                body = ["cmd", "command", "patch", "input", "query", "q", "url", "description", "prompt"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
             }
         } else if ["exec", "parallel"].contains(name) {
             // Extract only JSON string literals, without executing JavaScript.
@@ -41,7 +70,7 @@ struct ToolPresentation {
             if !patches.isEmpty { body = patches.joined(separator: "\n"); title = "Patch" }
             else if !commands.isEmpty { body = commands.joined(separator: "\n\n"); title = "Shell" }
         }
-        let hasPatch = body.contains("*** Begin Patch") || body.contains("*** Update File:")
+        let hasPatch = body.contains("*** Begin Patch") || body.contains("*** Update File:") || body.contains("*** Add File:")
             || body.contains("diff --git ") || body.range(of: #"(?m)^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@"#, options: .regularExpression) != nil
         if hasPatch {
             path = path ?? body.components(separatedBy: "\n").first(where: { $0.hasPrefix("*** Update File: ") || $0.hasPrefix("*** Add File: ") || $0.hasPrefix("+++ b/") }).map {
@@ -49,6 +78,20 @@ struct ToolPresentation {
             }
         }
         self.title = title; self.body = body; self.path = path; patch = hasPatch ? body : nil
+    }
+
+    /// The last two path components — enough to tell files apart on a phone.
+    static func short(_ path: String) -> String {
+        path.split(separator: "/").suffix(2).joined(separator: "/")
+    }
+
+    /// An Edit/MultiEdit as the apply_patch shape the diff renderer reads:
+    /// the removed lines then the replacement, one `@@` hunk per edit.
+    private static func updatePatch(_ path: String?, edits: [(String, String)]) -> String {
+        "*** Update File: \(path ?? "File")\n" + edits.map { old, new in
+            "@@\n" + old.components(separatedBy: "\n").map { "-" + $0 }.joined(separator: "\n") + "\n"
+                + new.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")
+        }.joined(separator: "\n")
     }
 
     static func name(_ name: String) -> String {
@@ -61,6 +104,10 @@ struct ToolPresentation {
         if ["exec_command", "bash", "shell", "Bash", "Shell", "write_stdin"].contains(name) { return "Shell" }
         if ["apply_patch", "Edit", "MultiEdit", "str_replace_editor"].contains(name) { return "Patch" }
         if ["exec", "parallel"].contains(name) { return "Tools" }
+        if name == "LS" { return "List" }
+        if name == "WebFetch" { return "Fetch" }
+        if name == "TodoWrite" { return "Todos" }
+        if ["Task", "Agent"].contains(name) { return "Agent" }
         if name.contains("search") || name.contains("web") { return "Browse" }
         return name.replacingOccurrences(of: "_", with: " ").capitalized
     }
