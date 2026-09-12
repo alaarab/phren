@@ -4,9 +4,12 @@ import { install, rollback, uninstall } from "./install.js";
 import { servers } from "./herdr.js";
 import { agentHook } from "./agent-hooks.js";
 import { provider } from "./protocol.js";
+import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
+    case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
+    case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
     case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
     case "serve": await serve(version); break;
     case "ssh": await dispatch(process.env.SSH_ORIGINAL_COMMAND || ""); break;
@@ -22,7 +25,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       } }, null, 2));
       return muxes.length > 0 ? 0 : 1;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|update|rollback|uninstall>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall>");
   }
   return 0;
 }

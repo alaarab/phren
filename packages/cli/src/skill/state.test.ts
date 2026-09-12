@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, writeFile } from "../test-helpers.js";
 import { writeInstallPreferences } from "../init/preferences.js";
-import { buildSkillManifest } from "./registry.js";
+import { buildSkillManifest, getAllSkills } from "./registry.js";
 import { syncScopeSkillsToDir } from "./files.js";
 import { isSkillEnabled, readSkillPreferences, setSkillEnabled, SKILL_PREFERENCES_PATH } from "./state.js";
 
@@ -47,6 +47,30 @@ describe("synced skill preferences", () => {
     writeFile(path.join(root, SKILL_PREFERENCES_PATH), JSON.stringify({ schemaVersion: 1, enabledSkills: { "other:audit": false }, future: { keep: [1, 2] } }));
     setSkillEnabled(root, "demo", "audit", true);
     expect(readSkillPreferences(root)).toEqual({ schemaVersion: 1, enabledSkills: { "other:audit": false, "demo:audit": true }, future: { keep: [1, 2] } });
+  });
+
+  it("refreshes shared and legacy choices between discovery calls", () => {
+    const root = store();
+    writeFile(path.join(root, "global/skills/shared.md"), "# Shared");
+    writeFile(path.join(root, "demo/skills/local.md"), "# Local");
+    writeFile(path.join(root, "profiles/dev.yaml"), "projects:\n  - global\n  - demo\n");
+    writeInstallPreferences(root, { disabledSkills: { "global:shared": true, "demo:local": true } });
+    setSkillEnabled(root, "global", "shared", true);
+
+    const initial = buildSkillManifest(root, "dev", "demo");
+    expect(initial.skills.map(({ name, enabled }) => ({ name, enabled }))).toEqual([
+      { name: "local", enabled: false }, { name: "shared", enabled: true },
+    ]);
+    writeInstallPreferences(root, { disabledSkills: {} });
+    setSkillEnabled(root, "global", "shared", false);
+
+    const updated = getAllSkills(root, "dev");
+    expect(updated.find((skill) => skill.name === "shared")?.enabled).toBe(false);
+    expect(updated.find((skill) => skill.name === "local")?.enabled).toBe(true);
+    expect(initial.skills.find((skill) => skill.name === "shared")?.enabled).toBe(true);
+
+    writeFile(path.join(root, SKILL_PREFERENCES_PATH), "invalid JSON");
+    expect(buildSkillManifest(root, "dev", "demo").skills.every((skill) => !skill.enabled)).toBe(true);
   });
 
   it("refuses malformed and future documents without enabling skills or overwriting data", () => {
