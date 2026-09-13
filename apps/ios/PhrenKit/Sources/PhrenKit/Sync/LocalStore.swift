@@ -94,7 +94,11 @@ public actor LocalStore {
     /// predicate and would otherwise make the phone able to rewrite it.
     public static func isSyncedPath(_ path: String) -> Bool {
         if path == SkillPreferences.path { return true }
-        if path == "phren.root.yaml" || path == "stores.yaml" { return true }
+        if path == "phren.root.yaml" || path == "stores.yaml" || path == MachineRegistry.machinesFile { return true }
+        // Which computer carries which project: `machines.yaml` names the
+        // profile, `profiles/<name>.yaml` lists its projects, and a project's
+        // `phren.project.yaml` remembers the folder it was added from.
+        if MachineRegistry.isProfilePath(path) { return true }
         // A team store repo describes itself: `.phren-team.yaml` is what the
         // CLI reads to decide the role it registers a joined store under
         // (cli/namespaces-store.ts:147), so it is also how the phone knows
@@ -111,7 +115,7 @@ public actor LocalStore {
         }
         guard isProjectDirName(parts[0]) else { return false }
         if parts.count == 2 {
-            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md"].contains(parts[1])
+            return ["FINDINGS.md", "tasks.md", "review.md", "summary.md", "CLAUDE.md", "truths.md", MachineRegistry.projectFile].contains(parts[1])
         }
         if parts.count == 3, parts[1] == "notes" {
             return JSRegex(#"^\d{4}-\d{2}-\d{2}\.md$"#).test(parts[2])
@@ -375,6 +379,8 @@ public actor LocalStore {
         public var instructions: [String: String] = [:]
         /// Raw so malformed or newer settings cannot be mistaken for defaults.
         public var skillPreferencesContent: String? = nil
+        /// Which computers carry which projects, and where.
+        public var machines: MachineRegistry = .empty
 
         public static let empty = Snapshot(projects: [], findings: [:], tasks: [:], notes: [:], reviewQueue: [], summaries: [:])
     }
@@ -398,9 +404,23 @@ public actor LocalStore {
         var journals: [String: [JournalFile]] = [:]
         var skills: [Skill] = []
         var instructions: [String: String] = [:]
+        var machines = MachineRegistry()
 
         for path in paths {
             let parts = path.split(separator: "/").map(String.init)
+
+            if path == MachineRegistry.machinesFile {
+                if let content = read(path) { machines.machines = MachineRegistry.parseMachines(content) }
+                continue
+            }
+            if MachineRegistry.isProfilePath(path) {
+                if let content = read(path) {
+                    let profile = MachineRegistry.parseProfile(content)
+                    let name = profile.name ?? String(parts[1].dropLast(".yaml".count))
+                    machines.profiles[name] = profile.projects
+                }
+                continue
+            }
 
             // Skills come first: they are the only synced content that can sit
             // outside a project directory (`global/skills/…`), so the project
@@ -439,6 +459,8 @@ public actor LocalStore {
                     instructions[project] = content
                 case "truths.md":
                     truths[project] = TruthsFile(content: content).truths
+                case MachineRegistry.projectFile:
+                    if let sourcePath = MachineRegistry.parseSourcePath(content) { machines.sourcePaths[project] = sourcePath }
                 default:
                     break
                 }
@@ -500,7 +522,7 @@ public actor LocalStore {
             projects: projects, findings: findings, tasks: tasks,
             notes: notes, reviewQueue: queue, summaries: summaries,
             truths: truths, consolidated: consolidated, skills: skills, instructions: instructions,
-            skillPreferencesContent: read(SkillPreferences.path)
+            skillPreferencesContent: read(SkillPreferences.path), machines: machines
         )
         cachedSnapshot = files.map { ($0, result) }
         return result

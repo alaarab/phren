@@ -101,6 +101,63 @@ extension PhrenConnection {
             path: "/v1/workspaces/" + operation.rawValue, body: JSONSerialization.data(withJSONObject: body)))
         try requireOK(data)
     }
+    /// The agents Phren can start in a fresh Herdr pane — Herdr's own kind
+    /// names, which are also the chat `source` values.
+    public enum LaunchKind: String, Sendable, CaseIterable, Identifiable {
+        case codex, claude, copilot
+        public var id: String { rawValue }
+        public var title: String { self == .claude ? "Claude Code" : self == .copilot ? "Copilot" : "Codex" }
+    }
+
+    /// What `POST /v1/workspaces/launch` hands back: the new pane with the
+    /// agent Herdr detected in it. `sessionID` is usually still nil here —
+    /// the agent has not written a transcript yet — so the caller polls
+    /// `chatPanes` for it the way the session list does.
+    public struct LaunchedSession: Sendable, Equatable {
+        public let workspaceID: String
+        public let tabID: String
+        public let paneID: String
+        public let agent: String
+        public let agentStatus: String?
+        public let sessionID: String?
+    }
+
+    /// "Open on a computer": a new workspace (or a tab in `workspaceID`) in
+    /// `cwd` on the computer, with `kind` started in its pane. Blocks until
+    /// Herdr reports the agent ready — up to `timeoutMs` plus a margin.
+    public static func launchSession(host: LiveHost, privateKey: Data, cwd: String, label: String, kind: LaunchKind,
+                                     workspaceID: String? = nil, timeoutMs: Int = 45_000) async throws -> LaunchedSession {
+        guard cwd.hasPrefix("/"), cwd.utf8.count <= 4_096, !cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw PhrenKitError.validation("Enter the full folder path on this computer.")
+        }
+        let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.utf8.count <= 200, !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw PhrenKitError.validation("Enter a short workspace name.")
+        }
+        if let workspaceID { guard AgentChatTarget.validID(workspaceID) else { throw PhrenKitError.validation("Choose a Herdr workspace.") } }
+        let timeout = min(120_000, max(3_000, timeoutMs))
+        var body: [String: Any] = ["cwd": cwd, "label": name, "kind": kind.rawValue, "timeoutMs": timeout]
+        body["workspaceId"] = workspaceID
+        var request = GatewayRequest(path: "/v1/workspaces/launch", body: try JSONSerialization.data(withJSONObject: body))
+        request.timeoutSeconds = timeout / 1_000 + 20
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
+        return try launchedSession(from: data, kind: kind)
+    }
+
+    /// Strict: every identifier must be a Herdr id and the agent must be the
+    /// one asked for, so a stale or foreign reply never opens the wrong pane.
+    static func launchedSession(from data: Data, kind: LaunchKind) throws -> LaunchedSession {
+        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any], response["ok"] as? Bool == true,
+              let workspaceID = response["workspaceId"] as? String, let tabID = response["tabId"] as? String,
+              let paneID = response["paneId"] as? String, [workspaceID, tabID, paneID].allSatisfy(AgentChatTarget.validID),
+              response["agent"] as? String == kind.rawValue else {
+            throw PhrenKitError.validation("The computer didn't confirm the new session. Check Herdr workspaces before trying again.")
+        }
+        let status = (response["agentStatus"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(40)) }
+        let session = (response["sessionId"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
+        return LaunchedSession(workspaceID: workspaceID, tabID: tabID, paneID: paneID, agent: kind.rawValue, agentStatus: status, sessionID: session)
+    }
+
     private static func checkHost(_ host: LiveHost, _ target: AgentChatTarget) throws {
         guard target.hostID == host.id, target.muxID == host.muxID else { throw PhrenKitError.validation("This conversation belongs to another computer or Herdr server.") }
     }

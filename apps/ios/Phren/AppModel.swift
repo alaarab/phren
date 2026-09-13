@@ -325,6 +325,12 @@ final class AppModel {
         snapshot(for: storeId).consolidated[project]
     }
 
+    /// The store's own map of computers to projects (machines.yaml +
+    /// profiles) and each project's recorded folder.
+    func machineRegistry(storeId: String) -> MachineRegistry {
+        snapshot(for: storeId).machines
+    }
+
     // MARK: - Cold tier (archived findings)
 
     /// What this project's archive weighs, without reading any of it.

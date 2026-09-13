@@ -100,6 +100,11 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
 - `POST /v1/workspaces/{create,rename,focus,close}` with an explicit server.
+- `POST /v1/workspaces/launch`: `{cwd, label, kind, workspaceId?, name?, timeoutMs?}`
+  creates a workspace (or a tab in `workspaceId`) in `cwd`, starts `kind`
+  (codex/claude/copilot) in its pane and waits for Herdr to detect it; returns
+  `{workspaceId, tabId, paneId, agent, agentStatus?, sessionId?}`. The session
+  id is normally still unknown at that point — poll `/v1/workspaces/panes`.
 - `GET /v1/web-servers`, `/v1/activity`
 - `GET /v1/usage`: account-limit percentages and reset times, grouped by provider.
 

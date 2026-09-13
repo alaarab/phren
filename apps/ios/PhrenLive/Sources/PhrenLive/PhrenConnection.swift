@@ -33,6 +33,17 @@ public enum LiveConnectionError: LocalizedError, Equatable {
 /// Bounded, cancellable requests through a pinned SSH connection. Only the
 /// workspace, pane, transcript, and exact-session prompt routes are exposed.
 public enum PhrenConnection {
+    /// The name the computer gives itself (`os.hostname()`), as the Hook's
+    /// health reports it — the key the store's `machines.yaml` uses.
+    public static func computerName(host: LiveHost, privateKey: Data) async throws -> String? {
+        try host.validate()
+        let data = try await fetchData(host: host, key: Curve25519.Signing.PrivateKey(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/health"))
+        guard data.count <= 65_536, let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              response["product"] as? String == "phren-hook" else { return nil }
+        guard let name = (response["computer"] as? [String: Any])?["name"] as? String, !name.isEmpty, name.utf8.count <= 253 else { return nil }
+        return name
+    }
+
     public static func fetch(host: LiveHost, privateKey: Data) async throws -> LiveWorkspaces {
         try host.validate()
         let data = try await fetchData(host: host, key: Curve25519.Signing.PrivateKey(rawRepresentation: privateKey))

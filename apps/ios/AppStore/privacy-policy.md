@@ -10,7 +10,7 @@ Keep the "Last updated" date accurate — a policy dated before a material
 change is worse than no policy.
 -->
 
-**Last updated: 10 September 2026**
+**Last updated: 12 September 2026**
 
 phren for iOS ("the app") is a client for a knowledge store you own,
 stored in a Git repository on GitHub. This policy explains what the app
@@ -121,6 +121,14 @@ The app is not directed at children and collects no data from anyone.
 If this policy changes materially, the updated version will be published
 at this URL with a revised date, and the change will be noted in the app's
 release notes.
+
+**12 September 2026:** the app now also mirrors the store's `machines.yaml`,
+`profiles/` and per-project `phren.project.yaml` (which computers carry which
+projects, and where); reads a computer's hostname and a pane's git branch from
+Phren Hook; can create a Herdr workspace and start an agent in a project folder
+on request; and keeps queued chat messages in memory only. The
+developer-receives-nothing statement is unchanged. The published copy is
+https://alaarab.github.io/phren/privacy.html.
 
 ## Contact
 

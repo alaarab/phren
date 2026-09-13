@@ -76,6 +76,7 @@ struct ProjectSessionsView: View {
     @State private var error: String?
     @State private var chatSession: LiveAgentSession?
     @State private var terminalSession: LiveAgentSession?
+    @State private var launching = false
 
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var target: SessionProject { SessionProject(storeID: storeID, name: project) }
@@ -103,6 +104,8 @@ struct ProjectSessionsView: View {
                              : "Several sessions are working in this project. Choose the one you want.")
                     }
                     ForEach(discovery.problems, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                    Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
+                        .accessibilityIdentifier("sessions-open-on-computer")
                     NavigationLink("Manage computers") { LiveSessionsView() }
                 }
                 if !matches.isEmpty {
@@ -141,6 +144,7 @@ struct ProjectSessionsView: View {
             .sheet(item: $terminalSession) { session in
                 NavigationStack { HerdrTerminalView(host: session.host, session: session) }
             }
+            .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeID, project: project) }
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .task(id: DiscoveryIdentity(hosts: preferences?.hosts ?? [], active: visible && scenePhase == .active, refresh: refreshID)) {

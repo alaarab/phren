@@ -1,0 +1,204 @@
+import PhrenKit
+import PhrenLive
+import SwiftUI
+
+/// "Open on a computer": pick the computer, confirm the folder, pick the
+/// harness, and the phone asks Phren Hook to create a Herdr workspace there,
+/// start the agent in it, and open the chat. The store already says which
+/// computers carry the project (`machines.yaml` + profiles) and the folder
+/// it was added from, so the usual case is three taps.
+struct LaunchSessionView: View {
+    let storeID: String
+    let project: String
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("sessions.live.preferences.v1") private var data = Data()
+    @AppStorage("launch.kind.v1") private var kind = "codex"
+    @State private var hostID: UUID?
+    @State private var folder = ""
+    @State private var folderEdited = false
+    @State private var computerNames: [UUID: String] = [:]
+    @State private var launching = false
+    @State private var status: String?
+    @State private var error: String?
+    @State private var chatSession: LiveAgentSession?
+
+    private typealias Harness = PhrenConnection.LaunchKind
+    private var harness: Harness? { Harness(rawValue: kind) }
+    private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
+    private var hosts: [LiveHost] { preferences?.hosts ?? [] }
+    private var registry: MachineRegistry { model.machineRegistry(storeId: storeID) }
+    private var selectedHost: LiveHost? { hosts.first { $0.id == hostID } }
+
+    /// The store knows this computer has the project, by the name the
+    /// computer gives itself (from the Hook), or by how it was saved here.
+    private func knowsProject(_ host: LiveHost) -> Bool {
+        [computerNames[host.id], host.name, host.address].compactMap { $0 }.contains { registry.hosts($0, project: project) }
+    }
+
+    /// Where the project lives on that computer: a folder the user already
+    /// matched to it on this iPhone, else the folder it was added from.
+    private func suggestedFolder(_ host: LiveHost) -> String {
+        if let saved = preferences?.mappings.first(where: { $0.hostID == host.id && $0.storeID == storeID && $0.project == project }) {
+            return saved.directory
+        }
+        return registry.sourcePaths[project] ?? ""
+    }
+
+    private var canOpen: Bool {
+        !launching && selectedHost?.fingerprint != nil && folder.hasPrefix("/") && harness != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            PhrenList {
+                Section {
+                    if hosts.isEmpty {
+                        Text("Connect a computer in Agents first. Phren Hook on it creates the workspace.").foregroundStyle(PhrenTheme.textMuted)
+                    }
+                    ForEach(hosts) { host in
+                        Button { select(host) } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "desktopcomputer").foregroundStyle(PhrenTheme.textMuted)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(host.name).foregroundStyle(PhrenTheme.text)
+                                    if knowsProject(host) {
+                                        Text("has \(project)").font(.caption).foregroundStyle(PhrenTheme.success)
+                                    } else if host.fingerprint == nil {
+                                        Text("finish verifying in Agents").font(.caption).foregroundStyle(PhrenTheme.warning)
+                                    }
+                                }
+                                Spacer()
+                                if host.id == hostID { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
+                            }
+                        }
+                        .accessibilityIdentifier("launch-computer:\(host.id)")
+                        .accessibilityAddTraits(host.id == hostID ? .isSelected : [])
+                    }
+                } header: { Text("Computer") }
+
+                Section {
+                    TextField("/path/to/\(project)", text: $folder)
+                        .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        .onChange(of: folder) { _, _ in folderEdited = true }
+                        .accessibilityIdentifier("launch-folder")
+                } header: { Text("Folder on that computer") } footer: {
+                    Text(folderEdited || selectedHost.map(suggestedFolder)?.isEmpty != false
+                         ? "The workspace opens here; the agent starts in it."
+                         : "From where the project was added to phren. Change it if this computer keeps it elsewhere.")
+                }
+
+                Section {
+                    ForEach(Harness.allCases) { harness in
+                        Button { kind = harness.rawValue } label: {
+                            HStack(spacing: 10) {
+                                AgentProviderGlyph(source: harness.rawValue, size: 20)
+                                Text(harness.title).foregroundStyle(PhrenTheme.text)
+                                Spacer()
+                                if kind == harness.rawValue { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
+                            }
+                        }
+                        .accessibilityIdentifier("launch-harness:\(harness.rawValue)")
+                        .accessibilityAddTraits(kind == harness.rawValue ? .isSelected : [])
+                    }
+                } header: { Text("Harness") }
+
+                Section {
+                    Button {
+                        Task { await open() }
+                    } label: {
+                        HStack {
+                            if launching { ProgressView().tint(PhrenTheme.chatPanel).padding(.trailing, 6) }
+                            Text(launching ? (status ?? "Opening…") : "Open \(project) with \(harness?.title ?? kind)")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan).foregroundStyle(PhrenTheme.chatPanel)
+                    .disabled(!canOpen)
+                    .accessibilityIdentifier("launch-open")
+                } footer: {
+                    Text("Creates a Herdr workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.")
+                }
+            }
+            .listSectionSpacing(12)
+            .navigationTitle("Open \(project)").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(launching) } }
+            .phrenScreen()
+            .modifier(SessionLaunchAlert(error: $error))
+            .sheet(item: $chatSession, onDismiss: { dismiss() }) { AgentChatSheet(session: $0) }
+            .interactiveDismissDisabled(launching)
+            .task { await prepare() }
+        }
+    }
+
+    /// Pre-select the first computer the store says has the project, and
+    /// learn each computer's own name so `machines.yaml` can be matched.
+    private func prepare() async {
+        if hostID == nil, let known = hosts.first(where: knowsProject) ?? hosts.first { select(known) }
+        await withTaskGroup(of: (UUID, String?).self) { group in
+            for host in hosts where host.fingerprint != nil {
+                group.addTask {
+                    #if DEBUG && targetEnvironment(simulator)
+                    if AgentChatFixture.enabled { return (host.id, host.name) }
+                    #endif
+                    let name = try? await PhrenConnection.computerName(host: host, privateKey: DeviceSSHKey.load(host.id))
+                    return (host.id, name)
+                }
+            }
+            for await (id, name) in group where name != nil { computerNames[id] = name }
+        }
+        // A better-informed choice once names are in, unless the user moved on.
+        if !folderEdited, let current = selectedHost, !knowsProject(current), let known = hosts.first(where: knowsProject) { select(known) }
+    }
+
+    private func select(_ host: LiveHost) {
+        hostID = host.id
+        if !folderEdited { folder = suggestedFolder(host); folderEdited = false }
+    }
+
+    private func open() async {
+        guard let host = selectedHost, let harness, canOpen else { return }
+        let cwd = folder.trimmingCharacters(in: .whitespacesAndNewlines)
+        launching = true; error = nil
+        defer { launching = false; status = nil }
+        do {
+            status = "Starting \(harness.title) in \(project)…"
+            let session: LiveAgentSession
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { session = try await AgentChatFixture.launch(host: host, cwd: cwd, label: project, kind: harness.rawValue) }
+            else { session = try await Self.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 } }
+            #else
+            session = try await Self.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 }
+            #endif
+            // Remember the folder for this project on this computer, so the
+            // next session is found without asking.
+            data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data
+            chatSession = session
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Asks the Hook to create the workspace and start the agent, then waits
+    /// for Herdr to list the new tab with its agent so the chat can target it.
+    private static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, progress: @MainActor (String) -> Void) async throws -> LiveAgentSession {
+        let key = try DeviceSSHKey.load(host.id)
+        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label, kind: kind)
+        await progress("Waiting for \(kind.title) to be ready…")
+        for _ in 0..<20 {
+            if let session = try await PhrenConnection.fetch(host: host, privateKey: key).sessions(on: host)
+                .first(where: { $0.workspaceID == launched.workspaceID && $0.tab.id == launched.tabID }) {
+                if session.tab.agent != nil { return session }
+            }
+            try await Task.sleep(for: .seconds(1))
+        }
+        // The agent started (the Hook said so) but the overview hasn't caught up;
+        // open the chat on the identifiers we have.
+        let json = #"{"kind":"herdr","groups":[{"id":"\#(launched.workspaceID)","label":"\#(label)","children":[{"id":"\#(launched.tabID)","label":"1","title":"\#(label)","agent":"\#(kind.rawValue)","agentStatus":"\#(launched.agentStatus ?? "idle")","cwd":"\#(cwd)"}]}]}"#
+        guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else {
+            throw PhrenKitError.validation("The workspace was created, but its session couldn't be opened. Find it under Live sessions.")
+        }
+        return session
+    }
+}

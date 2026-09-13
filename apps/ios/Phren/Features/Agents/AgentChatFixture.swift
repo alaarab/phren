@@ -50,8 +50,11 @@ import UIKit
     static func panes(_ session: LiveAgentSession) throws -> AgentChatPanes {
         reads += 1
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
-        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": flag("--chat-copilot") ? "copilot" : "codex",
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": flag("--chat-copilot") ? "00000000-0000-0000-0000-000000000023" : "fixture-codex-session", "cwd": "/work/phone"]]
+        // A session launched from a project runs the harness that was picked.
+        let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : "codex")
+        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
         if flag("--chat-multiple") {
             panes.append(["id": "\(session.workspaceID):p2", "label": "2", "title": "Review the changes", "agent": "claude", "agentStatus": "idle", "sessionId": "fixture-claude-session"])
         }
@@ -170,5 +173,18 @@ import UIKit
             "entries": delta, "startLine": 0, "totalLines": totalLines, "hasMore": false]), source: target.source)
     }
     private static func flag(_ flag: String) -> Bool { ProcessInfo.processInfo.arguments.contains(flag) }
+
+    /// "Open on a computer": what the Hook would return after creating a
+    /// workspace and starting the agent, plus the snapshot the session comes
+    /// from. Recorded so a UI test can check what was asked for.
+    static var launches: [(cwd: String, label: String, kind: String)] = []
+    static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {
+        try await Task.sleep(for: .milliseconds(400))
+        launches.append((cwd, label, kind))
+        if flag("--launch-fails") { throw PhrenKitError.validation("Herdr couldn't start \(kind) in the new pane: the fixture said no.") }
+        let json = #"{"kind":"herdr","groups":[{"id":"w9","label":"\#(label)","children":[{"id":"w9:t1","label":"1","title":"\#(label)","agent":"\#(kind)","agentStatus":"idle","cwd":"\#(cwd)","sessionId":"fixture-\#(kind)-session","agentPaneCount":1,"paneCount":1}]}]}"#
+        guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else { throw PhrenKitError.validation("Fixture produced no session.") }
+        return session
+    }
 }
 #endif

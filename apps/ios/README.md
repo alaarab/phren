@@ -107,6 +107,15 @@ Terminal, opens conversations across saved computers and agents within the
 current tab. Each conversation keeps its own draft. Swipe down on the message
 box or its icon row to dismiss the keyboard without sending or losing your draft.
 
+**Open on a computer**, in a project's session menu, starts a fresh session
+where the project lives: the store's `machines.yaml` and profiles say which
+of your computers carry the project and its `phren.project.yaml` remembers
+the folder, so the computer is pre-selected and the folder filled in. Pick
+the harness (Codex, Claude Code, Copilot) and Open — Phren Hook creates a
+Herdr workspace in that folder, starts the agent in it, and the chat opens
+once the agent is ready. The folder is remembered for the project on that
+computer, so later sessions are found without asking.
+
 **Memory maintenance**, available from Projects and Settings, is optional. Its
 overview groups candidates, stale memories, and conflicts by project and store.
 Open a project to copy a maintenance request into an agent conversation or

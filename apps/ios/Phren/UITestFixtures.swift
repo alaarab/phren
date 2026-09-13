@@ -60,6 +60,10 @@ enum UITestFixtures {
             if owner == "sample", arguments.contains("--automatic-sessions-fixture") {
                 let savedPins = (try? LiveSessionPreferences.read(defaults.data(forKey: preferencesKey) ?? Data()))?.pinnedSessions ?? []
                 try await store.write("phone/FINDINGS.md", content: "# Findings\n\n- [decision] Keep phone sessions connected to project memory\n", blobSha: nil)
+                // The store knows this computer carries the project, and where.
+                try await store.write("machines.yaml", content: "Test Mac: mac\n", blobSha: nil)
+                try await store.write("profiles/mac.yaml", content: "name: mac\nprojects:\n  - phone\n", blobSha: nil)
+                try await store.write("phone/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/phone\n", blobSha: nil)
                 defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
                 if arguments.contains("--all-sessions-fixture") {
                     let remote = try LiveHost(id: hostIDs[1], name: "Test Linux",

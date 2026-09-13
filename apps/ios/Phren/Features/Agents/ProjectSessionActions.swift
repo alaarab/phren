@@ -9,6 +9,7 @@ struct ProjectSessionActions: View {
     var presentation: Presentation = .menu
     @State private var chatting = false
     @State private var terminal = false
+    @State private var launching = false
     var body: some View {
         Group {
             switch presentation {
@@ -20,9 +21,12 @@ struct ProjectSessionActions: View {
         }
         .sheet(isPresented: $chatting) { ProjectSessionsView(storeID: storeId, project: project, openChat: true) }
         .sheet(isPresented: $terminal) { ProjectSessionsView(storeID: storeId, project: project) }
+        .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeId, project: project) }
     }
     private var actions: some View {
         Group {
+            Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
+                .accessibilityIdentifier("project-open-on-computer")
             Button("Chat with agent", systemImage: "bubble.left.and.bubble.right") { chatting = true }
             Button("Herdr terminal", systemImage: "terminal") { terminal = true }
         }
