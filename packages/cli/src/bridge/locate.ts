@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
@@ -24,10 +24,16 @@ export async function locateProject(project: string, activity: Json[], env: Node
   const found: LocatedFolder[] = [];
   const seen = new Set<string>();
   const offer = async (directory: string, source: LocatedFolder["source"], lastSeen?: string) => {
-    const dir = path.resolve(directory);
+    let dir = path.resolve(directory);
+    try {
+      if (!(await stat(dir)).isDirectory()) return;
+      // On a case-insensitive disk ~/projects and ~/Projects are one folder;
+      // the real path (native, so it carries the on-disk case) dedupes them.
+      dir = await realpath.native(dir);
+    } catch { return; /* not on this computer */ }
     if (seen.has(dir)) return;
     seen.add(dir);
-    try { if ((await stat(dir)).isDirectory()) found.push({ directory: dir, source, ...(lastSeen ? { lastSeen } : {}) }); } catch { /* not on this computer */ }
+    found.push({ directory: dir, source, ...(lastSeen ? { lastSeen } : {}) });
   };
   const namesProject = (directory: string) => directory.split("/").includes(project);
 
