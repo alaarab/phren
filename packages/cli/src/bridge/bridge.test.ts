@@ -134,9 +134,11 @@ describe("Phren Hook boundaries", () => {
         { at: "2026-09-12T03:00:00Z", directory: path.join(home, "Projects/other") },
       ];
       const found = await locateProject("phren", activity, { ...process.env, PHREN_PATH: path.join(home, "store"), PROJECTS_DIR: path.join(home, "work") });
+      // Candidates come back as real paths (macOS resolves /var to /private/var).
+      const real = (p: string) => realpathSync.native(p);
       expect(found.map(f => [f.source, f.directory])).toEqual([
-        ["activity", path.join(home, "Projects/phren")], // trimmed to the project folder, newest first
-        ["herdr", path.join(home, "work/phren")],
+        ["activity", real(path.join(home, "Projects/phren"))], // trimmed to the project folder, newest first
+        ["herdr", real(path.join(home, "work/phren"))],
       ]);
       expect(found[0].lastSeen).toBe("2026-09-12T01:00:00Z");
       await expect(locateProject("../etc", [])).rejects.toThrow("Invalid project name");
