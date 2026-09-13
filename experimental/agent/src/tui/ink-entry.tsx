@@ -6,6 +6,7 @@ import React from "react";
 import { render } from "ink";
 import type { AgentConfig } from "../agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "../agent-loop.js";
+import { emitHerdrHook } from "../herdr-hooks.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { resolveSkillGesture } from "../commands.js";
@@ -473,11 +474,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
     update();
 
+    emitHerdrHook("UserPromptSubmit");
     try {
       await runTurn(userInput, session, config, { ...tuiHooks, signal: turnAbort?.signal });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       streamingText += `\nError: ${msg}`;
+    } finally {
+      emitHerdrHook("Stop");
     }
 
     // Compute elapsed time
