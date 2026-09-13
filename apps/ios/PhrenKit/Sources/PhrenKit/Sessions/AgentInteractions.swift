@@ -124,6 +124,7 @@ public struct AgentRepositoryDiff: Decodable, Sendable {
         public let status: String
         public let sections: [Section]
         public var id: String { path }
+        public init(path: String, status: String, sections: [Section]) { self.path = path; self.status = status; self.sections = sections }
     }
     public struct Section: Decodable, Sendable, Identifiable {
         public let id: String

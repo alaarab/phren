@@ -482,16 +482,29 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["Copy patch"].exists)
         capture(app, "Phren purple actions and native tool diff")
         // A python-heredoc edit shows what ran and, without opening the card,
-        // the diffs of what it changed on disk — in both repositories.
+        // the files it changed on disk — folded to their title bars. Tap one
+        // for its preview, open it full screen, fold it again.
         let shell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Shell")).firstMatch
         XCTAssertTrue(shell.waitForExistence(timeout: 3))
         XCTAssertTrue(shell.label.contains("Shell")); XCTAssertFalse(shell.label.contains("×"))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Accent is purple now")).firstMatch.waitForExistence(timeout: 5))
-        capture(app, "Inline diffs of what a shell command changed, under the collapsed card")
+        let theme = app.buttons["chat-patch-file:Theme.swift"], findings = app.buttons["chat-patch-file:phone/FINDINGS.md"]
+        XCTAssertTrue(theme.waitForExistence(timeout: 5)); XCTAssertTrue(findings.exists)
+        let purple = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch
+        XCTAssertFalse(purple.exists)
+        capture(app, "Files a shell command changed, folded under the collapsed card")
+        theme.tap()
+        XCTAssertTrue(purple.waitForExistence(timeout: 5))
+        capture(app, "One changed file unfolded to its preview")
+        app.buttons["chat-patch-open"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Theme.swift"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["diff-options"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(theme.waitForExistence(timeout: 5)); theme.tap()
+        XCTAssertFalse(purple.waitForExistence(timeout: 1))
         shell.tap()
-        // Expanded: the command, its output, then the same diffs.
+        // Expanded: the command, its output, then the same folded files.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "open(p,'w').write(s)")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chat-patch-file:phone/FINDINGS.md"].waitForExistence(timeout: 3))
         // The header's diff screen covers the whole tree, plus every place the
         // session's commands wrote to.
         app.buttons["chat-diff"].tap()

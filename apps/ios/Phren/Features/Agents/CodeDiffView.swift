@@ -9,6 +9,11 @@ import SwiftUI
 struct CodeDiffView: View {
     let patch: String
     var previewLineLimit = 36
+    /// A file under a shell call starts as its title bar alone: tap it for
+    /// the preview, tap again to fold it, or open the whole diff full screen.
+    var collapsible = false
+    @State private var open = false
+    @State private var fullScreen = false
     @State private var showAll = false
     @State private var page = 0
     /// The card's width, so row tints run edge to edge inside the horizontal
@@ -27,22 +32,45 @@ struct CodeDiffView: View {
         let pageCount = max(1, (diff.rows.count + 119) / 120)
         let currentPage = min(page, pageCount - 1)
         let visible = showAll ? Array(diff.rows.dropFirst(currentPage * 120).prefix(120)) : Array(diff.rows.prefix(previewLineLimit))
+        let header = diff.rows.first(where: { $0.kind == .header })
+        let unfolded = !collapsible || open
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                if let header = diff.rows.first(where: { $0.kind == .header }) {
-                    Text(header.text).font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.textSecondary)
-                        .lineLimit(1).truncationMode(.head)
+                if collapsible {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { open.toggle() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                .rotationEffect(.degrees(open ? 90 : 0))
+                            Text(header?.text ?? "Patch").font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.textSecondary)
+                                .lineLimit(1).truncationMode(.head)
+                            Spacer(minLength: 4)
+                            DiffCounts(added: diff.added, removed: diff.removed)
+                        }.frame(minHeight: 32).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(header?.text ?? "Patch"), \(open ? "expanded" : "collapsed")")
+                    .accessibilityIdentifier("chat-patch-file:\(header?.text ?? "")")
+                    Button("Open full diff", systemImage: "arrow.up.left.and.arrow.down.right") { fullScreen = true }
+                        .labelStyle(.iconOnly).foregroundStyle(PhrenTheme.textMuted).frame(width: 36, height: 32)
+                        .accessibilityIdentifier("chat-patch-open")
+                } else {
+                    if let header {
+                        Text(header.text).font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.textSecondary)
+                            .lineLimit(1).truncationMode(.head)
+                    }
+                    Spacer(minLength: 4)
+                    DiffCounts(added: diff.added, removed: diff.removed)
                 }
-                Spacer(minLength: 4)
-                DiffCounts(added: diff.added, removed: diff.removed)
                 if diff.truncated { Text("Preview").font(.caption2).foregroundStyle(PhrenTheme.textMuted) }
                 Button("Copy patch", systemImage: "doc.on.doc") { UIPasteboard.general.string = patch }
                     .labelStyle(.iconOnly).foregroundStyle(PhrenTheme.textMuted).frame(width: 36, height: 32)
             }
             .padding(.leading, 12).padding(.trailing, 4)
             .background(PhrenTheme.surfaceRaised)
-            .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 1) }
-            if showAll && pageCount > 1 {
+            .overlay(alignment: .bottom) { Rectangle().fill(PhrenTheme.border).frame(height: 1).opacity(unfolded ? 1 : 0) }
+            if unfolded, showAll && pageCount > 1 {
                 HStack(spacing: 4) {
                     pageButton("First patch page", "chevron.left.2", "first", destination: 0, current: currentPage, count: pageCount)
                     pageButton("Previous patch page", "chevron.left", "previous", destination: currentPage - 1, current: currentPage, count: pageCount)
@@ -55,7 +83,7 @@ struct CodeDiffView: View {
                     pageButton("Last patch page", "chevron.right.2", "last", destination: pageCount - 1, current: currentPage, count: pageCount)
                 }.padding(.horizontal, 6)
             }
-            ScrollView(showAll ? [.horizontal, .vertical] : [.horizontal]) {
+            if unfolded { ScrollView(showAll ? [.horizontal, .vertical] : [.horizontal]) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(visible) { row in
                         if row.kind == .header, row.id == diff.rows.first(where: { $0.kind == .header })?.id {
@@ -68,13 +96,22 @@ struct CodeDiffView: View {
                 .frame(minWidth: width, alignment: .leading)
                 .textSelection(.enabled)
                 .padding(.vertical, 4)
-            }.id(currentPage).frame(height: showAll ? 320 : nil).defaultScrollAnchor(.topLeading)
-            if diff.rows.count > previewLineLimit {
+            }.id(currentPage).frame(height: showAll ? 320 : nil).defaultScrollAnchor(.topLeading) }
+            if unfolded, diff.rows.count > previewLineLimit {
                 Button(showAll ? "Collapse patch" : "Show \(diff.rows.count - previewLineLimit) more lines") { showAll.toggle(); page = 0 }
                     .font(.caption).foregroundStyle(PhrenTheme.accent).padding(10)
                     .accessibilityIdentifier("chat-patch-expand")
             }
-            if diff.truncated { Text("Preview truncated. Copy the patch for all supplied lines.").font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(10) }
+            if unfolded, diff.truncated { Text("Preview truncated. Copy the patch for all supplied lines.").font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(10) }
+        }
+        .sheet(isPresented: $fullScreen) {
+            // The same editor as Repository changes, for this one patch.
+            let path = (header?.text ?? "Patch").replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: "")
+            let status = (header?.text ?? "").hasPrefix("New file") ? "A " : (header?.text ?? "").hasPrefix("Deleted file") ? "D " : " M"
+            NavigationStack {
+                FileDiffView(file: .init(path: path, status: status, sections: []), section: .init(id: "chat:\(path)", kind: "unstaged", patch: patch))
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { fullScreen = false } } }
+            }
         }
         .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 0.5))

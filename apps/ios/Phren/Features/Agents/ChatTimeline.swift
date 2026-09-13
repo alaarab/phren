@@ -101,7 +101,7 @@ struct ChatToolActivity: View, Equatable {
             if !expanded, !changed.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(changed.prefix(4)) { change in
-                        CodeDiffView(patch: change.text, previewLineLimit: 12)
+                        CodeDiffView(patch: change.text, previewLineLimit: 12, collapsible: true)
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("chat-tool-change:\(change.id)")
                     }
@@ -118,7 +118,7 @@ struct ChatToolActivity: View, Equatable {
                         // is what tells you what happened, so it is never
                         // folded behind a disclosure.
                         ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
-                                       id: message.id, isResult: message.isToolResult)
+                                       id: message.id, isResult: message.isToolResult, collapsible: message.isChange)
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
@@ -132,6 +132,7 @@ private struct ToolDetailView: View {
     let presentation: ToolPresentation
     let id: String
     var isResult = false
+    var collapsible = false
     @State private var fullOutput: FullToolOutput?
     @State private var showMore = false
     /// Six lines in the card, eighty once opened; the sheet has the rest.
@@ -142,7 +143,7 @@ private struct ToolDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let patch = presentation.patch { CodeDiffView(patch: patch, previewLineLimit: 8) }
+            if let patch = presentation.patch { CodeDiffView(patch: patch, previewLineLimit: collapsible ? 12 : 8, collapsible: collapsible) }
             else {
                 HStack(spacing: 8) {
                     Text(isResult ? "Output" : presentation.title).fontWeight(.medium)
