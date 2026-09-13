@@ -15,7 +15,7 @@ export function herdrSocket(server: string): string {
 }
 
 /** Herdr's documented newline JSON socket API. No shell, UI focus, or inherited caller context. */
-export async function rpc(server: string, method: string, params: Json = {}, signal?: AbortSignal): Promise<Json> {
+export async function rpc(server: string, method: string, params: Json = {}, signal?: AbortSignal, timeoutMs = 10_000): Promise<Json> {
   const socket = herdrSocket(server);
   const metadata = await stat(socket);
   if (!metadata.isSocket() || (process.getuid && metadata.uid !== process.getuid())) throw new BridgeError(503, "The Herdr socket is unavailable.");
@@ -31,7 +31,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const abort = () => finish(new BridgeError(499, "Request cancelled."));
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
-    client.setTimeout(10_000, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.")));
+    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.")));
     client.on("error", () => finish(new BridgeError(503, "Herdr is not reachable on this computer.")));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));
