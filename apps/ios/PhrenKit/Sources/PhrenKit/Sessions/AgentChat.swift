@@ -13,16 +13,27 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, sessionID].joined(separator: "/") }
 
     public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default") throws {
-        guard [workspaceID, tabID, paneID, sessionID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), ["codex", "claude", "copilot"].contains(source),
-              source != "copilot" || UUID(uuidString: sessionID) != nil else {
-            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, or GitHub Copilot conversation in this pane.")
+        guard [workspaceID, tabID, paneID, sessionID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
+              !["copilot", "phren"].contains(source) || UUID(uuidString: sessionID) != nil else {
+            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, or Phren conversation in this pane.")
         }
         self.hostID = hostID; self.workspaceID = workspaceID; self.tabID = tabID
         self.paneID = paneID; self.source = source; self.sessionID = sessionID
         self.muxID = muxID
     }
 
-    public var providerName: String { source == "claude" ? "Claude" : source == "copilot" ? "Copilot" : "Codex" }
+    /// Agents the app can chat with natively. `phren` is the experimental
+    /// phren-agent; its panes appear once Herdr reports that agent kind.
+    public static let sources = ["codex", "claude", "copilot", "phren"]
+
+    public var providerName: String {
+        switch source {
+        case "claude": return "Claude"
+        case "copilot": return "Copilot"
+        case "phren": return "Phren"
+        default: return "Codex"
+        }
+    }
 
     private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID }
     public init(from decoder: Decoder) throws {
@@ -119,7 +130,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public var context = AgentSessionContext()
 
     public static func read(_ data: Data, source: String) throws -> Self {
-        guard ["codex", "claude", "copilot"].contains(source), data.count <= 8_388_608,
+        guard AgentChatTarget.sources.contains(source), data.count <= 8_388_608,
               let frame = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let kind = Kind(rawValue: frame["type"] as? String ?? ""), frame["source"] as? String == source,
               frame["entries"] == nil || frame["entries"] is [[String: Any]] else {
@@ -136,7 +147,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
-            let parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw)
+            let parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
@@ -193,6 +204,39 @@ public struct AgentChatTranscript: Equatable, Sendable {
         case "function_call_output", "custom_tool_call_output":
             return [Part(role: .tool, title: "Tool result", text: readable(payload["output"]), toolCallID: payload["call_id"] as? String)]
         default: return []
+        }
+    }
+    /// phren-agent's event log, as Phren Hook exports it: one `user/message`,
+    /// `assistant/message` or `tool/results` event per row, each carrying an
+    /// Anthropic-shaped message whose blocks are text, image, tool_use or
+    /// tool_result (reasoning is already redacted on the computer).
+    private static func phren(_ raw: [String: Any]) -> [Part] {
+        guard let type = raw["type"] as? String, let data = raw["data"] as? [String: Any],
+              let message = data["message"] as? [String: Any] else { return [] }
+        let role: AgentChatMessage.Role
+        switch type {
+        case "user/message": role = .user
+        case "assistant/message": role = .assistant
+        case "tool/results": role = .tool
+        default: return []
+        }
+        if let content = message["content"] as? String {
+            return role == .tool ? [] : [Part(role: role, text: content)]
+        }
+        guard let blocks = message["content"] as? [[String: Any]] else { return [] }
+        return blocks.enumerated().compactMap { index, block -> Part? in
+            switch block["type"] as? String {
+            case "text":
+                guard role != .tool, let text = block["text"] as? String, !text.isEmpty else { return nil }
+                return Part(role: role, text: text, idIndex: index)
+            case "image":
+                return role == .tool ? nil : Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: index)
+            case "tool_use":
+                return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: index)
+            case "tool_result":
+                return Part(role: .tool, title: "Tool result", text: text(block["content"]), toolCallID: block["tool_use_id"] as? String, idIndex: index)
+            default: return nil
+            }
         }
     }
     private static func copilot(_ raw: [String: Any]) -> [Part] {

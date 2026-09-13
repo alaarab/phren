@@ -18,6 +18,8 @@ public enum AgentSlashCommand {
         case "codex": names = ["/model", "/permissions", "/diff", "/review", "/status", "/skills", "/compact", "/resume", "/new", "/mcp"]
         case "claude": names = ["/help", "/model", "/permissions", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
         case "copilot": names = ["/help", "/model", "/agent", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
+        // experimental/agent/src/commands.ts — the ones worth a tap on a phone.
+        case "phren": names = ["/help", "/model", "/provider", "/plan", "/context", "/cost", "/diff", "/review", "/compact", "/resume", "/permissions", "/clear"]
         default: names = []
         }
         return names.filter { $0.hasPrefix(draft.lowercased()) }
@@ -38,6 +40,9 @@ public enum AgentSlashCommand {
             case "/new", "/clear": detail = "Start a fresh conversation"
             case "/mcp": detail = "Manage connected tools"
             case "/help": detail = "Browse agent commands"
+            case "/provider": detail = "Switch the model provider"
+            case "/plan": detail = "Plan before acting"
+            case "/cost": detail = "See this session's cost"
             case "/agent": detail = "Choose an agent"
             case "/context": detail = "Inspect conversation context"
             case "/usage": detail = "See account usage"

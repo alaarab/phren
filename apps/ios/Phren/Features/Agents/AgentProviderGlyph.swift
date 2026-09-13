@@ -19,6 +19,8 @@ struct AgentProviderGlyph: View {
             case "copilot":
                 Image(systemName: "sparkles").font(.system(size: size * 0.78, weight: .semibold))
                     .foregroundStyle(PhrenTheme.lavender)
+            case "phren":
+                Image("PhrenMascot").resizable().scaledToFit().frame(width: size, height: size)
             default:
                 Image(systemName: "person.crop.circle").font(.system(size: size * 0.82))
                     .foregroundStyle(PhrenTheme.textDim)
@@ -34,6 +36,7 @@ struct AgentProviderGlyph: View {
         case "claude": return "Claude"
         case "codex": return "Codex"
         case "copilot": return "Copilot"
+        case "phren": return "Phren"
         default: return "Agent"
         }
     }

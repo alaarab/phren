@@ -105,6 +105,9 @@ export async function paneIdentity(server: string, pane: Json): Promise<string |
   const candidates = files.flatMap(file => {
     const match = pane.agent === "codex" ? /rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file)
       : pane.agent === "claude" ? /\/([a-f0-9-]{36})\.jsonl$/i.exec(file)
+      // phren-agent appends and closes per event, so its log is rarely open;
+      // the lifecycle binding below is the usual path for it.
+      : pane.agent === "phren" ? /\/session-([a-f0-9-]{36})\.events\.jsonl$/i.exec(file)
       : /\/session-state\/([a-f0-9-]{36})\/events\.jsonl$/i.exec(file);
     return match ? [match[1]] : [];
   });

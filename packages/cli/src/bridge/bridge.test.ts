@@ -3,18 +3,19 @@ import { createServer as createNetServer, type Server } from "node:net";
 import { request } from "node:http";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open, realpath as realpathAsync } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import { planAgentHooks, upgradeKeys } from "./install.js";
-import { TranscriptReader, transcriptPath, visibleEvent, historicalImage } from "./transcripts.js";
+import { TranscriptReader, transcriptPath, visibleEvent, historicalImage, phrenStoreRoot } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
 import { repositoryBranch } from "./projects.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
+import { object } from "./protocol.js";
 
 const execFileAsync = promisify(execFile);
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -75,6 +76,40 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent({ type: "assistant", isSidechain: true, message: {} }, "claude")).toBeUndefined();
     expect(visibleEvent({ type: "assistant.message", agentId: "subagent", data: { content: "private" } }, "copilot")).toBeUndefined();
     expect(JSON.stringify(visibleEvent({ type: "assistant", message: { content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "Visible" }] } }, "claude"))).not.toContain("private");
+  });
+  it("exports phren-agent message events without reasoning, header, or splices", () => {
+    const assistant = { seq: 3, time: "2026-09-12T20:00:00.000Z", type: "assistant/message", data: { turn: 1, stop_reason: "tool_use",
+      usage: { input_tokens: 120, output_tokens: 40 },
+      message: { role: "assistant", content: [{ type: "reasoning", text: "private", signature: "sig" }, { type: "text", text: "Visible" },
+        { type: "tool_use", id: "call_1", name: "bash", input: { cmd: "ls" } }] } } };
+    const exported = visibleEvent(assistant, "phren")!;
+    expect(JSON.stringify(exported)).not.toContain("private");
+    expect(exported).toEqual({ seq: 3, time: "2026-09-12T20:00:00.000Z", type: "assistant/message", data: { turn: 1, stop_reason: "tool_use",
+      usage: { input_tokens: 120, output_tokens: 40 },
+      message: { role: "assistant", content: [{ type: "redacted" }, { type: "text", text: "Visible" }, { type: "tool_use", id: "call_1", name: "bash", input: { cmd: "ls" } }] } } });
+    expect(visibleEvent({ type: "header", version: 1, sessionId: session, cwd: "/work" }, "phren")).toBeUndefined();
+    expect(visibleEvent({ seq: 9, type: "log/replace", data: { start: 1, end: 4, message: { role: "user", content: "summary" } } }, "phren")).toBeUndefined();
+    const results = visibleEvent({ seq: 4, type: "tool/results", data: { turn: 1, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "a\nb" }] } } }, "phren")!;
+    expect(object(results.data).message).toEqual({ role: "user", content: [{ type: "tool_result", tool_use_id: "call_1", content: "a\nb" }] });
+  });
+  it("finds a phren-agent event log under the store's runtime sessions", async () => {
+    const store = await mkdtemp(path.join(tmpdir(), "phren-store-"));
+    const previous = process.env.PHREN_PATH;
+    process.env.PHREN_PATH = store;
+    try {
+      expect(phrenStoreRoot()).toBe(path.resolve(store));
+      await mkdir(path.join(store, ".runtime/sessions"), { recursive: true });
+      const file = path.join(store, ".runtime/sessions", `session-${session}.events.jsonl`);
+      await writeFile(file, JSON.stringify({ type: "header", version: 1, sessionId: session, cwd: store }) + "\n"
+        + JSON.stringify({ seq: 1, time: "t", type: "user/message", data: { message: { role: "user", content: "Hi" }, source: "user", turn: 1 } }) + "\n");
+      expect(await transcriptPath("phren", session)).toBe(await realpathAsync(file));
+      const page = await new TranscriptReader(await transcriptPath("phren", session), "phren").read();
+      expect(page.entries.map(e => e.raw.type)).toEqual(["user/message"]);
+      await expect(transcriptPath("phren", "bbbbbbbb-2222-4222-8222-222222222222")).rejects.toThrow("not available");
+    } finally {
+      if (previous === undefined) delete process.env.PHREN_PATH; else process.env.PHREN_PATH = previous;
+      await rm(store, { recursive: true, force: true });
+    }
   });
   it("exports only the model from a Codex turn context", () => {
     const context = { type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra", cwd: "/private/work", approval_policy: "never", instructions: "private" } };

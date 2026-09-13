@@ -88,6 +88,9 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive
   `beforeLine`, returning one older page without first reading the latest page.
+- Provider `source` values: `codex`, `claude`, `copilot`, and `phren` (the
+  experimental phren-agent — its `session-<uuid>.events.jsonl` under the store's
+  `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`).
 - `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
   and the pane's current git `branch` (read on the computer, cached ~10s).
   The model name comes from the transcript instead: Claude rows carry

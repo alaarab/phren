@@ -1,5 +1,6 @@
 /** Interactive REPL for the phren agent with steering/queue input modes. */
 
+import { emitHerdrHook } from "./herdr-hooks.js";
 import * as readline from "node:readline/promises";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -111,11 +112,14 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     agentRunning = true;
 
+    emitHerdrHook("UserPromptSubmit");
     try {
       await runTurn(trimmed, session, config);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);
+    } finally {
+      emitHerdrHook("Stop");
     }
 
     agentRunning = false;
@@ -132,6 +136,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       }
 
       agentRunning = true;
+      emitHerdrHook("UserPromptSubmit");
       try {
         if (inputMode === "steering") {
           // Steering: inject as a correction/redirect
@@ -141,6 +146,8 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);
+      } finally {
+        emitHerdrHook("Stop");
       }
       agentRunning = false;
     }

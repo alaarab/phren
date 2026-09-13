@@ -26,6 +26,17 @@ Note: the test suite imports `@phren/cli` subpath exports that resolve to
 `packages/cli/dist/`, so a bare `pnpm --filter @phren/agent test` on a clean
 checkout fails until the CLI is built — prefer the turbo invocation.
 
+## Phren Hook / iPhone chat
+
+When phren-agent runs inside a Herdr pane (`HERDR_ENV=1`), it reports
+`SessionStart`, `UserPromptSubmit` and `Stop` to the installed Phren Hook
+bundle (`~/.local/share/phren/bridge/current/bridge-hook.mjs hook phren`, see
+`src/herdr-hooks.ts`) so the iPhone can bind the pane to this session's
+`.runtime/sessions/session-<id>.events.jsonl`. Everything on Phren's side is in
+place; the pane shows up as a chat once Herdr reports `phren` as an agent kind
+(Herdr adds agents in its own releases — see the draft request in the project
+notes). Without Herdr the hook calls are silent no-ops.
+
 ## Splash
 
 Interactive sessions (`phren-agent -i`, `--multi`, `--team`) open with the

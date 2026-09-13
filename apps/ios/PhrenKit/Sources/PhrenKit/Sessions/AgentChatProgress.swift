@@ -52,6 +52,17 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
            let message = raw["message"] as? [String: Any], message["role"] as? String == "assistant" {
             return AgentTokenUsage.read(message["usage"] as? [String: Any], inputIncludesCache: false).map { .init(line: line, value: .usage($0)) }
         }
+        if source == "phren", let data = raw["data"] as? [String: Any] {
+            // A user turn starts work; the assistant's final message (no tool
+            // call pending) finishes it, and carries the response's counts.
+            switch raw["type"] as? String {
+            case "user/message": return .init(line: line, value: .started(date(nil, fallback: raw["time"])))
+            case "assistant/message":
+                if let usage = AgentTokenUsage.read(data["usage"] as? [String: Any]) { return .init(line: line, value: .usage(usage)) }
+                return data["stop_reason"] as? String == "end_turn" ? .init(line: line, value: .finished(date(nil, fallback: raw["time"]))) : nil
+            default: return nil
+            }
+        }
         if source == "copilot", raw["agentId"] == nil, let data = raw["data"] as? [String: Any] {
             switch raw["type"] as? String {
             case "assistant.turn_start": return .init(line: line, value: .started(date(nil, fallback: raw["timestamp"])))
