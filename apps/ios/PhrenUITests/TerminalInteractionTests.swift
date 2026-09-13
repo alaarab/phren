@@ -24,6 +24,26 @@ final class TerminalInteractionTests: XCTestCase {
         app.buttons["Codex shortcuts"].tap()
         app.buttons["terminal-command:codex:/model"].tap()
         XCTAssertEqual(try state(app).input, before + "/model ", "A command waits for explicit Enter")
+        // A tapped shortcut closes the panel, like a menu item.
+        XCTAssertFalse(app.buttons["Close shortcuts"].waitForExistence(timeout: 1), "Sending a shortcut dismisses the panel")
+        app.buttons["Ctrl"].press(forDuration: 0.6)
+        XCTAssertTrue(app.buttons["Close shortcuts"].waitForExistence(timeout: 3))
+        app.buttons["Terminal gestures"].tap()
+        let closeAfter = app.switches["terminal-close-after-shortcut"]
+        XCTAssertTrue(closeAfter.waitForExistence(timeout: 3))
+        // A SwiftUI Toggle's centre is its label; the switch sits at the trailing edge.
+        closeAfter.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertEqual(closeAfter.value as? String, "0")
+        app.buttons["Codex shortcuts"].tap()
+        let model = app.buttons["terminal-command:codex:/model"]
+        XCTAssertTrue(model.waitForExistence(timeout: 3)); model.tap()
+        XCTAssertTrue(app.buttons["Close shortcuts"].waitForExistence(timeout: 2), "With the toggle off the panel stays open")
+        XCTAssertTrue(model.exists)
+        app.buttons["Terminal gestures"].tap()
+        XCTAssertTrue(closeAfter.waitForExistence(timeout: 3))
+        closeAfter.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap() // restore the default for later tests
+        XCTAssertEqual(closeAfter.value as? String, "1")
+        app.buttons["Codex shortcuts"].tap()
         capture(app, "Tabbed terminal command palette")
         app.buttons["Claude shortcuts"].tap()
         XCTAssertTrue(app.buttons["terminal-command:claude:/help"].isHittable)

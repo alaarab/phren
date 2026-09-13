@@ -175,6 +175,9 @@ private struct TerminalShortcutMenu: View {
     @State private var editingPanel: TerminalShortcutPanelID = .favorites
     @State private var error: String?
     @State private var sequenceTask: Task<Void, Never>?
+    /// A tapped shortcut sends and closes the panel, the way a menu item
+    /// does; turn it off to fire several in a row.
+    @AppStorage("terminal.closeAfterShortcut.v1") private var closeAfterShortcut = true
     @ScaledMetric(relativeTo: .caption) private var tileWidth = 100.0
     private var preferences: TerminalShortcutPreferences { storage.preferences }
     private var selected: TerminalShortcutPanel { preferences.selectedPanel(preferred: tab, source: source) }
@@ -326,6 +329,7 @@ private struct TerminalShortcutMenu: View {
             }
             let steps = try shortcut.steps()
             error = nil
+            let dismiss = closeAfterShortcut
             sequenceTask = Task { @MainActor in
                 defer { sequenceTask = nil }
                 for (index, step) in steps.enumerated() {
@@ -336,6 +340,7 @@ private struct TerminalShortcutMenu: View {
                     guard !Task.isCancelled else { return }
                     send(step)
                 }
+                if dismiss { close() }
             }
         } catch { self.error = error.localizedDescription }
     }
@@ -347,8 +352,11 @@ private struct TerminalShortcutMenu: View {
 
 private struct TerminalGestureSettings: View {
     @AppStorage("terminal.twoFingerGestures.v1") private var enabled = true
+    @AppStorage("terminal.closeAfterShortcut.v1") private var closeAfterShortcut = true
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Toggle("Close panel after a shortcut", isOn: $closeAfterShortcut).font(.subheadline).tint(PhrenTheme.cyan)
+                .accessibilityIdentifier("terminal-close-after-shortcut")
             Toggle("Two-finger gestures", isOn: $enabled).font(.subheadline).tint(PhrenTheme.cyan)
             Text("Swipe up with two fingers for shortcuts. Swipe down with two fingers to hide the keyboard.")
             Text("Swipe with one finger to scroll. Pinch to resize. Hold to select text. Tap controls and links to open them.")

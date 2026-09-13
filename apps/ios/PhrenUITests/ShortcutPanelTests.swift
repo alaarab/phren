@@ -53,6 +53,9 @@ final class ShortcutPanelTests: XCTestCase {
         let report = try JSONDecoder().decode(Report.self, from: Data(app.staticTexts["terminal-fixture-report"].label.utf8))
         XCTAssertEqual(report.input, "\u{02}T", "The two-step binding sends exact bytes without Enter")
         capture(app, "Customized Ctrl hold panel")
+        // The tap closed the panel; hold Ctrl again for its settings.
+        app.buttons["Ctrl"].press(forDuration: 0.6)
+        XCTAssertTrue(app.buttons["Terminal gestures"].waitForExistence(timeout: 5))
         app.buttons["Terminal gestures"].tap()
         app.buttons["terminal-customize-shortcuts"].tap()
         XCTAssertTrue(app.navigationBars["Shortcuts"].waitForExistence(timeout: 5))

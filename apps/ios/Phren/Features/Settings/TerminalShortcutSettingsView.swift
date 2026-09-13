@@ -19,6 +19,7 @@ struct TerminalShortcutSettingsView: View {
     @State private var error: String?
     @State private var selectedPanel: TerminalShortcutPanelID?
     @State private var toolbarSettings = false
+    @AppStorage("terminal.closeAfterShortcut.v1") private var closeAfterShortcut = true
     private var preferences: TerminalShortcutPreferences { storage.preferences }
 
     var body: some View {
@@ -48,10 +49,13 @@ struct TerminalShortcutSettingsView: View {
                     }
             } header: { Text("Panel tabs") }
             footer: { Text("Tap − to disable a panel. Drag to reorder. Keep at least one panel active.") }
-                .disabled(storage.saved == nil)
             Section("Inactive") {
                 ForEach(preferences.panels.filter { !$0.enabled }) { panel in panelRow(panel) }
             }.disabled(storage.saved == nil)
+            Section {
+                Toggle("Close panel after a shortcut", isOn: $closeAfterShortcut).tint(PhrenTheme.cyan)
+                    .accessibilityIdentifier("settings-close-after-shortcut")
+            } footer: { Text("Off keeps the panel open so you can send several shortcuts in a row.") }
             Section {
                 Button { toolbarSettings = true } label: { Label("Toolbar keys & icons", systemImage: "keyboard") }
                 Button("Restore all shortcut defaults") { storage.reset(); error = nil }
