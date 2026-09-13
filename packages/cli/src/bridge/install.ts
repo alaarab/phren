@@ -205,7 +205,10 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
         const groups = objects(hooks[event]).map(group => ({ ...group, hooks: objects(group.hooks).filter(h => !ownHook(h.command)) })).filter(group => group.hooks.length);
         // Tool hooks snapshot the working tree around shell calls, so the phone
         // can show what a command changed; other tools carry their own patch.
-        const group = event.endsWith("ToolUse") ? { matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }
+        // Claude Code matches the tool by name here; Codex names its shell
+        // tool differently across versions, so its hook runs for every tool
+        // and the Hook itself keeps only shell calls.
+        const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
           : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
         hooks[event] = remove ? groups : [...groups, group];
       }

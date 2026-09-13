@@ -90,9 +90,11 @@ export class AgentHooks {
         await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
         // What a shell call changed on disk: snapshot before, diff after.
-        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && SHELL_TOOLS.has(String(body.tool))) {
+        const input = object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
+        // A shell call by name, or any tool whose input is a command line —
+        // Codex has renamed its shell tool more than once.
+        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && (SHELL_TOOLS.has(String(body.tool)) || command !== undefined)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
-          const input = object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
           if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "");
           else await this.changes.after(conversation, id);
           res.end("{}"); return;

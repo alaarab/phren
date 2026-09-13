@@ -621,7 +621,9 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect(changes).toHaveLength(3);
       expect(changes[0].after).toContain("other-provider-hook");
       expect(changes[0].after).toContain("PermissionRequest");
-      expect(JSON.parse(changes[0].after).hooks.PreToolUse[0]).toMatchObject({ matcher: "Bash", hooks: [{ timeout: 10 }] });
+      expect(JSON.parse(changes[0].after).hooks.PreToolUse[0]).toMatchObject({ hooks: [{ timeout: 10 }] });
+      expect(JSON.parse(changes[0].after).hooks.PreToolUse[0].matcher).toBeUndefined(); // Codex: every tool, filtered by the Hook
+      expect(JSON.parse(changes.find(c => c.file.endsWith("settings.json"))!.after).hooks.PreToolUse[0].matcher).toBe("Bash");
       expect(JSON.parse(changes[0].after).hooks.PostToolUse).toHaveLength(1);
       expect(await readFile(file, "utf8")).toBe(original);
       await writeFile(file, changes[0].after);
