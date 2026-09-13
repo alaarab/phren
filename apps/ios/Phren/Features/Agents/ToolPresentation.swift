@@ -10,6 +10,16 @@ struct ToolPresentation {
     /// A short qualifier after the path — "lines 10–50", "in src/".
     var note: String? = nil
     let raw: String
+    /// Whether this call looks like it wrote to files — a heredoc, `sed -i`,
+    /// a redirect, `tee`, a Python `open(..., "w")`, `git apply` — so the
+    /// chat can offer the repository diff that shows what actually changed.
+    /// Only for commands: Write/Edit already carry their own patch.
+    var editsFiles: Bool {
+        guard patch == nil, ["Shell", "Tools"].contains(title) else { return false }
+        return Self.fileEdit.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil
+    }
+    private static let fileEdit = try! NSRegularExpression(pattern: #"(?m)(<<-?\s*['"]?\w+['"]?|\bsed\s+-[a-zA-Z]*i|\btee\b|(?<![<>&|\d])>{1,2}\s*[~./\w-]+|\bopen\([^)]*['"][wa]\+?['"]|\bgit\s+apply\b|\bpatch\s+-p\d|\b(?:cp|mv|rm)\s+-?\w*\s+[~./\w-]+|\bnpm\s+(?:i|install|uninstall)\b|\bpnpm\s+(?:add|remove)\b)"#)
+
     var preview: String {
         // The file, not its whole absolute path: the last two components
         // read like VS Code's "folder/file" and leave room for the counts.

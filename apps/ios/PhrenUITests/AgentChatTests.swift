@@ -481,6 +481,16 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Updated Theme.swift"].exists)
         XCTAssertTrue(app.buttons["Copy patch"].exists)
         capture(app, "Phren purple actions and native tool diff")
+        // A python-heredoc edit shows what ran; its chip opens what changed.
+        let shell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Shell")).firstMatch
+        XCTAssertTrue(shell.waitForExistence(timeout: 3)); shell.tap()
+        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-changes:")).firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 3)); chip.tap()
+        XCTAssertTrue(app.navigationBars["Repository changes"].waitForExistence(timeout: 5))
+        let row = app.buttons["diff-file:unstaged:Theme.swift"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "Repository changes from a shell edit, syntax coloured")
     }
     /// Seed this simulator with `xcrun simctl addmedia <device> <test-image>`.
     @MainActor

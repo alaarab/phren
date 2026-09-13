@@ -1,3 +1,4 @@
+import PhrenKit
 import SwiftUI
 
 /// VS Code's diff editor colours, mapped onto the theme's semantic tints: a
@@ -34,6 +35,7 @@ enum DiffPalette {
 struct DiffRowView: View {
     let row: DiffDocument.Row
     var numbered = true
+    var language: SyntaxTokenizer.Language = .plain
 
     var body: some View {
         if row.kind == .hunk {
@@ -57,7 +59,7 @@ struct DiffRowView: View {
                 Text(DiffPalette.sign(row.kind))
                     .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
                     .frame(width: 14, alignment: .center)
-                Text(Self.attributed(row))
+                Text(Self.attributed(row, language: language))
                     .foregroundStyle(PhrenTheme.text)
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(.trailing, 12)
@@ -73,10 +75,11 @@ struct DiffRowView: View {
         }
     }
 
-    /// The line without its leading sign, with the changed characters tinted.
-    static func attributed(_ row: DiffDocument.Row) -> AttributedString {
+    /// The line without its leading sign, syntax-coloured, with the changed
+    /// characters tinted on top — GitHub's two layers.
+    static func attributed(_ row: DiffDocument.Row, language: SyntaxTokenizer.Language = .plain) -> AttributedString {
         let body = row.kind == .context || row.kind == .added || row.kind == .removed ? String(row.text.dropFirst()) : row.text
-        var text = AttributedString(body.isEmpty ? " " : body)
+        var text = body.isEmpty ? AttributedString(" ") : CodeHighlighting.highlighted(body, language: language)
         guard let inner = row.inner, !inner.isEmpty else { return text }
         // `inner` indexes the original line; shift by the dropped sign.
         let start = row.text.distance(from: row.text.index(after: row.text.startIndex), to: inner.lowerBound)
@@ -121,12 +124,13 @@ struct DiffHunkRow: View {
 struct DiffSplitRowView: View {
     let row: DiffDocument.SplitRow
     let columnWidth: CGFloat
+    var language: SyntaxTokenizer.Language = .plain
 
     var body: some View {
         if let hunk = row.hunk {
             DiffHunkRow(text: hunk.text)
         } else if row.left?.kind == .header, let header = row.left {
-            DiffRowView(row: header)
+            DiffRowView(row: header, language: language)
         } else {
             HStack(alignment: .top, spacing: 0) {
                 cell(row.left, number: row.left?.old)
@@ -149,7 +153,7 @@ struct DiffSplitRowView: View {
                 Text(DiffPalette.sign(line.kind))
                     .foregroundStyle(line.kind == .added ? PhrenTheme.success : line.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
                     .frame(width: 14)
-                Text(DiffRowView.attributed(line)).foregroundStyle(PhrenTheme.text).lineLimit(1).truncationMode(.tail)
+                Text(DiffRowView.attributed(line, language: language)).foregroundStyle(PhrenTheme.text).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 0)
         }

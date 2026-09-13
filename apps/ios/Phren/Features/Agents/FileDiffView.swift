@@ -13,6 +13,7 @@ struct FileDiffView: View {
     @State private var focused: Int?
 
     private var document: DiffDocument? { section.patch.map(DiffDocument.init(patch:)) }
+    private var language: SyntaxTokenizer.Language { .detect(file.path) }
     private var fileName: String { file.path.split(separator: "/").last.map(String.init) ?? file.path }
 
     var body: some View {
@@ -76,13 +77,13 @@ struct FileDiffView: View {
                         if sideBySide {
                             let column = max(180, (geometry.size.width - 1) / 2)
                             ForEach(document.split) { row in
-                                DiffSplitRowView(row: row, columnWidth: column)
+                                DiffSplitRowView(row: row, columnWidth: column, language: language)
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.left?.change ?? row.right?.change) }
                             }
                         } else {
                             ForEach(document.rows) { row in
-                                DiffRowView(row: row)
+                                DiffRowView(row: row, language: language)
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.change) }
                             }

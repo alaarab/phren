@@ -1,3 +1,4 @@
+import PhrenKit
 import SwiftUI
 
 /// A tool's patch inside the chat, drawn with the same rows as the file diff
@@ -14,6 +15,11 @@ struct CodeDiffView: View {
     /// scroller instead of stopping where the longest line ends.
     @State private var width: CGFloat = 0
     private var document: DiffDocument { DiffDocument(patch: patch) }
+    /// The file named in the patch header decides the colouring.
+    private func language(_ diff: DiffDocument) -> SyntaxTokenizer.Language {
+        let header = diff.rows.first { $0.kind == .header }?.text ?? ""
+        return .detect(header.replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: ""))
+    }
 
     var body: some View {
         let diff = document
@@ -55,7 +61,7 @@ struct CodeDiffView: View {
                         if row.kind == .header, row.id == diff.rows.first(where: { $0.kind == .header })?.id {
                             // Already named in the card's title bar.
                         } else {
-                            DiffRowView(row: row, numbered: numbered)
+                            DiffRowView(row: row, numbered: numbered, language: language(diff))
                         }
                     }
                 }

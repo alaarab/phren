@@ -59,6 +59,7 @@ struct AgentChatView: View {
     @State private var showingDictation = false
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
+    @State private var showingChanges = false
     @State private var previewImage: ChatAttachmentDraft?
     @State private var historyTask: Task<Void, Never>?
     @State private var bottomPosition: CGFloat = 0
@@ -151,6 +152,7 @@ struct AgentChatView: View {
                             ForEach(model.timeline) { entry in
                                 if entry.isActivity {
                                     ChatToolActivity(messages: entry.messages).equatable().id(entry.id)
+                                        .environment(\.openRepositoryChanges, model.target == nil ? nil : { showingChanges = true })
                                 } else if let message = entry.messages.first {
                                     ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
                                         message.role == .user && item.path.map { message.text.contains($0) } == true
@@ -306,6 +308,11 @@ struct AgentChatView: View {
                 }, context: project == nil ? nil : {
                     Task { try? await Task.sleep(for: .milliseconds(350)); showingContext = true }
                 })
+            }
+        }
+        .sheet(isPresented: $showingChanges) {
+            if let target = model.target {
+                NavigationStack { AgentDiffView(session: session, target: target) }
             }
         }
         .sheet(isPresented: $showingDictation) {

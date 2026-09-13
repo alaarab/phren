@@ -80,13 +80,18 @@ workspaces, project memory, skills, graph, usage, context, switching agent);
 the terminal, slash commands, and dictation stay in the composer, and a
 connection notice offers Reconnect when the conversation drops.
 
-**Repository changes** follows VS Code's Source Control view: Staged Changes
-and Changes, each file with its status letter (M, A, D, R, U), name, folder,
-and line counts. A file opens in a diff editor with old/new line numbers in
-the gutter, tinted inserted and removed rows with the changed characters
-tinted harder, hunk rules, next/previous change, inline or side-by-side
-layout, and copy. Patches an agent applies render in the chat with the same
-rows.
+**Repository changes** is GitHub's files-changed view: Staged Changes and
+Changes as flat rows with a file-type icon, name, folder, status letter
+(M, A, D, R, U), `+N −M` and a diffstat bar. A file opens in a diff editor
+with old/new line numbers in the gutter, tinted inserted and removed rows
+with the changed characters tinted harder, **syntax colouring by language**
+(Swift, Python, TypeScript/JavaScript, JSON, YAML, shell, Rust, Go, Ruby,
+CSS, HTML, SQL, Markdown), hunk rules, next/previous change, inline or
+side-by-side layout, and copy. Patches an agent applies render in the chat
+with the same coloured rows, chat code fences are coloured by their language,
+and a shell command that wrote files (a heredoc, `sed -i`, a Python
+`open(…, "w")`) offers **See repository changes** so you can read what it
+actually changed.
 
 The transcript reads in plain white and grey in every theme: prose and tool
 titles (Shell, Agent, Patch) in white, commands and icons in neutral grey,

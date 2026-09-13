@@ -48,7 +48,8 @@ struct ChatRichText: View, Equatable {
                                 .font(.caption).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 32)
                         }.foregroundStyle(PhrenTheme.chatNeutral)
                         ScrollView(.horizontal) {
-                            Text(block.text).font(.system(size: textSize, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                            Text(CodeHighlighting.highlightedBlock(block.text, language: .detect(language)))
+                                .font(.system(size: textSize, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
                                 .textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
                         }
                     }.padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))

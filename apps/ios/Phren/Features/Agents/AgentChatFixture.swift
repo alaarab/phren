@@ -107,6 +107,13 @@ import UIKit
             let output = String(decoding: try JSONSerialization.data(withJSONObject: ["chunk_id": "fixture", "output": "Updated Theme.swift", "exit_code": 0]), as: UTF8.self)
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "output": [["type": "input_text", "text": output]]]]])
         }
+        if flag("--chat-diffs") {
+            // A shell-driven edit: the card can only show what ran, so it
+            // offers the repository diff for what changed.
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "edit-py", "name": "exec_command",
+                "arguments": "{\"cmd\":\"python3 - <<'EOF'\\np='Theme.swift'\\ns=open(p).read().replace('green','purple')\\nopen(p,'w').write(s)\\nEOF\"}"]]])
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "edit-py", "output": "{\"output\":\"\",\"exit_code\":0}"]]])
+        }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
         // Real transcripts retain the tool call after it is answered. Keep its

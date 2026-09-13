@@ -61,11 +61,21 @@ struct ChatToolSummary {
     }
 }
 
+/// How a tool card opens the conversation's repository diff — set by the
+/// chat view, absent anywhere a card is shown without a live session.
+struct OpenRepositoryChangesKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+extension EnvironmentValues {
+    var openRepositoryChanges: (() -> Void)? {
+        get { self[OpenRepositoryChangesKey.self] } set { self[OpenRepositoryChangesKey.self] = newValue }
+    }
+}
+
 struct ChatToolActivity: View, Equatable {
     let messages: [AgentChatMessage]
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openRepositoryChanges) private var openRepositoryChanges
     var body: some View {
         let summary = ChatToolSummary(messages)
         VStack(alignment: .leading, spacing: 0) {
@@ -100,6 +110,17 @@ struct ChatToolActivity: View, Equatable {
                         // folded behind a disclosure.
                         ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
                                        id: message.id, isResult: message.isToolResult)
+                    }
+                    // A command that wrote files says nothing about what it
+                    // wrote; the working tree does.
+                    if let openRepositoryChanges, messages.contains(where: { !$0.isToolResult && ToolPresentation(title: $0.title ?? "", text: $0.text).editsFiles }) {
+                        Button { openRepositoryChanges() } label: {
+                            Label("See repository changes", systemImage: "arrow.triangle.branch")
+                                .font(.caption.weight(.medium)).padding(.horizontal, 10).padding(.vertical, 7)
+                                .background(PhrenTheme.surfaceRaised, in: Capsule())
+                        }
+                        .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
+                        .accessibilityIdentifier("chat-tool-changes:\(messages[0].id)")
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
