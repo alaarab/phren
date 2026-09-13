@@ -115,7 +115,9 @@ def main():
         return
     run("xcrun", "devicectl", "device", "install", "app", "--device", device, str(app), "--timeout", "120")
     print("Phren installed. Launching…", flush=True)
-    run("xcrun", "devicectl", "device", "process", "launch", "--device", device,
+    # --terminate-existing: launching over a running Phren otherwise fails with
+# FBSOpenApplicationServiceErrorDomain error 1, which reads like a locked phone.
+run("xcrun", "devicectl", "device", "process", "launch", "--terminate-existing", "--device", device,
         "--terminate-existing", "com.phren.ios", "--timeout", "30")
     print("Phren installed and launched.")
 
