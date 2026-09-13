@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build, verify, install, and launch Phren on a paired iPhone."""
 import argparse
+import time
 from contextlib import contextmanager
 import json
 import os
@@ -115,10 +116,20 @@ def main():
         return
     run("xcrun", "devicectl", "device", "install", "app", "--device", device, str(app), "--timeout", "120")
     print("Phren installed. Launching…", flush=True)
-    # --terminate-existing: launching over a running Phren otherwise fails with
-# FBSOpenApplicationServiceErrorDomain error 1, which reads like a locked phone.
-run("xcrun", "devicectl", "device", "process", "launch", "--terminate-existing", "--device", device,
-        "--terminate-existing", "com.phren.ios", "--timeout", "30")
+    # Right after an install, launching can fail transiently with
+    # CoreDeviceError 10002 / FBSOpenApplicationServiceErrorDomain error 1 while
+    # the previous instance is still being torn down — it reads like a locked
+    # phone but a retry a few seconds later succeeds.
+    for attempt in range(3):
+        try:
+            run("xcrun", "devicectl", "device", "process", "launch", "--device", device,
+                "--terminate-existing", "com.phren.ios", "--timeout", "30")
+            break
+        except SystemExit:
+            if attempt == 2:
+                raise
+            print("Launch not accepted yet; retrying…", flush=True)
+            time.sleep(4)
     print("Phren installed and launched.")
 
 
