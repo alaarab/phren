@@ -46,7 +46,7 @@ final class ApprovalActivityController {
                 staleDate: record.expiresAt)
             if let existing = Activity<ApprovalActivityAttributes>.activities.first(where: { $0.attributes.requestID == record.id }) {
                 await existing.update(content)
-            } else {
+            } else if IntegrationSettings.enabled(IntegrationSettings.liveActivityKey) { // Settings → Notifications
                 _ = try Activity.request(attributes: ApprovalActivityAttributes(requestID: record.id), content: content, pushType: nil)
             }
             observed[target] = (approval.id, record.expiresAt)

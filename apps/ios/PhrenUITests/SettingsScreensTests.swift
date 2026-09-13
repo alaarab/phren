@@ -16,6 +16,11 @@ final class SettingsScreensTests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 5), id); row.tap()
             XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5), title)
         }
+        // The value comes back as "1" or 1 depending on the element; poll it.
+        func isOn(_ element: XCUIElement) -> Bool {
+            for _ in 0..<25 { if String(describing: element.value ?? "") == "1" { return true }; Thread.sleep(forTimeInterval: 0.2) }
+            return false
+        }
         // A SwiftUI Toggle's centre is its label; the switch sits at the trailing
         // edge, and its value follows the animation.
         func turnOn(_ id: String) {
@@ -24,8 +29,7 @@ final class SettingsScreensTests: XCTestCase {
             // The row is the identified switch; the control is its inner switch.
             let control = toggle.switches.firstMatch
             control.tap()
-            expectation(for: NSPredicate(format: "value == '1'"), evaluatedWith: control)
-            waitForExpectations(timeout: 5)
+            XCTAssertTrue(isOn(control), id)
         }
         func back() { app.navigationBars.buttons.firstMatch.tap(); for _ in 0..<3 where !app.descendants(matching: .any)["settings-theme"].exists { app.swipeDown() } }
 
@@ -65,13 +69,38 @@ final class SettingsScreensTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["speech-replacement:0"].waitForExistence(timeout: 3))
         back()
 
+        for (id, title) in [("settings-keyboard", "Keyboard"), ("settings-hook", "Phren Hook"), ("settings-notifications", "Notifications"), ("settings-show-on-agents", "Show on Agents")] {
+            open(id, title: title); back()
+        }
+
         // Preferences survive a relaunch.
         app.terminate(); app.launch()
         app.tabBars.buttons["Settings"].tap()
         open("settings-terminal-advanced", title: "Advanced")
         let kept = app.switches["terminal-keep-screen-on"]
         XCTAssertTrue(kept.waitForExistence(timeout: 3))
-        expectation(for: NSPredicate(format: "value == '1'"), evaluatedWith: kept.switches.firstMatch); waitForExpectations(timeout: 5)
+        XCTAssertTrue(isOn(kept.switches.firstMatch))
         XCTAssertTrue(app.buttons["▁ Underline"].isSelected)
+    }
+
+    /// The Agents header's extra icons and the screens behind them, with fixture data.
+    @MainActor
+    func testSimulatorsAndFilesFromTheAgentsHeader() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--native-chat-fixture"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Agents"].tap()
+        let simulators = app.buttons["all-simulators"]
+        XCTAssertTrue(simulators.waitForExistence(timeout: 10)); simulators.tap()
+        XCTAssertTrue(app.navigationBars["Simulators"].waitForExistence(timeout: 5))
+        let row = app.buttons["simulator:11111111-2222-3333-4444-555555555555"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
+        XCTAssertTrue(app.navigationBars["iPhone 17 Pro"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap(); app.navigationBars.buttons.firstMatch.tap()
+        let files = app.buttons["all-files"]
+        XCTAssertTrue(files.waitForExistence(timeout: 5)); files.tap()
+        XCTAssertTrue(app.navigationBars["Files"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["files-row:design.pdf"].waitForExistence(timeout: 5))
     }
 }

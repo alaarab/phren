@@ -343,6 +343,17 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root) await rm(root, { recursive: true, force: true });
   });
   it("discovers workspaces through a private protocol without any TCP helper", async () => {
+    // Files the phone keeps on the computer, and the simulator routes.
+    const upload = await api("/v1/files", { name: "notes.md", data: Buffer.from("# hi\n").toString("base64") });
+    expect(upload.status, JSON.stringify(upload.data)).toBe(200); expect(upload.data.path).toMatch(/uploads\/files\/[0-9a-f-]{36}-notes\.md$/);
+    expect((await api("/v1/files", { name: "../x", data: "aGk=" })).status).toBe(400);
+    expect((await api("/v1/files", { name: "shot.png", data: Buffer.from("not an image").toString("base64") })).status).toBe(400);
+    const files = await api("/v1/files");
+    expect(files.data.files.map((f: { name: string; size: number }) => [f.name, f.size])).toEqual([["notes.md", 5]]);
+    expect((await api("/v1/simulators/screenshot?udid=nope")).status).toBe(400);
+    const simulators = await api("/v1/simulators");
+    expect(simulators.status).toBe(200); expect(Array.isArray(simulators.data.simulators)).toBe(true);
+    if (process.platform !== "darwin") expect(simulators.data.simulators).toEqual([]);
     const health = await api("/v1/health");
     expect(health.data.product).toBe("phren-hook"); expect(health.data.protocol).toBe(1);
     const workspaces = await api("/v1/workspaces?mux=herdr:default");

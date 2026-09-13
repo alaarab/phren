@@ -59,6 +59,8 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-terminal-toolbar")
                     NavigationLink { TerminalShortcutSettingsView() } label: { settingsRow("Shortcuts", "rectangle.grid.2x2") }
                         .accessibilityIdentifier("settings-terminal-shortcuts")
+                    NavigationLink { KeyboardSettingsView() } label: { settingsRow("Keyboard", "keyboard.badge.ellipsis") }
+                        .accessibilityIdentifier("settings-keyboard")
                     NavigationLink { TerminalGesturesSettingsView() } label: { settingsRow("Gestures", "hand.draw") }
                         .accessibilityIdentifier("settings-gestures")
                     NavigationLink { SpeechSettingsView() } label: { settingsRow("Speech", "mic") }
@@ -104,7 +106,13 @@ struct SettingsView: View {
                 }
 
                 Section("Integrations") {
-                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers & Phren Hook", "desktopcomputer") }
+                    NavigationLink { PhrenHookSettingsView() } label: { settingsRow("Phren Hook", "point.3.connected.trianglepath.dotted") }
+                        .accessibilityIdentifier("settings-hook")
+                    NavigationLink { NotificationSettingsView() } label: { settingsRow("Notifications", "bell") }
+                        .accessibilityIdentifier("settings-notifications")
+                    NavigationLink { ShowOnAgentsSettingsView() } label: { settingsRow("Show on Agents", "square.grid.2x2") }
+                        .accessibilityIdentifier("settings-show-on-agents")
+                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers", "desktopcomputer") }
                     NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
                         .accessibilityIdentifier("settings-account-usage")
                     Text("Chat, terminals, and project memory stay together in Phren. Connect the agents already running on your computers.")

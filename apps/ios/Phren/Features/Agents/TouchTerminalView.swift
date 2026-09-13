@@ -10,6 +10,23 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     private var requestingKeyboard = false
     var onTextSizeChanged: ((CGFloat) -> Void)?
     var onShortcutGesture: (() -> Void)?
+    var onOpenChat: (() -> Void)?
+    var onDictate: (() -> Void)?
+
+    /// Hardware-keyboard shortcuts (Settings → Keyboard lists them).
+    override var keyCommands: [UIKeyCommand]? {
+        let commands = [
+            UIKeyCommand(title: "Shortcuts panel", action: #selector(commandShortcuts), input: "k", modifierFlags: .command),
+            UIKeyCommand(title: "Paste", action: #selector(paste(_:)), input: "v", modifierFlags: .command),
+            UIKeyCommand(title: "Open chat", action: #selector(commandChat), input: "j", modifierFlags: .command),
+            UIKeyCommand(title: "Dictate", action: #selector(commandDictate), input: "m", modifierFlags: [.command, .shift]),
+        ]
+        commands.forEach { $0.wantsPriorityOverSystemBehavior = true }
+        return commands
+    }
+    @objc private func commandShortcuts() { onShortcutGesture?() }
+    @objc private func commandChat() { onOpenChat?() }
+    @objc private func commandDictate() { onDictate?() }
     private lazy var editMenu = UIEditMenuInteraction(delegate: self)
     #if DEBUG && targetEnvironment(simulator)
     private(set) var copyActions = 0

@@ -6,6 +6,24 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
+## 0.0.8
+
+### New
+
+- Simulators: every iOS simulator booted on a computer, with its live screen,
+  from the Agents header or a computer's page (needs Phren Hook 0.2.15).
+- Files: put any file on a computer through Phren Hook and copy its path for
+  an agent; chat attachments are no longer limited to images.
+- Keyboard: ⌘K shortcuts panel, ⌘V paste, ⌘J chat, ⌘⇧M dictation on a
+  hardware keyboard; Option as Meta; auto-hide the toolbar while one is
+  connected.
+- Notifications: turn the approval Live Activity off, keep the Agents screen
+  awake.
+- Phren Hook: the install command with Copy, and each computer's Hook
+  version at a glance.
+- Show on Agents: choose which of Web servers, Simulators and Files sit in the
+  Agents header.
+
 ## 0.0.7
 
 ### New

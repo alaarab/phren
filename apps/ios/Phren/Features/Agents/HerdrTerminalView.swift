@@ -1,5 +1,6 @@
 import PhrenKit
 import PhrenLive
+import GameController
 import SwiftTerm
 import SwiftUI
 
@@ -51,6 +52,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         if font.fontName != terminal.font.fontName { terminal.font = font }
         terminal.getTerminal().setCursorStyle(TerminalSettings.cursorStyle)
         terminal.autocorrectionType = TerminalSettings.autocorrects ? .yes : .no
+        terminal.optionAsMetaKey = IntegrationSettings.enabled(IntegrationSettings.optionAsMetaKey)
     }
     func applyAppearance() {
         terminal.nativeBackgroundColor = UIColor(PhrenTheme.bgSunken)
@@ -274,6 +276,11 @@ struct HerdrTerminalView: View {
     @State private var shortcuts = false
     @State private var reconnect = UUID()
     @State private var uploadRequest: TerminalUploadRequest?
+    @State private var showingChat = false
+    @State private var showingDictation = false
+    @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
+    /// Settings → Keyboard: the toolbar steps aside for a physical keyboard.
+    private var toolbarHidden: Bool { hardwareKeyboard && IntegrationSettings.enabled(IntegrationSettings.autoHideToolbarKey, default: false) }
     private var currentHost: LiveHost? { (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } }
     private var active: Bool { visible && scenePhase == .active && currentHost == host }
     var body: some View {
@@ -284,11 +291,13 @@ struct HerdrTerminalView: View {
             }
             if currentHost != host { Text("Connection settings changed. Reopen Herdr from the computer list.").font(.footnote).padding() }
             HerdrTerminalSurface(model: model).padding(.horizontal, 4)
-            TerminalControls(terminal: model.terminal, hostID: host.id,
-                             source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,
-                             shortcuts: $shortcuts, send: model.input,
-                             attach: { uploadRequest = TerminalUploadRequest(attachments: $0) })
-                .padding(.bottom, 6)
+            if !toolbarHidden {
+                TerminalControls(terminal: model.terminal, hostID: host.id,
+                                 source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,
+                                 shortcuts: $shortcuts, send: model.input,
+                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) })
+                    .padding(.bottom, 6)
+            }
         }
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .topLeading) {
@@ -306,16 +315,24 @@ struct HerdrTerminalView: View {
         .sheet(item: $uploadRequest) { request in
             TerminalUploadFlow(host: host, attachments: request.attachments)
         }
+        .sheet(isPresented: $showingChat) { if let session { AgentChatSheet(session: session) } }
+        .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in hardwareKeyboard = GCKeyboard.coalesced != nil }
         .onAppear {
             // Settings → Advanced: no auto-lock while a terminal is up.
             if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
+            model.terminal.onOpenChat = { if session != nil { showingChat = true } }
+            model.terminal.onDictate = { showingDictation = true }
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             visible = false
             shortcuts = false
             model.terminal.onShortcutGesture = nil
+            model.terminal.onOpenChat = nil
+            model.terminal.onDictate = nil
         }
         .task(id: Run(active: active, reconnect: reconnect)) {
             if active { await model.run(host: host, session: session, target: target, paneID: paneID, commandMenu: commandMenu) }

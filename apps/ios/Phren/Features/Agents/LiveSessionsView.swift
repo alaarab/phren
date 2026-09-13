@@ -89,10 +89,23 @@ struct LiveSessionsView: View {
         .toolbar {
             NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
                 .accessibilityIdentifier("all-account-usage")
-            NavigationLink { WebServersView() } label: { Label("Web servers", systemImage: "globe") }
-                .accessibilityIdentifier("all-web-servers")
+            // Settings → Show on Agents chooses these.
+            if IntegrationSettings.enabled(IntegrationSettings.showWebServersKey) {
+                NavigationLink { WebServersView() } label: { Label("Web servers", systemImage: "globe") }
+                    .accessibilityIdentifier("all-web-servers")
+            }
+            if IntegrationSettings.enabled(IntegrationSettings.showSimulatorsKey) {
+                NavigationLink { SimulatorsView() } label: { Label("Simulators", systemImage: "iphone") }
+                    .accessibilityIdentifier("all-simulators")
+            }
+            if IntegrationSettings.enabled(IntegrationSettings.showFilesKey) {
+                NavigationLink { HostFilesView() } label: { Label("Files", systemImage: "folder") }
+                    .accessibilityIdentifier("all-files")
+            }
             Button("Refresh all sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }
         }
+        .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .refreshable { refreshID = UUID() }
         .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
         .sheet(item: $selected) { selection in
@@ -369,6 +382,10 @@ private struct LiveHostView: View {
                 if let host {
                     NavigationLink { WebServersView(hostID: host.id) } label: { Label("Web servers", systemImage: "globe") }
                         .accessibilityIdentifier("host-web-servers")
+                    NavigationLink { SimulatorsView(hostID: host.id) } label: { Label("Simulators", systemImage: "iphone") }
+                        .accessibilityIdentifier("host-simulators")
+                    NavigationLink { HostFilesView(hostID: host.id) } label: { Label("Files", systemImage: "folder") }
+                        .accessibilityIdentifier("host-files")
                     NavigationLink { HerdrWorkspacesView(hostID: host.id) } label: {
                         Label("Herdr workspaces & terminal", systemImage: "terminal")
                     }
