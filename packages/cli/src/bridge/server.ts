@@ -12,13 +12,24 @@ import { repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { locateProject } from "./locate.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
-import { saveUpload } from "./uploads.js";
+import { listUploads, saveUpload } from "./uploads.js";
+import { bootedSimulators, simulatorScreenshot } from "./simulators.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { AccountUsageReader } from "./usage.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
-  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot"] };
+  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot"],
+  files: true, simulators: process.platform === "darwin" };
+
+/** A file from the phone: a plain name and base64 bytes, bounded. */
+function uploadBody(data: Json): { name: string; bytes: Buffer } {
+  const name = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_ .()-]{0,199}$/).refine(n => !n.includes("..")).parse(data.name);
+  const encoded = z.string().max(11_184_812).regex(/^[A-Za-z0-9+/]*={0,2}$/).parse(data.data);
+  const bytes = Buffer.from(encoded, "base64");
+  if (!bytes.length || bytes.length > MAX_FRAME) throw new BridgeError(413, "The file is empty or too large.");
+  return { name, bytes };
+}
 
 async function body(request: IncomingMessage): Promise<Json> {
   let size = 0; const chunks: Buffer[] = [];
@@ -78,6 +89,12 @@ export async function serve(version: string): Promise<void> {
           case "/v1/muxes": result = { muxes: await servers() }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
+          case "/v1/simulators": result = { simulators: await bootedSimulators() }; break;
+          case "/v1/simulators/screenshot": {
+            const bytes = await simulatorScreenshot(String(url.searchParams.get("udid") ?? ""));
+            response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
+          }
+          case "/v1/files": result = { files: await listUploads("files") }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
           case "/v1/projects/locate": result = { candidates: await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent()) }; break;
           case "/v1/workspaces": {
@@ -106,6 +123,11 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
+        if (url.pathname === "/v1/files") {
+          // Files the phone keeps on this computer, outside any session.
+          const { name, bytes } = uploadBody(data);
+          result = { ok: true, path: await saveUpload("files", name, bytes) };
+        } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launchSession(selectedServer(url), data);
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
@@ -120,10 +142,7 @@ export async function serve(version: string): Promise<void> {
             if (JSON.stringify(data.keys) !== '["Escape"]' || pane.agent_status !== "working") throw new BridgeError(409, "This agent is no longer working.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["esc"] }); result = { ok: true };
           } else if (url.pathname === "/v1/upload") {
-            const name = z.string().regex(/^[A-Za-z0-9_.-]{1,200}\.(png|jpg|jpeg|gif|webp)$/i).parse(data.name);
-            const encoded = z.string().max(11_184_812).regex(/^[A-Za-z0-9+/]*={0,2}$/).parse(data.data);
-            const bytes = Buffer.from(encoded, "base64");
-            if (!bytes.length || bytes.length > MAX_FRAME) throw new BridgeError(413, "The image is too large.");
+            const { name, bytes } = uploadBody(data);
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
           } else if (url.pathname === "/v1/diff") result = await repositoryDiff(await trustedDirectory(pane), z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? []);
           else if (url.pathname === "/v1/approvals/answer") {
@@ -131,6 +150,7 @@ export async function serve(version: string): Promise<void> {
           } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
           else throw new BridgeError(404, "Unknown Phren Hook route.");
         }
+      }
       } else throw new BridgeError(405, "Unsupported request method.");
       const payload = JSON.stringify(result);
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");

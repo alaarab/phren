@@ -1,4 +1,4 @@
-import { mkdir, readdir, lstat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, lstat, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { bridgeRoot, BridgeError, MAX_FRAME } from "./protocol.js";
@@ -10,9 +10,13 @@ export function imageBytes(bytes: Buffer): boolean {
     || (bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP");
 }
 
+export const IMAGE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 let uploadQueue = Promise.resolve();
+/** Stores a file the phone sent under uploads/<session>/. A name with an
+ * image extension must hold image bytes; anything else is kept as-is. */
 export async function saveUpload(session: string, name: string, bytes: Buffer): Promise<string> {
-  if (!bytes.length || bytes.length > MAX_FRAME || !imageBytes(bytes)) throw new BridgeError(400, "Choose a PNG, JPEG, GIF, or WebP image.");
+  if (!bytes.length || bytes.length > MAX_FRAME) throw new BridgeError(400, "The file is empty or too large.");
+  if (IMAGE_NAME.test(name) && !imageBytes(bytes)) throw new BridgeError(400, "Choose a PNG, JPEG, GIF, or WebP image.");
   let saved = "";
   const task = uploadQueue.catch(() => {}).then(async () => {
     const root = path.join(bridgeRoot(), "uploads");
@@ -38,4 +42,17 @@ export async function saveUpload(session: string, name: string, bytes: Buffer): 
   uploadQueue = task;
   await task;
   return saved;
+}
+
+/** What the phone has put in one folder, newest first. */
+export async function listUploads(session: string): Promise<{ name: string; path: string; size: number; modified: string }[]> {
+  const folder = path.join(bridgeRoot(), "uploads", session);
+  const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
+  const files: { name: string; path: string; size: number; modified: string }[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const file = path.join(folder, entry.name), metadata = await stat(file);
+    files.push({ name: entry.name.replace(/^[0-9a-f-]{36}-/, ""), path: file, size: metadata.size, modified: metadata.mtime.toISOString() });
+  }
+  return files.sort((a, b) => b.modified.localeCompare(a.modified)).slice(0, 200);
 }
