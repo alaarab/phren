@@ -23,6 +23,9 @@ number counts up on its own.
   version at a glance.
 - Show on Agents: choose which of Web servers, Simulators and Files sit in the
   Agents header.
+- "Hey Siri, message phren on mini in Phren" — then say the message. It goes
+  to the agent in that session exactly as a typed chat message would. Also in
+  Shortcuts as "Message Agent".
 
 ## 0.0.7
 

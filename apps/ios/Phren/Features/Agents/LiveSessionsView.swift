@@ -118,6 +118,11 @@ struct LiveSessionsView: View {
             guard visible, scenePhase == .active, !adding else { return }
             await overview.run(hosts: hosts)
         }
+        // Once the sessions are known, Siri can name them ("message phren on mini in phren").
+        .onChange(of: overview.ready, initial: true) { _, ready in
+            guard ready else { return }
+            PhrenAppShortcuts.donateSessions(overview.computers.flatMap { computer in computer.monitor.snapshot?.sessions(on: computer.host) ?? [] })
+        }
     }
 
     /// The one-line status above the sessions. It rides in the first

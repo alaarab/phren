@@ -39,6 +39,19 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             shortTitle: "Add Note",
             systemImageName: "square.and.pencil"
         )
+        AppShortcut(
+            intent: MessageAgentIntent(),
+            phrases: [
+                "Message \(\.$session) in \(.applicationName)",
+                "Tell \(\.$session) in \(.applicationName)",
+                "Send a message to \(\.$session) in \(.applicationName)",
+                "Message an agent in \(.applicationName)",
+                "Message my agent in \(.applicationName)",
+                "Talk to my agent in \(.applicationName)",
+            ],
+            shortTitle: "Message Agent",
+            systemImageName: "bubble.left.and.text.bubble.right"
+        )
     }
 }
 
@@ -46,6 +59,17 @@ extension PhrenAppShortcuts {
     /// The project list Siri last had donated to it, so the ~7s live poll
     /// doesn't re-donate an unchanged list every cycle.
     @MainActor private static var donatedProjects: [String]?
+    @MainActor private static var donatedSessions: [String]?
+
+    /// Makes the live sessions speakable ("message phren on mini in phren")
+    /// whenever the Agents screen has a fresh set of them.
+    @MainActor
+    static func donateSessions(_ sessions: [LiveAgentSession]) {
+        let ids = sessions.filter { $0.tab.agent != nil }.map { AgentSessionEntity($0).id }.sorted()
+        guard ids != donatedSessions else { return }
+        donatedSessions = ids
+        updateAppShortcutParameters()
+    }
 
     /// Re-donates project names when the set actually changes, so a project
     /// created on another machine becomes speakable ("…to alpha lens in
