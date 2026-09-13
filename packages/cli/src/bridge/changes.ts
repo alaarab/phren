@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFile, copyFile, mkdir, readFile, realpath, stat, unlink } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readFile, realpath, stat, unlink, utimes } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -55,6 +55,11 @@ async function treeHash(root: string): Promise<string> {
   const index = path.resolve(root, (await git(root, ["rev-parse", "--git-path", "index"])).trim());
   const temp = path.join(tmpdir(), `phren-tree-${randomUUID()}`);
   await copyFile(index, temp).catch(() => undefined); // an unborn repository has no index yet
+  // The copy is newer than every file, which would let git trust cached stat
+  // data for a file rewritten to the same size within the same instant.
+  // Dating the copy back makes every entry "racy", so contents are checked
+  // (a zero timestamp would switch that check off instead).
+  await utimes(temp, 1, 1).catch(() => undefined);
   try {
     await git(root, ["add", "-A", "--ignore-errors", "--", "."], { GIT_INDEX_FILE: temp });
     return (await git(root, ["write-tree"], { GIT_INDEX_FILE: temp })).trim();
