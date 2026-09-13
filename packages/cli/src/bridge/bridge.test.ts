@@ -135,6 +135,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
+  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false;
   function api(url: string, body?: unknown): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
       const payload = body === undefined ? undefined : JSON.stringify(body);
@@ -154,6 +155,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     }
     commands = []; current = session; reportIdentity = true; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false;
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     record = path.join(root, `codex/sessions/2026/09/10/rollout-2026-09-10T00-00-00-${session}.jsonl`);
@@ -171,9 +173,26 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           if (replaceBeforeMutation) current = "bbbbbbbb-1111-4111-8111-111111111111";
           deliveries.push({ method: req.method, session: current });
         }
+        // Herdr's create calls answer {ok} and the new workspace/tab/pane show
+        // up in the next snapshot; agent.start marks the pane's agent.
+        if (req.method === "workspace.create") {
+          const wid = `w${9 + extraWorkspaces.length}`;
+          extraWorkspaces.push({ workspace_id: wid, label: req.params.label });
+          extraTabs.push({ tab_id: `${wid}:t1`, workspace_id: wid, label: "1" });
+          extraPanes.push({ pane_id: `${wid}:p1`, tab_id: `${wid}:t1`, workspace_id: wid, terminal_id: `term-${wid}`, cwd: req.params.cwd });
+        } else if (req.method === "tab.create") {
+          const wid = req.params.workspace_id, n = extraTabs.filter(t => t.workspace_id === wid).length + 2;
+          extraTabs.push({ tab_id: `${wid}:t${n}`, workspace_id: wid, label: req.params.label });
+          extraPanes.push({ pane_id: `${wid}:p${n}`, tab_id: `${wid}:t${n}`, workspace_id: wid, terminal_id: `term-${wid}-${n}`, cwd: req.params.cwd });
+        } else if (req.method === "agent.start") {
+          const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
+          if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
+          target.agent = req.params.kind; target.agent_status = "idle";
+        }
         const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: "term-one", agent: "codex", agent_status: "working",
           agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
-        const snapshot = { panes: [pane], workspaces: [{ workspace_id: "w1", label: "Project" }], tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }] };
+        const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
+          tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
           : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: process.pid }] } } : { ok: true } }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
@@ -203,6 +222,37 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await api("/v1/activity")).data.events[0].directory).toBe(root);
     const permissions = await import("node:fs/promises").then(fs => fs.stat(path.join(root, "bridge/hook.sock")));
     expect(permissions.mode & 0o777).toBe(0o600);
+  });
+  it("launches a workspace in a directory with an agent started in its pane", async () => {
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "phren", kind: "claude" });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(launched.data).toMatchObject({ ok: true, workspaceId: "w9", tabId: "w9:t1", paneId: "w9:p1", agent: "claude", agentStatus: "idle" });
+    expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ label: "phren", cwd: root, focus: false });
+    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "phren", kind: "claude", pane_id: "w9:p1", timeout_ms: 45_000 });
+    // The new pane is now a chat target the overview can see.
+    const overview = await api("/v1/workspaces?mux=herdr:default");
+    expect(overview.data.groups.some((g: any) => g.id === "w9" && g.children[0].agent === "claude")).toBe(true);
+  });
+  it("launches a tab inside an existing workspace when asked", async () => {
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "second", kind: "codex", workspaceId: "w1", name: "Codex here", timeoutMs: 1 });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
+    expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: root });
+    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "Codex here", pane_id: "w1:p2", timeout_ms: 3_000 });
+  });
+  it("reports a failed agent start without hiding the workspace it created", async () => {
+    failAgentStart = true;
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "broken", kind: "copilot" });
+    expect(launched.status).toBe(409);
+    expect(launched.data.error).toContain("couldn't start copilot");
+    expect(launched.data.error).toContain("still open on the computer");
+    expect(commands.some(c => c.method === "workspace.create")).toBe(true);
+  });
+  it("rejects a relative directory or an unknown agent kind before touching Herdr", async () => {
+    expect((await api("/v1/workspaces/launch?mux=herdr:default", { cwd: "relative/path", label: "x", kind: "codex" })).status).toBe(400);
+    expect((await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "x", kind: "gemini" })).status).toBe(400);
+    expect((await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "", kind: "codex" })).status).toBe(400);
+    expect(commands.some(c => c.method === "workspace.create" || c.method === "agent.start")).toBe(false);
   });
   it("reports available Codex context without opening chat and drops a replaced session's usage", async () => {
     const overview = async () => (await api("/v1/workspaces?mux=herdr:default")).data.groups[0].children[0];

@@ -6,8 +6,8 @@ import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
 import { ActivityJournal } from "./activity.js";
-import { panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
-import { BridgeError, bridgeRoot, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
+import { paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
 import { repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
@@ -104,7 +104,9 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname.startsWith("/v1/workspaces/")) {
+        if (url.pathname === "/v1/workspaces/launch") {
+          result = await launchSession(selectedServer(url), data);
+        } else if (url.pathname.startsWith("/v1/workspaces/")) {
           result = await workspaceAction(selectedServer(url), url.pathname.split("/").at(-1)!, data);
         } else {
           const target = targetSchema.parse(data.target);
@@ -225,6 +227,55 @@ export async function serve(version: string): Promise<void> {
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});
+}
+
+const launchKinds = ["codex", "claude", "copilot"] as const;
+const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+
+/**
+ * "Open on a computer": a new Herdr workspace (or a tab in an existing one)
+ * in the project's directory, with the chosen agent started in its pane.
+ * Herdr's create calls do not return identifiers, so the new tab is found
+ * by diffing snapshots; `agent.start` returns once Herdr has detected the
+ * agent and it is ready for input, which can take most of `timeoutMs`.
+ */
+async function launchSession(server: string, data: Json): Promise<Json> {
+  const cwd = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+  const label = plainText(200).parse(data.label);
+  const kind = z.enum(launchKinds).parse(data.kind);
+  const name = data.name === undefined ? label : plainText(200).parse(data.name);
+  const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
+  const timeout = Math.min(120_000, Math.max(3_000, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
+  const before = await snapshot(server);
+  if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
+  const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
+  const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
+  await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} });
+  let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
+  for (let attempt = 0; attempt < 25 && !created; attempt++) {
+    const s = await snapshot(server);
+    const fresh = objects(s.tabs).filter(t => !knownTabs.has(t.tab_id)
+      && (workspace ? t.workspace_id === workspace : !knownWorkspaces.has(t.workspace_id)));
+    const tab = fresh.find(t => t.label === label)
+      ?? fresh.find(t => objects(s.workspaces).some(w => w.workspace_id === t.workspace_id && w.label === label))
+      ?? fresh[0];
+    const pane = tab && objects(s.panes).find(p => p.tab_id === tab.tab_id && p.workspace_id === tab.workspace_id && !p.agent);
+    if (tab && pane && id.safeParse(tab.workspace_id).success && id.safeParse(tab.tab_id).success && id.safeParse(pane.pane_id).success) {
+      created = { workspaceId: String(tab.workspace_id), tabId: String(tab.tab_id), paneId: String(pane.pane_id) };
+    } else await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  if (!created) throw new BridgeError(409, `Herdr created "${label}" but its pane did not appear. Check Herdr on the computer.`);
+  try {
+    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout }, undefined, timeout + 5_000);
+  } catch (error) {
+    const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time" : "Herdr reported an error";
+    throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);
+  }
+  const after = await snapshot(server);
+  const pane = objects(after.panes).find(p => p.pane_id === created!.paneId && p.tab_id === created!.tabId && p.workspace_id === created!.workspaceId);
+  const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
+  const sessionId = pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined;
+  return { ok: true, ...created, agent: kind, agentStatus, sessionId };
 }
 
 async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
