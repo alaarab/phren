@@ -125,7 +125,7 @@ export async function serve(version: string): Promise<void> {
             const bytes = Buffer.from(encoded, "base64");
             if (!bytes.length || bytes.length > MAX_FRAME) throw new BridgeError(413, "The image is too large.");
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
-          } else if (url.pathname === "/v1/diff") result = await repositoryDiff(await trustedDirectory(pane));
+          } else if (url.pathname === "/v1/diff") result = await repositoryDiff(await trustedDirectory(pane), z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? []);
           else if (url.pathname === "/v1/approvals/answer") {
             await agentHooks.answer(target, z.string().uuid().parse(data.actionId), data.decision); result = { ok: true };
           } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
