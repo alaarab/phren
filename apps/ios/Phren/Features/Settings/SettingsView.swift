@@ -23,6 +23,17 @@ struct SettingsView: View {
     @State private var now = Date()
     private let healthTicker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
+    /// One settings row the way the grouped lists draw them: an icon, the
+    /// title, and the current value in the trailing slot.
+    private func settingsRow(_ title: String, _ symbol: String, value: String? = nil) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).foregroundStyle(PhrenTheme.accent).frame(width: 22)
+            Text(title)
+            Spacer()
+            if let value { Text(value).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+        }
+    }
+
     private static let needsAttentionAnchor = "needs-attention"
 
     var body: some View {
@@ -31,19 +42,27 @@ struct SettingsView: View {
                 ActionErrorBanner()
                 ScrollViewReader { proxy in
                 PhrenForm {
-                Section("Appearance") {
+                Section("Terminal") {
                     NavigationLink { AppearanceSettingsView() } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "paintpalette").foregroundStyle(PhrenTheme.accent)
-                            Text("Theme")
-                            Spacer()
-                            Text(PhrenAppearance.shared.name).foregroundStyle(PhrenTheme.textMuted)
-                        }
+                        settingsRow("Theme", "paintpalette", value: PhrenAppearance.shared.name)
                     }.accessibilityIdentifier("settings-theme")
-                    NavigationLink { TerminalToolbarSettingsView() } label: { Label("Terminal toolbar", systemImage: "keyboard") }
+                    NavigationLink { TerminalFontSettingsView() } label: {
+                        settingsRow("Fonts & Size", "textformat", value: TerminalFonts.shared.selectedName)
+                    }.accessibilityIdentifier("settings-fonts")
+                    NavigationLink { ChatSettingsView() } label: { settingsRow("Chat", "bubble.left.and.text.bubble.right") }
+                        .accessibilityIdentifier("settings-chat")
+                    NavigationLink { TerminalAdvancedSettingsView() } label: { settingsRow("Advanced", "slider.horizontal.3") }
+                        .accessibilityIdentifier("settings-terminal-advanced")
+                }
+                Section("Input") {
+                    NavigationLink { TerminalToolbarSettingsView() } label: { settingsRow("Toolbar", "keyboard") }
                         .accessibilityIdentifier("settings-terminal-toolbar")
-                    NavigationLink { TerminalShortcutSettingsView() } label: { Label("Shortcut panels", systemImage: "rectangle.grid.2x2") }
+                    NavigationLink { TerminalShortcutSettingsView() } label: { settingsRow("Shortcuts", "rectangle.grid.2x2") }
                         .accessibilityIdentifier("settings-terminal-shortcuts")
+                    NavigationLink { TerminalGesturesSettingsView() } label: { settingsRow("Gestures", "hand.draw") }
+                        .accessibilityIdentifier("settings-gestures")
+                    NavigationLink { SpeechSettingsView() } label: { settingsRow("Speech", "mic") }
+                        .accessibilityIdentifier("settings-speech")
                 }
                 if model.phase == .ready {
                 Section {
@@ -84,9 +103,9 @@ struct SettingsView: View {
                 }
                 }
 
-                Section("Agent connections") {
-                    NavigationLink("Computers & Phren Hook") { LiveSessionsView() }
-                    NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
+                Section("Integrations") {
+                    NavigationLink { LiveSessionsView() } label: { settingsRow("Computers & Phren Hook", "desktopcomputer") }
+                    NavigationLink { AccountUsageView() } label: { settingsRow("Account usage", "chart.bar") }
                         .accessibilityIdentifier("settings-account-usage")
                     Text("Chat, terminals, and project memory stay together in Phren. Connect the agents already running on your computers.")
                         .font(.caption).foregroundStyle(.secondary)

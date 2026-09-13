@@ -14,7 +14,11 @@ struct AgentConversationLink<LabelContent: View>: View {
             if let onOpenInPhren { onOpenInPhren() }
             else { showingChat = true }
         } label: { label }
-        .sheet(isPresented: $showingChat) { AgentChatSheet(session: session) }
+        .sheet(isPresented: $showingChat) {
+            // Settings → Chat decides which of the two views a session opens in.
+            if ChatSettings.opensInTerminal { NavigationStack { HerdrTerminalView(host: session.host, session: session) } }
+            else { AgentChatSheet(session: session) }
+        }
     }
 }
 
@@ -77,7 +81,7 @@ struct AgentChatView: View {
               let expected = try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID,
                                                     tabID: session.tab.id, muxID: session.host.muxID),
               model.target == expected else { return }
-        guard model.attachments.count + incomingAttachments.count <= 4 else {
+        guard model.attachments.count + incomingAttachments.count <= ChatAttachmentLimit.maximum else {
             model.deliveryError = "Make room for \(incomingAttachments.count) attachment(s). Each message can include four."
             return
         }
@@ -301,7 +305,7 @@ struct AgentChatView: View {
         }
         .sheet(isPresented: $showingAttachments) {
             if let openingTarget = model.target {
-                ChatAttachmentPicker(canAdd: model.attachments.count < 4, add: { item in
+                ChatAttachmentPicker(canAdd: model.attachments.count < ChatAttachmentLimit.maximum, add: { item in
                     if model.target == openingTarget { model.add(item) }
                 }, context: project == nil ? nil : {
                     Task { try? await Task.sleep(for: .milliseconds(350)); showingContext = true }
@@ -311,7 +315,9 @@ struct AgentChatView: View {
         .sheet(isPresented: $showingDictation) {
             if let openingTarget = model.target {
                 ChatDictationView { text in
-                    if model.target == openingTarget { model.draft += (model.draft.isEmpty ? "" : "\n\n") + text }
+                    guard model.target == openingTarget else { return }
+                    model.draft += (model.draft.isEmpty ? "" : "\n\n") + text
+                    if ChatSettings.autoSendsDictation { Task { await model.send(session) } }
                 }
             }
         }
@@ -556,6 +562,7 @@ struct AgentChatView: View {
             if let error = model.draftStorageError { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning).accessibilityIdentifier("chat-draft-storage-error") }
             VStack(spacing: 0) {
                 TextField("Message \(model.target?.providerName ?? "agent")…", text: $model.draft, axis: .vertical)
+                    .autocorrectionDisabled(!ChatSettings.autocorrects)
                     .lineLimit(1...4).focused($composing).font(.system(size: composerTextSize, design: .monospaced))
                     .tint(PhrenTheme.cyan).padding(.vertical, 8).padding(.horizontal, 12)
                     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)

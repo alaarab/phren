@@ -11,7 +11,7 @@ final class WhatsNewTests: XCTestCase {
         let sheet = app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "What's new in ")).firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["NEW"].exists)
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Shell commands show what they changed")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Settings regrouped")).firstMatch.exists)
         app.buttons["whats-new-done"].tap()
         XCTAssertFalse(sheet.waitForExistence(timeout: 1))
         app.tabBars.buttons["Settings"].tap()
@@ -20,7 +20,8 @@ final class WhatsNewTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertTrue(app.navigationBars["What's new"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["0.0.6"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["0.0.7"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["0.0.6"].exists)
         XCTAssertTrue(app.staticTexts["Earlier"].exists)
     }
 }

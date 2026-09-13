@@ -6,6 +6,25 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
+## 0.0.7
+
+### New
+
+- Settings regrouped: Terminal (Theme, Fonts & Size, Chat, Advanced), Input
+  (Toolbar, Shortcuts, Gestures, Speech), Integrations, Memory, About.
+- Fonts & Size: a font-size stepper, JetBrains Mono, Fira Code and Hack
+  downloaded on demand, and your own .ttf/.otf imported from Files — all
+  drawn by the terminal's own renderer.
+- Chat: choose whether a session opens in chat or the Herdr terminal, send
+  dictation straight to the agent, and turn chat autocorrection off.
+- Advanced: cursor style (block, underline, bar) and blink, keep the screen
+  on while a terminal is open, terminal autocorrection.
+- Gestures: pinch, hold-to-select and two-finger swipes can each be turned
+  off.
+- Speech: pick the dictation language, try a test transcription, and add word
+  replacements for names the recogniser gets wrong.
+- Attach up to twenty images or files to one message (was four).
+
 ## 0.0.6
 
 ### New

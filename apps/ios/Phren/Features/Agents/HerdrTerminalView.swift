@@ -32,10 +32,25 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         // Gesture fixtures always begin at a known size; production restores
         // the user's choice across terminals and app launches.
         let savedSize = AppModel.isUITesting ? 12 : defaults.double(forKey: "terminal.textSize.v1")
+        terminal.font = TerminalFonts.font(size: savedSize > 0 ? savedSize : 12)
         terminal.setTextSize(savedSize > 0 ? savedSize : 12)
         terminal.onTextSizeChanged = { defaults.set(Double($0), forKey: "terminal.textSize.v1") }
         applyAppearance()
+        applySettings()
+        for name in [TerminalFonts.changed, TerminalSettings.changed] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.applySettings() }
+            }
+        }
         terminal.accessibilityIdentifier = "herdr-terminal"
+    }
+    /// Font, cursor and autocorrection from Settings — on open and whenever they change.
+    func applySettings() {
+        let size = terminal.font.pointSize
+        let font = TerminalFonts.font(size: size)
+        if font.fontName != terminal.font.fontName { terminal.font = font }
+        terminal.getTerminal().setCursorStyle(TerminalSettings.cursorStyle)
+        terminal.autocorrectionType = TerminalSettings.autocorrects ? .yes : .no
     }
     func applyAppearance() {
         terminal.nativeBackgroundColor = UIColor(PhrenTheme.bgSunken)
@@ -292,9 +307,12 @@ struct HerdrTerminalView: View {
             TerminalUploadFlow(host: host, attachments: request.attachments)
         }
         .onAppear {
+            // Settings → Advanced: no auto-lock while a terminal is up.
+            if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
         }.onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
             visible = false
             shortcuts = false
             model.terminal.onShortcutGesture = nil

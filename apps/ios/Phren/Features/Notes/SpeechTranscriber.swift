@@ -64,7 +64,7 @@ final class SpeechTranscriber {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
-    init(locale: Locale = .current) {
+    init(locale: Locale = SpeechSettings.locale) {
         recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer()
     }
 

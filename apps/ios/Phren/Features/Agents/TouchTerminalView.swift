@@ -85,6 +85,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     }
 
     @objc private func zoomTerminal(_ gesture: UIPinchGestureRecognizer) {
+        guard TerminalSettings.enabled(TerminalSettings.pinchKey) else { return }
         switch gesture.state {
         case .began:
             editMenu.dismissMenu()
@@ -225,6 +226,7 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     }
 
     @objc private func selectText(_ gesture: UILongPressGestureRecognizer) {
+        guard TerminalSettings.enabled(TerminalSettings.holdSelectKey) else { return }
         let point = gesture.location(in: self)
         let core = getTerminal()
         let position = bufferPosition(at: point)

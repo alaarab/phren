@@ -2,6 +2,10 @@ import ImageIO
 import PhrenKit
 import PhotosUI
 import SwiftUI
+
+/// How many files one message may carry. Each is uploaded on its own over
+/// SSH, so the cap is about the phone's memory, not the transport.
+enum ChatAttachmentLimit { static let maximum = 20 }
 import UniformTypeIdentifiers
 
 /// Downsample before rendering; newly encoded images omit source metadata.
@@ -112,7 +116,7 @@ struct ChatAttachmentPicker: View {
             .navigationTitle("Add attachment").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
-            .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: 4, matching: .images)
+            .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: ChatAttachmentLimit.maximum, matching: .images)
             .task {
                 guard !openedInitialSource, let initialSource, canAdd else { return }
                 openedInitialSource = true
@@ -133,7 +137,7 @@ struct ChatAttachmentPicker: View {
                     defer { busy = false }
                     do {
                         let urls = try result.get()
-                        for url in urls.prefix(4) {
+                        for url in urls.prefix(ChatAttachmentLimit.maximum) {
                             add(try await Task.detached(priority: .userInitiated) { try ChatAttachmentPreparation.file(url) }.value)
                         }
                         dismiss()

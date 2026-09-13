@@ -227,7 +227,7 @@ final class AgentChatModel {
         draft = ""; attachments = []; sentImages = []; deliveryError = nil; needsAnswer = false
     }
     func add(_ attachment: AgentAttachment) {
-        guard attachments.count < 4 else { deliveryError = "Attach up to four files in one message."; return }
+        guard attachments.count < ChatAttachmentLimit.maximum else { deliveryError = "Attach up to \(ChatAttachmentLimit.maximum) files in one message."; return }
         attachments.append(.init(attachment: attachment)); deliveryError = nil
     }
 

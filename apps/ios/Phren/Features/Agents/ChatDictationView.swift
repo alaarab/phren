@@ -38,7 +38,7 @@ struct ChatDictationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add to draft") { transcriber.stop(); insert(text); dismiss() }
+                    Button("Add to draft") { transcriber.stop(); insert(SpeechSettings.apply(text)); dismiss() }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
