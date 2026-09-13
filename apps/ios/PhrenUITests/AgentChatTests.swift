@@ -481,23 +481,20 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Updated Theme.swift"].exists)
         XCTAssertTrue(app.buttons["Copy patch"].exists)
         capture(app, "Phren purple actions and native tool diff")
-        // A python-heredoc edit shows what ran, and — collapsed — what it
-        // changed on disk, the way a terminal lists "Updated file (+1 −1)".
+        // A python-heredoc edit shows what ran and, without opening the card,
+        // the diffs of what it changed on disk — in both repositories.
         let shell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Shell")).firstMatch
         XCTAssertTrue(shell.waitForExistence(timeout: 3))
         XCTAssertTrue(shell.label.contains("Shell")); XCTAssertFalse(shell.label.contains("×"))
-        let changed = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-change:")).firstMatch
-        XCTAssertTrue(changed.waitForExistence(timeout: 3))
-        XCTAssertTrue(changed.label.contains("Updated Theme.swift"))
-        capture(app, "A shell edit lists what it changed under the collapsed card")
-        shell.tap()
-        // Expanded: the diffs themselves, inline, coloured — then the chip for the whole tree.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
-        app.swipeUp()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Accent is purple now")).firstMatch.waitForExistence(timeout: 5))
-        capture(app, "Inline diffs of what a shell command changed, in two repositories")
-        let chip = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-changes:")).firstMatch
-        XCTAssertTrue(chip.waitForExistence(timeout: 3)); chip.tap()
+        capture(app, "Inline diffs of what a shell command changed, under the collapsed card")
+        shell.tap()
+        // Expanded: the command, its output, then the same diffs.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "open(p,'w').write(s)")).firstMatch.waitForExistence(timeout: 5))
+        // The header's diff screen covers the whole tree, plus every place the
+        // session's commands wrote to.
+        app.buttons["chat-diff"].tap()
         XCTAssertTrue(app.navigationBars["Repository changes"].waitForExistence(timeout: 5))
         let row = app.buttons["diff-file:unstaged:Theme.swift"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()

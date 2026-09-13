@@ -59,8 +59,6 @@ struct AgentChatView: View {
     @State private var showingDictation = false
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
-    @State private var showingChanges = false
-    @State private var changesPaths: [String] = []
     @State private var previewImage: ChatAttachmentDraft?
     @State private var historyTask: Task<Void, Never>?
     @State private var bottomPosition: CGFloat = 0
@@ -153,7 +151,6 @@ struct AgentChatView: View {
                             ForEach(model.timeline) { entry in
                                 if entry.isActivity {
                                     ChatToolActivity(messages: entry.messages).equatable().id(entry.id)
-                                        .environment(\.openRepositoryChanges, model.target == nil ? nil : { changesPaths = $0; showingChanges = true })
                                 } else if let message = entry.messages.first {
                                     ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
                                         message.role == .user && item.path.map { message.text.contains($0) } == true
@@ -311,11 +308,6 @@ struct AgentChatView: View {
                 })
             }
         }
-        .sheet(isPresented: $showingChanges) {
-            if let target = model.target {
-                NavigationStack { AgentDiffView(session: session, target: target, paths: changesPaths) }
-            }
-        }
         .sheet(isPresented: $showingDictation) {
             if let openingTarget = model.target {
                 ChatDictationView { text in
@@ -454,7 +446,10 @@ struct AgentChatView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let target = model.target {
                 NavigationLink {
-                    AgentDiffView(session: session, target: target)
+                    // Besides the pane's tree: whatever the session's commands
+                    // wrote elsewhere — the phren store, a sibling checkout.
+                    AgentDiffView(session: session, target: target, paths: Array(Set(model.messages.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange }
+                        .flatMap { ToolPresentation(title: $0.title ?? "", text: $0.text).editedPaths }).sorted().prefix(24)))
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                         .foregroundStyle(PhrenTheme.chatText)

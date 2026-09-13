@@ -63,39 +63,11 @@ struct ChatToolSummary {
     }
 }
 
-/// How a tool card opens the conversation's repository diff — set by the
-/// chat view, absent anywhere a card is shown without a live session.
-struct OpenRepositoryChangesKey: EnvironmentKey { static let defaultValue: (([String]) -> Void)? = nil }
-extension EnvironmentValues {
-    var openRepositoryChanges: (([String]) -> Void)? {
-        get { self[OpenRepositoryChangesKey.self] } set { self[OpenRepositoryChangesKey.self] = newValue }
-    }
-}
-
-/// One file a shell call changed, for the line under the collapsed card:
-/// Updated / Added / Deleted, the file, and its counts.
-struct ChatChangeSummary: Identifiable {
-    let id: String
-    let verb: String
-    let file: String
-    let added: Int
-    let removed: Int
-    init(_ message: AgentChatMessage) {
-        id = message.id
-        let first = message.text.prefix { !$0.isNewline }
-        verb = first.hasPrefix("*** Add File: ") ? "Added" : first.hasPrefix("*** Delete File: ") ? "Deleted" : "Updated"
-        file = ToolPresentation.short(String(first.drop { $0 != ":" }.dropFirst(2)))
-        let preview = DiffPreview(message.text)
-        added = preview.added; removed = preview.removed
-    }
-}
-
 struct ChatToolActivity: View, Equatable {
     let messages: [AgentChatMessage]
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.openRepositoryChanges) private var openRepositoryChanges
     var body: some View {
         let summary = ChatToolSummary(messages)
         VStack(alignment: .leading, spacing: 0) {
@@ -122,24 +94,22 @@ struct ChatToolActivity: View, Equatable {
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityHint("Expand this call and its output")
                 .accessibilityIdentifier("chat-tool-group:\(messages[0].id)")
-            // What the command changed, visible without opening the card —
-            // the way a terminal lists "Updated file (+n −m)" under a call.
-            let changed = messages.filter(\.isChange).map(ChatChangeSummary.init)
+            // What the command changed, right there under the call without
+            // opening the card — the way a terminal shows "Updated file
+            // (+n −m)" and the lines beneath it.
+            let changed = messages.filter(\.isChange)
             if !expanded, !changed.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(changed.prefix(6)) { change in
-                        HStack(spacing: 6) {
-                            Image(systemName: "pencil.line").font(.system(size: 9)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
-                            Text("\(change.verb) \(change.file)").foregroundStyle(PhrenTheme.chatText).lineLimit(1).truncationMode(.middle)
-                            DiffCounts(added: change.added, removed: change.removed)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("chat-tool-change:\(change.id)")
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(changed.prefix(4)) { change in
+                        CodeDiffView(patch: change.text, previewLineLimit: 12)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("chat-tool-change:\(change.id)")
                     }
-                    if changed.count > 6 { Text("+\(changed.count - 6) more files").foregroundStyle(PhrenTheme.chatNeutralDim) }
+                    if changed.count > 4 {
+                        Text("+\(changed.count - 4) more files").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                    }
                 }
-                .font(.system(.caption, design: .monospaced))
-                .padding(.horizontal, 12).padding(.bottom, 8)
+                .padding(.horizontal, 10).padding(.bottom, 10)
             }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -149,18 +119,6 @@ struct ChatToolActivity: View, Equatable {
                         // folded behind a disclosure.
                         ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
                                        id: message.id, isResult: message.isToolResult)
-                    }
-                    // A command that wrote files says nothing about what it
-                    // wrote; the working tree does.
-                    let edits = messages.filter { !$0.isToolResult }.map { ToolPresentation(title: $0.title ?? "", text: $0.text) }.filter(\.editsFiles)
-                    if let openRepositoryChanges, !edits.isEmpty {
-                        Button { openRepositoryChanges(Array(Set(edits.flatMap(\.editedPaths))).sorted()) } label: {
-                            Label("See repository changes", systemImage: "arrow.triangle.branch")
-                                .font(.caption.weight(.medium)).padding(.horizontal, 10).padding(.vertical, 7)
-                                .background(PhrenTheme.surfaceRaised, in: Capsule())
-                        }
-                        .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-                        .accessibilityIdentifier("chat-tool-changes:\(messages[0].id)")
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
