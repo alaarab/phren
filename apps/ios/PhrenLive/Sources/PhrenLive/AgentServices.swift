@@ -103,6 +103,41 @@ extension PhrenConnection {
     }
     /// The agents Phren can start in a fresh Herdr pane — Herdr's own kind
     /// names, which are also the chat `source` values.
+    /// A folder the computer says the project lives in, and how it knows.
+    public struct LocatedFolder: Sendable, Equatable, Identifiable {
+        public let directory: String
+        public let source: String
+        public let lastSeen: String?
+        public init(directory: String, source: String, lastSeen: String?) { self.directory = directory; self.source = source; self.lastSeen = lastSeen }
+        public var id: String { directory }
+        public var sourceLabel: String {
+            switch source {
+            case "activity": return "an agent worked here"
+            case "herdr": return "a Herdr workspace"
+            case "phren": return "registered with phren"
+            default: return "found by name"
+            }
+        }
+    }
+
+    /// Asks the computer where `project` lives — its activity journal, Herdr's
+    /// saved workspaces, phren's registration, then the usual project roots.
+    public static func locateProject(host: LiveHost, privateKey: Data, project: String) async throws -> [LocatedFolder] {
+        guard project.range(of: #"^[a-z0-9][a-z0-9-]{0,99}$"#, options: .regularExpression) != nil else {
+            throw PhrenKitError.validation("Invalid project name.")
+        }
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(path: "/v1/projects/locate?project=" + project))
+        guard data.count <= 65_536, let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let candidates = response["candidates"] as? [[String: Any]] else {
+            throw PhrenKitError.validation("The computer returned an unusable answer. Update Phren Hook.")
+        }
+        return candidates.prefix(8).compactMap { entry in
+            guard let directory = entry["directory"] as? String, directory.hasPrefix("/"), directory.utf8.count <= 4_096,
+                  !directory.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+            return LocatedFolder(directory: directory, source: entry["source"] as? String ?? "search", lastSeen: entry["lastSeen"] as? String)
+        }
+    }
+
     public enum LaunchKind: String, Sendable, CaseIterable, Identifiable {
         case codex, claude, copilot
         public var id: String { rawValue }

@@ -18,6 +18,9 @@ struct LaunchSessionView: View {
     @State private var folder = ""
     @State private var folderEdited = false
     @State private var computerNames: [UUID: String] = [:]
+    /// Folders the selected computer says the project lives in.
+    @State private var located: [UUID: [PhrenConnection.LocatedFolder]] = [:]
+    @State private var locating = false
     @State private var launching = false
     @State private var status: String?
     @State private var error: String?
@@ -37,12 +40,30 @@ struct LaunchSessionView: View {
     }
 
     /// Where the project lives on that computer: a folder the user already
-    /// matched to it on this iPhone, else the folder it was added from.
+    /// matched to it on this iPhone, else what the computer itself reports
+    /// (an agent worked there, Herdr saved it, phren registered it), else the
+    /// folder the project was added to phren from — which may be another
+    /// machine's path, so it comes last.
     private func suggestedFolder(_ host: LiveHost) -> String {
         if let saved = preferences?.mappings.first(where: { $0.hostID == host.id && $0.storeID == storeID && $0.project == project }) {
             return saved.directory
         }
-        return registry.sourcePaths[project] ?? ""
+        return located[host.id]?.first?.directory ?? registry.sourcePaths[project] ?? ""
+    }
+
+    private func locate(_ host: LiveHost) async {
+        guard host.fingerprint != nil, located[host.id] == nil else { return }
+        locating = true
+        defer { locating = false }
+        let folders: [PhrenConnection.LocatedFolder]
+        #if DEBUG && targetEnvironment(simulator)
+        if AgentChatFixture.enabled { folders = (try? await AgentChatFixture.locate(project: project)) ?? [] }
+        else { folders = (try? await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)) ?? [] }
+        #else
+        folders = (try? await PhrenConnection.locateProject(host: host, privateKey: DeviceSSHKey.load(host.id), project: project)) ?? []
+        #endif
+        located[host.id] = folders
+        if hostID == host.id, !folderEdited { folder = suggestedFolder(host); folderEdited = false }
     }
 
     private var canOpen: Bool {
@@ -82,10 +103,31 @@ struct LaunchSessionView: View {
                         .font(.system(.body, design: .monospaced)).autocorrectionDisabled().textInputAutocapitalization(.never)
                         .onChange(of: folder) { _, _ in folderEdited = true }
                         .accessibilityIdentifier("launch-folder")
+                    if let host = selectedHost {
+                        if locating && located[host.id] == nil {
+                            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Asking \(host.name) where \(project) is…") }
+                                .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                        }
+                        ForEach(located[host.id] ?? []) { candidate in
+                            Button { folder = candidate.directory; folderEdited = false } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: candidate.directory == folder ? "checkmark.circle.fill" : "folder")
+                                        .foregroundStyle(candidate.directory == folder ? PhrenTheme.success : PhrenTheme.chatNeutralDim)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(candidate.directory).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.text)
+                                            .lineLimit(1).truncationMode(.head)
+                                        Text(candidate.sourceLabel).font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                                    }
+                                }
+                            }
+                            .accessibilityIdentifier("launch-found:\(candidate.directory)")
+                        }
+                    }
                 } header: { Text("Folder on that computer") } footer: {
-                    Text(folderEdited || selectedHost.map(suggestedFolder)?.isEmpty != false
-                         ? "The workspace opens here; the agent starts in it."
-                         : "From where the project was added to phren. Change it if this computer keeps it elsewhere.")
+                    Text(selectedHost.flatMap { located[$0.id]?.isEmpty == false ? "Found on the computer itself — where an agent last worked on it, a saved Herdr workspace, or phren's registration." : nil }
+                         ?? (folderEdited || selectedHost.map(suggestedFolder)?.isEmpty != false
+                             ? "The workspace opens here; the agent starts in it."
+                             : "From where the project was added to phren. Change it if this computer keeps it elsewhere."))
                 }
 
                 Section {
@@ -155,6 +197,7 @@ struct LaunchSessionView: View {
     private func select(_ host: LiveHost) {
         hostID = host.id
         if !folderEdited { folder = suggestedFolder(host); folderEdited = false }
+        Task { await locate(host) }
     }
 
     private func open() async {

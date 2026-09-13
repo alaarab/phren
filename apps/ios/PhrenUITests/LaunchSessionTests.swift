@@ -19,7 +19,13 @@ final class LaunchSessionTests: XCTestCase {
         XCTAssertTrue(mac.label.contains("has phone"), "machines.yaml + the profile say this computer carries the project")
         XCTAssertTrue(mac.isSelected, "The computer that has the project is chosen up front")
         let folder = app.textFields["launch-folder"]
-        XCTAssertEqual(folder.value as? String, "/work/phone", "The folder comes from the project's phren.project.yaml")
+        XCTAssertTrue(app.buttons["launch-found:/work/phone"].waitForExistence(timeout: 5), "The computer reports where the project is")
+        XCTAssertEqual(folder.value as? String, "/work/phone", "The folder is the computer's own answer")
+        XCTAssertTrue(app.buttons["launch-found:/Users/fixture/Projects/phone"].exists)
+        app.buttons["launch-found:/Users/fixture/Projects/phone"].tap()
+        XCTAssertEqual(folder.value as? String, "/Users/fixture/Projects/phone", "A candidate fills the field")
+        app.buttons["launch-found:/work/phone"].tap()
+        XCTAssertEqual(folder.value as? String, "/work/phone")
         app.buttons["launch-harness:claude"].tap()
         XCTAssertTrue(app.buttons["launch-harness:claude"].isSelected)
         let open = app.buttons["launch-open"]

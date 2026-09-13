@@ -61,6 +61,13 @@ that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if
 needed to load new callbacks. Ambiguous conversation identities disable sending.
 
+`GET /v1/projects/locate?project=<name>` says where a project lives on that
+computer, existing folders only: the activity journal (every folder an agent
+session ran in, newest first), Herdr's saved workspaces, phren's registered
+path, then the usual project roots. The phone's "Open on a computer" fills its
+folder from this rather than from the store's `sourcePath`, which belongs to
+whichever machine added the project.
+
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.
 Pending tabs expose `approvalPending`; the exact conversation's status stream

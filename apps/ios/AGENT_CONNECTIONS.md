@@ -84,6 +84,9 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 ## Conversation protocol
 
 - `GET /v1/health`, `/v1/muxes`, `/v1/workspaces`, `/v1/workspaces/panes`
+- `GET /v1/projects/locate?project=<name>`: where the project lives on that
+  computer (activity journal, Herdr's saved workspaces, phren's registration,
+  search roots), existing folders only.
 - `WS /v1/transcripts`: backlog, append, and older frames with provider JSON rows
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive

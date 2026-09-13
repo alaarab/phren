@@ -185,6 +185,11 @@ import UIKit
     /// workspace and starting the agent, plus the snapshot the session comes
     /// from. Recorded so a UI test can check what was asked for.
     static var launches: [(cwd: String, label: String, kind: String)] = []
+    static func locate(project: String) async throws -> [PhrenConnection.LocatedFolder] {
+        try await Task.sleep(for: .milliseconds(150))
+        return [.init(directory: "/work/\(project)", source: "activity", lastSeen: "2026-09-12T01:00:00Z"),
+                .init(directory: "/Users/fixture/Projects/\(project)", source: "search", lastSeen: nil)]
+    }
     static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {
         try await Task.sleep(for: .milliseconds(400))
         launches.append((cwd, label, kind))
