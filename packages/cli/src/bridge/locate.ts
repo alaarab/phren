@@ -1,4 +1,5 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
@@ -29,7 +30,7 @@ export async function locateProject(project: string, activity: Json[], env: Node
       if (!(await stat(dir)).isDirectory()) return;
       // On a case-insensitive disk ~/projects and ~/Projects are one folder;
       // the real path (native, so it carries the on-disk case) dedupes them.
-      dir = await realpath.native(dir);
+      dir = realpathSync.native(dir);
     } catch { return; /* not on this computer */ }
     if (seen.has(dir)) return;
     seen.add(dir);
