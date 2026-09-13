@@ -98,7 +98,7 @@ export async function serve(version: string): Promise<void> {
             const abort = new AbortController();
             response.once("close", () => { if (!response.writableEnded) abort.abort(); });
             await validateTarget(target);
-            const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source);
+            const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`));
             const page = await reader.read(before, abort.signal);
             result = { ...page, type: "older", source: target.source, session: target.session }; break;
           }
@@ -203,7 +203,7 @@ export async function serve(version: string): Promise<void> {
       initialPane = await validateTarget(target);
       if (abort.signal.aborted) return;
       unwatch = agentHooks.watch(target);
-      reader = url.pathname === "/v1/transcripts" ? new TranscriptReader(await transcriptPath(target.source, target.session), target.source) : undefined;
+      reader = url.pathname === "/v1/transcripts" ? new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, agentHooks.changes.view(`${target.source}:${target.session}`)) : undefined;
       if (abort.signal.aborted) { stop(); return; }
       ready = true;
       timer = setInterval(() => { void tick(); }, reader ? 500 : 1500);

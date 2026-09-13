@@ -4,6 +4,7 @@ import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
+import { outputCallIds, type ChangeLookup } from "./changes.js";
 
 export interface Entry { line: number; raw: Json }
 
@@ -124,14 +125,14 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
 export class TranscriptReader {
   private revision?: string;
   private nextLine = 0;
-  constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number) {}
+  constructor(readonly file: string, readonly source: Provider, private readonly imageLine?: number, private readonly changes?: ChangeLookup) {}
   async read(before?: number, signal?: AbortSignal): Promise<{ entries: Entry[]; totalLines: number; startLine: number; hasMore: boolean; reset: boolean }> {
     return withTranscriptIndex(this.file, async (handle, index) => {
       const reset = this.revision !== index.revision;
       const end = Math.min(before ?? index.lines, index.lines);
       const lower = this.imageLine ?? (reset || before !== undefined ? 0 : this.nextLine);
       const entries: Entry[] = [];
-      let bytes = 0, cursor = end;
+      let bytes = 0, cursor = end, held: number | undefined;
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
         let entry: Entry | undefined;
@@ -139,6 +140,16 @@ export class TranscriptReader {
           const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source);
           if (raw) entry = { line: row.line, raw: this.imageLine === row.line ? raw : chatFrame(raw, this.source) };
         } catch { /* A malformed old row cannot block the next readable page. */ }
+        if (entry && this.changes && this.imageLine === undefined) {
+          // A shell call's output carries what it changed on disk. While that
+          // diff is still being computed on the live tail, the row — and the
+          // newer rows already collected — wait for the next read.
+          const ids = outputCallIds(entry.raw, this.source);
+          if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
+          const attached: Json = {};
+          for (const id of ids) { const files = await this.changes.changes(id); if (files) attached[id] = files; }
+          if (Object.keys(attached).length) entry.raw = { ...entry.raw, phren_changes: attached };
+        }
         if (entry) {
           const size = Buffer.byteLength(JSON.stringify(entry));
           if (this.imageLine !== undefined || size < 2_097_152) {
@@ -150,7 +161,7 @@ export class TranscriptReader {
         cursor = row.line;
         if (entries.length >= 200) break;
       }
-      if (before === undefined) { this.revision = index.revision; this.nextLine = index.lines; }
+      if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
       return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0, reset };
     }, signal);
   }
