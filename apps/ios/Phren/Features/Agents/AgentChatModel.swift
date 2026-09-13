@@ -8,6 +8,19 @@ struct ChatAttachmentDraft: Identifiable, Equatable {
     var id: UUID { attachment.id }
 }
 
+/// A message typed while the agent was busy: held in the app, listed under
+/// the transcript, delivered when the turn ends — or now, on request.
+struct QueuedMessage: Identifiable, Equatable {
+    let id = UUID()
+    var text: String
+    var attachments: [ChatAttachmentDraft]
+}
+
+/// Queues survive switching agents within a chat, like drafts do.
+@MainActor enum AgentChatQueues {
+    static var items: [String: [QueuedMessage]] = [:]
+}
+
 @MainActor enum AgentChatDrafts {
     static var text: [String: String] = [:]
     static var attachments: [String: [ChatAttachmentDraft]] = [:]
@@ -80,6 +93,7 @@ final class AgentChatModel {
     func acceptActivity(_ activity: String?) {
         guard let activity else { return }
         liveActivity = activity; preferProgressActivity = false
+        scheduleDrain()
     }
     var modelName: String?
     /// The model and branch the transcript names, kept across status ticks;
@@ -121,6 +135,14 @@ final class AgentChatModel {
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
     var sentImages: [ChatAttachmentDraft] = []
+    /// Messages waiting for the agent to finish its turn; the first goes out
+    /// the moment it does.
+    var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
+    /// True while a send would interrupt the agent: it is working, or a reply
+    /// is still on its way, and nothing is waiting on the person.
+    var isBusy: Bool { !needsAnswer && approval == nil && (awaitingReply || activityPhase == .working) }
+    private var drainTask: Task<Void, Never>?
+    private var lastSession: LiveAgentSession?
     private var generation = UUID()
     private var streamTask: Task<Void, Never>?
     private var streamTarget: AgentChatTarget?
@@ -157,6 +179,7 @@ final class AgentChatModel {
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; question = nil; answeredQuestions = []
+            queue = AgentChatQueues.items[chosen.id] ?? []
         } catch { self.error = error.localizedDescription }
     }
     private func persistDraft(immediately: Bool = false) {
@@ -197,7 +220,7 @@ final class AgentChatModel {
         progressTask?.cancel(); progressTask = nil
         streamTask?.cancel(); streamTask = nil; streamTarget = nil
         statusTask?.cancel(); statusTask = nil; interactionConnected = false; approval = nil
-        target = nil; history = .init(); connected = false
+        target = nil; history = .init(); connected = false; queue = []; drainTask?.cancel(); drainTask = nil
         rejectedStreamTarget = nil
         progress = .init(); reveal.finish(); hasTranscript = false; awaitingReply = false; sentAt = nil; liveActivity = nil; modelName = nil
         transcriptContext = .init(); statusBranch = nil
@@ -209,6 +232,7 @@ final class AgentChatModel {
     }
 
     func run(_ session: LiveAgentSession) async {
+        lastSession = session
         rejectedStreamTarget = nil
         let run = UUID(); generation = run; loading = true
         // A new appearance can start before the cancelled run unwinds. Its
@@ -317,6 +341,7 @@ final class AgentChatModel {
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
         acceptContext(frame)
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+        scheduleDrain()
     }
 
     /// A backlog replaces what the transcript said (the conversation was
@@ -461,17 +486,79 @@ final class AgentChatModel {
             #endif
             deliveryStatus = "Stop requested"
         } catch { deliveryError = "Stop wasn't confirmed. \(error.localizedDescription)" }
+        scheduleDrain()
+    }
+
+    // MARK: - Queue
+
+    /// Delivers a queued message now, ahead of the agent finishing — the
+    /// "steer" case. On failure the item stays queued with the error shown.
+    func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async {
+        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        let result = await deliver(item.text, attachments: queue[index].attachments, session: session)
+        guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        if result.delivered { queue.remove(at: index) } else { queue[index].attachments = result.attachments }
+        scheduleDrain()
+    }
+
+    func remove(_ item: QueuedMessage) {
+        queue.removeAll { $0.id == item.id }
+    }
+
+    /// Pulls a queued message back into the composer to change it.
+    func edit(_ item: QueuedMessage) {
+        guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        let item = queue.remove(at: index)
+        draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.text : draft + "\n" + item.text
+        attachments += item.attachments.filter { queued in !attachments.contains { $0.id == queued.id } }
+    }
+
+    /// Sends the next queued message once the agent is free. Debounced: the
+    /// status stream and the transcript both report the turn ending, and a
+    /// reply's last frames arrive a beat after the status flips.
+    private func scheduleDrain() {
+        guard !queue.isEmpty, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
+        drainTask = Task { @MainActor [weak self] in
+            defer { self?.drainTask = nil }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+            guard let self, let next = queue.first, !isBusy, !sending, connected, lastSession == session else { return }
+            await sendNow(next, session)
+        }
     }
 
     /// Uploads can be reused after failure; prompt delivery is never replayed.
     func send(_ session: LiveAgentSession) async {
-        guard !sending, connected, !needsAnswer, approval == nil, let target,
+        guard !sending, connected, !needsAnswer, approval == nil, target != nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty else { return }
         guard !AgentSlashCommand.isCommand(draft) || attachments.isEmpty else {
             deliveryError = "Remove attachments before running a slash command."; return
         }
-        let submitted = draft, submittedIDs = Set(attachments.map(\.id))
-        var sent = attachments
+        lastSession = session
+        let submitted = draft, items = attachments
+        // While the agent works, a message waits its turn rather than
+        // interrupting — as in Claude Code. Slash commands go straight through.
+        if isBusy, !AgentSlashCommand.isCommand(submitted) {
+            queue.append(QueuedMessage(text: submitted, attachments: items))
+            draft = ""; attachments = []; deliveryError = nil
+            persistDraft(immediately: true)
+            return
+        }
+        let result = await deliver(submitted, attachments: items, session: session)
+        for uploaded in result.attachments {
+            if let index = attachments.firstIndex(where: { $0.id == uploaded.id }) { attachments[index].path = uploaded.path }
+        }
+        guard result.delivered else { return }
+        if draft == submitted { draft = "" }
+        attachments.removeAll { item in items.contains { $0.id == item.id } }
+        persistDraft(immediately: true)
+    }
+
+    /// Uploads any attachments that still lack a path, then delivers the
+    /// prompt. Returns the attachments with the paths that did upload, so a
+    /// retry never re-uploads; prompt delivery itself is never replayed.
+    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession) async -> (delivered: Bool, attachments: [ChatAttachmentDraft]) {
+        guard let target else { return (false, items) }
+        var sent = items
         sending = true; deliveryError = nil
         defer { sending = false; deliveryStatus = nil }
         do {
@@ -486,11 +573,10 @@ final class AgentChatModel {
                 #endif
                 try Task.checkCancellation()
                 sent[index].path = path
-                if let original = attachments.firstIndex(where: { $0.id == sent[index].id }) { attachments[original].path = path }
             }
         } catch {
             deliveryError = "Attachment upload didn't finish. Your message hasn't been sent. \(error.localizedDescription)"
-            return
+            return (false, sent)
         }
         let paths = sent.compactMap { $0.path }.joined(separator: "\n")
         let text = paths.isEmpty ? submitted : submitted + "\n\nAttached files on this computer:\n" + paths
@@ -504,7 +590,6 @@ final class AgentChatModel {
             #else
             try await PhrenConnection.sendChat(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, text: text)
             #endif
-            if draft == submitted { draft = "" }
             if AgentSlashCommand.isCommand(submitted) { awaitingReply = false; sentAt = nil }
             // Keep small local previews, not full uploaded files, in the conversation.
             let previews = await Task.detached(priority: .userInitiated) {
@@ -512,14 +597,14 @@ final class AgentChatModel {
                     ChatAttachmentPreparation.preview(item.attachment).map { ChatAttachmentDraft(attachment: $0, path: item.path) }
                 }
             }.value
-            guard self.target == target else { return }
+            guard self.target == target else { return (true, sent) }
             sentImages += previews
             if sentImages.count > 16 { sentImages.removeFirst(sentImages.count - 16) }
-            attachments.removeAll { submittedIDs.contains($0.id) }
-            persistDraft(immediately: true)
+            return (true, sent)
         } catch {
             awaitingReply = false
             deliveryError = "Delivery wasn't confirmed. Check the conversation before trying again. \(error.localizedDescription)"
+            return (false, sent)
         }
     }
     static func fetchPanes(_ session: LiveAgentSession) async throws -> AgentChatPanes {

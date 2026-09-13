@@ -94,6 +94,12 @@ your own messages on a neutral bubble, and a green connection badge — the
 theme's accent stays on Send and Stop. The header's left control is a back
 chevron.
 
+While an agent is working, a new message **queues** instead of interrupting —
+the Send control becomes Queue, and queued messages sit above the composer
+with Send now (steer the agent immediately), Edit (back into the composer),
+and remove. The first queued message goes out on its own when the turn ends.
+Slash commands still go straight through.
+
 Chat uses compact tool activity and a full-width composer. Its smaller Send
 control becomes Stop while an agent works and the draft is empty; typing a new
 message brings Send back so you can steer the agent. **Switch agent**, beside

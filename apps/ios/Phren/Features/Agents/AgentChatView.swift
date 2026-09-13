@@ -251,6 +251,12 @@ struct AgentChatView: View {
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
+            // Between the transcript and the input, where Claude Code keeps
+            // its queue; outside the lazy stack so the rows are always laid out.
+            if !model.queue.isEmpty {
+                ScrollView { queuedMessages.padding(.horizontal, 12) }
+                    .frame(maxHeight: 190).padding(.bottom, 2)
+            }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
@@ -592,7 +598,7 @@ struct AgentChatView: View {
                     } label: {
                         Group {
                             if model.sending || model.stopping { ProgressView().tint(PhrenTheme.chatPanel) }
-                            else { Image(systemName: showsStop ? "stop.fill" : "arrow.up").font(.system(size: showsStop ? 13 : 19, weight: .semibold)) }
+                            else { Image(systemName: showsStop ? "stop.fill" : showsQueue ? "text.append" : "arrow.up").font(.system(size: showsStop ? 13 : showsQueue ? 17 : 19, weight: .semibold)) }
                         }
                         .frame(width: 36, height: 36)
                         .foregroundStyle(primaryActionEnabled ? PhrenTheme.chatPanel : PhrenTheme.textDim)
@@ -600,7 +606,8 @@ struct AgentChatView: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .disabled(!primaryActionEnabled)
-                    .accessibilityLabel(showsStop ? "Stop" : "Send message").accessibilityIdentifier(showsStop ? "chat-stop" : "chat-send")
+                    .accessibilityLabel(showsStop ? "Stop" : showsQueue ? "Queue message" : "Send message")
+                    .accessibilityIdentifier(showsStop ? "chat-stop" : showsQueue ? "chat-queue" : "chat-send")
                     .accessibilityValue(model.deliveryStatus ?? "")
                     .keyboardShortcut(.return, modifiers: .command)
                 }
@@ -627,8 +634,51 @@ struct AgentChatView: View {
     }
     private struct RunIdentity: Equatable { let active: Bool; let refresh: UUID }
     private var showsStop: Bool {
-        !model.needsAnswer && (model.awaitingReply || model.activityPhase == .working)
-            && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
+        model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
+    }
+    /// A message typed while the agent is busy joins the queue instead of
+    /// interrupting; the control says so.
+    private var showsQueue: Bool {
+        model.isBusy && !showsStop && !AgentSlashCommand.isCommand(model.draft)
+    }
+
+    /// Claude Code's queue, on a phone: each waiting message with Send now
+    /// (steer), Edit (back into the composer), and remove.
+    private var queuedMessages: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Queued · \(model.queue.count)").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.chatNeutral)
+                .padding(.leading, 4)
+            ForEach(model.queue) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.top, 3)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
+                        if !item.attachments.isEmpty {
+                            Text("\(item.attachments.count) attachment\(item.attachments.count == 1 ? "" : "s")")
+                                .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 0) {
+                        Button { sendTask = Task { await model.sendNow(item, session) } } label: {
+                            Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
+                        }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
+                            .disabled(!active || !model.connected || model.sending)
+                        Button { model.edit(item); composing = true } label: {
+                            Image(systemName: "pencil").frame(width: 36, height: 36).contentShape(Rectangle())
+                        }.accessibilityLabel("Edit").accessibilityIdentifier("chat-queued-edit:\(item.id)")
+                        Button { model.remove(item) } label: {
+                            Image(systemName: "xmark").frame(width: 36, height: 36).contentShape(Rectangle())
+                        }.accessibilityLabel("Remove from queue").accessibilityIdentifier("chat-queued-remove:\(item.id)")
+                    }.font(.system(size: 15)).foregroundStyle(PhrenTheme.chatNeutral).buttonStyle(.plain)
+                }
+                .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
+                .background(PhrenTheme.chatUserBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(PhrenTheme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("chat-queued:\(item.id)")
+            }
+        }
+        .accessibilityIdentifier("chat-queue")
     }
     private var primaryActionEnabled: Bool {
         showsStop ? active && model.connected && !model.sending && !model.stopping && !model.answering : canSend
