@@ -52,7 +52,11 @@ No extra request per iPhone row is needed.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
 - Local project activity history, retained on the computer.
 
-The helper does not start coding agents for you. Text updates depend on when
+From a project, the iPhone can open a new session on a computer:
+`POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
+the project's directory and starts the chosen agent — Codex, Claude Code, or
+Copilot — in its pane, returning once Herdr has detected it ready. Otherwise
+the helper does not start coding agents for you. Text updates depend on when
 that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if
 needed to load new callbacks. Ambiguous conversation identities disable sending.

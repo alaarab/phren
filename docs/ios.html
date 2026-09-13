@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phren for iPhone · your computers, your memory</title>
+<meta name="description" content="The Phren iPhone app: your project memory on your phone, and native chat, terminals and diffs for the Codex, Claude Code and Copilot sessions running on your own computers.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="style.css">
+<style>
+body{margin:0;background:#171a23;color:#eeeaf4;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:800px;margin:auto;padding:48px 24px 88px}nav{display:flex;gap:24px;margin-bottom:70px;flex-wrap:wrap}a{color:#91d7e1}h1{font-size:clamp(38px,7vw,68px);line-height:1.08;letter-spacing:-.04em;margin:16px 0 28px}h2{font-size:25px;margin-top:44px}h3{font-size:18px;margin:0}p{color:#c4c7d4}pre{padding:20px;border:1px solid #424653;border-radius:16px;background:#20232e;overflow:auto;font-size:14px}code{font-family:ui-monospace,SFMono-Regular,monospace}.eyebrow{color:#a9a1d0;letter-spacing:.12em;font-size:13px;text-transform:uppercase}.lead{font-size:21px;max-width:650px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin:36px 0}.grid p{margin:8px 0}.note{padding-left:18px;border-left:2px solid #a9a1d0}.status{display:inline-block;padding:3px 10px;border:1px solid #424653;border-radius:999px;font-size:13px;color:#a9a1d0}footer{margin-top:64px;font-size:14px}li{margin:8px 0}ol,ul{color:#c4c7d4}a:focus-visible{outline:2px solid #91d7e1;outline-offset:5px}
+</style></head><body><main>
+<nav aria-label="Main"><a href="index.html">← phren</a><a href="docs.html">Documentation</a><a href="phren-hook.html">Phren Hook</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a><a href="https://github.com/alaarab/phren">Source</a></nav>
+<div class="eyebrow">Phren for iPhone · open source</div>
+<h1>Your memory.<br>Your agents.<br>In your pocket.</h1>
+<p class="lead">A native iPhone app for the phren store you already keep on GitHub — and for the coding agents running on your own computers. Nothing goes through a Phren server, because there isn't one.</p>
+<p><span class="status">Status: direct install and private TestFlight-style delivery from the repo. Not yet on the App Store.</span></p>
+
+<div class="grid">
+<section><h3>Memory, live</h3><p>Findings, notes, tasks, truths and the review queue from every store you attach, synced straight from GitHub. New findings an agent pushes on another machine show up on the phone within seconds.</p></section>
+<section><h3>Sessions, wherever they run</h3><p>Every Codex, Claude Code and Copilot session across your computers, grouped by what needs you. Tap one to chat; open the exact Herdr pane in a terminal when you need the whole screen.</p></section>
+<section><h3>Nothing in between</h3><p>GitHub for the store, pinned SSH to your computers (Tailscale when you're away). Tokens and keys stay in the device Keychain.</p></section>
+</div>
+
+<h2>What you need</h2>
+<ol>
+<li><strong>A phren store on GitHub.</strong> The repo that holds your <code>~/.phren</code> store (<code>phren team init</code> or <code>phren store add --remote &lt;url&gt;</code> from your computer). The app signs in with a fine-grained GitHub token scoped to that repo — see <a href="support.html">Support</a> for the exact permissions.</li>
+<li><strong>Phren Hook on each computer</strong> that runs your agents: <code>npx --yes @phren/cli@0.2.14 bridge install</code>. It is a local helper, not a service in the cloud. Setup and troubleshooting live on the <a href="phren-hook.html">Phren Hook page</a>.</li>
+<li><strong>SSH, and Tailscale away from home.</strong> The phone authenticates with a per-computer SSH key it generates itself and verifies the computer's host-key fingerprint the first time. No public port, Funnel or relay.</li>
+</ol>
+<p class="note">Agents and terminals work without a GitHub sign-in. Memory needs one; you can dismiss that setup and come back to it.</p>
+
+<h2>Projects and memory</h2>
+<p><strong>Projects</strong> lists every project in every attached store, with counts, claim badges from <code>stores.yaml</code>, and a read-only marker on tiers like <code>global</code>. Inside a project: findings grouped by date (journal entries from team stores included), notes by day, pinned truths, the summary, skills and agent instructions, and the archive of consolidated topics — fetched only when you open one.</p>
+<p><strong>Tasks</strong> is the workload view: Backlog, Active and Done with search, filters (age, priority, project, store) and sorting; swipe to Start, Backlog or Done; select several and move them across stores at once. <strong>Search</strong> runs across every store. The <strong>memory graph</strong> is the same 3D viewer as the web UI and VS Code, focused on one store at a time.</p>
+<p>Edits — add, edit, promote, review decisions, skill toggles and moves — apply instantly on the phone, queue offline, and flush to GitHub as commits authored by you, one commit per file. Team stores get journal-append semantics exactly as the CLI does. Anything that can't be pushed shows under <strong>Settings → Needs attention</strong> for retry or discard.</p>
+
+<h2>Sessions and chat</h2>
+<p><strong>Agents</strong> opens with the sessions from every saved computer — working and waiting first, then idle, done and other open tabs — each row naming its computer, project, agent and state. The chat header shows the agent's glyph with its connection state, the pane's title, and the project · model · branch. From there: repository changes, Herdr workspaces, project memory, skills and the graph.</p>
+<ul>
+<li><strong>Chat</strong> streams the agent's own transcript: progressive text, tool calls as compact rows that expand to the full command and a terminal-style output block, patches drawn as diffs, images, real usage counters, Stop, and approval prompts you can answer from the phone.</li>
+<li><strong>Queue while it works.</strong> A message typed while the agent is busy waits above the composer with Send now, Edit and remove; the first one goes out when the turn ends. Slash commands go straight through.</li>
+<li><strong>Repository changes</strong> follow VS Code's Source Control view: staged and unstaged files with status letters, then a diff editor with line numbers, tinted rows, changed-character highlights, next/previous change, and inline or side-by-side layout.</li>
+<li><strong>Terminals</strong> open the exact Herdr pane, with a compact key dock, Ctrl-hold shortcut panels you can customise, pinch to resize, hold to select, and image uploads into the running agent.</li>
+<li><strong>Web servers</strong> preview the development servers a computer is running, tunnelled over SSH so loopback-only apps work from the phone.</li>
+<li><strong>Account usage</strong> shows Claude and Codex account limits and reset times per computer.</li>
+</ul>
+
+<h2>Capture from anywhere</h2>
+<p>"Hey Siri, add a task to phren" works from a locked phone. <strong>Add Task</strong> and <strong>Add Note</strong> appear in Shortcuts and can sit on the Action Button. In the app, a voice sheet dictates notes and tasks with on-device recognition where the device supports it. <strong>Settings → Recent captures</strong> shows where every capture landed and whether it has synced.</p>
+<p>Home Screen and Lock Screen <strong>widgets</strong> show your memory count and top active task without opening the app. Permission requests from an agent can appear as a Live Activity with Deny and Approve.</p>
+
+<h2>Themes and settings</h2>
+<p>Charcoal (default), Amethyst, Graphite and Slate, plus custom named themes. The chat transcript reads in plain white and grey in every theme, with the accent kept for Send and Stop. The terminal toolbar and Ctrl-hold panels are yours to arrange. Attach several stores — personal and team — and the tabs show a merged view with a store filter.</p>
+
+<h2>Install</h2>
+<p>The app is built from <a href="https://github.com/alaarab/phren/tree/main/apps/ios">apps/ios</a> in the repo. Today it installs directly on a paired iPhone (<code>python3 apps/ios/scripts/deploy-phone.py</code>) or over a private Tailscale link from your own Mac; the README covers signing, XcodeGen and the OTA installer. An App Store submission is in progress. When it ships, this page and the <a href="support.html">Support</a> page will say so.</p>
+
+<h2>Where your data goes</h2>
+<p>Store data is read from and written to GitHub with your token. Session data is read from your own computers over SSH. The developer receives nothing — no analytics, no crash reports, no telemetry. The <a href="privacy.html">privacy policy</a> lists, item by item, what the app keeps on the device and what leaves it.</p>
+
+<footer><a href="privacy.html">Privacy</a> · <a href="support.html">Support</a> · <a href="phren-hook.html">Phren Hook</a> · <a href="https://github.com/alaarab/phren/blob/main/apps/ios/README.md">Developer README</a> · <a href="https://github.com/alaarab/phren/blob/main/apps/ios/AGENT_CONNECTIONS.md">Protocol and security details</a></footer>
+</main></body></html>
