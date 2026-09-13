@@ -25,6 +25,9 @@ root = Path(__file__).resolve().parents[1]
 def run(command, **kwargs):
     return subprocess.run(command, cwd=root, check=True, **kwargs)
 
+import changelog
+version = changelog.require_entry()
+print(f"Archiving Phren {version} build {args.build_number}.", flush=True)
 run(["xcodegen", "generate"])
 settings = [f"CURRENT_PROJECT_VERSION={args.build_number}", "CODE_SIGN_STYLE=Automatic"]
 if args.team:

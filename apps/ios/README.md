@@ -536,6 +536,17 @@ show the version and build, so device updates can be identified unambiguously.
 If the phone is away, add `--build-only` to prepare and verify the signed app
 without contacting a device, then use the private Tailscale installer below.
 
+### Version and changelog
+
+The version is `MARKETING_VERSION` in `project.yml` (currently 0.0.6); the
+build number keeps counting on its own. `CHANGELOG.md` next to it has one
+`## <version>` section per release with `### New` / `### Improved` / `### Fixed`
+bullets, and is bundled into the app: the first launch of a new version shows
+its section as a "What's new" sheet (once the store is connected), and
+Settings → About → What's new lists every release. `deploy-phone.py` and
+`release.py` run `scripts/changelog.py` first and refuse to build a version
+that has no section — bump the version and write its entry together.
+
 For unattended signing, `signing_helper` points to an existing executable that
 accepts `unlock` and `lock`: `unlock` prints only the dedicated keychain's path
 and prioritizes it, while `lock` relocks it and restores the prior search list.

@@ -135,6 +135,7 @@ struct RootView: View {
 
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
+    @State private var showingWhatsNew = false
 
     var body: some View {
         @Bindable var model = model
@@ -165,6 +166,12 @@ struct MainTabView: View {
                 .tag(AppTab.settings)
         }
         .sheet(isPresented: $model.showingMemoryMaintenance) { MemoryMaintenanceView() }
+        .sheet(isPresented: $showingWhatsNew) { WhatsNewSheet() }
+        // This version's notes, once — after the store is connected, so the
+        // sheet never lands on top of onboarding.
+        .onChange(of: model.phase, initial: true) { _, phase in
+            if phase == .ready, ReleaseNotesStore.shouldPresent() { showingWhatsNew = true }
+        }
         .sheet(isPresented: $model.showingMemoryConnection) {
             OnboardingFlow(isPresented: true)
         }

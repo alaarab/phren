@@ -210,7 +210,8 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("App", value: "phren for iOS")
-                    LabeledContent("Version", value: "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                    LabeledContent("Version", value: "\(ReleaseNotesStore.version) (\(ReleaseNotesStore.build))")
+                    NavigationLink("What's new") { ChangelogView() }.accessibilityIdentifier("settings-whats-new")
                     Link("phren on GitHub", destination: URL(string: "https://github.com/alaarab/phren")!)
                     NavigationLink("Open-source notices") {
                         ScrollView {

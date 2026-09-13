@@ -28,6 +28,24 @@ enum DiffPalette {
     }
     static let font = Font.system(.caption, design: .monospaced)
     static let numberWidth: CGFloat = 34
+
+    /// The gutter tint for one row of a run of inserted or removed lines:
+    /// a plain rectangle, rounded only where the run starts and ends, so
+    /// consecutive rows read as one block rather than a pill per line.
+    static func gutterShape(_ kind: DiffDocument.Kind, runStart: Bool, runEnd: Bool) -> some View {
+        let r: CGFloat = 6
+        return UnevenRoundedRectangle(topLeadingRadius: runStart ? r : 0, bottomLeadingRadius: runEnd ? r : 0,
+                                      bottomTrailingRadius: runEnd ? r : 0, topTrailingRadius: runStart ? r : 0, style: .continuous)
+            .fill(gutter(kind))
+    }
+    /// Whether `index` in `rows` begins or ends a run of its kind — only
+    /// inserted and removed lines form runs.
+    static func run(_ rows: [DiffDocument.Row], at index: Int) -> (start: Bool, end: Bool) {
+        let changed = { (kind: DiffDocument.Kind) in kind == .added || kind == .removed }
+        guard changed(rows[index].kind) else { return (true, true) }
+        // A removed block followed by its replacement reads as one change.
+        return (index == 0 || !changed(rows[index - 1].kind), index == rows.count - 1 || !changed(rows[index + 1].kind))
+    }
 }
 
 /// One unified-view row: old and new line numbers in the gutter, the sign,
@@ -36,6 +54,9 @@ struct DiffRowView: View {
     let row: DiffDocument.Row
     var numbered = true
     var language: SyntaxTokenizer.Language = .plain
+    /// Where this row sits in a run of inserted or removed lines.
+    var runStart = true
+    var runEnd = true
 
     var body: some View {
         if row.kind == .hunk {
@@ -49,26 +70,27 @@ struct DiffRowView: View {
         } else {
             HStack(alignment: .top, spacing: 0) {
                 if numbered {
+                    // The tint spans the row's full height, so a run of lines
+                    // shares one unbroken block.
                     HStack(spacing: 0) {
                         Text(row.old.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
                         Text(row.new.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
                     }
-                    .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6)
-                    .background(DiffPalette.gutter(row.kind))
+                    .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
+                    .background(DiffPalette.gutterShape(row.kind, runStart: runStart, runEnd: runEnd))
                 }
                 Text(DiffPalette.sign(row.kind))
                     .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
-                    .frame(width: 14, alignment: .center)
+                    .frame(width: 14, alignment: .center).padding(.vertical, 1.5)
                 Text(Self.attributed(row, language: language))
                     .foregroundStyle(PhrenTheme.text)
                     .fixedSize(horizontal: true, vertical: false)
-                    .padding(.trailing, 12)
+                    .padding(.trailing, 12).padding(.vertical, 1.5)
                 Spacer(minLength: 0)
             }
             .font(DiffPalette.font)
-            .padding(.vertical, 1.5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DiffPalette.line(row.kind))
+            .background(Rectangle().fill(DiffPalette.line(row.kind)))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Self.spoken(row))
             .accessibilityAddTraits(.isStaticText)
@@ -125,6 +147,8 @@ struct DiffSplitRowView: View {
     let row: DiffDocument.SplitRow
     let columnWidth: CGFloat
     var language: SyntaxTokenizer.Language = .plain
+    var runStart = true
+    var runEnd = true
 
     var body: some View {
         if let hunk = row.hunk {
@@ -147,8 +171,8 @@ struct DiffSplitRowView: View {
     private func cell(_ line: DiffDocument.Row?, number: Int?) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text(number.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
-                .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6)
-                .background(line.map { DiffPalette.gutter($0.kind) } ?? .clear)
+                .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
+                .background(line.map { DiffPalette.gutterShape($0.kind, runStart: runStart, runEnd: runEnd) })
             if let line {
                 Text(DiffPalette.sign(line.kind))
                     .foregroundStyle(line.kind == .added ? PhrenTheme.success : line.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
@@ -158,8 +182,7 @@ struct DiffSplitRowView: View {
             Spacer(minLength: 0)
         }
         .font(DiffPalette.font)
-        .padding(.vertical, 1.5)
         .frame(width: columnWidth, alignment: .leading)
-        .background(line.map { DiffPalette.line($0.kind) } ?? PhrenTheme.surface.opacity(0.4))
+        .background(Rectangle().fill(line.map { DiffPalette.line($0.kind) } ?? PhrenTheme.surface.opacity(0.4)))
     }
 }

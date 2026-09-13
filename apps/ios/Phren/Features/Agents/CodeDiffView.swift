@@ -85,11 +85,12 @@ struct CodeDiffView: View {
             }
             if unfolded { ScrollView(showAll ? [.horizontal, .vertical] : [.horizontal]) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(visible) { row in
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, row in
                         if row.kind == .header, row.id == diff.rows.first(where: { $0.kind == .header })?.id {
                             // Already named in the card's title bar.
                         } else {
-                            DiffRowView(row: row, numbered: numbered, language: language(diff))
+                            let run = DiffPalette.run(visible, at: index)
+                            DiffRowView(row: row, numbered: numbered, language: language(diff), runStart: run.start, runEnd: run.end)
                         }
                     }
                 }

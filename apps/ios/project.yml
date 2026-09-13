@@ -71,6 +71,10 @@ targets:
       - path: Phren/Resources/graph
         type: folder
         buildPhase: resources
+      # The app's changelog, shown once per version as "What's new" and in
+      # Settings. scripts/changelog.py keeps it in step with MARKETING_VERSION.
+      - path: CHANGELOG.md
+        buildPhase: resources
       - Shared
     dependencies:
       - package: PhrenKit
@@ -137,7 +141,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.phren.ios
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PHREN_APP"
-        MARKETING_VERSION: "1.0.0"
+        MARKETING_VERSION: "0.0.6"
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: true
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -185,7 +189,7 @@ targets:
         # Keep in lockstep with the Phren target above — App Store Connect
         # rejects an upload where the extension's version doesn't match its
         # containing app's.
-        MARKETING_VERSION: "1.0.0"
+        MARKETING_VERSION: "0.0.6"
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"

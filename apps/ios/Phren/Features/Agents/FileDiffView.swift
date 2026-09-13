@@ -76,14 +76,18 @@ struct FileDiffView: View {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if sideBySide {
                             let column = max(180, (geometry.size.width - 1) / 2)
-                            ForEach(document.split) { row in
-                                DiffSplitRowView(row: row, columnWidth: column, language: language)
+                            ForEach(Array(document.split.enumerated()), id: \.element.id) { index, row in
+                                let rows = document.split
+                                let same = { (a: DiffDocument.SplitRow?, b: DiffDocument.SplitRow) in a?.left?.kind == b.left?.kind && a?.right?.kind == b.right?.kind && a?.hunk == nil }
+                                DiffSplitRowView(row: row, columnWidth: column, language: language,
+                                                 runStart: index == 0 || !same(rows[index - 1], row), runEnd: index == rows.count - 1 || !same(rows[index + 1], row))
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.left?.change ?? row.right?.change) }
                             }
                         } else {
-                            ForEach(document.rows) { row in
-                                DiffRowView(row: row, language: language)
+                            ForEach(Array(document.rows.enumerated()), id: \.element.id) { index, row in
+                                let run = DiffPalette.run(document.rows, at: index)
+                                DiffRowView(row: row, language: language, runStart: run.start, runEnd: run.end)
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.change) }
                             }

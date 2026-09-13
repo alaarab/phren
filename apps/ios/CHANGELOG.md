@@ -1,0 +1,46 @@
+# Changelog
+
+Phren for iPhone. Newest first. The app shows the section for its own version
+once after an update ("What's new") and keeps the whole file under
+Settings → About. `scripts/changelog.py` refuses to build a version that has no
+section here; the version is `MARKETING_VERSION` in `project.yml`, the build
+number counts up on its own.
+
+## 0.0.6
+
+### New
+
+- Shell commands show what they changed, right under the call: each file as a
+  row with its counts, tap for the diff, expand it full screen. Phren Hook
+  snapshots the working tree — and the phren store — around every shell call.
+- Repository changes also lists other repositories a session wrote to, and
+  commits a hook already made.
+- Open on a computer: from a project, pick the computer, phren finds the
+  folder, pick the harness, and the chat opens in a new Herdr workspace.
+- Queue messages while the agent works — Send now, Edit, or remove; the first
+  one goes out when the turn ends.
+- The chat header shows the agent's glyph, then project · model · branch, with
+  the diff button beside it.
+- The diff editor follows VS Code: line numbers, tinted rows, changed
+  characters, next/previous change, inline or side by side, syntax coloured.
+- Tool cards show the full command, output that scrolls sideways, and named
+  titles for Read, Grep, Glob, Fetch, Todos and Agent; Write and MultiEdit
+  are drawn as diffs.
+- phren-agent joins Codex, Claude Code and Copilot as a chat provider.
+- The Ctrl-hold shortcut panel can close after a shortcut (Settings).
+
+### Improved
+
+- Chat text is brighter and larger; tool chrome is grey; the accent stays on
+  Send and Stop.
+- The sessions list wastes less space around "Sessions across your computers".
+- The secret scanner matches the CLI, so moving skills no longer trips on
+  long base64 strings.
+
+### Fixed
+
+- "Couldn't move skill" for files containing base64 secrets.
+
+## Earlier
+
+Builds 1–60 predate this changelog.

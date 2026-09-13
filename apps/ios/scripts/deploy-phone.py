@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import changelog
 import plistlib
 import re
 import shlex
@@ -101,9 +102,11 @@ def main():
         raise ValueError(f"Choose a build number higher than the previous local build ({previous}).")
     if not args.build_only:
         run("xcrun", "devicectl", "device", "info", "lockState", "--device", device, "--timeout", "30")
+    # Every build carries a changelog entry for its version, or it does not build.
+    version = changelog.require_entry()
     run("xcodegen", "generate")
     with signing(config) as settings:
-        print(f"Building and signing Phren build {number}. Build log: {log_path}", flush=True)
+        print(f"Building and signing Phren {version} build {number}. Build log: {log_path}", flush=True)
         build([
             "xcodebuild", "build", "-skipPackagePluginValidation", "-project", "Phren.xcodeproj", "-scheme", "Phren",
             "-configuration", "Release", "-destination", "generic/platform=iOS",
