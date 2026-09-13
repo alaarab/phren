@@ -501,6 +501,11 @@ final class AgentChatTests: XCTestCase {
         app.buttons["Done"].tap()
         XCTAssertTrue(theme.waitForExistence(timeout: 5)); theme.tap()
         XCTAssertFalse(purple.waitForExistence(timeout: 1))
+        // A run of removed then added lines draws as one block.
+        findings.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Geocoder batches at 8/s")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "Multi-line change drawn as one block")
+        findings.tap()
         shell.tap()
         // Expanded: the command, its output, then the same folded files.
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "open(p,'w').write(s)")).firstMatch.waitForExistence(timeout: 5))
