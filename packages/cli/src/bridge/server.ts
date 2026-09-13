@@ -9,6 +9,7 @@ import { ActivityJournal } from "./activity.js";
 import { paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
 import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
 import { repositoryBranch, repositoryDiff, webServers } from "./projects.js";
+import { locateProject } from "./locate.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { saveUpload } from "./uploads.js";
@@ -78,6 +79,7 @@ export async function serve(version: string): Promise<void> {
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
+          case "/v1/projects/locate": result = { candidates: await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent()) }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);

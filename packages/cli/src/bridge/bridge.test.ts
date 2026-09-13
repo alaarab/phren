@@ -14,6 +14,7 @@ import { TranscriptReader, transcriptPath, visibleEvent, historicalImage, phrenS
 import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
 import { repositoryBranch } from "./projects.js";
+import { locateProject } from "./locate.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 import { object } from "./protocol.js";
 
@@ -116,6 +117,35 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent(context, "codex")).toEqual({ type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra" } });
     expect(visibleEvent({ type: "turn_context", payload: { cwd: "/private/work" } }, "codex")).toBeUndefined();
   });
+  it("locates a project on this computer from activity, Herdr state, registration and search roots", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "phren-locate-"));
+    await mkdir(path.join(home, "Projects/phren/apps"), { recursive: true });
+    await mkdir(path.join(home, "work/phren"), { recursive: true });
+    await mkdir(path.join(home, ".config/herdr"), { recursive: true });
+    await writeFile(path.join(home, ".config/herdr/session.json"), JSON.stringify({ workspaces: [{ cwd: path.join(home, "work/phren") }, { cwd: "/nowhere/phren" }] }));
+    await mkdir(path.join(home, "store/phren"), { recursive: true });
+    await writeFile(path.join(home, "store/phren/phren.project.yaml"), `sourcePath: ${path.join(home, "Projects/phren")}\n`);
+    const previousHerdr = process.env.PHREN_HERDR_HOME;
+    process.env.PHREN_HERDR_HOME = path.join(home, ".config/herdr");
+    try {
+      const activity = [
+        { at: "2026-09-12T01:00:00Z", directory: path.join(home, "Projects/phren/apps") },
+        { at: "2026-09-12T02:00:00Z", directory: "/gone/phren" },
+        { at: "2026-09-12T03:00:00Z", directory: path.join(home, "Projects/other") },
+      ];
+      const found = await locateProject("phren", activity, { ...process.env, PHREN_PATH: path.join(home, "store"), PROJECTS_DIR: path.join(home, "work") });
+      expect(found.map(f => [f.source, f.directory])).toEqual([
+        ["activity", path.join(home, "Projects/phren")], // trimmed to the project folder, newest first
+        ["herdr", path.join(home, "work/phren")],
+      ]);
+      expect(found[0].lastSeen).toBe("2026-09-12T01:00:00Z");
+      await expect(locateProject("../etc", [])).rejects.toThrow("Invalid project name");
+      expect(await locateProject("nothing-here", [], { ...process.env, HOME: home })).toEqual([]);
+    } finally {
+      if (previousHerdr === undefined) delete process.env.PHREN_HERDR_HOME; else process.env.PHREN_HERDR_HOME = previousHerdr;
+    }
+  });
+
   it("reports the pane's branch with a short cache and nothing for a plain folder", async () => {
     const repo = await mkdtemp(path.join(tmpdir(), "phren-branch-"));
     const git = (...args: string[]) => execFileAsync("git", ["-C", repo, ...args], { env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: repo } });
