@@ -14,7 +14,7 @@ import { planAgentHooks, upgradeKeys } from "./install.js";
 import { TranscriptReader, transcriptPath, visibleEvent, historicalImage, phrenStoreRoot } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
-import { repositoryBranch } from "./projects.js";
+import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { locateProject } from "./locate.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 import { object } from "./protocol.js";
@@ -158,6 +158,42 @@ describe("Phren Hook boundaries", () => {
     expect(await repositoryBranch(repo)).toBe("trunk"); // cached for a few seconds
     const plain = await mkdtemp(path.join(tmpdir(), "phren-plain-"));
     expect(await repositoryBranch(plain)).toBeUndefined();
+  });
+
+  it("diffs the paths a command named: other repositories and commits a hook already made", async () => {
+    const home = await realpathAsync(await mkdtemp(path.join(tmpdir(), "phren-diff-")));
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: home, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" };
+    const git = (cwd: string, ...args: string[]) => execFileAsync("git", ["-C", cwd, ...args], { env });
+    const project = path.join(home, "work/app"), store = path.join(home, ".phren");
+    await mkdir(project, { recursive: true }); await mkdir(path.join(store, "app"), { recursive: true });
+    for (const repo of [project, store]) await git(repo, "init", "-q", "-b", "main");
+    await writeFile(path.join(project, "a.txt"), "one\n"); await git(project, "add", "."); await git(project, "commit", "-q", "-m", "start");
+    await writeFile(path.join(store, "app/FINDINGS.md"), "- old\n"); await git(store, "add", "."); await git(store, "commit", "-q", "-m", "start");
+    // The agent appended to the store and phren's Stop hook committed it at once.
+    await appendFile(path.join(store, "app/FINDINGS.md"), "- new pitfall\n"); await git(store, "commit", "-q", "-am", "phren: capture finding");
+    // The project has an edit still in the working tree and one already committed.
+    await writeFile(path.join(project, "a.txt"), "two\n");
+    await writeFile(path.join(project, "b.txt"), "b\n"); await git(project, "add", "b.txt"); await git(project, "commit", "-q", "-m", "add b");
+    const previousHome = process.env.HOME; process.env.HOME = home;
+    try {
+      const diff = await repositoryDiff(project, ["~/.phren/app", path.join(project, "b.txt"), "/etc/hosts", "../missing/file", 42]) as {
+        root: string; files: { path: string; status: string; sections: { id: string; kind: string; patch: string; note?: string }[] }[];
+        related: { root: string; branch: string; files: { path: string; status: string; sections: { patch: string; note?: string }[] }[] }[];
+      };
+      expect(diff.root).toBe(project);
+      expect(diff.files.map(f => f.path)).toEqual(["a.txt", "b.txt"]);
+      expect(diff.files[0].sections[0]).toMatchObject({ kind: "unstaged" });
+      expect(diff.files[1].sections[0]).toMatchObject({ id: "committed:b.txt", kind: "committed", note: expect.stringMatching(/^[0-9a-f]{7,} · add b · /) });
+      expect(diff.files[1].sections[0].patch).toContain("+b");
+      expect(diff.related).toHaveLength(1);
+      expect(diff.related[0]).toMatchObject({ root: store, branch: "main" });
+      expect(diff.related[0].files).toHaveLength(1);
+      expect(diff.related[0].files[0]).toMatchObject({ path: "app", status: "  " });
+      expect(diff.related[0].files[0].sections[0].patch).toContain("+- new pitfall");
+      expect(diff.related[0].files[0].sections[0].note).toMatch(/phren: capture finding/);
+      // Nothing named: the same shape as before, without the related list.
+      expect(await repositoryDiff(project)).not.toHaveProperty("related");
+    } finally { process.env.HOME = previousHome; }
   });
 });
 

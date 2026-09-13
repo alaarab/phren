@@ -137,6 +137,7 @@ struct DiffStatusBadge: View {
     static func letter(_ status: String) -> (String, Color, String) {
         let code = status.trimmingCharacters(in: .whitespaces)
         if status == "??" { return ("U", PhrenTheme.success, "Untracked") }
+        if code.isEmpty { return ("", PhrenTheme.textMuted, "Committed") }
         switch code.first {
         case "A": return ("A", PhrenTheme.success, "Added")
         case "D": return ("D", PhrenTheme.danger, "Deleted")

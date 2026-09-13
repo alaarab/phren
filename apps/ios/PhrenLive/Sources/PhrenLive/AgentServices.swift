@@ -58,12 +58,15 @@ extension PhrenConnection {
             path: GatewayRequest.path("/v1/transcripts/blob", GatewayRequest.targetQuery(target).merging(["line": "\(line)", "block": "\(block)"]) { _, new in new }), maximumResponseBytes: 8_388_608))
     }
 
-    public static func repositoryDiff(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentRepositoryDiff {
+    /// `paths` are files a command named; the computer adds their repositories
+    /// (and a commit a hook already made) to the pane's own working tree.
+    public static func repositoryDiff(host: LiveHost, privateKey: Data, target: AgentChatTarget, paths: [String] = []) async throws -> AgentRepositoryDiff {
         try checkHost(host, target)
         let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
         guard let cwd = pane.cwd, cwd.hasPrefix("/"), cwd.utf8.count <= 4_096 else { throw PhrenKitError.validation("This pane has no repository folder.") }
+        let paths = Array(paths.filter { !$0.isEmpty && $0.utf8.count <= 4_096 && !$0.contains("\0") }.prefix(24))
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(
-            path: "/v1/diff", body: GatewayRequest.targetBody(target), maximumResponseBytes: 8_388_608))
+            path: "/v1/diff", body: GatewayRequest.targetBody(target, fields: paths.isEmpty ? [:] : ["paths": paths]), maximumResponseBytes: 8_388_608))
         return try AgentRepositoryDiff.read(data)
     }
 

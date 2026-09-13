@@ -63,9 +63,9 @@ struct ChatToolSummary {
 
 /// How a tool card opens the conversation's repository diff — set by the
 /// chat view, absent anywhere a card is shown without a live session.
-struct OpenRepositoryChangesKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+struct OpenRepositoryChangesKey: EnvironmentKey { static let defaultValue: (([String]) -> Void)? = nil }
 extension EnvironmentValues {
-    var openRepositoryChanges: (() -> Void)? {
+    var openRepositoryChanges: (([String]) -> Void)? {
         get { self[OpenRepositoryChangesKey.self] } set { self[OpenRepositoryChangesKey.self] = newValue }
     }
 }
@@ -113,8 +113,9 @@ struct ChatToolActivity: View, Equatable {
                     }
                     // A command that wrote files says nothing about what it
                     // wrote; the working tree does.
-                    if let openRepositoryChanges, messages.contains(where: { !$0.isToolResult && ToolPresentation(title: $0.title ?? "", text: $0.text).editsFiles }) {
-                        Button { openRepositoryChanges() } label: {
+                    let edits = messages.filter { !$0.isToolResult }.map { ToolPresentation(title: $0.title ?? "", text: $0.text) }.filter(\.editsFiles)
+                    if let openRepositoryChanges, !edits.isEmpty {
+                        Button { openRepositoryChanges(Array(Set(edits.flatMap(\.editedPaths))).sorted()) } label: {
                             Label("See repository changes", systemImage: "arrow.triangle.branch")
                                 .font(.caption.weight(.medium)).padding(.horizontal, 10).padding(.vertical, 7)
                                 .background(PhrenTheme.surfaceRaised, in: Capsule())

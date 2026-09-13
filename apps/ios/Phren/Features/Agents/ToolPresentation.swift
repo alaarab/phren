@@ -18,7 +18,25 @@ struct ToolPresentation {
         guard patch == nil, ["Shell", "Tools"].contains(title) else { return false }
         return Self.fileEdit.firstMatch(in: body, range: NSRange(body.startIndex..., in: body)) != nil
     }
-    private static let fileEdit = try! NSRegularExpression(pattern: #"(?m)(<<-?\s*['"]?\w+['"]?|\bsed\s+-[a-zA-Z]*i|\btee\b|(?<![<>&|\d])>{1,2}\s*[~./\w-]+|\bopen\([^)]*['"][wa]\+?['"]|\bgit\s+apply\b|\bpatch\s+-p\d|\b(?:cp|mv|rm)\s+-?\w*\s+[~./\w-]+|\bnpm\s+(?:i|install|uninstall)\b|\bpnpm\s+(?:add|remove)\b)"#)
+    private static let fileEdit = try! NSRegularExpression(pattern: #"(?m)(<<-?\s*['"]?\w+['"]?|\bsed\s+-[a-zA-Z]*i|\btee\b|(?<![<>&|\d])>{1,2}\s*[~./\w-]+|\bopen\([^)]*['"][wa]\+?['"]|\.write_(?:text|bytes)\(|\bwriteFile(?:Sync)?\(|\bjson\.dump\(|\bgit\s+(?:apply|mv|rm|checkout|restore|stash|commit)\b|\bpatch\s+-p\d|\b(?:cp|mv|rm|touch|mkdir|ln)\s+-?\w*\s*[~./\w-]+|\bnpm\s+(?:i|install|uninstall)\b|\bpnpm\s+(?:add|remove)\b|\bpip3?\s+(?:install|uninstall)\b|\bcargo\s+(?:add|remove)\b|\bgo\s+(?:get|mod)\b)"#)
+
+    /// The places the command named — `/…`, `~/…` or `./…` — so the diff can
+    /// look them up even when they sit in another repository, or were
+    /// committed by a hook before anyone looked. Absolute system paths such
+    /// as `/dev/null` are harmless: the computer keeps to your home folder.
+    var editedPaths: [String] {
+        guard editsFiles else { return [] }
+        var seen = Set<String>(), paths: [String] = []
+        for match in Self.pathLiteral.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
+            guard let range = Range(match.range, in: body) else { continue }
+            let path = String(body[range])
+            guard path.count > 2, seen.insert(path).inserted else { continue }
+            paths.append(path)
+            if paths.count == 24 { break }
+        }
+        return paths
+    }
+    private static let pathLiteral = try! NSRegularExpression(pattern: #"(?<![\w@:/])(?:~/|\./|/)[\w.@+~-]+(?:/[\w.@+~-]+)*"#)
 
     var preview: String {
         // The file, not its whole absolute path: the last two components

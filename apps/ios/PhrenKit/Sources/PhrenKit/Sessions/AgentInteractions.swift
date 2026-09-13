@@ -131,20 +131,34 @@ public struct AgentRepositoryDiff: Decodable, Sendable {
         public let binary: Bool?
         public let loadState: String?
         public let patch: String?
+        /// For a `committed` section: the commit's hash, subject and age.
+        public let note: String?
 
-        public init(id: String, kind: String, binary: Bool? = nil, loadState: String? = nil, patch: String? = nil) {
-            self.id = id; self.kind = kind; self.binary = binary; self.loadState = loadState; self.patch = patch
+        public init(id: String, kind: String, binary: Bool? = nil, loadState: String? = nil, patch: String? = nil, note: String? = nil) {
+            self.id = id; self.kind = kind; self.binary = binary; self.loadState = loadState; self.patch = patch; self.note = note
         }
+    }
+    /// Another repository a command wrote into — the phren store, a sibling
+    /// checkout — with the changes under the paths it named.
+    public struct Related: Decodable, Sendable, Identifiable {
+        public let root: String
+        public let branch: String?
+        public let files: [File]
+        public var id: String { root }
     }
     public let branch: String?
     public let root: String
     public let launchPath: String
     public let files: [File]
+    public let related: [Related]?
     public static func read(_ data: Data) throws -> Self {
         guard data.count <= 8_388_608 else { throw PhrenKitError.validation("The repository diff is too large.") }
         let result = try JSONDecoder().decode(Self.self, from: data)
+        let related = result.related ?? []
         guard result.root.hasPrefix("/"), result.launchPath.hasPrefix("/"), result.files.count <= 5_000,
-              Set(result.files.map(\.path)).count == result.files.count else { throw PhrenKitError.validation("The repository response is invalid.") }
+              Set(result.files.map(\.path)).count == result.files.count, related.count <= 8,
+              related.allSatisfy({ $0.root.hasPrefix("/") && $0.files.count <= 5_000 && Set($0.files.map(\.path)).count == $0.files.count })
+        else { throw PhrenKitError.validation("The repository response is invalid.") }
         return result
     }
     public static func statusPath(_ data: Data) throws -> String {

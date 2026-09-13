@@ -53,4 +53,28 @@ final class ToolPresentationTests: XCTestCase {
         XCTAssertTrue(ToolOutputPreview(output, lines: 80, characters: 16_000).text.hasSuffix("…"))
         XCTAssertEqual(ToolOutputPreview(output, lines: 200, characters: 16_000).text, output)
     }
+
+    func testShellEditsNameThePathsTheyTouch() {
+        // A python heredoc that writes under the phren store and appends a file: the
+        // paths it names come out, system paths and URLs do not.
+        let cmd = """
+        python3 - <<'PY'
+        from pathlib import Path
+        p=Path('/Users/me/.phren/objectstudio/reference/live-midi')
+        (p/'source-inputs.json').write_text('{}')
+        with (p/'WORK.md').open('a') as f: f.write('x')
+        print('see https://example.org/docs/x', open('/dev/null'))
+        PY
+        git diff --check
+        """
+        let shell = ToolPresentation(title: "exec_command", text: "{\"cmd\":\(String(decoding: try! JSONEncoder().encode(cmd), as: UTF8.self))}")
+        XCTAssertTrue(shell.editsFiles)
+        XCTAssertEqual(shell.editedPaths, ["/Users/me/.phren/objectstudio/reference/live-midi", "/dev/null"])
+        XCTAssertTrue(ToolPresentation(title: "Bash", text: "{\"command\":\"sed -i '' 's/a/b/' ~/work/app/README.md\"}").editedPaths == ["~/work/app/README.md"])
+        XCTAssertTrue(ToolPresentation(title: "Bash", text: "{\"command\":\"touch ./notes/today.md\"}").editsFiles)
+        XCTAssertEqual(ToolPresentation(title: "Bash", text: "{\"command\":\"touch ./notes/today.md\"}").editedPaths, ["./notes/today.md"])
+        // Reading is not writing.
+        let read = ToolPresentation(title: "Bash", text: "{\"command\":\"cat /Users/me/.phren/phren/tasks.md | head\"}")
+        XCTAssertFalse(read.editsFiles); XCTAssertEqual(read.editedPaths, [])
+    }
 }

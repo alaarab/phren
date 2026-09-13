@@ -111,7 +111,7 @@ import UIKit
             // A shell-driven edit: the card can only show what ran, so it
             // offers the repository diff for what changed.
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "edit-py", "name": "exec_command",
-                "arguments": "{\"cmd\":\"python3 - <<'EOF'\\np='Theme.swift'\\ns=open(p).read().replace('green','purple')\\nopen(p,'w').write(s)\\nEOF\"}"]]])
+                "arguments": "{\"cmd\":\"python3 - <<'EOF'\\np='Theme.swift'\\ns=open(p).read().replace('green','purple')\\nopen(p,'w').write(s)\\nopen('/Users/fixture/.phren/phone/FINDINGS.md','a').write('- Accent is purple now\\\\n')\\nEOF\"}"]]])
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "edit-py", "output": "{\"output\":\"\",\"exit_code\":0}"]]])
         }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }

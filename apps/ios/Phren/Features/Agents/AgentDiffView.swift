@@ -6,9 +6,13 @@ import SwiftUI
 /// Staged Changes and Changes, each file with its status letter, name, dim
 /// folder, and line counts. A file with both staged and unstaged edits is
 /// listed under both, as it is there, and each opens that group's diff.
+/// Opened from a tool card, it also carries the paths that command named:
+/// the computer adds what changed under them — in another repository, or in
+/// a commit a hook already made — as further groups below.
 struct AgentDiffView: View {
     let session: LiveAgentSession
     let target: AgentChatTarget
+    var paths: [String] = []
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var diff: AgentRepositoryDiff?
@@ -27,8 +31,8 @@ struct AgentDiffView: View {
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
 
-    private func entries(_ diff: AgentRepositoryDiff, kind: String) -> [Entry] {
-        diff.files.flatMap { file -> [Entry] in
+    private func entries(_ files: [AgentRepositoryDiff.File], kind: String) -> [Entry] {
+        files.flatMap { file -> [Entry] in
             if kind == "unstaged", file.status == "??" {
                 // Untracked: nothing to compare yet, still a change VS Code lists.
                 return [Entry(file: file, section: .init(id: "untracked:\(file.path)", kind: "unstaged", binary: nil, loadState: nil, patch: nil))]
@@ -40,31 +44,22 @@ struct AgentDiffView: View {
     var body: some View {
         PhrenList {
             if let diff {
-                let staged = entries(diff, kind: "staged"), unstaged = entries(diff, kind: "unstaged")
-                // GitHub's "Files changed" summary line: the branch, the count,
-                // the totals — one flat row, no card chrome.
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.triangle.branch").font(.caption).foregroundStyle(PhrenTheme.chatNeutral)
-                            Text(diff.branch ?? "Unborn branch").font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                            Spacer()
-                            DiffCounts(added: counts.values.reduce(0) { $0 + $1.added }, removed: counts.values.reduce(0) { $0 + $1.removed })
-                        }
-                        HStack(spacing: 6) {
-                            Text("\(staged.count + unstaged.count) file\(staged.count + unstaged.count == 1 ? "" : "s") changed")
-                            Text("·").foregroundStyle(PhrenTheme.textDim)
-                            Text(diff.root).lineLimit(1).truncationMode(.head)
-                        }.font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                }
-                if staged.isEmpty && unstaged.isEmpty {
+                let staged = entries(diff.files, kind: "staged"), unstaged = entries(diff.files, kind: "unstaged"), committed = entries(diff.files, kind: "committed")
+                summary(root: diff.root, branch: diff.branch, files: diff.files, changed: staged.count + unstaged.count + committed.count)
+                if staged.isEmpty && unstaged.isEmpty && committed.isEmpty {
                     Section { Label("Working tree is clean", systemImage: "checkmark.circle").foregroundStyle(PhrenTheme.success) }
                 }
                 if !staged.isEmpty { group("Staged Changes", staged) }
                 if !unstaged.isEmpty { group("Changes", unstaged) }
+                if !committed.isEmpty { group("Committed", committed) }
+                // What the command wrote elsewhere, one block per repository.
+                ForEach(diff.related ?? []) { other in
+                    let staged = entries(other.files, kind: "staged"), unstaged = entries(other.files, kind: "unstaged"), committed = entries(other.files, kind: "committed")
+                    summary(root: other.root, branch: other.branch, files: other.files, changed: staged.count + unstaged.count + committed.count)
+                    if !staged.isEmpty { group("Staged Changes", staged) }
+                    if !unstaged.isEmpty { group("Changes", unstaged) }
+                    if !committed.isEmpty { group("Committed", committed) }
+                }
             } else if error == nil {
                 Section { ProgressView("Loading repository changes…") }
             }
@@ -82,16 +77,18 @@ struct AgentDiffView: View {
                 let result: AgentRepositoryDiff
                 #if DEBUG && targetEnvironment(simulator)
                 if AgentChatFixture.enabled {
-                    result = try AgentRepositoryDiff.read(Data(#"{"root":"/work/phone","launchPath":"/work/phone","branch":"main","files":[{"path":"Theme.swift","status":" M","sections":[{"id":"unstaged:Theme.swift","kind":"unstaged","binary":false,"patch":"@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12"}]},{"path":"Sources/App/Settings.swift","status":"M ","sections":[{"id":"staged:Sources/App/Settings.swift","kind":"staged","binary":false,"patch":"@@ -10,4 +10,5 @@ struct Settings {\n     var theme = \"dark\"\n+    var compact = true\n     var sound = false\n"}]},{"path":"Notes.md","status":"??","sections":[]}]}"#.utf8))
-                } else { result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target) }
+                    // Opened from the heredoc card, the store it wrote to comes back as a related repository.
+                    let related = paths.isEmpty ? "" : #","related":[{"root":"/Users/fixture/.phren","branch":"main","files":[{"path":"phone/FINDINGS.md","status":"  ","sections":[{"id":"committed:phone/FINDINGS.md","kind":"committed","binary":false,"loadState":"loaded","note":"a1b2c3d · phren: capture finding · 1 minute ago","patch":"diff --git a/phone/FINDINGS.md b/phone/FINDINGS.md\n--- a/phone/FINDINGS.md\n+++ b/phone/FINDINGS.md\n@@ -2,2 +2,3 @@\n - Tiles are one sprite\n+- Accent is purple now\n - Offline first\n"}]}]}]"#
+                    result = try AgentRepositoryDiff.read(Data((#"{"root":"/work/phone","launchPath":"/work/phone","branch":"main","files":[{"path":"Theme.swift","status":" M","sections":[{"id":"unstaged:Theme.swift","kind":"unstaged","binary":false,"patch":"@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12"}]},{"path":"Sources/App/Settings.swift","status":"M ","sections":[{"id":"staged:Sources/App/Settings.swift","kind":"staged","binary":false,"patch":"@@ -10,4 +10,5 @@ struct Settings {\n     var theme = \"dark\"\n+    var compact = true\n     var sound = false\n"}]},{"path":"Notes.md","status":"??","sections":[]}]"# + related + "}").utf8))
+                } else { result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths) }
                 #else
-                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target)
+                result = try await PhrenConnection.repositoryDiff(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, paths: paths)
                 #endif
                 try Task.checkCancellation()
                 // Counted once here rather than per row: the bridge can hand
                 // back hundreds of patches, and the list re-renders freely.
                 var totals: [String: (added: Int, removed: Int)] = [:]
-                for file in result.files {
+                for file in result.files + (result.related ?? []).flatMap(\.files) {
                     for section in file.sections where section.patch?.isEmpty == false {
                         let preview = DiffPreview(section.patch!)
                         totals[section.id] = (preview.added, preview.removed)
@@ -103,13 +100,38 @@ struct AgentDiffView: View {
         }
     }
 
+    /// GitHub's "Files changed" summary line: the branch, the count, the
+    /// totals — one flat row, no card chrome. Once per repository.
+    private func summary(root: String, branch: String?, files: [AgentRepositoryDiff.File], changed: Int) -> some View {
+        let ids = Set(files.flatMap { $0.sections.map(\.id) })
+        let totals = counts.filter { ids.contains($0.key) }.values
+        return Section {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.branch").font(.caption).foregroundStyle(PhrenTheme.chatNeutral)
+                    Text(branch ?? "Unborn branch").font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                    Spacer()
+                    DiffCounts(added: totals.reduce(0) { $0 + $1.added }, removed: totals.reduce(0) { $0 + $1.removed })
+                }
+                HStack(spacing: 6) {
+                    Text("\(changed) file\(changed == 1 ? "" : "s") changed")
+                    Text("·").foregroundStyle(PhrenTheme.textDim)
+                    Text(root).lineLimit(1).truncationMode(.head)
+                }.font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+            }
+            .listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+            .accessibilityIdentifier("diff-repository:\(root)")
+        }
+    }
+
     /// A file list the way GitHub draws it: flat rows, a file icon, the
     /// path, the counts and a five-block bar — and no disclosure chevrons.
     private func group(_ title: String, _ entries: [Entry]) -> some View {
         Section {
             ForEach(entries) { entry in
                 Button { opened = entry } label: {
-                    FileChangeRow(file: entry.file, counts: counts[entry.section.id])
+                    FileChangeRow(file: entry.file, counts: counts[entry.section.id], note: entry.section.note)
                 }
                 .buttonStyle(.plain)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
@@ -134,6 +156,8 @@ struct AgentDiffView: View {
 struct FileChangeRow: View {
     let file: AgentRepositoryDiff.File
     let counts: (added: Int, removed: Int)?
+    /// The commit that carried a `committed` section: hash · subject · age.
+    var note: String? = nil
 
     private var parts: (name: String, folder: String?) {
         guard let slash = file.path.lastIndex(of: "/") else { return (file.path, nil) }
@@ -161,10 +185,13 @@ struct FileChangeRow: View {
                 HStack(spacing: 6) {
                     Text(parts.name).font(.system(.subheadline, design: .monospaced).weight(.medium)).foregroundStyle(PhrenTheme.chatText)
                         .lineLimit(1).truncationMode(.middle)
-                    DiffStatusBadge(status: file.status)
+                    if !file.status.trimmingCharacters(in: .whitespaces).isEmpty { DiffStatusBadge(status: file.status) }
                 }
                 if let folder = parts.folder {
                     Text(folder).font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.head)
+                }
+                if let note {
+                    Text(note).font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim).lineLimit(1).truncationMode(.tail)
                 }
             }
             Spacer(minLength: 8)

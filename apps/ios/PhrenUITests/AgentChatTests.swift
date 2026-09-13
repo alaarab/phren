@@ -491,6 +491,15 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 5))
         capture(app, "Repository changes from a shell edit, syntax coloured")
+        // The same command appended to the phren store, which a hook committed
+        // straight away: it appears as its own repository, with the commit.
+        app.navigationBars.buttons.firstMatch.tap()
+        let store = app.buttons["diff-file:committed:phone/FINDINGS.md"]
+        XCTAssertTrue(store.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "phren: capture finding")).firstMatch.exists)
+        store.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+- Accent is purple now")).firstMatch.waitForExistence(timeout: 5))
+        capture(app, "A hook's commit in another repository, from the same command")
     }
     /// Seed this simulator with `xcrun simctl addmedia <device> <test-image>`.
     @MainActor
