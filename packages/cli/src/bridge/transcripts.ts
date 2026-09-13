@@ -26,7 +26,26 @@ function toolOutputReferences(output: unknown): unknown {
   return Array.isArray(result.content) ? { ...result, content: imageReferences(result.content) } : output;
 }
 
+/**
+ * The phren store whose `.runtime/sessions` holds phren-agent event logs.
+ * `PHREN_PATH` or the shared `~/.phren` root — the two resolutions the CLI's
+ * `findPhrenPath` makes without a working directory, which a service has none
+ * of. Kept inline rather than importing phren-paths: that module drags in
+ * yaml and the data layer, and this bundle is budgeted for cold start.
+ */
+export function phrenStoreRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.PHREN_PATH?.trim();
+  if (!configured) return path.join(homedir(), ".phren");
+  const expanded = configured === "~" ? homedir() : configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : configured;
+  return path.resolve(expanded);
+}
+
 function chatFrame(raw: Json, source: Provider): Json {
+  if (source === "phren") {
+    const data = object(raw.data), message = object(data.message);
+    return Array.isArray(message.content)
+      ? { ...raw, data: { ...data, message: { ...message, content: imageReferences(message.content, true) } } } : raw;
+  }
   if (source === "copilot") {
     const data = object(raw.data);
     return { ...raw, data: { ...data,
@@ -46,9 +65,11 @@ export async function transcriptPath(source: Provider, session: string): Promise
   if (!/^[a-f0-9-]{36}$/i.test(session)) throw new BridgeError(400, "Invalid conversation identity.");
   const base = source === "codex" ? path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")
     : source === "claude" ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects")
+    : source === "phren" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
     : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
   const root = await realpath(base);
-  const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl` : `${session}/events.jsonl`;
+  const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
+    : source === "phren" ? `session-${session}.events.jsonl` : `${session}/events.jsonl`;
   const matches = await glob(pattern, { cwd: root, absolute: true, follow: false });
   if (matches.length !== 1) throw new BridgeError(404, "The transcript is not available for this conversation.");
   const file = await realpath(matches[0]);
@@ -58,6 +79,19 @@ export async function transcriptPath(source: Provider, session: string): Promise
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider): Json | undefined {
+  if (source === "phren") {
+    // phren-agent's event log (experimental/agent/src/session/log.ts): the
+    // header and log/replace splices are bookkeeping; the three message
+    // events are the conversation. Reasoning blocks stay on the computer.
+    if (!["user/message", "assistant/message", "tool/results"].includes(String(raw.type))) return undefined;
+    const data = object(raw.data), message = object(data.message);
+    const content = Array.isArray(message.content)
+      ? objects(message.content).map(b => ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" })
+      : message.content;
+    const exported: Json = { message: { role: message.role, content } };
+    for (const key of ["source", "turn", "stop_reason", "usage"]) if (data[key] !== undefined) exported[key] = data[key];
+    return { seq: raw.seq, time: raw.time, type: raw.type, data: exported };
+  }
   if (source === "codex") {
     const p = object(raw.payload);
     // The model answering this turn is the only field of turn_context the

@@ -40,6 +40,9 @@ Missing limits, ambiguous panes, and unavailable observations omit the metric.
 No extra request per iPhone row is needed.
 
 - Codex, Claude Code, and Copilot conversations, with exact pane/session identity.
+  The experimental phren-agent is wired the same way (its `.runtime/sessions`
+  event log is the transcript, and it reports SessionStart/UserPromptSubmit/Stop
+  to the Hook itself) and switches on once Herdr reports the `phren` agent kind.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.

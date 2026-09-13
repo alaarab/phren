@@ -21,6 +21,7 @@ import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
+import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { createSession, runTurn } from "./agent-loop.js";
@@ -182,6 +183,9 @@ export async function runAgentCli(raw: string[]) {
     contextSnippet = await buildContextSnippet(phrenCtx, args.task);
     priorSummary = getPriorSummary(phrenCtx);
     sessionId = startSession(phrenCtx);
+    // Inside a Herdr pane, tell Phren Hook which event log is this pane's.
+    setHerdrHookSession(sessionId);
+    emitHerdrHook("SessionStart");
 
     // Load evolved project context for warm start
     const projectCtx = loadProjectContext(phrenCtx);
@@ -458,7 +462,9 @@ export async function runAgentCli(raw: string[]) {
     }
     if (resumedLog) {
       const session = createSession(contextLimit, { log: resumedLog });
-      const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig);
+      emitHerdrHook("UserPromptSubmit");
+      const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig)
+        .finally(() => emitHerdrHook("Stop"));
       result = {
         finalText: turnResult.text,
         turns: turnResult.turns,
@@ -469,7 +475,8 @@ export async function runAgentCli(raw: string[]) {
       };
     } else {
       const session = createSession(contextLimit, { log: agentConfig.sessionLog });
-      const turnResult = await runTurn(args.task, session, agentConfig);
+      emitHerdrHook("UserPromptSubmit");
+      const turnResult = await runTurn(args.task, session, agentConfig).finally(() => emitHerdrHook("Stop"));
       result = {
         finalText: turnResult.text,
         turns: turnResult.turns,
