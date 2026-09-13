@@ -125,7 +125,7 @@ def main():
             run("xcrun", "devicectl", "device", "process", "launch", "--device", device,
                 "--terminate-existing", "com.phren.ios", "--timeout", "30")
             break
-        except SystemExit:
+        except subprocess.CalledProcessError:
             if attempt == 2:
                 raise
             print("Launch not accepted yet; retrying…", flush=True)
