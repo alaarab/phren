@@ -190,7 +190,7 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     const hooks = object(config.hooks);
     const command = `${quote(process.execPath)} ${quote(program)} hook ${source}`;
     const ownHook = (entry: unknown) => typeof entry === "string" && entry.endsWith(` ${quote(program)} hook ${source}`);
-    for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"]) {
+    for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
       if (hooks[event] !== undefined && (!Array.isArray(hooks[event]) || (hooks[event] as unknown[]).some(v => !v || typeof v !== "object" || Array.isArray(v)))) throw new Error(`Invalid ${event} hooks: ${file}`);
       if (source !== "copilot" && objects(hooks[event]).some(g => !Array.isArray(g.hooks))) throw new Error(`Invalid ${event} hook group: ${file}`);
     }
@@ -201,9 +201,13 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
         hooks[event] = remove ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
       }
     } else {
-      for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"]) {
+      for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
         const groups = objects(hooks[event]).map(group => ({ ...group, hooks: objects(group.hooks).filter(h => !ownHook(h.command)) })).filter(group => group.hooks.length);
-        hooks[event] = remove ? groups : [...groups, { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] }];
+        // Tool hooks snapshot the working tree around shell calls, so the phone
+        // can show what a command changed; other tools carry their own patch.
+        const group = event.endsWith("ToolUse") ? { matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }
+          : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
+        hooks[event] = remove ? groups : [...groups, group];
       }
     }
     config.hooks = hooks;

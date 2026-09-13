@@ -157,6 +157,25 @@ final class AgentChatTests: XCTestCase {
         XCTAssertThrowsError(try AgentChatTranscript.read(frame(rows, source: "codex"), source: "claude"))
     }
 
+    func testShellChangesAttachedByTheHookBecomePatchPartsUnderTheirCall() throws {
+        let patch = "diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n"
+        let rows: [[String: Any]] = [
+            ["type": "response_item", "payload": ["type": "function_call", "name": "exec_command", "call_id": "c1", "arguments": "{\"cmd\":\"sed -i s/1/2/ src/a.ts\"}"]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "c1", "output": ""],
+             "phren_changes": ["c1": [["root": "/work/app", "path": "src/a.ts", "status": "M", "added": 1, "removed": 1, "patch": patch],
+                                      ["root": "/work/app", "path": "src/b.ts", "status": "A", "added": 1, "removed": 0, "patch": "diff --git a/src/b.ts b/src/b.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/b.ts\n@@ -0,0 +1 @@\n+export {};\n"],
+                                      ["root": "/work/app", "path": "", "status": "M", "patch": "ignored"]]]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "c2", "output": "other"], "phren_changes": ["c1": [["path": "x", "patch": "@@\n+y"]]]],
+        ]
+        let transcript = try AgentChatTranscript.read(frame(rows, source: "codex"), source: "codex")
+        XCTAssertEqual(transcript.messages.map(\.title), ["exec_command", "Tool result", "Changes", "Changes", "Tool result"])
+        XCTAssertEqual(transcript.messages.map(\.isChange), [false, false, true, true, false])
+        XCTAssertEqual(transcript.messages[2].text, "*** Update File: src/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n")
+        XCTAssertEqual(transcript.messages[3].text, "*** Add File: src/b.ts\n@@ -0,0 +1 @@\n+export {};\n")
+        XCTAssertEqual(transcript.messages[2].toolCallID, "c1")
+        XCTAssertEqual(Set(transcript.messages.map(\.id)).count, 5)
+    }
+
     func testClaudeBlocksSeparateVisibleTextToolCallsAndResults() throws {
         let rows: [[String: Any]] = [
             ["type": "user", "message": ["role": "user", "content": "Review this"]],

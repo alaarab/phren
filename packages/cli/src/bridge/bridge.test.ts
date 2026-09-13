@@ -16,6 +16,7 @@ import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
 import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { locateProject } from "./locate.js";
+import { ToolChanges, namedPaths, outputCallIds } from "./changes.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 import { object } from "./protocol.js";
 
@@ -158,6 +159,65 @@ describe("Phren Hook boundaries", () => {
     expect(await repositoryBranch(repo)).toBe("trunk"); // cached for a few seconds
     const plain = await mkdtemp(path.join(tmpdir(), "phren-plain-"));
     expect(await repositoryBranch(plain)).toBeUndefined();
+  });
+
+  it("records what a shell call changed, across the pane's repository and the store, and holds the output row until it is known", async () => {
+    const home = await realpathAsync(await mkdtemp(path.join(tmpdir(), "phren-changes-")));
+    const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: home, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" };
+    const git = (cwd: string, ...args: string[]) => execFileAsync("git", ["-C", cwd, ...args], { env });
+    const project = path.join(home, "work/app"), store = path.join(home, ".phren");
+    await mkdir(path.join(project, "src"), { recursive: true }); await mkdir(path.join(store, "app"), { recursive: true });
+    for (const repo of [project, store]) await git(repo, "init", "-q", "-b", "main");
+    await writeFile(path.join(project, "src/a.ts"), "const a = 1;\n"); await writeFile(path.join(project, ".gitignore"), "dist/\n");
+    await git(project, "add", "."); await git(project, "commit", "-q", "-m", "start");
+    await writeFile(path.join(store, "app/FINDINGS.md"), "- old\n"); await git(store, "add", "."); await git(store, "commit", "-q", "-m", "start");
+    const previous = { HOME: process.env.HOME, PHREN_PATH: process.env.PHREN_PATH, PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME };
+    process.env.HOME = home; process.env.PHREN_PATH = store; process.env.PHREN_BRIDGE_HOME = path.join(home, "bridge");
+    try {
+      const changes = new ToolChanges();
+      const command = "sed -i '' 's/1/2/' src/a.ts && echo '- new' >> ~/.phren/app/FINDINGS.md && mkdir -p dist && echo x > dist/out.js";
+      await changes.before("claude:s1", "toolu_1", project, command);
+      const view = changes.view("claude:s1");
+      expect(view.pending("toolu_1")).toBe(true);
+      // The command runs: an edit, a new file the store's hook commits at once, and ignored build output.
+      await writeFile(path.join(project, "src/a.ts"), "const a = 2;\n");
+      await writeFile(path.join(project, "src/b.ts"), "export {};\n");
+      await mkdir(path.join(project, "dist")); await writeFile(path.join(project, "dist/out.js"), "x");
+      await appendFile(path.join(store, "app/FINDINGS.md"), "- new\n"); await git(store, "commit", "-q", "-am", "phren: capture finding");
+      await changes.after("claude:s1", "toolu_1");
+      expect(view.pending("toolu_1")).toBe(false);
+      const files = (await view.changes("toolu_1"))!;
+      expect(files.map(f => [f.root, f.path, f.status, f.added, f.removed])).toEqual([
+        [project, "src/a.ts", "M", 1, 1], [project, "src/b.ts", "A", 1, 0], [store, "app/FINDINGS.md", "M", 1, 0],
+      ]);
+      expect(files[0].patch).toContain("+const a = 2;");
+      expect(await view.changes("toolu_none")).toBeUndefined();
+      // A fresh instance reads the record back from disk.
+      expect((await new ToolChanges().view("claude:s1").changes("toolu_1"))?.map(f => f.path)).toEqual(["src/a.ts", "src/b.ts", "app/FINDINGS.md"]);
+      // A call that changed nothing leaves no attachment.
+      await changes.before("claude:s1", "toolu_2", project, "ls"); await changes.after("claude:s1", "toolu_2");
+      expect(await view.changes("toolu_2")).toBeUndefined();
+
+      // The reader attaches the record to the output row, and holds a row whose diff is still pending.
+      const transcript = path.join(home, "t.jsonl");
+      const row = (id: string) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+      await writeFile(transcript, [JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Bash", input: { command } }] } }), row("toolu_1")].join("\n") + "\n");
+      const reader = new TranscriptReader(transcript, "claude", undefined, view);
+      const page = await reader.read();
+      expect(page.entries).toHaveLength(2);
+      expect(Object.keys((page.entries[1].raw as { phren_changes: Record<string, unknown> }).phren_changes)).toEqual(["toolu_1"]);
+      await changes.before("claude:s1", "toolu_3", project, "touch src/c.ts");
+      await appendFile(transcript, row("toolu_3") + "\n");
+      const held = await reader.read();
+      expect(held.entries).toHaveLength(0); // the row waits for PostToolUse
+      await writeFile(path.join(project, "src/c.ts"), ""); await changes.after("claude:s1", "toolu_3");
+      const released = await reader.read();
+      expect(released.entries.map(e => e.line)).toEqual([2]);
+      expect((released.entries[0].raw as { phren_changes: Record<string, { path: string }[]> }).phren_changes.toolu_3.map(f => f.path)).toEqual(["src/c.ts"]);
+    } finally { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } }
+    expect(namedPaths("cat ~/x/y.md /etc/hosts ./a https://h/p 'p/q'")).toEqual(["~/x/y.md", "/etc/hosts", "./a"]);
+    expect(outputCallIds({ type: "response_item", payload: { type: "function_call_output", call_id: "c1" } }, "codex")).toEqual(["c1"]);
+    expect(outputCallIds({ type: "tool.execution_complete", data: { toolCallId: "t1" } }, "copilot")).toEqual(["t1"]);
   });
 
   it("diffs the paths a command named: other repositories and commits a hook already made", async () => {
@@ -550,6 +610,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect(changes).toHaveLength(3);
       expect(changes[0].after).toContain("other-provider-hook");
       expect(changes[0].after).toContain("PermissionRequest");
+      expect(JSON.parse(changes[0].after).hooks.PreToolUse[0]).toMatchObject({ matcher: "Bash", hooks: [{ timeout: 10 }] });
+      expect(JSON.parse(changes[0].after).hooks.PostToolUse).toHaveLength(1);
       expect(await readFile(file, "utf8")).toBe(original);
       await writeFile(file, changes[0].after);
       expect((await planAgentHooks("/private/phren/current/bridge-hook.mjs")).some(c => c.file === file)).toBe(false);

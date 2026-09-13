@@ -105,6 +105,9 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public var imageBlocks: [Int] = []
     public var toolCallID: String? = nil
     public var isToolResult: Bool { role == .tool && title == "Tool result" }
+    /// A file a shell call changed, attached by Phren Hook — shown under the
+    /// call as a diff rather than counted as a call of its own.
+    public var isChange: Bool { role == .tool && title == "Changes" }
 }
 
 /// Normalize only visible conversation content. Encrypted reasoning, system
@@ -147,8 +150,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
-            let parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
+            var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
+            parts += changes(raw, after: parts)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
             for (index, part) in parts.enumerated() {
@@ -172,6 +176,25 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var imageBlocks: [Int] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
+    }
+    /// What a shell call changed on disk, as Phren Hook attaches it to the
+    /// call's output row (`phren_changes`, keyed by call id): one Patch-shaped
+    /// part per file, in the apply_patch form the diff cards already draw.
+    private static func changes(_ raw: [String: Any], after parts: [Part]) -> [Part] {
+        guard let attached = raw["phren_changes"] as? [String: [[String: Any]]] else { return [] }
+        var extra: [Part] = []
+        for part in parts where part.title == "Tool result" {
+            guard let id = part.toolCallID, let files = attached[id] else { continue }
+            for file in files.prefix(40) {
+                guard let path = file["path"] as? String, !path.isEmpty, path.utf8.count <= 4_096,
+                      let patch = file["patch"] as? String, !patch.isEmpty else { continue }
+                let status = file["status"] as? String ?? "M"
+                let header = status == "A" ? "*** Add File: " : status == "D" ? "*** Delete File: " : "*** Update File: "
+                let hunks = patch.components(separatedBy: "\n").drop { !$0.hasPrefix("@@") }.joined(separator: "\n")
+                extra.append(Part(role: .tool, title: "Changes", text: header + path + "\n" + hunks, toolCallID: id))
+            }
+        }
+        return extra
     }
     private static func text(_ value: Any?) -> String {
         if let value = value as? String { return value }

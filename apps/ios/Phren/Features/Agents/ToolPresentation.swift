@@ -98,11 +98,11 @@ struct ToolPresentation {
             if !patches.isEmpty { body = patches.joined(separator: "\n"); title = "Patch" }
             else if !commands.isEmpty { body = commands.joined(separator: "\n\n"); title = "Shell" }
         }
-        let hasPatch = body.contains("*** Begin Patch") || body.contains("*** Update File:") || body.contains("*** Add File:")
+        let hasPatch = body.contains("*** Begin Patch") || body.contains("*** Update File:") || body.contains("*** Add File:") || body.contains("*** Delete File:")
             || body.contains("diff --git ") || body.range(of: #"(?m)^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@"#, options: .regularExpression) != nil
         if hasPatch {
-            path = path ?? body.components(separatedBy: "\n").first(where: { $0.hasPrefix("*** Update File: ") || $0.hasPrefix("*** Add File: ") || $0.hasPrefix("+++ b/") }).map {
-                $0.replacingOccurrences(of: "*** Update File: ", with: "").replacingOccurrences(of: "*** Add File: ", with: "").replacingOccurrences(of: "+++ b/", with: "")
+            path = path ?? body.components(separatedBy: "\n").first(where: { $0.hasPrefix("*** Update File: ") || $0.hasPrefix("*** Add File: ") || $0.hasPrefix("*** Delete File: ") || $0.hasPrefix("+++ b/") }).map {
+                $0.replacingOccurrences(of: "*** Update File: ", with: "").replacingOccurrences(of: "*** Add File: ", with: "").replacingOccurrences(of: "*** Delete File: ", with: "").replacingOccurrences(of: "+++ b/", with: "")
             }
         }
         self.title = title; self.body = body; self.path = path; patch = hasPatch ? body : nil

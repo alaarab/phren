@@ -4,7 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { herdrRoot, rpc, snapshot, validateTarget } from "./herdr.js";
+import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { SHELL_TOOLS, ToolChanges } from "./changes.js";
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
 const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", server, encodeURIComponent(pane) + ".json");
@@ -32,6 +33,7 @@ export class ApprovalWatchLeases {
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
 export class AgentHooks {
+  readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
@@ -87,6 +89,14 @@ export class AgentHooks {
         const temporary = file + "." + randomUUID();
         await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
+        // What a shell call changed on disk: snapshot before, diff after.
+        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && SHELL_TOOLS.has(String(body.tool))) {
+          const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
+          const input = object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
+          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "");
+          else await this.changes.after(conversation, id);
+          res.end("{}"); return;
+        }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
           || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server))) { res.end("{}"); return; }
         // An exact chat watcher or explicit foreground overview lease is needed.
@@ -124,9 +134,9 @@ export async function agentHook(source: Provider) {
   const target = targetSchema.parse({ server, workspace: process.env.HERDR_WORKSPACE_ID, tab: process.env.HERDR_TAB_ID,
     pane: process.env.HERDR_PANE_ID, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
-  const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input });
+  const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd });
   await new Promise<void>(resolve => {
-    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : 1500,
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });

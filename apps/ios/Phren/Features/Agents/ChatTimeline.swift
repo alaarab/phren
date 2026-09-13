@@ -17,7 +17,8 @@ struct ChatTimelineEntry: Identifiable {
                 previousMessageID = message.id
                 continue
             }
-            if message.isToolResult {
+            // A result — or what the call changed on disk — joins its call.
+            if message.isToolResult || message.isChange {
                 if let key = message.toolCallID, !key.isEmpty, !ambiguous.contains(key), let index = calls[key] {
                     entries[index].messages.append(message)
                     previousMessageID = message.id
@@ -51,7 +52,8 @@ struct ChatToolSummary {
     let count: Int
 
     init(_ messages: [AgentChatMessage]) {
-        let calls = messages.filter { $0.title != "Tool result" }
+        // What a call changed on disk is listed under it, not counted as a call.
+        let calls = messages.filter { $0.title != "Tool result" && !$0.isChange }
         let presentations = calls.map { ToolPresentation(title: $0.title ?? "Tool", text: $0.text) }
         let names = presentations.map(\.title)
         title = Set(names).count == 1 ? names[0] : calls.isEmpty ? "Tool results" : "Activity"
@@ -67,6 +69,24 @@ struct OpenRepositoryChangesKey: EnvironmentKey { static let defaultValue: (([St
 extension EnvironmentValues {
     var openRepositoryChanges: (([String]) -> Void)? {
         get { self[OpenRepositoryChangesKey.self] } set { self[OpenRepositoryChangesKey.self] = newValue }
+    }
+}
+
+/// One file a shell call changed, for the line under the collapsed card:
+/// Updated / Added / Deleted, the file, and its counts.
+struct ChatChangeSummary: Identifiable {
+    let id: String
+    let verb: String
+    let file: String
+    let added: Int
+    let removed: Int
+    init(_ message: AgentChatMessage) {
+        id = message.id
+        let first = message.text.prefix { !$0.isNewline }
+        verb = first.hasPrefix("*** Add File: ") ? "Added" : first.hasPrefix("*** Delete File: ") ? "Deleted" : "Updated"
+        file = ToolPresentation.short(String(first.drop { $0 != ":" }.dropFirst(2)))
+        let preview = DiffPreview(message.text)
+        added = preview.added; removed = preview.removed
     }
 }
 
@@ -102,6 +122,25 @@ struct ChatToolActivity: View, Equatable {
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityHint("Expand this call and its output")
                 .accessibilityIdentifier("chat-tool-group:\(messages[0].id)")
+            // What the command changed, visible without opening the card —
+            // the way a terminal lists "Updated file (+n −m)" under a call.
+            let changed = messages.filter(\.isChange).map(ChatChangeSummary.init)
+            if !expanded, !changed.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(changed.prefix(6)) { change in
+                        HStack(spacing: 6) {
+                            Image(systemName: "pencil.line").font(.system(size: 9)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                            Text("\(change.verb) \(change.file)").foregroundStyle(PhrenTheme.chatText).lineLimit(1).truncationMode(.middle)
+                            DiffCounts(added: change.added, removed: change.removed)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("chat-tool-change:\(change.id)")
+                    }
+                    if changed.count > 6 { Text("+\(changed.count - 6) more files").foregroundStyle(PhrenTheme.chatNeutralDim) }
+                }
+                .font(.system(.caption, design: .monospaced))
+                .padding(.horizontal, 12).padding(.bottom, 8)
+            }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(messages) { message in
