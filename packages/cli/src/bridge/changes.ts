@@ -18,6 +18,12 @@ export interface ChangedFile { root: string; path: string; status: string; patch
  * else — Write, Edit, apply_patch — already carries its patch. */
 export const SHELL_TOOLS = new Set(["Bash", "bash", "shell", "Shell", "exec_command", "shell_command", "local_shell", "write_stdin"]);
 
+/** The user's home: `HOME` when set (tests and POSIX), else the OS's answer —
+ * `os.homedir()` ignores `HOME` on Windows. */
+export function homeDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HOME && path.isAbsolute(env.HOME) ? env.HOME : homedir();
+}
+
 const NAMED = /(?<![\w@:/])(?:~\/|\.\/|\/)[\w.@+~-]+(?:\/[\w.@+~-]+)*/g;
 /** The places a command names — the same rule the phone applies. */
 export function namedPaths(command: string): string[] {
@@ -34,8 +40,7 @@ async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}): 
 
 /** The repository holding `target` (a file, a folder, or something not yet
  * created), confined to the user's home; undefined otherwise. */
-export async function repositoryOf(target: string, cwd: string): Promise<string | undefined> {
-  const home = homedir();
+export async function repositoryOf(target: string, cwd: string, home = homeDirectory()): Promise<string | undefined> {
   const absolute = target === "~" || target.startsWith("~/") ? path.join(home, target.slice(1)) : path.resolve(cwd, target);
   let existing = absolute;
   while (!(await stat(existing).catch(() => undefined))) {
