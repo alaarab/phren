@@ -112,6 +112,10 @@ struct LiveSessionsView: View {
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
         .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
+        // A Siri "open … in Phren" leaves the session to show here.
+        .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
+            if let pending = AgentLaunch.takePending() { chatSession = pending }
+        }
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .task(id: PollID(hosts: hosts, active: visible && scenePhase == .active && !adding, refresh: refreshID)) {

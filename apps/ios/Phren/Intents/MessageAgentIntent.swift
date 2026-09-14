@@ -2,16 +2,21 @@ import AppIntents
 import PhrenKit
 import PhrenLive
 
-/// A running agent session, as Siri names it: "phren on Mini".
+/// Somewhere Siri can send a message: a running session ("phren on Mini"),
+/// or a phren project on a computer that has it, where a session would be
+/// started first.
 struct AgentSessionEntity: AppEntity, Equatable {
     static var typeDisplayRepresentation: TypeDisplayRepresentation { TypeDisplayRepresentation(name: "Agent session") }
     static var defaultQuery = AgentSessionEntityQuery()
 
+    enum Kind: Equatable { case live, launch(storeID: String) }
     let id: String
     let workspace: String
     let computer: String
     let title: String
     let agent: String?
+    let kind: Kind
+    var isLive: Bool { kind == .live }
 
     init(_ session: LiveAgentSession) {
         id = [session.host.id.uuidString, session.workspaceID, session.tab.id].joined(separator: "|")
@@ -19,20 +24,30 @@ struct AgentSessionEntity: AppEntity, Equatable {
         computer = session.host.name
         title = session.tab.displayTitle
         agent = session.tab.agent
+        kind = .live
+    }
+    init(host: LiveHost, storeID: String, project: String) {
+        id = ["launch", host.id.uuidString, storeID, project].joined(separator: "|")
+        workspace = project; computer = host.name; title = project; agent = nil
+        kind = .launch(storeID: storeID)
     }
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(workspace) on \(computer)", subtitle: "\((agent ?? "agent").capitalized) · \(title)",
-                              synonyms: ["\(workspace)", "\(workspace) workspace", "\(workspace) workspace on \(computer)", "\(workspace) session on \(computer)"])
+        DisplayRepresentation(title: "\(workspace) on \(computer)",
+                              subtitle: isLive ? "\((agent ?? "agent").capitalized) · \(title)" : "Start a session here",
+                              synonyms: ["\(workspace)", "\(workspace) workspace", "\(workspace) project", "\(workspace) workspace on \(computer)", "\(workspace) session on \(computer)", "\(workspace) on the \(computer)"])
     }
 }
 
 /// Live sessions from every saved computer, asked in parallel; a computer
 /// that does not answer within a few seconds simply contributes nothing.
+@MainActor
 enum AgentSessions {
+    static var hosts: [LiveHost] {
+        (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
+    }
     static func current() async -> [LiveAgentSession] {
-        let hosts = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
-        return await withTaskGroup(of: [LiveAgentSession].self) { group in
+        await withTaskGroup(of: [LiveAgentSession].self) { group in
             for host in hosts {
                 group.addTask {
                     let fetch = Task { try await PhrenConnection.fetch(host: host, privateKey: DeviceSSHKey.load(host.id)) }
@@ -46,6 +61,53 @@ enum AgentSessions {
             return all.sorted { ($0.host.name, $0.workspaceName, $0.tab.displayTitle) < ($1.host.name, $1.workspaceName, $1.tab.displayTitle) }
         }
     }
+
+    /// Everything Siri can name: the live sessions, then each project the
+    /// store places on a saved computer (or that was opened there before)
+    /// unless a session for it is already running on that computer.
+    static func targets() async -> [AgentSessionEntity] {
+        let live = await current()
+        var entities = live.map(AgentSessionEntity.init)
+        let mappings = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.mappings ?? []
+        for target in await PhrenCapture.targets() {
+            for host in hosts where host.fingerprint != nil {
+                let known = await AgentLaunch.knowsProject(host, computerName: nil, storeID: target.storeId, project: target.project)
+                    || mappings.contains { $0.hostID == host.id && $0.project == target.project }
+                guard known else { continue }
+                let running = live.contains { session in
+                    session.host.id == host.id && (session.workspaceName.lowercased() == target.project.lowercased()
+                        || session.tab.cwd?.lowercased().hasSuffix("/" + target.project.lowercased()) == true)
+                }
+                if !running { entities.append(AgentSessionEntity(host: host, storeID: target.storeId, project: target.project)) }
+            }
+        }
+        return entities
+    }
+
+    /// The session behind an entity — the running one, or a new one started
+    /// in the project's folder with the default harness.
+    static func resolve(_ entity: AgentSessionEntity, progress: @MainActor (String) -> Void = { _ in }) async throws -> (session: LiveAgentSession, started: Bool) {
+        let parts = entity.id.split(separator: "|").map(String.init)
+        if case .launch(let storeID) = entity.kind {
+            guard parts.count == 4, let hostID = UUID(uuidString: parts[1]), let host = hosts.first(where: { $0.id == hostID }) else {
+                throw PhrenKitError.validation("That computer is no longer saved.")
+            }
+            let project = parts[3]
+            guard let cwd = await AgentLaunch.folder(host: host, storeID: storeID, project: project) else {
+                throw PhrenKitError.validation("Couldn't find where \(project) lives on \(host.name). Open it once from the project screen.")
+            }
+            await progress("Starting \(AgentLaunch.defaultHarness.title) in \(project) on \(host.name)…")
+            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: AgentLaunch.defaultHarness, progress: progress)
+            AgentLaunch.remember(host: host, cwd: cwd, storeID: storeID, project: project)
+            return (session, true)
+        }
+        guard parts.count == 3, let hostID = UUID(uuidString: parts[0]), let host = hosts.first(where: { $0.id == hostID }) else {
+            throw PhrenKitError.validation("That computer is no longer saved.")
+        }
+        if let session = (try? await PhrenConnection.fetch(host: host, privateKey: DeviceSSHKey.load(host.id)))?.sessions(on: host)
+            .first(where: { $0.workspaceID == parts[1] && $0.tab.id == parts[2] }) { return (session, false) }
+        throw PhrenKitError.validation("\(entity.workspace) on \(entity.computer) is no longer running.")
+    }
 }
 
 /// Resolves what Siri heard — "phren", "phren workspace on mini", "the mini
@@ -54,14 +116,13 @@ enum AgentSessions {
 struct AgentSessionEntityQuery: EntityStringQuery {
     func entities(for identifiers: [AgentSessionEntity.ID]) async throws -> [AgentSessionEntity] {
         let wanted = Set(identifiers)
-        return await AgentSessions.current().map(AgentSessionEntity.init).filter { wanted.contains($0.id) }
+        return await AgentSessions.targets().filter { wanted.contains($0.id) }
     }
     func suggestedEntities() async throws -> [AgentSessionEntity] {
-        await AgentSessions.current().map(AgentSessionEntity.init)
+        await AgentSessions.targets()
     }
     func entities(matching string: String) async throws -> [AgentSessionEntity] {
-        let entities = await AgentSessions.current().map(AgentSessionEntity.init)
-        return Self.rank(string, among: entities)
+        Self.rank(string, among: await AgentSessions.targets())
     }
 
     static func normalized(_ text: String) -> String {
@@ -85,6 +146,8 @@ struct AgentSessionEntityQuery: EntityStringQuery {
             guard score > 0 else { return nil }
             let computerHit = words.contains { computer == $0 || (computer.hasPrefix($0) && $0.count >= 3) }
             if computerHit { score += 30 }
+            // A running session beats starting a new one for the same words.
+            if entity.isLive { score += 10 }
             let mentionsAnotherComputer = !computerHit && entities.contains { other in
                 other.computer != entity.computer && words.contains { normalized(other.computer) == $0 }
             }
@@ -117,17 +180,18 @@ struct MessageAgentIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let text = SpeechSettings.apply(message.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty else { throw $message.needsValueError("What should I tell it?") }
-        let parts = session.id.split(separator: "|", maxSplits: 2).map(String.init)
-        guard parts.count == 3, let hostID = UUID(uuidString: parts[0]) else { throw $session.needsValueError("Which session?") }
-        let hosts = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
-        guard let host = hosts.first(where: { $0.id == hostID }) else { throw $session.needsValueError("That computer is no longer saved. Which session?") }
-        let key = try DeviceSSHKey.load(host.id)
-        let panes = try await PhrenConnection.chatPanes(host: host, privateKey: key, workspaceID: parts[1], tabID: parts[2])
+        let resolved = try await AgentSessions.resolve(session)
+        let live = resolved.session
+        let key = try DeviceSSHKey.load(live.host.id)
+        let panes = try await PhrenConnection.chatPanes(host: live.host, privateKey: key, workspaceID: live.workspaceID, tabID: live.tab.id)
         guard let pane = panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }) ?? panes.panes.first(where: { $0.agent != nil }) else {
             return .result(dialog: "No agent is running in \(session.workspace) on \(session.computer) any more.")
         }
-        let target = try pane.target(hostID: host.id, workspaceID: parts[1], tabID: parts[2], muxID: host.muxID)
-        try await PhrenConnection.sendChat(host: host, privateKey: key, target: target, text: text)
-        return .result(dialog: "Sent to \((pane.agent ?? "the agent").capitalized) in \(session.workspace) on \(session.computer).")
+        let target = try pane.target(hostID: live.host.id, workspaceID: live.workspaceID, tabID: live.tab.id, muxID: live.host.muxID)
+        try await PhrenConnection.sendChat(host: live.host, privateKey: key, target: target, text: text)
+        let agent = (pane.agent ?? "the agent").capitalized
+        return .result(dialog: resolved.started
+            ? "Started \(agent) in \(session.workspace) on \(session.computer) and sent your message."
+            : "Sent to \(agent) in \(session.workspace) on \(session.computer).")
     }
 }

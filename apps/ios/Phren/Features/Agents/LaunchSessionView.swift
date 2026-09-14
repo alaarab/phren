@@ -207,13 +207,7 @@ struct LaunchSessionView: View {
         defer { launching = false; status = nil }
         do {
             status = "Starting \(harness.title) in \(project)…"
-            let session: LiveAgentSession
-            #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { session = try await AgentChatFixture.launch(host: host, cwd: cwd, label: project, kind: harness.rawValue) }
-            else { session = try await Self.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 } }
-            #else
-            session = try await Self.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 }
-            #endif
+            let session = try await AgentLaunch.launch(host: host, cwd: cwd, label: project, kind: harness) { status = $0 }
             // Remember the folder for this project on this computer, so the
             // next session is found without asking.
             data = (try? LiveSessionPreferences.assigning(hostID: host.id, directory: cwd, storeID: storeID, project: project, in: data)) ?? data
@@ -223,25 +217,4 @@ struct LaunchSessionView: View {
         }
     }
 
-    /// Asks the Hook to create the workspace and start the agent, then waits
-    /// for Herdr to list the new tab with its agent so the chat can target it.
-    private static func launch(host: LiveHost, cwd: String, label: String, kind: Harness, progress: @MainActor (String) -> Void) async throws -> LiveAgentSession {
-        let key = try DeviceSSHKey.load(host.id)
-        let launched = try await PhrenConnection.launchSession(host: host, privateKey: key, cwd: cwd, label: label, kind: kind)
-        await progress("Waiting for \(kind.title) to be ready…")
-        for _ in 0..<20 {
-            if let session = try await PhrenConnection.fetch(host: host, privateKey: key).sessions(on: host)
-                .first(where: { $0.workspaceID == launched.workspaceID && $0.tab.id == launched.tabID }) {
-                if session.tab.agent != nil { return session }
-            }
-            try await Task.sleep(for: .seconds(1))
-        }
-        // The agent started (the Hook said so) but the overview hasn't caught up;
-        // open the chat on the identifiers we have.
-        let json = #"{"kind":"herdr","groups":[{"id":"\#(launched.workspaceID)","label":"\#(label)","children":[{"id":"\#(launched.tabID)","label":"1","title":"\#(label)","agent":"\#(kind.rawValue)","agentStatus":"\#(launched.agentStatus ?? "idle")","cwd":"\#(cwd)"}]}]}"#
-        guard let session = try LiveWorkspaces.read(Data(json.utf8)).sessions(on: host).first else {
-            throw PhrenKitError.validation("The workspace was created, but its session couldn't be opened. Find it under Live sessions.")
-        }
-        return session
-    }
 }

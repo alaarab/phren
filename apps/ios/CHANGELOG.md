@@ -24,9 +24,11 @@ number counts up on its own.
 - Show on Agents: choose which of Web servers, Simulators and Files sit in the
   Agents header.
 - Enter closes the terminal's arrow pad; the arrows and editing keys keep it up.
-- "Hey Siri, message phren on mini in Phren" — then say the message. It goes
-  to the agent in that session exactly as a typed chat message would. Also in
-  Shortcuts as "Message Agent".
+- "Hey Siri, tell mina on mini in Phren" — then say the message. Name a
+  running session or just a project: when nothing is running there, phren
+  starts the agent in the project's folder first, then delivers the message.
+  "Open mina in Phren" opens that chat, starting the session when needed.
+  Both in Shortcuts as "Message Agent" and "Open Session".
 
 ## 0.0.7
 

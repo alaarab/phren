@@ -185,6 +185,8 @@ final class AppModel {
     /// Bound to `MainTabView`'s `TabView` selection — set from a widget deep
     /// link (`phren://review`, `phren://tasks`) via `PhrenApp.onOpenURL`.
     var selectedTab: AppTab = .projects
+    /// Bumped by an intent that left a chat to open under `AgentLaunch.takePending()`.
+    var pendingChatVersion = 0
     var showingMemoryMaintenance = false
     var showingMemoryConnection = false
 

@@ -52,6 +52,17 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             shortTitle: "Message Agent",
             systemImageName: "bubble.left.and.text.bubble.right"
         )
+        AppShortcut(
+            intent: OpenProjectIntent(),
+            phrases: [
+                "Open \(\.$session) in \(.applicationName)",
+                "Start \(\.$session) in \(.applicationName)",
+                "Open a session in \(.applicationName)",
+                "Start a session in \(.applicationName)",
+            ],
+            shortTitle: "Open Session",
+            systemImageName: "play.circle"
+        )
     }
 }
 

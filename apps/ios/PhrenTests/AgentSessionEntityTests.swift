@@ -18,6 +18,13 @@ final class AgentSessionEntityTests: XCTestCase {
         // Without a computer both phren sessions survive, so Siri asks which.
         XCTAssertEqual(Set(AgentSessionEntityQuery.rank("phren", among: all).map(\.id)), [phrenMini.id, phrenStudio.id])
         XCTAssertEqual(AgentSessionEntityQuery.rank("mina", among: all).map(\.id), [mina.id])
+        // A project with no session yet resolves to starting one; a running
+        // session for the same words comes first.
+        let host = try! LiveHost(name: "Mini", address: "mini.local", username: "me")
+        let launchOgrid = AgentSessionEntity(host: host, storeID: "s1", project: "ogrid"), launchPhren = AgentSessionEntity(host: host, storeID: "s1", project: "phren")
+        XCTAssertEqual(AgentSessionEntityQuery.rank("ogrid on mini", among: all + [launchOgrid, launchPhren]).map(\.id), [launchOgrid.id])
+        XCTAssertEqual(AgentSessionEntityQuery.rank("phren on mini", among: all + [launchOgrid, launchPhren]).map(\.id), [phrenMini.id, launchPhren.id])
+        XCTAssertFalse(launchOgrid.isLive); XCTAssertTrue(phrenMini.isLive)
         XCTAssertTrue(AgentSessionEntityQuery.rank("nothing here", among: all).isEmpty)
         XCTAssertEqual(AgentSessionEntityQuery.rank("", among: all).count, 3)
     }
