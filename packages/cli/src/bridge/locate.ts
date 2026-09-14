@@ -36,7 +36,14 @@ export async function locateProject(project: string, activity: Json[], env: Node
     seen.add(dir);
     found.push({ directory: dir, source, ...(lastSeen ? { lastSeen } : {}) });
   };
-  const namesProject = (directory: string) => directory.split("/").includes(project);
+  // Paths from journals and Herdr use whichever separator the computer
+  // does; split on both so Windows folders are trimmed like POSIX ones.
+  const segments = (directory: string) => directory.split(/[\\/]/);
+  const namesProject = (directory: string) => segments(directory).includes(project);
+  const trimmed = (directory: string) => {
+    const parts = segments(directory);
+    return parts.slice(0, parts.lastIndexOf(project) + 1).join(path.sep);
+  };
 
   // 1. Folders an agent session ran in, newest first — the strongest signal
   // that this is the folder the person means.
@@ -45,8 +52,7 @@ export async function locateProject(project: string, activity: Json[], env: Node
     if (directory && path.isAbsolute(directory) && namesProject(directory)) {
       // Trim to the project segment so a session started in a subfolder
       // still opens the project itself.
-      const parts = directory.split("/");
-      await offer(parts.slice(0, parts.lastIndexOf(project) + 1).join("/"), "activity", typeof event.at === "string" ? event.at : undefined);
+      await offer(trimmed(directory), "activity", typeof event.at === "string" ? event.at : undefined);
     }
   }
   // 2. Workspaces Herdr has saved.
@@ -55,8 +61,7 @@ export async function locateProject(project: string, activity: Json[], env: Node
     for (const match of JSON.stringify(session).matchAll(/"cwd":\s*"((?:\\.|[^"\\])*)"/g)) {
       const directory = JSON.parse(`"${match[1]}"`) as string;
       if (path.isAbsolute(directory) && namesProject(directory)) {
-        const parts = directory.split("/");
-        await offer(parts.slice(0, parts.lastIndexOf(project) + 1).join("/"), "herdr");
+        await offer(trimmed(directory), "herdr");
       }
     }
   } catch { /* no saved session */ }

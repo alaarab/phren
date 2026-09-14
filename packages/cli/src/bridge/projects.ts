@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { request } from "node:http";
-import { homedir, userInfo } from "node:os";
+import { userInfo } from "node:os";
+import { homeDirectory } from "./changes.js";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
@@ -54,7 +55,7 @@ async function committed(root: string, pathspec: string): Promise<Json | undefin
  * a deleted file still finds its repository. */
 async function resolveTouched(raw: string, cwd: string, primaryRoot: string): Promise<string | undefined> {
   if (typeof raw !== "string" || !raw || raw.length > 4096 || raw.includes("\0")) return undefined;
-  const home = homedir();
+  const home = homeDirectory();
   const absolute = raw === "~" || raw.startsWith("~/") ? path.join(home, raw.slice(1)) : path.resolve(cwd, raw);
   let existing = absolute, rest: string[] = [];
   while (!(await stat(existing).catch(() => undefined))) {
@@ -78,7 +79,8 @@ export async function repositoryDiff(cwd: string, touched: unknown[] = []): Prom
   for (const raw of touched.slice(0, 24)) {
     const file = await resolveTouched(raw as string, cwd, root); if (!file) continue;
     const owner = await gitRoot((await stat(file).catch(() => undefined))?.isDirectory() ? file : path.dirname(file)); if (!owner) continue;
-    const rel = path.relative(owner, file) || ".";
+    // git speaks forward slashes on every platform.
+    const rel = (path.relative(owner, file) || ".").split(path.sep).join("/");
     const list = byRoot.get(owner) ?? []; if (!list.includes(rel)) list.push(rel); byRoot.set(owner, list);
   }
   const related: Json[] = [];
