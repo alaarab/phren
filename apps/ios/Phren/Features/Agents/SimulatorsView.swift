@@ -30,12 +30,13 @@ private struct SimulatorSection: View {
     @State private var error: String?
     var body: some View {
         Section {
-            if let simulators {
-                if simulators.isEmpty { Text("No simulator is booted on \(host.name).").foregroundStyle(PhrenTheme.textMuted) }
-                ForEach(simulators) { simulator in
+            if let booted = simulators {
+                if booted.isEmpty { Text("No simulator is booted on \(host.name).").foregroundStyle(PhrenTheme.textMuted) }
+                ForEach(booted) { simulator in
                     NavigationLink { SimulatorScreenView(host: host, simulator: simulator) } label: {
                         HStack(spacing: 12) {
                             SimulatorScreen(host: host, simulator: simulator, interval: 4).frame(width: 44, height: 92)
+                                .allowsHitTesting(false)
                                 .clipShape(RoundedRectangle(cornerRadius: 6)).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(PhrenTheme.border))
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(simulator.name).font(.subheadline.weight(.medium)).foregroundStyle(PhrenTheme.text)
@@ -43,6 +44,11 @@ private struct SimulatorSection: View {
                             }
                         }
                     }.accessibilityIdentifier("simulator:\(simulator.udid)")
+                    .swipeActions {
+                        Button("Shut down", systemImage: "power", role: .destructive) {
+                            Task { try? await PhrenConnection.simulatorAct(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid, action: "shutdown"); self.simulators?.removeAll { $0.id == simulator.id } }
+                        }
+                    }
                 }
             } else if let error { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) }
             else { ProgressView("Asking \(host.name)…") }
@@ -95,13 +101,107 @@ struct SimulatorScreen: View {
     #endif
 }
 
+/// The simulator, live and under your finger: tap the screen to tap the
+/// device, Home and Lock in the toolbar, type into it, launch an app, open
+/// a URL, or shut it down. Touches need one Accessibility grant on the Mac
+/// for Phren Hook's helper; the first tap says exactly what to allow.
 struct SimulatorScreenView: View {
     let host: LiveHost
     let simulator: HostSimulator
+    @Environment(\.dismiss) private var dismiss
+    @State private var apps: [SimulatorApp] = []
+    @State private var typing = false
+    @State private var text = ""
+    @State private var url = ""
+    @State private var opening = false
+    @State private var message: String?
+    @State private var busy = false
+    @State private var flash: CGPoint?
+
     var body: some View {
-        SimulatorScreen(host: host, simulator: simulator, interval: 1.5)
-            .padding(12)
-            .navigationTitle(simulator.name).navigationBarTitleDisplayMode(.inline)
-            .phrenScreen()
+        VStack(spacing: 0) {
+            if let message {
+                Text(message).font(.footnote).foregroundStyle(PhrenTheme.warning).padding(.horizontal, 16).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading).background(PhrenTheme.surface)
+                    .accessibilityIdentifier("simulator-message")
+            }
+            GeometryReader { geometry in
+                SimulatorScreen(host: host, simulator: simulator, interval: 1.0)
+                    .overlay {
+                        if let flash { Circle().stroke(PhrenTheme.accent, lineWidth: 2).frame(width: 34, height: 34).position(flash).transition(.opacity) }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { point in
+                        // The screenshot is fitted into the view; map the tap
+                        // back onto the device's own frame.
+                        let frame = Self.fitted(in: geometry.size, aspect: 1320.0 / 2868.0)
+                        guard frame.contains(point) else { return }
+                        let x = (point.x - frame.minX) / frame.width, y = (point.y - frame.minY) / frame.height
+                        withAnimation(.easeOut(duration: 0.12)) { flash = point }
+                        Task { await act("tap", ["x": x, "y": y]); try? await Task.sleep(for: .milliseconds(250)); withAnimation { flash = nil } }
+                    }
+                    .accessibilityIdentifier("simulator-screen")
+            }
+            .padding(8)
+            HStack(spacing: 6) {
+                control("Home", "house") { await act("home") }
+                control("Lock", "lock") { await act("lock") }
+                control("Type", "keyboard") { typing = true }
+                Menu {
+                    if apps.isEmpty { Text("No apps installed") }
+                    ForEach(apps) { app in Button(app.name) { Task { await act("launch", ["bundleId": app.bundleId]) } } }
+                    Divider()
+                    Button("Open URL…", systemImage: "link") { opening = true }
+                } label: { Label("Apps", systemImage: "square.grid.2x2").font(.caption).frame(maxWidth: .infinity, minHeight: 44) }
+                    .accessibilityIdentifier("simulator-apps")
+                Menu {
+                    Button("Shut down", systemImage: "power", role: .destructive) { Task { await act("shutdown"); dismiss() } }
+                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
+                    .accessibilityLabel("More")
+            }
+            .padding(.horizontal, 10).padding(.bottom, 6)
+            .buttonStyle(.plain).foregroundStyle(PhrenTheme.text)
+        }
+        .navigationTitle(simulator.name).navigationBarTitleDisplayMode(.inline)
+        .phrenScreen()
+        .task {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { apps = [SimulatorApp(bundleId: "com.phren.ios", name: "Phren")]; return }
+            #endif
+            apps = (try? await PhrenConnection.simulatorApps(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid)) ?? []
+        }
+        .alert("Type into the simulator", isPresented: $typing) {
+            TextField("Text", text: $text).accessibilityIdentifier("simulator-type-field")
+            Button("Type") { let value = text; text = ""; Task { await act("type", ["text": value]) } }
+            Button("Cancel", role: .cancel) { text = "" }
+        }
+        .alert("Open a URL in the simulator", isPresented: $opening) {
+            TextField("https://", text: $url).textInputAutocapitalization(.never).autocorrectionDisabled()
+            Button("Open") { let value = url; url = ""; Task { await act("openurl", ["url": value]) } }
+            Button("Cancel", role: .cancel) { url = "" }
+        }
+    }
+
+    private func control(_ title: String, _ symbol: String, _ action: @escaping () async -> Void) -> some View {
+        Button { Task { await action() } } label: {
+            Label(title, systemImage: symbol).font(.caption).frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+        }.disabled(busy).accessibilityIdentifier("simulator-" + title.lowercased())
+    }
+
+    /// Where a `scaledToFit` image of `aspect` lands inside `size`.
+    static func fitted(in size: CGSize, aspect: CGFloat) -> CGRect {
+        let width = min(size.width, size.height * aspect), height = width / aspect
+        return CGRect(x: (size.width - width) / 2, y: (size.height - height) / 2, width: width, height: height)
+    }
+
+    private func act(_ action: String, _ fields: [String: Any] = [:]) async {
+        busy = true; defer { busy = false }
+        do {
+            #if DEBUG && targetEnvironment(simulator)
+            if AgentChatFixture.enabled { AgentChatFixture.simulatorActions.append(action); message = nil; return }
+            #endif
+            try await PhrenConnection.simulatorAct(host: host, privateKey: DeviceSSHKey.load(host.id), udid: simulator.udid, action: action, fields: fields)
+            message = nil
+        } catch { message = error.localizedDescription }
     }
 }

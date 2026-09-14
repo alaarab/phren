@@ -97,6 +97,14 @@ final class SettingsScreensTests: XCTestCase {
         let row = app.buttons["simulator:11111111-2222-3333-4444-555555555555"]
         XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
         XCTAssertTrue(app.navigationBars["iPhone 17 Pro"].waitForExistence(timeout: 5))
+        // The screen takes touches; the toolbar sends keys and launches apps.
+        let screen = app.descendants(matching: .any)["simulator-screen"].firstMatch
+        XCTAssertTrue(screen.waitForExistence(timeout: 3))
+        screen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.buttons["simulator-home"].tap()
+        app.buttons["simulator-apps"].tap()
+        XCTAssertTrue(app.buttons["Phren"].waitForExistence(timeout: 3)); app.buttons["Phren"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["simulator-message"].exists)
         app.navigationBars.buttons.firstMatch.tap(); app.navigationBars.buttons.firstMatch.tap()
         let files = app.buttons["all-files"]
         XCTAssertTrue(files.waitForExistence(timeout: 5)); files.tap()

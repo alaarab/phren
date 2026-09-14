@@ -194,6 +194,8 @@ import UIKit
         return [.init(directory: "/work/\(project)", source: "activity", lastSeen: "2026-09-12T01:00:00Z"),
                 .init(directory: "/Users/fixture/Projects/\(project)", source: "search", lastSeen: nil)]
     }
+    /// Simulator actions the fixture screen sent, for tests.
+    nonisolated(unsafe) static var simulatorActions: [String] = []
     static func launch(host: LiveHost, cwd: String, label: String, kind: String) async throws -> LiveAgentSession {
         try await Task.sleep(for: .milliseconds(400))
         launches.append((cwd, label, kind))

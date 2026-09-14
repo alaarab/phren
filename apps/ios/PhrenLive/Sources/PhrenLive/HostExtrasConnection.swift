@@ -26,6 +26,23 @@ extension PhrenConnection {
                                    request: GatewayRequest(path: GatewayRequest.path("/v1/simulators/screenshot", ["udid": udid]), maximumResponseBytes: 8_388_608))
     }
 
+    public static func simulatorApps(host: LiveHost, privateKey: Data, udid: String) async throws -> [SimulatorApp] {
+        try host.validate()
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: GatewayRequest.path("/v1/simulators/apps", ["udid": udid])))
+        return try SimulatorApp.readSnapshot(data)
+    }
+
+    /// One action on a simulator: `boot`, `shutdown`, `home`, `lock`,
+    /// `launch` (bundleId), `openurl` (url), `tap` (x, y as 0…1), `type` (text).
+    public static func simulatorAct(host: LiveHost, privateKey: Data, udid: String, action: String, fields: [String: Any] = [:]) async throws {
+        try host.validate()
+        var body = fields; body["udid"] = udid; body["action"] = action
+        let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/simulators/action", body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])))
+        guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any], result["ok"] as? Bool == true else {
+            throw PhrenKitError.validation("The computer did not accept that.")
+        }
+    }
+
     public static func files(host: LiveHost, privateKey: Data) async throws -> [HostFile] {
         try host.validate()
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: GatewayRequest(path: "/v1/files"))

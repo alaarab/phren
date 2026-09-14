@@ -29,6 +29,10 @@ number counts up on its own.
 - The shortcuts panel is denser: four to a row, the command and one word,
   agent tabs as glyphs, Add in the header.
 - Full-screen diffs scroll sideways again for long lines.
+- Simulators are interactive: tap the screen to tap the device, Home, Lock,
+  type text, launch an installed app, open a URL, shut it down (swipe a row
+  too). Touches need one Accessibility grant on the Mac for Phren Hook's
+  helper; the first tap says what to allow.
 - "Hey Siri, tell mina on mini in Phren" — then say the message. Name a
   running session or just a project: when nothing is running there, phren
   starts the agent in the project's folder first, then delivers the message.

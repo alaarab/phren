@@ -17,6 +17,19 @@ public struct HostSimulator: Equatable, Sendable, Identifiable, Decodable {
     }
 }
 
+/// An app installed on a simulator, for the launcher.
+public struct SimulatorApp: Equatable, Sendable, Identifiable, Decodable {
+    public let bundleId: String
+    public let name: String
+    public var id: String { bundleId }
+    public init(bundleId: String, name: String) { self.bundleId = bundleId; self.name = name }
+    public static func readSnapshot(_ data: Data) throws -> [Self] {
+        guard data.count <= 262_144 else { throw PhrenKitError.validation("The app list is too large.") }
+        struct Snapshot: Decodable { var apps: [SimulatorApp] }
+        return Array(try JSONDecoder().decode(Snapshot.self, from: data).apps.prefix(100))
+    }
+}
+
 /// A file the phone put on a computer through Phren Hook.
 public struct HostFile: Equatable, Sendable, Identifiable, Decodable {
     public let name: String
