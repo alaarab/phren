@@ -74,8 +74,12 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
     children: objects(s.tabs).filter(t => t.workspace_id === w.workspace_id).map(t => {
       const panes = objects(s.panes).filter(p => p.tab_id === t.tab_id && p.workspace_id === t.workspace_id);
       const agent = panes.find(p => p.agent);
+      // Herdr's per-pane state_change_seq climbs with every agent status
+      // change; the phone orders "just finished" ahead of "finished an hour ago" by it.
+      const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
       return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
+        changedSeq: changed || undefined,
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
         contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
         agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };

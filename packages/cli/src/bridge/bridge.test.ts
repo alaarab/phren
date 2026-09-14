@@ -58,6 +58,10 @@ describe("Phren Hook boundaries", () => {
     expect(workspaceSnapshot({ ...snapshot, focused_workspace_id: "w1" }).focus).toBeUndefined();
     expect(workspaceSnapshot({ ...snapshot, focused_pane_id: "missing" }).focus).toBeUndefined();
     expect(workspaceSnapshot({ ...snapshot, focused_pane_id: undefined }).focus).toBeUndefined();
+    // The tab carries the highest state_change_seq of its panes, and nothing when Herdr gives none.
+    const seq = workspaceSnapshot({ ...snapshot, panes: [{ workspace_id: "w2", tab_id: "w2:t1", pane_id: "w2:p1", state_change_seq: 7 }, { workspace_id: "w2", tab_id: "w2:t1", pane_id: "w2:p2", state_change_seq: 12 }] });
+    expect((seq.groups as { children: { changedSeq?: number }[] }[])[1].children[0].changedSeq).toBe(12);
+    expect((workspaceSnapshot(snapshot).groups as { children: { changedSeq?: number }[] }[])[1].children[0].changedSeq).toBeUndefined();
   });
   it("migrates only recognized Phren keys and preserves unrelated restrictions", () => {
     const key = 'restrict,port-forwarding,permitopen="127.0.0.1:*",command="python3 ~/.local/share/phren/chat-progress.py" ssh-ed25519 AAAA phren-iphone\n';

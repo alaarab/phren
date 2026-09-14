@@ -135,7 +135,11 @@
     }
     @media (max-width: 1024px) { .cta-celebrate { right: 80px; } }
     @media (max-width: 780px) {
-      .cta-celebrate { width: 76px; height: 76px; right: 12px; top: 50%; }
+      /* No room beside the copy on a phone: the sprite takes its own row
+         between the copy and the buttons, centred, label underneath. */
+      .cta-celebrate { position: relative; top: auto; right: auto; transform: none; width: 104px; height: 104px; margin: 4px auto 34px; }
+      /* The side illustration is a dark-on-dark panel that only leaves a hole on a phone. */
+      .cta-brand-art { display: none; }
     }
     .cta-celebrate .jumper {
       width: 100%; height: 100%;
@@ -594,12 +598,6 @@
           </div>
           <div class="bento-card-title">Same brain, every tool.</div>
           <p class="bento-card-desc">Switch agents, switch machines. Phren keeps up. What you figured out in Claude this morning is already there when you open Cursor tonight. Good stuff sticks. Bad stuff fades.</p>
-          <div class="bento-tag-row">
-            <span class="agent-pill">Claude Code</span>
-            <span class="agent-pill">Copilot</span>
-            <span class="agent-pill">Cursor</span>
-            <span class="agent-pill">Codex</span>
-          </div>
         </div>
 
         <div class="bento-card bento-card-fun reveal reveal-delay-2">
@@ -1093,24 +1091,13 @@
   <section class="cta-section">
     <div class="cta-content">
       <div class="cta-panel reveal" style="position:relative;">
-        <div class="cta-celebrate phren-motion" aria-hidden="true">
-          <div class="jumper"><div class="phren-sprite-mount" data-props='{"size":104,"armsOverhead":true,"mouth":"smile","blinkEvery":22,"bobEvery":0}'></div></div>
-          <span class="confetti" style="--dx:-38px;--dy:-42px;--rot:-280deg;background:#7C3AED;animation-delay:0s"></span>
-          <span class="confetti" style="--dx:42px;--dy:-38px;--rot:300deg;background:#28D3F2;animation-delay:0.1s"></span>
-          <span class="confetti" style="--dx:48px;--dy:36px;--rot:180deg;background:#fff;animation-delay:0.2s"></span>
-          <span class="confetti" style="--dx:-44px;--dy:34px;--rot:-200deg;background:#9c8ff8;animation-delay:0.3s"></span>
-          <span class="confetti" style="--dx:-54px;--dy:-6px;--rot:160deg;background:#28D3F2;animation-delay:0.4s"></span>
-          <span class="confetti" style="--dx:56px;--dy:4px;--rot:-240deg;background:#7C3AED;animation-delay:0.5s"></span>
-          <span class="confetti" style="--dx:0;--dy:-58px;--rot:360deg;background:#fff;animation-delay:0.15s"></span>
-          <span class="done-label">task complete</span>
-        </div>
         <div class="cta-brand">
           <div class="cta-brand-copy">
             <div class="section-label">Ready?</div>
             <h2 class="cta-title">Your knowledge, your repo.</h2>
             <p class="cta-tagline">No API calls. No third party.<br><span class="kw-finding">Findings</span> tagged with <span class="kw-session">sessions</span>, linked to <span class="kw-task">tasks</span>, surfaced before every prompt.</p>
           </div>
-          <div style="max-width:160px">
+          <div class="cta-brand-art" style="max-width:160px">
             <svg viewBox="0 0 520 320" fill="none" xmlns="http://www.w3.org/2000/svg">
               <defs>
                 <linearGradient id="cta-panelGlow" x1="48" y1="24" x2="472" y2="296" gradientUnits="userSpaceOnUse">
@@ -1162,6 +1149,17 @@
               </g>
             </svg>
           </div>
+        </div>
+        <div class="cta-celebrate phren-motion" aria-hidden="true">
+          <div class="jumper"><div class="phren-sprite-mount" data-props='{"size":104,"armsOverhead":true,"mouth":"smile","blinkEvery":22,"bobEvery":0}'></div></div>
+          <span class="confetti" style="--dx:-38px;--dy:-42px;--rot:-280deg;background:#7C3AED;animation-delay:0s"></span>
+          <span class="confetti" style="--dx:42px;--dy:-38px;--rot:300deg;background:#28D3F2;animation-delay:0.1s"></span>
+          <span class="confetti" style="--dx:48px;--dy:36px;--rot:180deg;background:#fff;animation-delay:0.2s"></span>
+          <span class="confetti" style="--dx:-44px;--dy:34px;--rot:-200deg;background:#9c8ff8;animation-delay:0.3s"></span>
+          <span class="confetti" style="--dx:-54px;--dy:-6px;--rot:160deg;background:#28D3F2;animation-delay:0.4s"></span>
+          <span class="confetti" style="--dx:56px;--dy:4px;--rot:-240deg;background:#7C3AED;animation-delay:0.5s"></span>
+          <span class="confetti" style="--dx:0;--dy:-58px;--rot:360deg;background:#fff;animation-delay:0.15s"></span>
+          <span class="done-label">task complete</span>
         </div>
         <div class="cta-actions">
           <a href="#install" class="btn-primary">
