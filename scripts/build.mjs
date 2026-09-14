@@ -119,7 +119,12 @@ try {
     platform: "node", target: "node20", format: "esm",
     banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
     external: ["bufferutil", "utf-8-validate"],
-    define: { PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version) },
+    define: {
+      PHREN_HOOK_VERSION: JSON.stringify(JSON.parse(fs.readFileSync(path.join(cliRoot, "package.json"), "utf8")).version),
+      // The simulator input helper's Swift source rides inside the bundle
+      // and is compiled on the Mac that needs it.
+      SIMTAP_SOURCE: JSON.stringify(fs.readFileSync(path.join(srcRoot, "bridge/native/simtap.swift"), "utf8")),
+    },
   });
   const entryPath = path.join(tempRoot, "index.js");
   if (fs.existsSync(entryPath)) {

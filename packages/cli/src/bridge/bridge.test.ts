@@ -355,6 +355,8 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const files = await api("/v1/files");
     expect(files.data.files.map((f: { name: string; size: number }) => [f.name, f.size])).toEqual([["notes.md", 5]]);
     expect((await api("/v1/simulators/screenshot?udid=nope")).status).toBe(400);
+    expect((await api("/v1/simulators/action", { udid: "nope", action: "tap", x: 0.5, y: 0.5 })).status).toBe(400);
+    expect((await api("/v1/simulators/apps?udid=nope")).status).toBe(400);
     const simulators = await api("/v1/simulators");
     expect(simulators.status).toBe(200); expect(Array.isArray(simulators.data.simulators)).toBe(true);
     if (process.platform !== "darwin") expect(simulators.data.simulators).toEqual([]);
