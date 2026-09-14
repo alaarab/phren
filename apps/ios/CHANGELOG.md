@@ -24,6 +24,11 @@ number counts up on its own.
 - Show on Agents: choose which of Web servers, Simulators and Files sit in the
   Agents header.
 - Enter closes the terminal's arrow pad; the arrows and editing keys keep it up.
+- Agents list: Done sits above Idle, and within a group the session whose
+  agent changed most recently comes first (Phren Hook 0.2.15).
+- The shortcuts panel is denser: four to a row, the command and one word,
+  agent tabs as glyphs, Add in the header.
+- Full-screen diffs scroll sideways again for long lines.
 - "Hey Siri, tell mina on mini in Phren" — then say the message. Name a
   running session or just a project: when nothing is running there, phren
   starts the agent in the project's folder first, then delivers the message.

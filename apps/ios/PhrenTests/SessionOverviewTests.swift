@@ -83,6 +83,26 @@ final class SessionOverviewTests: XCTestCase {
         run.cancel(); await run.value
     }
 
+    func testDoneSitsAboveIdleAndNewestChangeComesFirstWithinAGroup() async throws {
+        let mac = try host("Mac")
+        let workspaces = try LiveWorkspaces.read(Data("""
+        {"kind":"herdr","groups":[
+          {"id":"w1","label":"alpha","children":[{"id":"w1:t1","label":"1","agent":"codex","agentStatus":"idle","changedSeq":40}]},
+          {"id":"w2","label":"beta","children":[{"id":"w2:t1","label":"1","agent":"claude","agentStatus":"done","changedSeq":10}]},
+          {"id":"w3","label":"gamma","children":[{"id":"w3:t1","label":"1","agent":"claude","agentStatus":"done","changedSeq":90}]},
+          {"id":"w4","label":"delta","children":[{"id":"w4:t1","label":"1","agent":"codex","agentStatus":"working","changedSeq":5}]}
+        ]}
+        """.utf8))
+        let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in workspaces } }
+        let run = Task { await model.run(hosts: [mac]) }
+        await eventually { model.connectedCount(at: .now) == 1 }
+        let result = groups(model)
+        XCTAssertEqual(result.map(\.title), ["Working", "Done", "Idle"])
+        // The session that finished most recently (highest change counter) leads its group.
+        XCTAssertEqual(result[1].sessions.map(\.workspaceName), ["gamma", "beta"])
+        run.cancel(); await run.value
+    }
+
     func testPinningMovesOnlyTheSelectedComputersTabAndUnpinningRestoresItsActivityGroup() async throws {
         let first = try host("Mac"), second = try host("Linux")
         let working = try snapshot("working"), waiting = try snapshot("waiting")

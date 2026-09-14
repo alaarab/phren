@@ -200,19 +200,12 @@ private struct TerminalShortcutMenu: View {
                         Text("Add a shortcut here, or hold a shortcut in another panel to add it to Favorites.")
                             .font(.caption).foregroundStyle(PhrenTheme.textMuted).padding()
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth))], spacing: 8) {
+                    // Four to a row, each the command and one short hint —
+                    // dense enough to take in at a glance; hold one to edit it.
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                         ForEach(selected.active) { shortcut in shortcutTile(shortcut) }
                     }
-                }.frame(maxHeight: 220)
-                HStack {
-                    Text("Hold a shortcut to edit it.").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
-                    Spacer()
-                    Button {
-                        editingPanel = selected.id; editing = TerminalShortcut()
-                    } label: { Label("Add", systemImage: "plus").font(.caption).frame(minHeight: 36) }
-                        .disabled(storage.saved == nil || selected.shortcuts.count >= 64)
-                        .accessibilityIdentifier("terminal-add-shortcut")
-                }
+                }.frame(maxHeight: 200)
             }
             if let error { Text(error).font(.caption).foregroundStyle(PhrenTheme.warning) }
         }.padding(10).frame(idealWidth: 370, maxWidth: 400)
@@ -244,43 +237,50 @@ private struct TerminalShortcutMenu: View {
     private var header: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal) {
-                HStack(spacing: 4) {
+                HStack(spacing: 2) {
                     ForEach(preferences.visiblePanels) { panel in tabButton(panel.id) }
                 }
             }.scrollIndicators(.hidden)
-            Button { settings.toggle() } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44) }
+            Button {
+                editingPanel = selected.id; editing = TerminalShortcut()
+            } label: { Image(systemName: "plus").frame(width: 40, height: 44) }
+                .accessibilityLabel("Add shortcut")
+                .disabled(storage.saved == nil || selected.shortcuts.count >= 64 || settings)
+                .accessibilityIdentifier("terminal-add-shortcut")
+            Button { settings.toggle() } label: { Image(systemName: "slider.horizontal.3").frame(width: 40, height: 44) }
                 .accessibilityLabel("Terminal gestures")
                 .accessibilityHint("Gesture options and shortcut customization")
-            Button(action: close) { Image(systemName: "xmark").frame(width: 44, height: 44) }
+            Button(action: close) { Image(systemName: "xmark").frame(width: 40, height: 44) }
                 .accessibilityLabel("Close shortcuts")
         }
     }
 
     private func tabButton(_ id: TerminalShortcutPanelID) -> some View {
         Button { tab = id.rawValue; settings = false } label: {
+            // Agents by their glyph, the rest by their symbol: no words up here.
             Group {
-                if id == .favorites || id == .uploads { Image(systemName: id.symbol) }
-                else { Text(id.title) }
+                if ["codex", "claude", "copilot", "phren"].contains(id.rawValue) { AgentProviderGlyph(source: id.rawValue, size: 20) }
+                else { Image(systemName: id.symbol) }
             }
-                .font(.caption.weight(.semibold)).padding(.horizontal, 11).frame(height: 44)
+                .font(.body.weight(.semibold)).frame(width: 44, height: 44)
                 .foregroundStyle(selected.id == id ? PhrenTheme.lavender : PhrenTheme.text)
-                .background(selected.id == id ? PhrenTheme.lavender.opacity(0.14) : .clear, in: Capsule())
+                .background(selected.id == id ? PhrenTheme.lavender.opacity(0.14) : .clear, in: Circle())
         }.accessibilityLabel(id.title + " shortcuts")
             .accessibilityAddTraits(selected.id == id ? .isSelected : [])
     }
 
     private func shortcutTile(_ shortcut: TerminalShortcut) -> some View {
         Button { run(shortcut) } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
-                    if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).foregroundStyle(PhrenTheme.cyan) }
-                    Text(shortcut.displayLabel).font(.system(.caption, design: .monospaced)).lineLimit(2)
+            VStack(spacing: 3) {
+                HStack(spacing: 4) {
+                    if !shortcut.symbol.isEmpty { Image(systemName: shortcut.symbol).font(.caption).foregroundStyle(PhrenTheme.cyan) }
+                    Text(shortcut.displayLabel).font(.system(size: 13, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 if !shortcut.hint.isEmpty {
-                    Text(shortcut.hint).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
+                    Text(Self.shortHint(shortcut.hint, command: shortcut.displayLabel)).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
                 }
-            }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).padding(8)
-                .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
+            }.frame(maxWidth: .infinity, minHeight: 50).padding(.horizontal, 4).padding(.vertical, 6)
+                .background(PhrenTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
         }.accessibilityIdentifier(shortcut.id.contains(":/") ? "terminal-command:" + shortcut.id : "terminal-shortcut:" + shortcut.id)
             .accessibilityLabel(shortcut.kind == .action && ["photos", "camera", "files"].contains(shortcut.value)
                                 ? "Attach from " + shortcut.displayLabel
@@ -315,6 +315,18 @@ private struct TerminalShortcutMenu: View {
                     }
                 }
             }.disabled(storage.saved == nil)
+    }
+
+    /// The hint's gist in one word: "Manage agent permissions" → "permissions",
+    /// "Start a fresh conversation" → "fresh" when the last word only repeats
+    /// the command. The full hint stays in the accessibility label and the editor.
+    static func shortHint(_ hint: String, command: String = "") -> String {
+        let filler: Set<String> = ["the", "a", "an", "your", "to", "of", "and", "or", "in", "on", "with", "for", "from", "into", "this", "that", "see", "show", "open", "start", "choose", "manage", "browse", "inspect", "continue", "run", "toggle", "set", "list", "view", "agent", "conversation", "available", "connected", "previous", "account"]
+        let all = hint.lowercased().replacingOccurrences(of: #"[^\p{L}\p{N} ]"#, with: "", options: .regularExpression).split(separator: " ").map(String.init)
+        let words = all.filter { !filler.contains($0) }
+        let name = command.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+        if let pick = words.last(where: { $0 != name }) ?? words.last { return pick }
+        return all.last(where: { $0 != name }) ?? all.first ?? ""
     }
 
     private func run(_ shortcut: TerminalShortcut) {

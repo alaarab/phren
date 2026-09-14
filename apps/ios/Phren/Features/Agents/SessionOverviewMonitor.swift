@@ -66,9 +66,10 @@ final class SessionOverviewMonitor {
             }
             if computer.monitor.isFresh(at: date) { live += sessions } else { previous += sessions }
         }
+        // What needs you first, then what just finished, then what is idle.
         let order: [(LiveWorkspaces.Tab.Activity, String)] = [
             (.working, "Working"), (.waiting, "Needs input"), (.error, "Needs attention"),
-            (.idle, "Idle"), (.done, "Done"), (.unknown, "Other sessions"),
+            (.done, "Done"), (.idle, "Idle"), (.unknown, "Other sessions"),
         ]
         let pinned = (live + previous).filter { preferences?.isPinned($0.id) == true }.sorted(by: Self.ordered)
         live.removeAll { preferences?.isPinned($0.id) == true }
@@ -92,8 +93,11 @@ final class SessionOverviewMonitor {
         computers.first { $0.host == session.host }?.monitor.isFresh(at: date) == true
     }
 
+    /// Most recently changed first (Herdr's state counter, when the Hook
+    /// reports it), then by computer and workspace so the rest stays stable.
     private static func ordered(_ lhs: LiveAgentSession, _ rhs: LiveAgentSession) -> Bool {
-        (lhs.host.name.lowercased(), lhs.host.id.uuidString, lhs.workspaceName.lowercased(), lhs.tab.id)
+        if lhs.host.id == rhs.host.id, let l = lhs.tab.changedSeq, let r = rhs.tab.changedSeq, l != r { return l > r }
+        return (lhs.host.name.lowercased(), lhs.host.id.uuidString, lhs.workspaceName.lowercased(), lhs.tab.id)
             < (rhs.host.name.lowercased(), rhs.host.id.uuidString, rhs.workspaceName.lowercased(), rhs.tab.id)
     }
 }

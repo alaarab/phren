@@ -13,6 +13,9 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         public let cwd: String?
         public let agentPaneCount: Int?
         public let paneCount: Int?
+        /// Herdr's state-change counter for the tab's panes: higher means the
+        /// agent's status moved more recently. Not a timestamp; only an order.
+        public let changedSeq: Int?
         private let reportedContextUsedPercent: ContextUsedPercent?
 
         /// Provider-reported percentage, when available. Missing or malformed
@@ -23,7 +26,7 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, cwd, agentPaneCount, paneCount
+            case id, label, title, agentStatus, approvalPending, agent, cwd, agentPaneCount, paneCount, changedSeq
             case reportedContextUsedPercent = "contextUsedPercent"
         }
 

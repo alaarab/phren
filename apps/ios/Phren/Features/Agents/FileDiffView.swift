@@ -73,7 +73,12 @@ struct FileDiffView: View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView(sideBySide ? [.vertical] : [.horizontal, .vertical]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    // A lazy stack inside a horizontally scrolling view sizes
+                    // itself to the viewport, not to its widest row, so long
+                    // lines would be clipped with nowhere to scroll. Rows are
+                    // laid out eagerly up to a size where that is still cheap.
+                    let rows = sideBySide ? document.split.count : document.rows.count
+                    DiffRowStack(lazy: rows > 1_500) {
                         if sideBySide {
                             let column = max(180, (geometry.size.width - 1) / 2)
                             ForEach(Array(document.split.enumerated()), id: \.element.id) { index, row in
@@ -170,5 +175,15 @@ struct DiffCounts: View {
         }
         .font(.system(.caption2, design: .monospaced).weight(.medium)).monospacedDigit()
         .accessibilityElement(children: .ignore).accessibilityLabel("\(added) added, \(removed) removed")
+    }
+}
+
+/// A vertical stack that is lazy only when the row count calls for it.
+private struct DiffRowStack<Content: View>: View {
+    let lazy: Bool
+    @ViewBuilder var content: Content
+    var body: some View {
+        if lazy { LazyVStack(alignment: .leading, spacing: 0) { content } }
+        else { VStack(alignment: .leading, spacing: 0) { content } }
     }
 }
