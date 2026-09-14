@@ -13,7 +13,7 @@ import { locateProject } from "./locate.js";
 import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { listUploads, saveUpload } from "./uploads.js";
-import { bootedSimulators, simulatorScreenshot } from "./simulators.js";
+import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { AccountUsageReader } from "./usage.js";
 
@@ -95,6 +95,7 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/simulators/apps": result = { apps: await simulatorApps(String(url.searchParams.get("udid") ?? "")) }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
           case "/v1/projects/locate": result = { candidates: await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent()) }; break;
           case "/v1/workspaces": {
@@ -127,6 +128,8 @@ export async function serve(version: string): Promise<void> {
           // Files the phone keeps on this computer, outside any session.
           const { name, bytes } = uploadBody(data);
           result = { ok: true, path: await saveUpload("files", name, bytes) };
+        } else if (url.pathname === "/v1/simulators/action") {
+          result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional() }).parse(data) as unknown as SimulatorAction);
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launchSession(selectedServer(url), data);
