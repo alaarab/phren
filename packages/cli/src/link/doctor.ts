@@ -20,7 +20,7 @@ import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
-import { detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
+import { commandExists, detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest } from "../skill/registry.js";
@@ -694,7 +694,9 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   }
   const wrapperSuffix = process.platform === "win32" ? ".cmd" : "";
   for (const tool of ["copilot", "cursor", "codex"]) {
-    if (!detected.has(tool)) continue;
+    // A tool can count as detected from its config folder alone (Copilot's
+    // ~/.copilot, say); a wrapper only makes sense around a binary on PATH.
+    if (!detected.has(tool) || !commandExists(tool)) continue;
     const active = isWrapperActive(tool);
     checks.push({
       name: `wrapper:${tool}`,
