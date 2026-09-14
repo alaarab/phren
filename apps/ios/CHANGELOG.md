@@ -31,8 +31,9 @@ number counts up on its own.
 - Full-screen diffs scroll sideways again for long lines.
 - Wrap long lines, separately for chat (Settings → Chat: code blocks, tool
   output, diff cards) and for the full-screen diff editor (its ⋯ menu).
-- Diff cards in chat use one narrow number column with the sign inside it,
-  so the code gets the width.
+- Inline diffs — chat cards and the full-screen editor — use one narrow
+  number column with the sign inside it, so the code gets the width. Side by
+  side keeps a number per column.
 - Simulators are interactive: tap the screen to tap the device, Home, Lock,
   type text, launch an installed app, open a URL, shut it down (swipe a row
   too). Touches need one Accessibility grant on the Mac for Phren Hook's
