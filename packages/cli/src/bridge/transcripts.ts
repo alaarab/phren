@@ -167,14 +167,20 @@ export class TranscriptReader {
   }
 }
 
-export async function historicalImage(file: string, line: number, block: number, source: Provider): Promise<Buffer> {
+/** One embedded image: block `block` of the row's content — or, with
+ * `inner`, image `inner` inside that block's tool_result content (what a
+ * Read of a PNG returns). For Codex, an output row's array is the content. */
+export async function historicalImage(file: string, line: number, block: number, source: Provider, inner?: number): Promise<Buffer> {
   if (!Number.isSafeInteger(line) || line < 0 || !Number.isSafeInteger(block) || block < 0 || block > 2000) throw new BridgeError(400, "Invalid image reference.");
+  if (inner !== undefined && (!Number.isSafeInteger(inner) || inner < 0 || inner > 2000)) throw new BridgeError(400, "Invalid image reference.");
   const reader = new TranscriptReader(file, source, line);
   const page = await reader.read(line + 1);
   const row = page.entries.find(e => e.line === line)?.raw;
   if (!row) throw new BridgeError(404, "This image is no longer in the transcript.");
-  const content = objects(source === "codex" ? object(row.payload).content : object(row.message).content);
-  const image = content[block];
+  const payload = source === "codex" ? object(row.payload) : source === "phren" ? object(object(row.data).message) : object(row.message);
+  const content = objects(source === "codex" && Array.isArray(payload.output) ? payload.output : payload.content);
+  let image = content[block];
+  if (inner !== undefined) image = objects(image?.content)[inner];
   const encoded = image?.image_url || object(image?.source).data;
   const base64 = typeof encoded === "string" ? encoded.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "") : "";
   if (!base64 || !/^[A-Za-z0-9+/=\s]+$/.test(base64) || base64.length > 11_184_812) throw new BridgeError(404, "This image is not embedded in the transcript.");

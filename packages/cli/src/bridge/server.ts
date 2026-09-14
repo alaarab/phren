@@ -107,7 +107,8 @@ export async function serve(version: string): Promise<void> {
           case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
           case "/v1/transcripts/blob": {
             const target = targetFromURL(url); await validateTarget(target);
-            const bytes = await historicalImage(await transcriptPath(target.source, target.session), Number(url.searchParams.get("line")), Number(url.searchParams.get("block")), target.source);
+            const inner = url.searchParams.get("inner");
+            const bytes = await historicalImage(await transcriptPath(target.source, target.session), Number(url.searchParams.get("line")), Number(url.searchParams.get("block")), target.source, inner === null ? undefined : Number(inner));
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
           case "/v1/transcripts/history": {
