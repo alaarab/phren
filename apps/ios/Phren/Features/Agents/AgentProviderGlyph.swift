@@ -1,9 +1,10 @@
 import PhrenKit
 import SwiftUI
 
-/// Which agent is answering, at a glance: Anthropic's asterisk for Claude,
-/// a six-petal blossom for Codex, and a sparkle for Copilot. Drawn rather
-/// than bundled so the marks follow the theme's foreground colours.
+/// Which agent is answering, at a glance: the real marks — Claude's
+/// starburst in Anthropic's terracotta, OpenAI's knot for Codex, GitHub
+/// Copilot's goggles — as template vectors (simple-icons, CC0), so Codex and
+/// Copilot follow the theme's foreground colour.
 struct AgentProviderGlyph: View {
     let source: String?
     var size: CGFloat = 22
@@ -12,13 +13,14 @@ struct AgentProviderGlyph: View {
         Group {
             switch source {
             case "claude":
-                Image(systemName: "asterisk").font(.system(size: size * 0.82, weight: .bold))
+                Image("ClaudeMark").resizable().scaledToFit().frame(width: size * 0.92, height: size * 0.92)
                     .foregroundStyle(Color(red: 0.85, green: 0.47, blue: 0.34))
             case "codex":
-                Blossom().fill(PhrenTheme.text).frame(width: size * 0.9, height: size * 0.9)
+                Image("CodexMark").resizable().scaledToFit().frame(width: size * 0.9, height: size * 0.9)
+                    .foregroundStyle(PhrenTheme.text)
             case "copilot":
-                Image(systemName: "sparkles").font(.system(size: size * 0.78, weight: .semibold))
-                    .foregroundStyle(PhrenTheme.lavender)
+                Image("CopilotMark").resizable().scaledToFit().frame(width: size * 0.92, height: size * 0.92)
+                    .foregroundStyle(PhrenTheme.text)
             case "phren":
                 Image("PhrenMascot").resizable().scaledToFit().frame(width: size, height: size)
             default:
@@ -38,22 +40,6 @@ struct AgentProviderGlyph: View {
         case "copilot": return "Copilot"
         case "phren": return "Phren"
         default: return "Agent"
-        }
-    }
-
-    /// Six capsules around a centre, sixty degrees apart.
-    private struct Blossom: Shape {
-        func path(in rect: CGRect) -> Path {
-            var path = Path()
-            let center = CGPoint(x: rect.midX, y: rect.midY)
-            let length = rect.width * 0.46, width = rect.width * 0.19
-            for petal in 0..<6 {
-                let angle = CGFloat(petal) * .pi / 3
-                let capsule = Path(roundedRect: CGRect(x: -width / 2, y: -length, width: width, height: length),
-                                   cornerRadius: width / 2)
-                path.addPath(capsule.applying(CGAffineTransform(translationX: center.x, y: center.y).rotated(by: angle)))
-            }
-            return path
         }
     }
 }

@@ -65,6 +65,10 @@ struct AgentChatView: View {
     @State private var dictation = SpeechTranscriber()
     @State private var dictationPrefix = ""
     @State private var dictationTask: Task<Void, Never>?
+    /// The mic is on as far as the person is concerned. The recogniser ends
+    /// a segment on its own after a pause; while this is set, each finished
+    /// segment is folded into the message and a new one starts.
+    @State private var dictating = false
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
     @State private var previewImage: ChatAttachmentDraft?
@@ -89,15 +93,17 @@ struct AgentChatView: View {
             }
             guard !Task.isCancelled, scenePhase == .active else { return }
             dictationPrefix = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
-            do { try dictation.start(); model.deliveryError = nil } catch { model.deliveryError = error.localizedDescription }
+            do { dictating = true; try dictation.start(); model.deliveryError = nil } catch { dictating = false; model.deliveryError = error.localizedDescription }
         }
     }
     /// Stops, applies the word replacements to what was said, and sends when Settings say so.
     private func stopDictation() {
-        guard dictation.isRecording else { return }
+        guard dictating else { return }
+        dictating = false
+        let spoken = SpeechSettings.apply(dictation.transcript)
         dictation.stop()
-        let spoken = dictation.transcript
-        if !spoken.isEmpty { model.draft = dictationPrefix + SpeechSettings.apply(spoken) }
+        if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
+        model.draft = model.draft.trimmingCharacters(in: .whitespaces)
         if ChatSettings.autoSendsDictation, !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Task { await model.send(session) } }
     }
 
@@ -346,10 +352,17 @@ struct AgentChatView: View {
             }
         }
         .onChange(of: dictation.transcript) { _, value in
-            if dictation.isRecording, !value.isEmpty { model.draft = dictationPrefix + value }
+            if dictating, !value.isEmpty { model.draft = dictationPrefix + value }
+        }
+        .onChange(of: dictation.isRecording) { _, recording in
+            // A segment ended by itself: keep what it heard and listen on.
+            guard dictating, !recording else { return }
+            let spoken = SpeechSettings.apply(dictation.transcript)
+            if !spoken.isEmpty { dictationPrefix += spoken + " "; model.draft = dictationPrefix }
+            if scenePhase == .active { try? dictation.start() } else { dictating = false }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
-        .onDisappear { dictationTask?.cancel(); if dictation.isRecording { dictation.stop() } }
+        .onDisappear { dictationTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingAgentSwitcher) {
             NavigationStack {
                 ChatAgentSwitcher(session: session, panes: model.panes, selectedPaneID: model.target?.paneID,
@@ -615,14 +628,14 @@ struct AgentChatView: View {
                         .disabled(model.sending || model.answering || model.stopping)
                     Spacer(minLength: 4)
                     Button {
-                        if dictation.isRecording { stopDictation() } else { startDictation() }
+                        if dictating { stopDictation() } else { startDictation() }
                     } label: {
-                        Image(systemName: dictation.isRecording ? "mic.fill" : "mic").font(.system(size: 20))
-                            .foregroundStyle(dictation.isRecording ? PhrenTheme.accent : PhrenTheme.chatText)
-                            .scaleEffect(dictation.isRecording ? 1 + CGFloat(dictation.audioLevel) * 0.25 : 1)
+                        Image(systemName: dictating ? "mic.fill" : "mic").font(.system(size: 20))
+                            .foregroundStyle(dictating ? PhrenTheme.accent : PhrenTheme.chatText)
+                            .scaleEffect(dictating ? 1 + CGFloat(dictation.audioLevel) * 0.25 : 1)
                             .animation(.easeOut(duration: 0.12), value: dictation.audioLevel)
                             .frame(width: 40, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate message")
+                    }.accessibilityLabel(dictating ? "Stop dictation" : "Dictate message")
                         .accessibilityIdentifier("chat-dictate")
                         .disabled(model.target == nil || model.sending)
                     Button {

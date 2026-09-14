@@ -29,6 +29,8 @@ number counts up on its own.
 - The shortcuts panel is denser: four to a row, the command and one word,
   agent tabs as glyphs, Add in the header.
 - Full-screen diffs scroll sideways again for long lines.
+- The real agent marks everywhere: Claude's starburst, OpenAI's knot for
+  Codex, GitHub Copilot's goggles.
 - Dictation types straight into the message as you speak — tap the mic, talk,
   tap again — instead of a separate box to review first. "Send after
   dictation" in Settings → Chat sends it on the second tap.

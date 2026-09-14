@@ -325,8 +325,11 @@ private struct TerminalShortcutMenu: View {
         let all = hint.lowercased().replacingOccurrences(of: #"[^\p{L}\p{N} ]"#, with: "", options: .regularExpression).split(separator: " ").map(String.init)
         let words = all.filter { !filler.contains($0) }
         let name = command.trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
-        if let pick = words.last(where: { $0 != name }) ?? words.last { return pick }
-        return all.last(where: { $0 != name }) ?? all.first ?? ""
+        // "Choose an agent" for /agent leaves only articles: fall back to
+        // the command's own name rather than "an".
+        let real = words.filter { $0.count > 2 }
+        if let pick = real.last(where: { $0 != name }) ?? real.last { return pick }
+        return name
     }
 
     private func run(_ shortcut: TerminalShortcut) {
