@@ -51,11 +51,13 @@ extension PhrenConnection {
         try requireOK(await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(path: path, body: GatewayRequest.targetBody(target, fields: (try JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]))))
     }
 
-    public static func transcriptImage(host: LiveHost, privateKey: Data, target: AgentChatTarget, line: Int, block: Int) async throws -> Data {
+    public static func transcriptImage(host: LiveHost, privateKey: Data, target: AgentChatTarget, line: Int, block: Int, inner: Int? = nil) async throws -> Data {
         try checkHost(host, target)
-        guard line >= 0, (0..<2_000).contains(block) else { throw PhrenKitError.validation("Invalid image reference.") }
+        guard line >= 0, (0..<2_000).contains(block), inner.map({ (0..<2_000).contains($0) }) ?? true else { throw PhrenKitError.validation("Invalid image reference.") }
+        var query = ["line": "\(line)", "block": "\(block)"]
+        if let inner { query["inner"] = "\(inner)" }
         return try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(
-            path: GatewayRequest.path("/v1/transcripts/blob", GatewayRequest.targetQuery(target).merging(["line": "\(line)", "block": "\(block)"]) { _, new in new }), maximumResponseBytes: 8_388_608))
+            path: GatewayRequest.path("/v1/transcripts/blob", GatewayRequest.targetQuery(target).merging(query) { _, new in new }), maximumResponseBytes: 8_388_608))
     }
 
     /// `paths` are files a command named; the computer adds their repositories

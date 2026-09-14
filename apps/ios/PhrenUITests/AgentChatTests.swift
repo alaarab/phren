@@ -473,14 +473,18 @@ final class AgentChatTests: XCTestCase {
     func testToolPatchShowsChangesAndUnwrapsResult() {
         let app = launch(extra: ["--chat-diffs"])
         app.buttons["live-chat:w7:w7:t9"].tap()
-        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch
+        let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Patch")).firstMatch
         XCTAssertTrue(group.waitForExistence(timeout: 8))
-        XCTAssertTrue(group.label.contains("Patch"))
         group.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let action = phrenPurple")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Updated Theme.swift"].exists)
         XCTAssertTrue(app.buttons["Copy patch"].exists)
         capture(app, "Phren purple actions and native tool diff")
+        // A Read of an image shows the image itself in the card.
+        let read = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Read")).firstMatch
+        XCTAssertTrue(read.waitForExistence(timeout: 3)); read.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["chat-historical-image"].firstMatch.waitForExistence(timeout: 8))
+        read.tap()
         // A python-heredoc edit shows what ran and, without opening the card,
         // the files it changed on disk — folded to their title bars. Tap one
         // for its preview, open it full screen, fold it again.

@@ -103,7 +103,17 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public let title: String?
     public let text: String
     public var imageBlocks: [Int] = []
+    /// Images inside a tool result — a Read of a screenshot, say — as the
+    /// transcript's `blob` route addresses them.
+    public var resultImages: [ImageRef] = []
     public var toolCallID: String? = nil
+    public struct ImageRef: Hashable, Sendable {
+        /// The message content block (Claude/phren: the tool_result; Codex: the output item).
+        public let block: Int
+        /// The image's index inside that block's own content; nil for Codex.
+        public let inner: Int?
+        public init(block: Int, inner: Int?) { self.block = block; self.inner = inner }
+    }
     public var isToolResult: Bool { role == .tool && title == "Tool result" }
     /// A file a shell call changed, attached by Phren Hook — shown under the
     /// call as a diff rather than counted as a call of its own.
@@ -160,7 +170,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
                 messages.append(.init(id: id, line: line, role: part.role, title: part.title,
-                                      text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, toolCallID: toolCallID))
+                                      text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID))
             }
         }
         return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
@@ -174,8 +184,13 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var title: String? = nil
         let text: String
         var imageBlocks: [Int] = []
+        var resultImages: [AgentChatMessage.ImageRef] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
+    }
+    /// Where the images sit inside a tool result's content array.
+    private static func innerImages(_ content: Any?) -> [Int] {
+        (content as? [[String: Any]] ?? []).enumerated().compactMap { ["image", "input_image"].contains($0.element["type"] as? String ?? "") ? $0.offset : nil }
     }
     /// What a shell call changed on disk, as Phren Hook attaches it to the
     /// call's output row (`phren_changes`, keyed by call id): one Patch-shaped
@@ -225,7 +240,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
         case "function_call", "custom_tool_call":
             return [Part(role: .tool, title: payload["name"] as? String ?? "Tool", text: readable(payload["arguments"] ?? payload["input"]), toolCallID: payload["call_id"] as? String)]
         case "function_call_output", "custom_tool_call_output":
-            return [Part(role: .tool, title: "Tool result", text: readable(payload["output"]), toolCallID: payload["call_id"] as? String)]
+            return [Part(role: .tool, title: "Tool result", text: readable(payload["output"]),
+                         resultImages: innerImages(payload["output"]).map { AgentChatMessage.ImageRef(block: $0, inner: nil) }, toolCallID: payload["call_id"] as? String)]
         default: return []
         }
     }
@@ -257,7 +273,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
             case "tool_use":
                 return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: index)
             case "tool_result":
-                return Part(role: .tool, title: "Tool result", text: text(block["content"]), toolCallID: block["tool_use_id"] as? String, idIndex: index)
+                return Part(role: .tool, title: "Tool result", text: text(block["content"]),
+                            resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
+                            toolCallID: block["tool_use_id"] as? String, idIndex: index)
             default: return nil
             }
         }
@@ -312,7 +330,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 return Part(role: role, text: text, idIndex: idIndex)
             case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: idIndex)
             case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)
-            case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]), toolCallID: block["tool_use_id"] as? String, idIndex: idIndex)
+            case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]),
+                                            resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
+                                            toolCallID: block["tool_use_id"] as? String, idIndex: idIndex)
             default: return nil
             }
         }

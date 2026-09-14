@@ -157,6 +157,21 @@ final class AgentChatTests: XCTestCase {
         XCTAssertThrowsError(try AgentChatTranscript.read(frame(rows, source: "codex"), source: "claude"))
     }
 
+    func testImagesInsideToolResultsAreAddressable() throws {
+        let claude: [[String: Any]] = [
+            ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "t1", "name": "Read", "input": ["file_path": "/x.png"]]]]],
+            ["type": "user", "message": ["role": "user", "content": [["type": "text", "text": "ok"], ["type": "tool_result", "tool_use_id": "t1", "content": [["type": "text", "text": "here"], ["type": "image"]]]]]],
+        ]
+        let transcript = try AgentChatTranscript.read(frame(claude, source: "claude"), source: "claude")
+        let result = transcript.messages.first { $0.isToolResult }!
+        XCTAssertEqual(result.resultImages, [.init(block: 1, inner: 1)])
+        let codex: [[String: Any]] = [
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "c1", "output": [["type": "input_image", "image_url": "data:image/png;base64,"]]]],
+        ]
+        let out = try AgentChatTranscript.read(frame(codex, source: "codex"), source: "codex").messages[0]
+        XCTAssertEqual(out.resultImages, [.init(block: 0, inner: nil)])
+    }
+
     func testShellChangesAttachedByTheHookBecomePatchPartsUnderTheirCall() throws {
         let patch = "diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-const a = 1;\n+const a = 2;\n"
         let rows: [[String: Any]] = [

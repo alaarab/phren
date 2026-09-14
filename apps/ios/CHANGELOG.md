@@ -29,6 +29,11 @@ number counts up on its own.
 - The shortcuts panel is denser: four to a row, the command and one word,
   agent tabs as glyphs, Add in the header.
 - Full-screen diffs scroll sideways again for long lines.
+- Dictation types straight into the message as you speak — tap the mic, talk,
+  tap again — instead of a separate box to review first. "Send after
+  dictation" in Settings → Chat sends it on the second tap.
+- Images an agent reads on the computer (a screenshot it opened with Read)
+  show in the tool card, not just "[Image attachment]".
 - Wrap long lines, separately for chat (Settings → Chat: code blocks, tool
   output, diff cards) and for the full-screen diff editor (its ⋯ menu).
 - Inline diffs — chat cards and the full-screen editor — use one narrow

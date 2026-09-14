@@ -99,6 +99,11 @@ import UIKit
             }
             append("assistant", "Each command has its own output.")
         }
+        if flag("--chat-diffs") {
+            // A Read of a screenshot: the image rides inside the tool result.
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "read-png", "name": "Read", "arguments": "{\"file_path\":\"/work/phone/shots/home.png\"}"]]])
+            entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "read-png", "output": [["type": "input_image", "image_url": "data:image/png;base64,"]]]]])
+        }
         if flag("--chat-diffs") || flag("--chat-dense-diff") {
             let patch = flag("--chat-dense-diff")
                 ? "*** Begin Patch\n*** Update File: Dense.swift\n@@\n" + String(repeating: "+x\n", count: 2_000) + "+Final dense patch marker\n*** End Patch"

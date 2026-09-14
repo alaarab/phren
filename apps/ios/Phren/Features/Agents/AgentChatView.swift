@@ -60,7 +60,11 @@ struct AgentChatView: View {
     @State private var showingContext = false
     @State private var commandDestination: CommandDestination?
     @State private var showingAttachments = false
-    @State private var showingDictation = false
+    /// Dictation writes straight into the composer: the words land in the
+    /// message as they are recognised, no separate box to review.
+    @State private var dictation = SpeechTranscriber()
+    @State private var dictationPrefix = ""
+    @State private var dictationTask: Task<Void, Never>?
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
     @State private var previewImage: ChatAttachmentDraft?
@@ -75,6 +79,27 @@ struct AgentChatView: View {
     // Recalculate when the keyboard changes the viewport as well as when the
     // transcript moves; either measurement can arrive first during layout.
     private var atBottom: Bool { bottomPosition <= scrollHeight + 60 }
+
+    /// Starts recognising into the composer after whatever is already typed.
+    private func startDictation() {
+        dictationTask?.cancel()
+        dictationTask = Task {
+            guard await SpeechTranscriber.requestPermissions() == .authorized else {
+                model.deliveryError = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
+            }
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            dictationPrefix = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
+            do { try dictation.start(); model.deliveryError = nil } catch { model.deliveryError = error.localizedDescription }
+        }
+    }
+    /// Stops, applies the word replacements to what was said, and sends when Settings say so.
+    private func stopDictation() {
+        guard dictation.isRecording else { return }
+        dictation.stop()
+        let spoken = dictation.transcript
+        if !spoken.isEmpty { model.draft = dictationPrefix + SpeechSettings.apply(spoken) }
+        if ChatSettings.autoSendsDictation, !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Task { await model.send(session) } }
+    }
 
     private func acceptIncomingAttachments() {
         guard !incomingAttachments.isEmpty, !model.restoringDraft, let initialPane,
@@ -154,7 +179,15 @@ struct AgentChatView: View {
                             }
                             ForEach(model.timeline) { entry in
                                 if entry.isActivity {
-                                    ChatToolActivity(messages: entry.messages).equatable().id(entry.id)
+                                    ChatToolActivity(messages: entry.messages, resultImages: { message in
+                                        AnyView(Group {
+                                            if let target = model.target {
+                                                ForEach(message.resultImages, id: \.self) { ref in
+                                                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner, active: active, preview: { previewImage = $0 })
+                                                }
+                                            }
+                                        })
+                                    }).equatable().id(entry.id)
                                 } else if let message = entry.messages.first {
                                     ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
                                         message.role == .user && item.path.map { message.text.contains($0) } == true
@@ -312,15 +345,11 @@ struct AgentChatView: View {
                 })
             }
         }
-        .sheet(isPresented: $showingDictation) {
-            if let openingTarget = model.target {
-                ChatDictationView { text in
-                    guard model.target == openingTarget else { return }
-                    model.draft += (model.draft.isEmpty ? "" : "\n\n") + text
-                    if ChatSettings.autoSendsDictation { Task { await model.send(session) } }
-                }
-            }
+        .onChange(of: dictation.transcript) { _, value in
+            if dictation.isRecording, !value.isEmpty { model.draft = dictationPrefix + value }
         }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
+        .onDisappear { dictationTask?.cancel(); if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingAgentSwitcher) {
             NavigationStack {
                 ChatAgentSwitcher(session: session, panes: model.panes, selectedPaneID: model.target?.paneID,
@@ -585,9 +614,17 @@ struct AgentChatView: View {
                     }.accessibilityLabel("Switch agent").accessibilityIdentifier("chat-switch-agent")
                         .disabled(model.sending || model.answering || model.stopping)
                     Spacer(minLength: 4)
-                    Button { showingDictation = true } label: {
-                        Image(systemName: "mic").font(.system(size: 20)).frame(width: 40, height: 44).contentShape(Rectangle())
-                    }.accessibilityLabel("Dictate message").disabled(model.target == nil || model.sending)
+                    Button {
+                        if dictation.isRecording { stopDictation() } else { startDictation() }
+                    } label: {
+                        Image(systemName: dictation.isRecording ? "mic.fill" : "mic").font(.system(size: 20))
+                            .foregroundStyle(dictation.isRecording ? PhrenTheme.accent : PhrenTheme.chatText)
+                            .scaleEffect(dictation.isRecording ? 1 + CGFloat(dictation.audioLevel) * 0.25 : 1)
+                            .animation(.easeOut(duration: 0.12), value: dictation.audioLevel)
+                            .frame(width: 40, height: 44).contentShape(Rectangle())
+                    }.accessibilityLabel(dictation.isRecording ? "Stop dictation" : "Dictate message")
+                        .accessibilityIdentifier("chat-dictate")
+                        .disabled(model.target == nil || model.sending)
                     Button {
                         composing = false
                         if showsStop {

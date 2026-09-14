@@ -65,6 +65,9 @@ struct ChatToolSummary {
 
 struct ChatToolActivity: View, Equatable {
     let messages: [AgentChatMessage]
+    /// Draws the images a tool result carries (a Read of a screenshot), given
+    /// the live session; nil where a card is shown without one.
+    var resultImages: ((AgentChatMessage) -> AnyView)? = nil
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages }
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -119,6 +122,7 @@ struct ChatToolActivity: View, Equatable {
                         // folded behind a disclosure.
                         ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
                                        id: message.id, isResult: message.isToolResult, collapsible: message.isChange)
+                        if message.isToolResult, !message.resultImages.isEmpty, let resultImages { resultImages(message) }
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }

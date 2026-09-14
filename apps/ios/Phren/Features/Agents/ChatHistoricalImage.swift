@@ -14,6 +14,7 @@ struct ChatHistoricalImage: View {
     let target: AgentChatTarget
     let line: Int
     let block: Int
+    var inner: Int? = nil
     let active: Bool
     let preview: (ChatAttachmentDraft) -> Void
     @State private var attachment: AgentAttachment?
@@ -34,14 +35,14 @@ struct ChatHistoricalImage: View {
             guard active, attachment == nil else { return }
             error = nil
             do {
-                let key = "\(target.id)/\(line)/\(block)" as NSString
+                let key = "\(target.id)/\(line)/\(block)/\(inner ?? -1)" as NSString
                 var bytes = TranscriptImageCache.data.object(forKey: key).map { $0 as Data }
                 if bytes == nil {
                     #if DEBUG && targetEnvironment(simulator)
                     if AgentChatFixture.enabled { bytes = AgentChatFixture.image.data }
-                    else { bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block) }
+                    else { bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner) }
                     #else
-                    bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block)
+                    bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner)
                     #endif
                 }
                 try Task.checkCancellation()
