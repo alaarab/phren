@@ -9,7 +9,7 @@ struct FileDiffView: View {
     let file: AgentRepositoryDiff.File
     let section: AgentRepositoryDiff.Section
     @AppStorage("diff.sideBySide.v1") private var sideBySide = false
-    @AppStorage(ChatSettings.wrapKey) private var wrap = false
+    @AppStorage(ChatSettings.wrapFullDiffKey) private var wrap = false
     @State private var change = 0
     @State private var focused: Int?
 
@@ -94,7 +94,7 @@ struct FileDiffView: View {
                         } else {
                             ForEach(Array(document.rows.enumerated()), id: \.element.id) { index, row in
                                 let run = DiffPalette.run(document.rows, at: index)
-                                DiffRowView(row: row, language: language, runStart: run.start, runEnd: run.end)
+                                DiffRowView(row: row, language: language, runStart: run.start, runEnd: run.end, wrap: wrap)
                                     .id(row.id)
                                     .overlay(alignment: .leading) { focusMarker(row.change) }
                             }

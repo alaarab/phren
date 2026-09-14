@@ -7,10 +7,12 @@ enum ChatSettings {
     static let openInKey = "chat.openSessionsIn.v1"          // "chat" | "terminal"
     static let autoSendDictationKey = "chat.autoSendDictation.v1"
     static let autocorrectionKey = "chat.autocorrection.v1"
-    /// Long lines in code blocks, tool output and diffs wrap instead of
-    /// scrolling sideways. Off by default: columns and stack traces read
-    /// better unbroken, and the diff editor's ⋯ menu flips it in place.
-    static let wrapKey = "code.wrap.v1"
+    /// Long lines in chat — code blocks, tool output, diff cards — wrap
+    /// instead of scrolling sideways. Off by default: columns and stack
+    /// traces read better unbroken. The full-screen diff editor has its own
+    /// switch (`wrapFullDiffKey`): wanting one wrapped says nothing about the other.
+    static let wrapKey = "code.wrap.chat.v1"
+    static let wrapFullDiffKey = "diff.wrap.full.v1"
     static var opensInTerminal: Bool { AppRuntime.defaults.string(forKey: openInKey) == "terminal" }
     static var autoSendsDictation: Bool { AppRuntime.defaults.bool(forKey: autoSendDictationKey) }
     static var autocorrects: Bool { AppRuntime.defaults.object(forKey: autocorrectionKey) as? Bool ?? true }
@@ -40,7 +42,7 @@ struct ChatSettingsView: View {
                     .accessibilityIdentifier("chat-autocorrection")
             } header: { Text("Composer") }
             Section {
-                Toggle(isOn: $wrap) { Label { Text("Wrap long lines"); Text("Code blocks, tool output and diffs wrap instead of scrolling sideways").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "text.word.spacing") } }
+                Toggle(isOn: $wrap) { Label { Text("Wrap long lines in chat"); Text("Code blocks, tool output and diff cards wrap instead of scrolling sideways. The full-screen diff has its own switch in its ⋯ menu.").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "text.word.spacing") } }
                     .accessibilityIdentifier("chat-wrap-lines")
             } header: { Text("Reading") }
             Section {

@@ -91,7 +91,7 @@ struct CodeDiffView: View {
                             // Already named in the card's title bar.
                         } else {
                             let run = DiffPalette.run(visible, at: index)
-                            DiffRowView(row: row, numbered: numbered, language: language(diff), runStart: run.start, runEnd: run.end)
+                            DiffRowView(row: row, numbered: numbered, language: language(diff), runStart: run.start, runEnd: run.end, wrap: wrap, compact: true)
                         }
                     }
                 }

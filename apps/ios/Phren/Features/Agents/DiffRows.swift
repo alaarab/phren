@@ -28,6 +28,7 @@ enum DiffPalette {
     }
     static let font = Font.system(.caption, design: .monospaced)
     static let numberWidth: CGFloat = 34
+    static let compactNumberWidth: CGFloat = 26
 
     /// The gutter tint for one row of a run of inserted or removed lines:
     /// a plain rectangle, rounded only where the run starts and ends, so
@@ -57,11 +58,15 @@ struct DiffRowView: View {
     /// Where this row sits in a run of inserted or removed lines.
     var runStart = true
     var runEnd = true
-    @AppStorage(ChatSettings.wrapKey) private var wrap = false
+    /// Long lines wrap under their own first character instead of scrolling.
+    var wrap = false
+    /// One narrow number column with the sign inside it — for chat cards,
+    /// where the editor's two-column gutter would eat a third of the width.
+    var compact = false
 
     var body: some View {
         if row.kind == .hunk {
-            DiffHunkRow(text: row.text)
+            DiffHunkRow(text: row.text, compact: compact)
         } else if row.kind == .header {
             Text(row.text.isEmpty ? " " : row.text)
                 .font(DiffPalette.font.weight(.semibold)).foregroundStyle(PhrenTheme.textSecondary)
@@ -70,23 +75,35 @@ struct DiffRowView: View {
                 .background(PhrenTheme.surfaceRaised)
         } else {
             HStack(alignment: .top, spacing: 0) {
-                if numbered {
-                    // The tint spans the row's full height, so a run of lines
-                    // shares one unbroken block.
-                    HStack(spacing: 0) {
-                        Text(row.old.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
-                        Text(row.new.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
+                if numbered, compact {
+                    // The line's number on its side of the change and the sign
+                    // beside it, in one narrow column.
+                    HStack(spacing: 3) {
+                        Text((row.new ?? row.old).map(String.init) ?? "").frame(width: DiffPalette.compactNumberWidth, alignment: .trailing).foregroundStyle(PhrenTheme.textDim)
+                        Text(DiffPalette.sign(row.kind)).frame(width: 10, alignment: .center)
+                            .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
                     }
-                    .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
+                    .padding(.leading, 2).padding(.trailing, 4).padding(.vertical, 1.5)
                     .background(DiffPalette.gutterShape(row.kind, runStart: runStart, runEnd: runEnd))
+                } else {
+                    if numbered {
+                        // The tint spans the row's full height, so a run of lines
+                        // shares one unbroken block.
+                        HStack(spacing: 0) {
+                            Text(row.old.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
+                            Text(row.new.map(String.init) ?? "").frame(width: DiffPalette.numberWidth, alignment: .trailing)
+                        }
+                        .foregroundStyle(PhrenTheme.textDim).padding(.trailing, 6).padding(.vertical, 1.5)
+                        .background(DiffPalette.gutterShape(row.kind, runStart: runStart, runEnd: runEnd))
+                    }
+                    Text(DiffPalette.sign(row.kind))
+                        .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
+                        .frame(width: 14, alignment: .center).padding(.vertical, 1.5)
                 }
-                Text(DiffPalette.sign(row.kind))
-                    .foregroundStyle(row.kind == .added ? PhrenTheme.success : row.kind == .removed ? PhrenTheme.danger : PhrenTheme.textDim)
-                    .frame(width: 14, alignment: .center).padding(.vertical, 1.5)
                 Text(Self.attributed(row, language: language))
                     .foregroundStyle(PhrenTheme.text)
                     .fixedSize(horizontal: !wrap, vertical: false)
-                    .padding(.trailing, 12).padding(.vertical, 1.5)
+                    .padding(.leading, compact ? 4 : 0).padding(.trailing, 12).padding(.vertical, 1.5)
                 Spacer(minLength: 0)
             }
             .font(DiffPalette.font)
@@ -127,9 +144,10 @@ struct DiffRowView: View {
 /// context; here the `@@` header sits on a hairline band.
 struct DiffHunkRow: View {
     let text: String
+    var compact = false
     var body: some View {
         HStack(spacing: 8) {
-            Rectangle().fill(PhrenTheme.borderStrong).frame(width: 2 * DiffPalette.numberWidth + 6, height: 1)
+            Rectangle().fill(PhrenTheme.borderStrong).frame(width: compact ? DiffPalette.compactNumberWidth + 16 : 2 * DiffPalette.numberWidth + 6, height: 1)
             Text(text).font(DiffPalette.font).foregroundStyle(PhrenTheme.accent.opacity(0.9)).lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
             Rectangle().fill(PhrenTheme.borderStrong).frame(height: 1)
