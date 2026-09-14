@@ -16,6 +16,7 @@ struct CodeDiffView: View {
     @State private var fullScreen = false
     @State private var showAll = false
     @State private var page = 0
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
     /// The card's width, so row tints run edge to edge inside the horizontal
     /// scroller instead of stopping where the longest line ends.
     @State private var width: CGFloat = 0
@@ -83,7 +84,7 @@ struct CodeDiffView: View {
                     pageButton("Last patch page", "chevron.right.2", "last", destination: pageCount - 1, current: currentPage, count: pageCount)
                 }.padding(.horizontal, 6)
             }
-            if unfolded { ScrollView(showAll ? [.horizontal, .vertical] : [.horizontal]) {
+            if unfolded { ScrollView(wrap ? (showAll ? [.vertical] : []) : (showAll ? [.horizontal, .vertical] : [.horizontal])) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(visible.enumerated()), id: \.element.id) { index, row in
                         if row.kind == .header, row.id == diff.rows.first(where: { $0.kind == .header })?.id {

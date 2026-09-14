@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Native Markdown paragraphs, fenced code and pipe tables; no remote web content is loaded.
 struct ChatRichText: View, Equatable {
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
     let text: String
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
     @ScaledMetric(relativeTo: .body) private var textSize = 14.5
@@ -78,10 +79,11 @@ struct ChatRichText: View, Equatable {
                             Button("Copy code", systemImage: "doc.on.doc") { UIPasteboard.general.string = block.text }
                                 .font(.caption).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 32)
                         }.foregroundStyle(PhrenTheme.chatNeutral)
-                        ScrollView(.horizontal) {
+                        ScrollView(wrap ? [] : [.horizontal]) {
                             Text(CodeHighlighting.highlightedBlock(block.text, language: .detect(language)))
                                 .font(.system(size: textSize, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
-                                .textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
+                                .textSelection(.enabled).fixedSize(horizontal: !wrap, vertical: false)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }.padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))

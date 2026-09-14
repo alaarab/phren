@@ -133,6 +133,7 @@ private struct ToolDetailView: View {
     let id: String
     var isResult = false
     var collapsible = false
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
     @State private var fullOutput: FullToolOutput?
     @State private var showMore = false
     /// Six lines in the card, eighty once opened; the sheet has the rest.
@@ -159,12 +160,13 @@ private struct ToolDetailView: View {
                 if isResult {
                     // Terminal output keeps its columns: scroll sideways
                     // rather than wrapping a table or a stack trace.
-                    ScrollView(.horizontal) {
+                    ScrollView(wrap ? [] : [.horizontal]) {
                         Text(presentation.body.isEmpty ? "No output"
                              : ToolOutputPreview(presentation.body, lines: showMore ? Self.moreLines : Self.previewLines,
                                                  characters: showMore ? 16_000 : 640).text)
                             .font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
-                            .fixedSize(horizontal: true, vertical: false).textSelection(.enabled)
+                            .fixedSize(horizontal: !wrap, vertical: false).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .accessibilityIdentifier("chat-tool-preview:\(id)")
                     }
                 } else {

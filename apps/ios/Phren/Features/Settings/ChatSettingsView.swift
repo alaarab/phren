@@ -7,6 +7,10 @@ enum ChatSettings {
     static let openInKey = "chat.openSessionsIn.v1"          // "chat" | "terminal"
     static let autoSendDictationKey = "chat.autoSendDictation.v1"
     static let autocorrectionKey = "chat.autocorrection.v1"
+    /// Long lines in code blocks, tool output and diffs wrap instead of
+    /// scrolling sideways. Off by default: columns and stack traces read
+    /// better unbroken, and the diff editor's ⋯ menu flips it in place.
+    static let wrapKey = "code.wrap.v1"
     static var opensInTerminal: Bool { AppRuntime.defaults.string(forKey: openInKey) == "terminal" }
     static var autoSendsDictation: Bool { AppRuntime.defaults.bool(forKey: autoSendDictationKey) }
     static var autocorrects: Bool { AppRuntime.defaults.object(forKey: autocorrectionKey) as? Bool ?? true }
@@ -16,6 +20,7 @@ struct ChatSettingsView: View {
     @AppStorage(ChatSettings.openInKey) private var openIn = "chat"
     @AppStorage(ChatSettings.autoSendDictationKey) private var autoSend = false
     @AppStorage(ChatSettings.autocorrectionKey) private var autocorrection = true
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
 
     var body: some View {
         PhrenList {
@@ -34,6 +39,10 @@ struct ChatSettingsView: View {
                 Toggle(isOn: $autocorrection) { Label("Autocorrection in chat", systemImage: "textformat.abc.dottedunderline") }
                     .accessibilityIdentifier("chat-autocorrection")
             } header: { Text("Composer") }
+            Section {
+                Toggle(isOn: $wrap) { Label { Text("Wrap long lines"); Text("Code blocks, tool output and diffs wrap instead of scrolling sideways").font(.caption).foregroundStyle(PhrenTheme.textMuted) } icon: { Image(systemName: "text.word.spacing") } }
+                    .accessibilityIdentifier("chat-wrap-lines")
+            } header: { Text("Reading") }
             Section {
                 HStack(spacing: 14) {
                     ForEach(["claude", "codex", "copilot", "phren"], id: \.self) { source in

@@ -27,9 +27,14 @@ final class SettingsScreensTests: XCTestCase {
             let toggle = app.switches[id]
             XCTAssertTrue(toggle.waitForExistence(timeout: 3), id)
             // The row is the identified switch; the control is its inner switch.
+            // The inner control usually takes the tap; when the hit lands on
+            // the row instead, a second tap at the switch's edge does.
             let control = toggle.switches.firstMatch
             control.tap()
-            XCTAssertTrue(isOn(control), id)
+            var on = false
+            for _ in 0..<10 where !on { Thread.sleep(forTimeInterval: 0.2); on = String(describing: control.value ?? "") == "1" || String(describing: toggle.value ?? "") == "1" }
+            if !on { toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
+            XCTAssertTrue(isOn(control) || isOn(toggle), id)
         }
         func back() { app.navigationBars.buttons.firstMatch.tap(); for _ in 0..<3 where !app.descendants(matching: .any)["settings-theme"].exists { app.swipeDown() } }
 

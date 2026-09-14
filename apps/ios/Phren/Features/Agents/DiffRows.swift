@@ -57,6 +57,7 @@ struct DiffRowView: View {
     /// Where this row sits in a run of inserted or removed lines.
     var runStart = true
     var runEnd = true
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
 
     var body: some View {
         if row.kind == .hunk {
@@ -84,7 +85,7 @@ struct DiffRowView: View {
                     .frame(width: 14, alignment: .center).padding(.vertical, 1.5)
                 Text(Self.attributed(row, language: language))
                     .foregroundStyle(PhrenTheme.text)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .fixedSize(horizontal: !wrap, vertical: false)
                     .padding(.trailing, 12).padding(.vertical, 1.5)
                 Spacer(minLength: 0)
             }

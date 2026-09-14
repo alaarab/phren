@@ -9,6 +9,7 @@ struct FileDiffView: View {
     let file: AgentRepositoryDiff.File
     let section: AgentRepositoryDiff.Section
     @AppStorage("diff.sideBySide.v1") private var sideBySide = false
+    @AppStorage(ChatSettings.wrapKey) private var wrap = false
     @State private var change = 0
     @State private var focused: Int?
 
@@ -42,6 +43,7 @@ struct FileDiffView: View {
                         Label("Inline", systemImage: "text.alignleft").tag(false)
                         Label("Side by side", systemImage: "rectangle.split.2x1").tag(true)
                     }
+                    Toggle("Wrap long lines", systemImage: "text.word.spacing", isOn: $wrap).accessibilityIdentifier("diff-wrap")
                     if let patch = section.patch {
                         Button("Copy patch", systemImage: "doc.on.doc") { UIPasteboard.general.string = patch }
                     }
@@ -72,7 +74,7 @@ struct FileDiffView: View {
     private func diffBody(_ document: DiffDocument) -> some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
-                ScrollView(sideBySide ? [.vertical] : [.horizontal, .vertical]) {
+                ScrollView(sideBySide || wrap ? [.vertical] : [.horizontal, .vertical]) {
                     // A lazy stack inside a horizontally scrolling view sizes
                     // itself to the viewport, not to its widest row, so long
                     // lines would be clipped with nowhere to scroll. Rows are

@@ -498,6 +498,12 @@ final class AgentChatTests: XCTestCase {
         app.buttons["chat-patch-open"].firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Theme.swift"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["diff-options"].exists)
+        // Long lines can wrap instead of scrolling; the switch lives in ⋯ and persists.
+        app.buttons["diff-options"].tap()
+        let wrap = app.buttons["Wrap long lines"]
+        XCTAssertTrue(wrap.waitForExistence(timeout: 3)); wrap.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 3))
+        app.buttons["diff-options"].tap(); app.buttons["Wrap long lines"].tap()
         app.buttons["Done"].tap()
         XCTAssertTrue(theme.waitForExistence(timeout: 5)); theme.tap()
         XCTAssertFalse(purple.waitForExistence(timeout: 1))
