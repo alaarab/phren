@@ -633,7 +633,7 @@ struct AgentChatView: View {
             .disabled(model.restoringDraft)
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
-        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
+        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 8)
         .background(PhrenTheme.chatCanvas.ignoresSafeArea(.container, edges: .bottom))
     }
     private struct CommandDestination: Hashable { let paneID: String; let menu: Bool }
