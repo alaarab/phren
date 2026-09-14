@@ -109,7 +109,12 @@ struct TerminalControls: View {
         }.accessibilityLabel(title)
     }
     private func arrow(_ symbol: String, _ title: String, _ sequence: String) -> some View {
-        Button { send(sequence) } label: {
+        Button {
+            send(sequence)
+            // Enter ends the thing the arrows were for — a menu pick, a line
+            // edit — so the pad folds away; the other keys keep it up.
+            if title == "Enter" { directions = false }
+        } label: {
             Image(systemName: symbol).font(.system(size: 20, weight: .medium))
                 .foregroundStyle(title == "Enter" ? PhrenTheme.cyan : PhrenTheme.text)
                 .frame(width: 56, height: 48)

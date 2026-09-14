@@ -13,9 +13,11 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertLessThan(enter.midX, app.buttons["Right"].frame.midX)
         app.buttons["Backspace"].tap()
         app.buttons["Clear line"].tap()
-        app.buttons["Enter"].tap()
+        XCTAssertTrue(app.buttons["Up"].exists, "Editing keys keep the pad open")
         capture(app, "Arrow pad with Enter and Clear Line")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)).tap()
+        app.buttons["Enter"].tap()
+        // Enter ends what the arrows were for, so the pad folds away by itself.
+        XCTAssertFalse(app.buttons["Up"].waitForExistence(timeout: 1), "Enter closes the arrow pad")
         XCTAssertEqual(try state(app).input, "\u{7F}\u{05}\u{15}\r")
         let before = try state(app).input
         app.buttons["Ctrl"].press(forDuration: 0.6)
