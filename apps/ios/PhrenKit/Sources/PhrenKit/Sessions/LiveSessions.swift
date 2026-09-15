@@ -10,6 +10,7 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         public let agentStatus: String?
         public let approvalPending: Bool?
         public let agent: String?
+        public let starting: Bool?
         public let cwd: String?
         /// The git branch of the agent's folder, when the Hook reports one.
         public let branch: String?
@@ -32,7 +33,7 @@ public struct LiveWorkspaces: Codable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, cwd, branch, agentPaneCount, paneCount, changedSeq
+            case id, label, title, agentStatus, approvalPending, agent, starting, cwd, branch, agentPaneCount, paneCount, changedSeq
             case reportedContextUsedPercent = "contextUsedPercent"
             case reportedLastChangedAt = "lastChangedAt"
         }

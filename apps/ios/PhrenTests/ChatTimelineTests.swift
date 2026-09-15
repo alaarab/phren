@@ -3,6 +3,23 @@ import PhrenKit
 @testable import Phren
 
 final class ChatTimelineTests: XCTestCase {
+    func testPhrenCallsStaySeparateAndUseTheirOwnDelayedResult() throws {
+        let messages = try read([
+            ["type": "function_call", "call_id": "a", "name": "mcp__phren__search_knowledge", "arguments": #"{"query":"navigation"}"#],
+            ["type": "message", "role": "assistant", "content": "Looking up the project"],
+            ["type": "function_call_output", "call_id": "a", "output": #"{"ok":true,"data":{"count":1,"results":[{"title":"Swipe back"}]}}"#],
+            ["type": "function_call", "call_id": "b", "name": "mcp__phren__get_tasks", "arguments": "{}"],
+            ["type": "function_call_output", "call_id": "b", "output": "[]"],
+            ["type": "function_call", "call_id": "c", "name": "mcp__phren__get_project_summary", "arguments": "{}"],
+            ["type": "function_call_output", "call_id": "c", "output": "Summary"],
+        ])
+        let entries = ChatTimelineEntry.group(messages)
+        XCTAssertEqual(entries.compactMap(\.phren).count, 3)
+        XCTAssertFalse(entries.contains(where: \.isReadRun))
+        XCTAssertEqual(entries.first?.phren?.titles, ["Swipe back"])
+        XCTAssertEqual(entries.first?.messages.last?.toolCallID, "a")
+    }
+
     func testReadOnlyClassificationIsConservative() {
         XCTAssertTrue(ReadOnlyToolCall.shell("cat README.md | rg Widget"))
         XCTAssertTrue(ReadOnlyToolCall.shell("sed -n '1,20p' App.swift"))

@@ -12,12 +12,12 @@ struct ChatTranscriptPreparation {
     private var firstSeen: [String: Date] = [:]
     private var finishedSeen: [String: Date] = [:]
     private struct Key: Equatable {
-        let content: String; let timestamp: Date?; let queued: Bool; let queueKey: String?
+        let content: String; let timestamp: Date?; let failed: Bool; let queued: Bool; let queueKey: String?
         let images: [Int]; let results: [AgentChatMessage.ImageRef]; let call: String?
     }
 
     mutating func update(_ messages: [AgentChatMessage], at now: Date = .now) {
-        let incoming = messages.map { Key(content: $0.renderKey, timestamp: $0.timestamp, queued: $0.isQueued, queueKey: $0.queueKey, images: $0.imageBlocks, results: $0.resultImages, call: $0.toolCallID) }
+        let incoming = messages.map { Key(content: $0.renderKey, timestamp: $0.timestamp, failed: $0.isToolError, queued: $0.isQueued, queueKey: $0.queueKey, images: $0.imageBlocks, results: $0.resultImages, call: $0.toolCallID) }
         guard incoming != keys else { return }
         let started = ChatPerformance.begin()
         defer { ChatPerformance.end("transcript preparation", started) }

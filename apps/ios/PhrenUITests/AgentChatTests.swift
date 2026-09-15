@@ -2,6 +2,92 @@ import XCTest
 
 final class AgentChatTests: XCTestCase {
     @MainActor
+    func testWriteAndEditShowChangeRowsBeforeExpanding() {
+        let app = launch(extra: ["--chat-write-changes"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        for path in ["Edited.swift", "Fallback.swift", "Created.swift"] {
+            let row = app.buttons["chat-patch-file:" + path]
+            for _ in 0..<6 where !row.isHittable { transcript.swipeDown() }
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertTrue(row.label.contains("collapsed"))
+        }
+        capture(app, "Write and Edit change rows")
+    }
+
+    @MainActor
+    func testStartingSessionSendsFirstPromptAndAttachesItsTranscript() {
+        let app = launch(extra: ["--starting-session-fixture"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["chat-starting"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Choose an agent"].exists)
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Create the first file")
+        app.buttons["chat-send"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Create the first file"].waitForExistence(timeout: 12))
+        XCTAssertFalse(app.staticTexts["chat-starting"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch.exists)
+        capture(app, "New session transcript attached")
+    }
+
+    @MainActor
+    func testPhrenToolsHaveTheirOwnCardsAndOpenFullDetails() {
+        let app = launch(extra: ["--chat-phren-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        for (id, verb) in [("search", "Recalled memories"), ("complete", "Completed a task"), ("task", "Added a task"), ("finding", "Saved a finding")] {
+            let card = app.buttons["chat-phren-card:phren-" + id]
+            for _ in 0..<8 where !card.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
+            XCTAssertTrue(card.waitForExistence(timeout: 5)); XCTAssertTrue(card.label.contains(verb))
+        }
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
+        capture(app, "Phren memory and task cards")
+        app.buttons["chat-phren-card:phren-finding"].tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "findingType")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+    }
+
+    @MainActor
+    func testClaudePastedImageReplacesPendingTwinAndHidesImageTokens() {
+        let app = launch(extra: ["--chat-claude-image", "--chat-working"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let pending = app.descendants(matching: .any)["chat-queued-tag:2:0"].firstMatch
+        XCTAssertTrue(pending.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["queued"].exists)
+        XCTAssertFalse(app.buttons["View conversation image"].exists)
+        capture(app, "Pending pasted image turn")
+        app.buttons["chat-stop"].tap()
+        XCTAssertTrue(app.buttons["View conversation image"].waitForExistence(timeout: 8))
+        XCTAssertFalse(pending.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["chat-message:2:0"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Why does this terminal wrap?"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "[Image #1]")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Attached files on this computer:")).firstMatch.exists)
+        let real = app.descendants(matching: .any)["chat-message:3:0"].firstMatch
+        XCTAssertTrue(real.buttons["View conversation image"].exists)
+        capture(app, "Landed pasted image in one bubble")
+    }
+
+    @MainActor
+    func testRemoteChatLinksRejectCustomSchemesAndConfirmWebHost() {
+        let app = launch(extra: ["--chat-secure-links"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.links["Approve"].waitForExistence(timeout: 8))
+        app.links["Approve"].tap()
+        XCTAssertFalse(app.alerts["Open website?"].exists)
+        XCTAssertTrue(app.buttons["chat-close"].exists)
+        app.links["Docs"].tap()
+        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.alerts.staticTexts["example.com"].exists)
+        capture(app, "Confirm a transcript website")
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(app.links["Docs"].exists)
+    }
+
+    @MainActor
     func testHeavyTranscriptScrollingPerformance() {
         let app = launch(extra: ["--chat-heavy"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -130,6 +216,9 @@ final class AgentChatTests: XCTestCase {
         let link = app.links["Open linked page"]
         XCTAssertTrue(link.waitForExistence(timeout: 5))
         link.tap()
+        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.alerts.staticTexts["example.org"].exists)
+        app.alerts.buttons["Open website"].firstMatch.tap()
         app.buttons["chat-close"].tap()
         let captured = app.staticTexts["chat-opened-url"]
         XCTAssertTrue(captured.waitForExistence(timeout: 5))
@@ -241,7 +330,8 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(group.waitForExistence(timeout: 8))
         XCTAssertEqual(group.label, "Shell, 1 operation")
         XCTAssertEqual(group.value as? String, "Collapsed")
-        XCTAssertLessThanOrEqual(group.frame.height, 44, "The compact tool pill retains a larger accessible tap target")
+        // A 44pt pill whose tap shape reaches 5pt past its edges (the reported frame is the tap shape).
+        XCTAssertLessThanOrEqual(group.frame.height, 54, "The compact tool pill stays one row tall")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["All 4 timeline tests passed."].exists)
         XCTAssertFalse(app.buttons["Latest messages"].exists, "A settled conversation already at the bottom does not need a jump button")
@@ -829,7 +919,7 @@ final class AgentChatTests: XCTestCase {
         app.buttons["chat-queue"].tap()
         let queued = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch
         XCTAssertTrue(queued.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Queued · 1"].exists)
+        XCTAssertFalse(app.staticTexts["Queued · 1"].exists, "Pending bubbles have no queued caption")
         XCTAssertEqual(composer.value as? String, "", "The composer is clear once the message is queued")
         let sendNow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-send:")).firstMatch
         sendNow.tap()
@@ -856,7 +946,7 @@ final class AgentChatTests: XCTestCase {
         composer.tap(); composer.typeText("Run the queued checks")
         app.buttons["chat-queue"].tap()
         XCTAssertTrue(app.staticTexts["Run the queued checks"].waitForExistence(timeout: 8))
-        let tag = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch
+        let tag = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch
         XCTAssertTrue(tag.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch.exists)
         capture(app, "Claude Code owns the queued instruction")
@@ -879,7 +969,7 @@ final class AgentChatTests: XCTestCase {
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:"))
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 3))
         XCTAssertEqual(rows.count, 2)
-        XCTAssertTrue(app.staticTexts["Queued · 2"].exists)
+        XCTAssertFalse(app.staticTexts["Queued · 2"].exists, "Pending bubbles have no queued caption")
         capture(app, "Two queued messages under the transcript")
         // Edit pulls the message back into the composer.
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-edit:")).element(boundBy: 1).tap()
@@ -994,14 +1084,26 @@ final class AgentChatTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"] + extra
-        app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["Agents"].tap()
         let host = app.buttons["live-host:A1000000-0000-0000-0000-000000000001"]
-        for _ in 0..<5 {
-            if host.isHittable { break }
+        // The first launch of a test run sometimes comes up before the fixture
+        // bootstrap finishes (no computers, no memory) and stays that way; a
+        // relaunch always lands. Real launches are unaffected.
+        for attempt in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
+            app.tabBars.buttons["Agents"].tap()
+            // The list's rows are lazy: the Computers section is only in the
+            // tree once scrolled to, which at accessibility text sizes takes
+            // many screens of session cards.
+            let revealed = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "live-host:")).firstMatch
+            if revealed.waitForExistence(timeout: attempt == 0 ? 12 : 25) || app.staticTexts["agents-introduction"].exists == false { break }
+            if attempt == 0 { app.terminate() }
+        }
+        for _ in 0..<14 {
+            if host.exists && host.isHittable { break }
             app.swipeUp()
         }
+        XCTAssertTrue(host.waitForExistence(timeout: 5), "The fixture computer must appear in Agents")
         host.tap()
         XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 10))
         return app
@@ -1010,6 +1112,5 @@ final class AgentChatTests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
-
 
 

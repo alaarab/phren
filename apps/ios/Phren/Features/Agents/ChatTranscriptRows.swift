@@ -47,7 +47,9 @@ private struct ChatTranscriptRow: View, Equatable {
         #if DEBUG
         let _ = ChatPerformance.enabled ? Self._printChanges() : ()
         #endif
-        if entry.isReadRun {
+        if let phren = entry.phren {
+            PhrenToolCard(presentation: phren, messages: entry.messages)
+        } else if entry.isReadRun {
             ChatReadRun(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
         } else if entry.isActivity {
             ChatToolActivity(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
@@ -110,11 +112,6 @@ private struct ChatMessageRow<Historical: View>: View {
                     }
                 }
                 historical()
-                if message.isQueued {
-                    Text(message.queueKey == nil ? "queued · status unavailable" : "queued")
-                        .font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
-                        .accessibilityIdentifier("chat-queued-tag:\(message.id)")
-                }
                 let text = displayText
                 if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) {
                     let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
@@ -128,15 +125,23 @@ private struct ChatMessageRow<Historical: View>: View {
                     Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
                 }
             }
+            .overlay(alignment: .topLeading) {
+                if message.isQueued {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityLabel("Pending message")
+                        .accessibilityIdentifier("chat-queued-tag:\(message.id)")
+                }
+            }
             .padding(message.role == .user ? 14 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
+        .opacity(message.isQueued ? 0.5 : 1)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
         .accessibilityIdentifier("chat-message:\(message.id)")
         .contextMenu {
-            Button("Copy message", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
+            Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(message.text) }
             ShareLink(item: message.text)
         }
     }
@@ -174,7 +179,7 @@ private struct LocalCommandRow: View {
             .accessibilityIdentifier("chat-command:\(id)")
             .contextMenu {
                 Button("View full output") { openOutput(.init(title: "Command output", text: command.text)) }
-                Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = command.text }
+                Button("Copy", systemImage: "doc.on.doc") { ChatClipboard.copy(command.text) }
             }
         }
     }

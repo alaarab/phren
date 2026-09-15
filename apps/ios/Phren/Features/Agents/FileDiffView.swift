@@ -34,6 +34,7 @@ struct FileDiffView: View {
             }
         }
         .background(PhrenTheme.bgSunken)
+        .confirmsWebLinks()
         .navigationTitle(fileName).navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -50,7 +51,7 @@ struct FileDiffView: View {
                     }
                     Toggle("Wrap long lines", systemImage: "text.word.spacing", isOn: $wrap).accessibilityIdentifier("diff-wrap")
                     if let patch = section.patch {
-                        Button("Copy patch", systemImage: "doc.on.doc") { UIPasteboard.general.string = patch }
+                        Button("Copy patch", systemImage: "doc.on.doc") { ChatClipboard.copy(patch) }
                     }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .accessibilityLabel("Diff options").accessibilityIdentifier("diff-options")

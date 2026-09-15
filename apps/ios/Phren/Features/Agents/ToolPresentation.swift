@@ -56,17 +56,19 @@ struct ToolPresentation {
         if rawTitle == "Tool result" {
             body = Self.unwrap(text)
         } else if let fields {
-            path = fields["file_path"] as? String ?? fields["path"] as? String
+            path = fields["file_path"] as? String ?? fields["path"] as? String ?? fields["notebook_path"] as? String
             let edits = (fields["edits"] as? [[String: Any]] ?? []).compactMap { edit -> (String, String)? in
                 guard let old = edit["old_string"] as? String, let new = edit["new_string"] as? String else { return nil }
                 return (old, new)
             }
-            if let old = fields["old_string"] as? String, let new = fields["new_string"] as? String {
+            if let old = (fields["old_string"] ?? fields["old_str"]) as? String, let new = (fields["new_string"] ?? fields["new_str"]) as? String {
                 body = Self.updatePatch(path, edits: [(old, new)]); title = "Patch"
             } else if !edits.isEmpty {
                 // MultiEdit: one file, several replacements — one hunk each.
                 body = Self.updatePatch(path, edits: edits); title = "Patch"
-            } else if let content = fields["content"] as? String, path != nil {
+            } else if let source = fields["new_source"] as? String, name == "NotebookEdit" {
+                body = Self.updatePatch(path, edits: [("", source)]); title = "Patch"
+            } else if let content = (fields["content"] ?? fields["file_text"]) as? String, path != nil {
                 // Write: the whole file as it now stands, every line new.
                 body = "*** Add File: \(path!)\n"
                     + content.components(separatedBy: "\n").map { "+" + $0 }.joined(separator: "\n")

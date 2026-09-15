@@ -10,7 +10,7 @@ struct SessionAttentionControl: ControlWidget {
         StaticControlConfiguration(kind: Self.kind, provider: SessionAttentionProvider()) { value in
             ControlWidgetButton(action: OpenAttentionSessionIntent()) {
                 Label {
-                    Text(value?.displayName ?? "Open phren")
+                    Text("Phren session")
                 } icon: {
                     Image("PhrenMark")
                 }

@@ -10,16 +10,21 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public let source: String
     public let sessionID: String
     public let muxID: String
-    public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, sessionID].joined(separator: "/") }
+    /// Present only before a transcript exists; binds the first prompt to the
+    /// Hook's verified terminal/process. Never substitute a made-up session ID.
+    public let startingToken: String?
+    public var isStarting: Bool { startingToken != nil && sessionID.isEmpty }
+    public var id: String { [hostID.uuidString, muxID, workspaceID, tabID, paneID, source, isStarting ? "starting-" + (startingToken ?? "") : sessionID].joined(separator: "/") }
 
-    public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default") throws {
-        guard [workspaceID, tabID, paneID, sessionID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
-              !["copilot", "phren"].contains(source) || UUID(uuidString: sessionID) != nil else {
+    public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default", startingToken: String? = nil) throws {
+        let starting = sessionID.isEmpty && startingToken?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+        guard [workspaceID, tabID, paneID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
+              starting || (startingToken == nil && Self.validID(sessionID) && (!["copilot", "phren"].contains(source) || UUID(uuidString: sessionID) != nil)) else {
             throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, or Phren conversation in this pane.")
         }
         self.hostID = hostID; self.workspaceID = workspaceID; self.tabID = tabID
         self.paneID = paneID; self.source = source; self.sessionID = sessionID
-        self.muxID = muxID
+        self.muxID = muxID; self.startingToken = startingToken
     }
 
     /// Agents the app can chat with natively. `phren` is the experimental
@@ -35,13 +40,13 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID }
+    private enum CodingKeys: String, CodingKey { case hostID, workspaceID, tabID, paneID, source, sessionID, muxID, startingToken }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         try self.init(hostID: values.decode(UUID.self, forKey: .hostID),
                       workspaceID: values.decode(String.self, forKey: .workspaceID), tabID: values.decode(String.self, forKey: .tabID),
                       paneID: values.decode(String.self, forKey: .paneID), source: values.decode(String.self, forKey: .source),
-                      sessionID: values.decode(String.self, forKey: .sessionID), muxID: values.decode(String.self, forKey: .muxID))
+                      sessionID: values.decode(String.self, forKey: .sessionID), muxID: values.decode(String.self, forKey: .muxID), startingToken: values.decodeIfPresent(String.self, forKey: .startingToken))
     }
 
     public static func validID(_ value: String) -> Bool {
@@ -57,13 +62,16 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
         public let agent: String?
         public let agentStatus: String?
         public let sessionId: String?
+        public let starting: Bool?
+        public let startingToken: String?
         public let title: String?
         public let cwd: String?
         public var displayTitle: String { title?.isEmpty == false ? title! : label }
         public var needsAnswer: Bool { ["blocked", "waiting"].contains(agentStatus ?? "") }
         public func target(hostID: UUID, workspaceID: String, tabID: String, muxID: String = "herdr:default") throws -> AgentChatTarget {
             try AgentChatTarget(hostID: hostID, workspaceID: workspaceID, tabID: tabID,
-                                paneID: id, source: agent ?? "", sessionID: sessionId ?? "", muxID: muxID)
+                                paneID: id, source: agent ?? "", sessionID: sessionId ?? "", muxID: muxID,
+                                startingToken: starting == true && sessionId == nil ? startingToken : nil)
         }
     }
     public let kind: String
@@ -82,10 +90,24 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
         return value
     }
 
+    /// Attach only to the same starting terminal/process, preserving the pane
+    /// selection even when other agents appear while the first prompt runs.
+    public func attachedTarget(for target: AgentChatTarget) throws -> AgentChatTarget? {
+        guard target.isStarting else { return nil }
+        guard groupId == target.workspaceID, childId == target.tabID,
+              let pane = panes.first(where: { $0.id == target.paneID }), pane.agent == target.source,
+              pane.startingToken == target.startingToken else {
+            throw PhrenKitError.validation("The starting agent changed. Reopen chat before sending.")
+        }
+        guard pane.sessionId != nil else { return nil }
+        return try pane.target(hostID: target.hostID, workspaceID: target.workspaceID, tabID: target.tabID, muxID: target.muxID)
+    }
+
     public func validate(_ target: AgentChatTarget, sending: Bool = false) throws -> Pane {
         guard groupId == target.workspaceID, childId == target.tabID,
               let pane = panes.first(where: { $0.id == target.paneID }),
-              pane.agent == target.source, pane.sessionId == target.sessionID else {
+              pane.agent == target.source,
+              target.isStarting ? (pane.starting == true && pane.sessionId == nil && pane.startingToken == target.startingToken) : pane.sessionId == target.sessionID else {
             throw PhrenKitError.validation("The agent in this pane changed. Reopen chat to choose its current conversation.")
         }
         if sending && pane.needsAnswer {
@@ -116,6 +138,7 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public var wasQueued = false
     public var isQueued = false
     public var queueKey: String? = nil
+    public var isToolError = false
     init(id: String, line: Int, role: Role, title: String?, text: String,
          imageBlocks: [Int] = [], resultImages: [ImageRef] = [], toolCallID: String? = nil) {
         self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
@@ -234,6 +257,10 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
                                                text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID)
                 message.timestamp = Self.timestamp(raw)
+                message.isToolError = part.isToolError
+                if part.role == .user {
+                    message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
+                }
                 if source == "claude", part.role == .user, raw["phrenQueued"] as? Bool == true {
                     message.wasQueued = true; message.isQueued = true
                     message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
@@ -255,6 +282,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var resultImages: [AgentChatMessage.ImageRef] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
+        var isToolError = false
     }
     /// One turn from the person is one bubble: a row's text and image blocks
     /// arrive as separate parts, and drawn apart the picture floats under
@@ -395,7 +423,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             case "tool_result":
                 return Part(role: .tool, title: "Tool result", text: text(block["content"]),
                             resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
-                            toolCallID: block["tool_use_id"] as? String, idIndex: index)
+                            toolCallID: block["tool_use_id"] as? String, idIndex: index, isToolError: block["is_error"] as? Bool == true)
             default: return nil
             }
         }
@@ -466,7 +494,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)
             case "tool_result": return Part(role: .tool, title: "Tool result", text: text(block["content"]),
                                             resultImages: innerImages(block["content"]).map { AgentChatMessage.ImageRef(block: index, inner: $0) },
-                                            toolCallID: block["tool_use_id"] as? String, idIndex: idIndex)
+                                            toolCallID: block["tool_use_id"] as? String, idIndex: idIndex, isToolError: block["is_error"] as? Bool == true)
             default: return nil
             }
         }

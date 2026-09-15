@@ -59,7 +59,7 @@ struct CodeDiffView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(header?.text ?? "Patch"), \(open ? "expanded" : "collapsed")")
-                    .accessibilityIdentifier("chat-patch-file:\(header?.text ?? "")")
+                    .accessibilityIdentifier("chat-patch-file:\((header?.text ?? "").replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: ""))")
                     Button("Open full diff", systemImage: "arrow.up.left.and.arrow.down.right") {
                         let path = (header?.text ?? "Patch").replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: "")
                         let status = (header?.text ?? "").hasPrefix("New file") ? "A " : (header?.text ?? "").hasPrefix("Deleted file") ? "D " : " M"
@@ -77,7 +77,7 @@ struct CodeDiffView: View {
                     DiffCounts(added: diff.added, removed: diff.removed)
                 }
                 if diff.truncated { Text("Preview").font(.caption2).foregroundStyle(PhrenTheme.textMuted) }
-                Button("Copy patch", systemImage: "doc.on.doc") { UIPasteboard.general.string = patch }
+                Button("Copy patch", systemImage: "doc.on.doc") { ChatClipboard.copy(patch) }
                     .labelStyle(.iconOnly).foregroundStyle(PhrenTheme.textMuted).frame(width: 36, height: 32)
             }
             .padding(.leading, 12).padding(.trailing, 4)

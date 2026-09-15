@@ -3,7 +3,7 @@ import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, 
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { bridgeRoot, type Json } from "./protocol.js";
+import { bridgeRoot, object, type Json } from "./protocol.js";
 import { z } from "zod";
 import { ProcessPool } from "./limits.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -20,8 +20,7 @@ const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changed
 export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|keychain-db|tfstate)|id_rsa.*|id_ed25519.*|(?:.*\.)?credentials\.json|\.netrc|\.npmrc|\.pypirc)$/i.test(path.basename(file));
 const gitPool = new ProcessPool(2);
 
-/** Tools whose effect on files is invisible in their own call: everything
- * else — Write, Edit, apply_patch — already carries its patch. */
+/** Tools whose filesystem changes are captured around the lifecycle callback. */
 export const SHELL_TOOLS = new Set(["Bash", "bash", "shell", "Shell", "exec_command", "shell_command", "local_shell", "write_stdin"]);
 
 /** The user's home: `HOME` when set (tests and POSIX), else the OS's answer —
@@ -32,10 +31,25 @@ export function homeDirectory(env: NodeJS.ProcessEnv = process.env): string {
 
 const NAMED = /(?<![\w@:/])(?:~\/|\.\/|\/)[\w.@+~-]+(?:\/[\w.@+~-]+)*/g;
 /** The places a command names — the same rule the phone applies. */
-export function namedPaths(command: string): string[] {
+export const FILE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit", "apply_patch", "str_replace_editor", "create_file", "replace_string_in_file", "multi_replace_string_in_file"]);
+export function capturesChanges(tool: string, input: Json): boolean {
+  return SHELL_TOOLS.has(tool) || FILE_TOOLS.has(tool.split(".").at(-1)!.toLowerCase()) || typeof input.command === "string" || typeof input.cmd === "string";
+}
+
+export function namedPaths(command: string, input: Json = {}): string[] {
   const found = new Set<string>();
   for (const match of command.slice(0, 65_536).matchAll(NAMED)) { if (match[0].length > 2) found.add(match[0]); if (found.size === 24) break; }
-  return [...found];
+  for (const value of [input.file_path, input.path, input.notebook_path,
+    ...((Array.isArray(input.replacements) ? input.replacements : []).map(v => object(v).filePath))]) {
+    if (typeof value === "string" && value.length > 0 && value.length <= 4096 && !value.includes("\0")) found.add(value);
+  }
+  // Patch headers are paths, never execute their content or scan new file text.
+  const patch = [input.patch, input.input, input.command, command].filter((v): v is string => typeof v === "string").join("\n").slice(0, 262144);
+  for (const match of patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)) {
+    const value = (match[1] ?? match[2]).trim(); if (value && value.length <= 4096 && !value.includes("\0")) found.add(value);
+    if (found.size >= 48) break;
+  }
+  return [...found].slice(0, 48);
 }
 
 async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<string> {
@@ -162,7 +176,7 @@ export class ToolChanges {
     this.snapshots.clear();
   }
 
-  async before(conversation: string, toolUseId: string, cwd: string, command: string): Promise<void> {
+  async before(conversation: string, toolUseId: string, cwd: string, command: string, input: Json = {}): Promise<void> {
     const key = `${conversation}\0${toolUseId}`;
     if (!toolUseId || this.snapshots.size >= 64 || this.snapshots.has(key)) return;
     const snapshot: Snapshot = { at: Date.now(), trees: new Map() };
@@ -170,7 +184,7 @@ export class ToolChanges {
     try {
       await this.budget(async signal => {
         const roots = new Set<string>();
-        for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command)]) {
+        for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command, input)]) {
           signal.throwIfAborted();
           if (roots.size >= 6) break;
           const root = await repositoryOf(target, cwd, homeDirectory(), signal); if (root) roots.add(root);

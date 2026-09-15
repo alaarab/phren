@@ -276,7 +276,13 @@ struct AgentChatView: View {
                                     sendTask = Task { await model.answer(session, question: prompt, selections: selections) }
                                 }.id(prompt.id)
                             }
-                            if model.connected && model.messages.isEmpty { Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40) }
+                            if model.target?.isStarting == true {
+                                Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
+                                    .foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                                    .accessibilityIdentifier("chat-starting")
+                            } else if model.connected && model.messages.isEmpty {
+                                Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                            }
                         }
                         // The scroll marker is not a message: it must not add
                         // another inter-message gap below the final reply.
@@ -387,6 +393,7 @@ struct AgentChatView: View {
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .background(PhrenTheme.chatCanvas)
+        .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
         .overlay {
@@ -778,10 +785,9 @@ struct AgentChatView: View {
                             openCommandMenu()
                         } else {
                             let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
-                            let donatedMessage = model.draft
                             sendTask = Task {
                                 await model.send(session)
-                                if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(donatedMessage, to: session) }
+                                if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
                                 if isCommand, model.deliveryError == nil, let pane {
                                     commandDestination = .init(paneID: pane, menu: false)
                                     // /new, /clear and /resume may change the session ID.
@@ -828,7 +834,7 @@ struct AgentChatView: View {
     }
     private struct RunIdentity: Equatable { let active: Bool; let refresh: UUID }
     private var showsStop: Bool {
-        model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
+        model.target?.isStarting != true && model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
     }
     /// A message typed while the agent is busy joins the queue instead of
     /// interrupting; the control says so.
@@ -836,15 +842,12 @@ struct AgentChatView: View {
         model.isBusy && !showsStop && !AgentSlashCommand.isCommand(model.draft)
     }
 
-    /// Claude Code's queue, on a phone: each waiting message with Send now
-    /// (steer), Edit (back into the composer), and remove.
+    /// Optimistic bubbles stay muted until echoed by the transcript. Only
+    /// unsent drafts have local edit/remove controls; Claude owns sent items.
     private var queuedMessages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Queued · \(model.queue.count)").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.chatNeutral)
-                .padding(.leading, 4)
             ForEach(model.queue) { item in
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.top, 3)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
                         if !item.attachments.isEmpty {
@@ -853,9 +856,7 @@ struct AgentChatView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 0) {
-                        if item.submittedAfterLine != nil {
-                            Text("Awaiting confirmation in Claude Code").font(.caption2)
-                        } else {
+                        if item.submittedAfterLine == nil {
                         Button { sendTask = Task { await model.sendNow(item, session) } } label: {
                             Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
@@ -871,7 +872,12 @@ struct AgentChatView: View {
                 }
                 .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
                 .background(PhrenTheme.chatUserBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(PhrenTheme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                .opacity(0.5)
+                .overlay(alignment: .topLeading) {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityLabel("Pending message").accessibilityIdentifier("chat-queued-tag:\(item.id)")
+                }
+                .padding(.leading, 30)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("chat-queued:\(item.id)")
             }

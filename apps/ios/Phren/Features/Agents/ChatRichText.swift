@@ -59,7 +59,7 @@ private struct ChatCodeBlock: View {
                 Button("View code", systemImage: "arrow.up.left.and.arrow.down.right") {
                     openOutput(.init(title: language.isEmpty ? "Code" : language, text: text))
                 }.frame(width: 44, height: 32)
-                Button("Copy code", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }.frame(width: 44, height: 32)
+                Button("Copy code", systemImage: "doc.on.doc") { ChatClipboard.copy(text) }.frame(width: 44, height: 32)
             }.labelStyle(.iconOnly).foregroundStyle(PhrenTheme.chatNeutral)
             Text(CodeHighlighting.highlightedBlock(ToolOutputPreview(text, lines: 12, characters: 2_000).text, language: .detect(language)))
                 .font(.system(size: 14.5, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)

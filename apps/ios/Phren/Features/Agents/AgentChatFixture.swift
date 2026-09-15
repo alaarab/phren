@@ -8,6 +8,8 @@ import UIKit
 @MainActor enum AgentChatFixture {
     static var enabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--native-chat-fixture") }
     static var sent: [(String, String)] = []
+    static var startingAttachedAt: Date?
+    static let startingToken = String(repeating: "a", count: 64)
     static var reads = 0
     private static var heavyFrames: [String: AgentChatTranscript] = [:]
     static var hasReadTranscript = false
@@ -53,9 +55,17 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : flag("--chat-claude-queue") ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
+        if flag("--starting-session-fixture") {
+            panes[0]["startingToken"] = startingToken
+            if startingAttachedAt == nil || Date.now < startingAttachedAt! {
+                panes[0].removeValue(forKey: "sessionId")
+                panes[0]["starting"] = true
+                panes[0]["agentStatus"] = "idle"
+            }
+        }
         if flag("--chat-multiple") {
             panes.append(["id": "\(session.workspaceID):p2", "label": "2", "title": "Review the changes", "agent": "claude", "agentStatus": "idle", "sessionId": "fixture-claude-session"])
         }
@@ -80,8 +90,24 @@ import UIKit
                 : ["type": role, "message": ["role": role, "content": [["type": "text", "text": text]]]]
             entries.append(["line": (flag("--chat-history") ? 20 : 0) + entries.count, "raw": raw])
         }
+        if !flag("--starting-session-fixture") {
         append("user", "Can you refine the project screen?")
         append("assistant", target.source == "codex" ? "The project screen is ready. What would you like to change?" : target.source == "copilot" ? "Copilot is connected to this project. What would you like to change?" : "I reviewed the changes. The project navigation looks consistent.")
+        }
+        if flag("--chat-write-changes") {
+            let patch = "diff --git a/Created.swift b/Created.swift\nnew file mode 100644\n--- /dev/null\n+++ b/Created.swift\n@@ -0,0 +1,2 @@\n+let one = 1\n+let two = 2\n"
+            for (call, name, input) in [
+                ("write-captured", "Write", ["file_path": "Created.swift", "content": "let one = 1\nlet two = 2"]),
+                ("write-fallback", "Write", ["file_path": "Fallback.swift", "content": "let fallback = true"]),
+                ("edit-fallback", "Edit", ["file_path": "Edited.swift", "old_string": "let value = 1", "new_string": "let value = 2"])
+            ] {
+                let arguments = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+                entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": call, "name": name, "arguments": arguments]]])
+                var result: [String: Any] = ["type": "response_item", "payload": ["type": "function_call_output", "call_id": call, "output": "Done"]]
+                if call == "write-captured" { result["phren_changes"] = [call: [["root": "/work/phone", "path": "Created.swift", "status": "A", "patch": patch, "added": 2, "removed": 0]]] }
+                entries.append(["line": entries.count, "raw": result])
+            }
+        }
         if flag("--chat-long-history") {
             for index in 0..<20 { append("assistant", "Recent discussion \(index). " + String(repeating: "Keep the current message visible while older history loads. ", count: 3)) }
         }
@@ -145,6 +171,39 @@ import UIKit
                     ["root": "/work/phone", "path": "Theme.swift", "status": "M", "added": 1, "removed": 1, "patch": "diff --git a/Theme.swift b/Theme.swift\nindex 1..2 100644\n--- a/Theme.swift\n+++ b/Theme.swift\n@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12\n"],
                     ["root": "/Users/fixture/.phren", "path": "phone/FINDINGS.md", "status": "M", "added": 3, "removed": 2, "patch": "diff --git a/phone/FINDINGS.md b/phone/FINDINGS.md\n--- a/phone/FINDINGS.md\n+++ b/phone/FINDINGS.md\n@@ -2,3 +2,5 @@\n - Tiles are one sprite\n-- Offline first\n-- Old note\n+- Accent is purple now\n+- Offline first, always\n+- Geocoder batches at 8/s\n"]]]]])
         }
+        if flag("--chat-phren-tools") {
+            let calls: [(String, String, [String: Any], [String: Any])] = [
+                ("finding", "add_finding", ["project": "phone", "findingType": "pitfall", "finding": String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)], ["ok": true]),
+                ("task", "add_task", ["project": "phone", "task": "Verify pasted images in chat"], ["ok": true]),
+                ("complete", "manage_task", ["project": "phone", "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),
+                ("search", "search_knowledge", ["project": "phone", "query": "chat navigation"], ["ok": true, "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
+            ]
+            for (id, tool, input, result) in calls {
+                let arguments = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+                let resultText = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+                let output: [String: Any] = ["content": [["type": "text", "text": resultText]]]
+                if target.source == "codex" {
+                    entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "phren-" + id, "name": "mcp__phren__" + tool, "arguments": arguments]]])
+                    entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "phren-" + id, "output": output]]])
+                } else {
+                    entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "phren-" + id, "name": "mcp__phren__" + tool, "input": input]]]]])
+                    entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "phren-" + id, "content": [["type": "text", "text": resultText]]]]]]])
+                }
+            }
+        }
+        if flag("--chat-secure-links") {
+            append("assistant", "[Approve](shortcuts://x)\n\n[Docs](https://example.com)")
+        }
+        if flag("--chat-claude-image") {
+            let text = "[Image #1]Why does this terminal wrap?\n\nAttached files on this computer:"
+            entries.append(["line": entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": String(repeating: "b", count: 64),
+                "message": ["role": "user", "content": text]]])
+            if stopped {
+                entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
+                    ["type": "text", "text": text],
+                    ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": image.data.base64EncodedString()]]]]]])
+            }
+        }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
         // Real transcripts retain the tool call after it is answered. Keep its
@@ -173,7 +232,7 @@ import UIKit
         if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
         if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
-        for (id, text) in sent where id == target.id {
+        for (id, text) in sent where id == target.id || flag("--starting-session-fixture") {
             if flag("--chat-claude-queue") {
                 let key = String(repeating: "a", count: 64)
                 entries.append(["line": entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": key,
@@ -200,6 +259,7 @@ import UIKit
         }
         if flag("--chat-send-fails") { throw LiveConnectionError.disconnected }
         sent.append((target.id, text))
+        if flag("--starting-session-fixture"), target.isStarting { startingAttachedAt = Date.now.addingTimeInterval(3) }
         if flag("--chat-streaming") { streamStarts[target.id] = .now }
     }
     private static func streamingTranscript(_ target: AgentChatTarget) throws -> AgentChatTranscript {

@@ -5,87 +5,63 @@ import WidgetKit
 struct SessionWorkingActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SessionWorkingActivityAttributes.self) { context in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 9) {
-                    PhrenActivityMark(size: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(context.state.project).font(.headline).lineLimit(1)
-                        if let branch = context.state.branch {
-                            Label(branch, systemImage: "arrow.triangle.branch")
-                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    ProviderActivityGlyph(provider: context.state.provider, size: 23)
-                }
-                HStack {
-                    Label(context.isStale ? "Timed out" : context.state.state,
-                          systemImage: context.isStale ? "clock.badge.exclamationmark" : "bolt.fill")
-                        .foregroundStyle(WidgetTheme.cyan)
-                    Spacer()
-                    Text(context.state.startedAt, style: .timer).monospacedDigit()
-                        .multilineTextAlignment(.trailing).frame(width: 64, alignment: .trailing)
-                        .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
-                }
-                .font(.subheadline.weight(.semibold))
-                if !context.isStale, let tool = context.state.toolName {
-                    Label(tool, systemImage: "hammer.fill")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(spacing: 8) {
+                PhrenActivityMark(size: 18)
+                Text(context.state.headline).font(.subheadline.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength: 4)
+                elapsed(context.state.startedAt)
             }
-            .padding(16)
+            .padding(10)
             .activityBackgroundTint(.black)
             .activitySystemActionForegroundColor(.white)
-            .widgetURL(routeURL(context.attributes.routeID))
+            .widgetURL(routeURL(context))
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) {
-                    PhrenActivityMark(size: 24)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    Text(context.state.startedAt, style: .timer)
-                        .font(.caption.monospacedDigit()).foregroundStyle(WidgetTheme.cyan)
-                        .multilineTextAlignment(.trailing).minimumScaleFactor(0.7).frame(width: 52, alignment: .trailing)
-                        .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
-                }
+                DynamicIslandExpandedRegion(.leading) { PhrenActivityMark(size: 18) }
+                DynamicIslandExpandedRegion(.trailing) { elapsed(context.state.startedAt) }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(context.state.project).font(.headline).lineLimit(1)
+                    Text("\(context.state.working) working · \(context.state.waiting) waiting")
+                        .font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack(spacing: 9) {
-                        ProviderActivityGlyph(provider: context.state.provider, size: 21)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(context.isStale ? "Timed out" : context.state.toolName ?? context.state.state)
-                                .font(.subheadline).lineLimit(1)
-                            if let branch = context.state.branch {
-                                Text(branch).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(context.state.entries.prefix(4)) { entry in
+                            HStack(spacing: 6) {
+                                ProviderActivityGlyph(provider: entry.provider, size: 16)
+                                Text(entry.project).privacySensitive().lineLimit(1)
+                                if let tool = entry.tool {
+                                    Text("· \(tool)").privacySensitive().foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Text(entry.computer).privacySensitive().font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                             }
+                            .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        Spacer()
                     }
                 }
             } compactLeading: {
-                PhrenActivityMark(size: 18)
-            } compactTrailing: {
-                // An unconstrained timer Text asks for all the width it might
-                // ever need, which stretches the island across the screen.
-                // Pin it to the width of "59:59" and let longer runs shrink.
-                Text(context.state.startedAt, style: .timer).font(.caption2.monospacedDigit())
-                    .multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
-                    .frame(width: 38, alignment: .trailing)
-                    .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
-            } minimal: {
                 PhrenActivityMark(size: 16)
-            }
-            .widgetURL(routeURL(context.attributes.routeID))
+            } compactTrailing: {
+                Text("\(context.state.working)").font(.caption2.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(context.state.waiting > 0 ? .orange : WidgetTheme.cyan)
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background((context.state.waiting > 0 ? Color.orange : WidgetTheme.cyan).opacity(0.15), in: Capsule())
+                    .accessibilityLabel("\(context.state.working) working, \(context.state.waiting) waiting")
+            } minimal: { PhrenActivityMark(size: 16) }
+            .widgetURL(routeURL(context))
         }
     }
 
-    private func routeURL(_ routeID: String) -> URL? {
+    private func elapsed(_ start: Date) -> some View {
+        Text(start, style: .timer).font(.caption.monospacedDigit()).foregroundStyle(WidgetTheme.cyan)
+            .multilineTextAlignment(.trailing).minimumScaleFactor(0.65)
+            .frame(width: 52, alignment: .trailing).clipped()
+    }
+    private func routeURL(_ context: ActivityViewContext<SessionWorkingActivityAttributes>) -> URL? {
+        guard context.state.working + context.state.waiting == 1 else { return URL(string: "phren://agents") }
         var components = URLComponents()
-        components.scheme = "phren"
-        components.host = "session"
-        components.queryItems = [URLQueryItem(name: "route", value: routeID)]
+        components.scheme = "phren"; components.host = "session"
+        components.queryItems = [URLQueryItem(name: "route", value: context.attributes.routeID)]
         return components.url
     }
 }

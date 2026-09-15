@@ -6,6 +6,7 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     enum Kind: Equatable { case message, activity, readRun }
     var messages: [AgentChatMessage]
     var kind: Kind = .message
+    var phren: PhrenToolPresentation? = nil
     var id: String { messages[0].id }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }
@@ -20,7 +21,14 @@ struct ChatTimelineEntry: Identifiable, Equatable {
             if message.role == .tool, message.title == "Background notification" { continue }
             guard message.role == .tool else {
                 entries.append(.init(messages: [message], kind: .message))
-                calls.removeAll(keepingCapacity: true); ambiguous.removeAll(keepingCapacity: true)
+                // Phren's result may follow an assistant progress line. Keep
+                // only its unanswered calls; ordinary tool grouping retains
+                // the existing conversation barriers.
+                calls = calls.filter { _, index in
+                    PhrenToolPresentation.recognizes(entries[index].messages.first?.title)
+                        && !entries[index].messages.contains(where: \.isToolResult)
+                }
+                ambiguous.formIntersection(calls.keys)
                 previousMessageID = message.id
                 continue
             }
@@ -48,6 +56,11 @@ struct ChatTimelineEntry: Identifiable, Equatable {
             entries.append(.init(messages: [message], kind: .activity))
             previousMessageID = message.id
         }
+        for index in entries.indices {
+            guard let call = entries[index].messages.first, PhrenToolPresentation.recognizes(call.title) else { continue }
+            let result = entries[index].messages.first(where: \.isToolResult)
+            entries[index].phren = PhrenToolPresentation(name: call.title ?? "", input: call.text, result: result?.text, isError: result?.isToolError == true)
+        }
         return foldingReads ? foldReadRuns(entries) : entries
     }
 
@@ -74,6 +87,7 @@ enum ReadOnlyToolCall {
     static func isReadOnly(_ messages: [AgentChatMessage]) -> Bool {
         guard !messages.contains(where: \.isChange), messages.contains(where: \.isToolResult),
               let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
+        guard !PhrenToolPresentation.recognizes(call.title) else { return false }
         let presentation = ToolPresentationCache.value(call)
         switch presentation.title {
         case "Read", "Browse", "List": return true
@@ -247,4 +261,3 @@ struct ChatToolSummary {
         preview = presentations.last?.preview ?? messages.last.map { ToolPresentationCache.value($0).preview } ?? ""
     }
 }
-

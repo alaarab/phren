@@ -28,4 +28,17 @@ final class ChatQueueHandoffTests: XCTestCase {
             "totalLines": line + 1, "entries": [["line": line, "raw": ["type": "user", "phrenQueued": true,
             "phrenQueueKey": String(repeating: "a", count: 64), "message": ["role": "user", "content": "Run tests"]]]]]), source: "claude")
     }
+
+    func testRealTurnDoesNotAcknowledgeASecondLocalCopyAfterItsQueuedTwin() throws {
+        let model = AgentChatModel()
+        let first = QueuedMessage(text: "Run tests", attachments: [], submittedAfterLine: 0, submittedText: "Run tests")
+        let second = QueuedMessage(text: "Run tests", attachments: [], submittedAfterLine: 0, submittedText: "Run tests")
+        model.queue = [first, second]
+        model.accept(try frame(line: 1))
+        XCTAssertEqual(model.queue.map(\.id), [second.id])
+        let real = try AgentChatTranscript.read(Data(#"{"type":"append","source":"claude","totalLines":3,"entries":[{"line":2,"raw":{"type":"user","message":{"role":"user","content":"Run tests"}}}]}"#.utf8), source: "claude")
+        model.accept(real)
+        XCTAssertEqual(model.queue.map(\.id), [second.id])
+        XCTAssertEqual(model.messages.map(\.id), ["2:0"])
+    }
 }

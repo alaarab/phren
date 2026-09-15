@@ -60,6 +60,20 @@ struct PhrenPalette: Codable, Equatable {
     var stateWorking: UInt32? = nil
     var stateWaiting: UInt32? = nil
     var stateDone: UInt32? = nil
+    var phrenCardSurface: UInt32? = nil
+    var phrenCardBorder: UInt32? = nil
+    var phrenCardAccent: UInt32? = nil
+
+    // Blend with this theme's own panel, including light custom themes.
+    var resolvedPhrenCardAccent: UInt32 { phrenCardAccent ?? action }
+    var resolvedPhrenCardSurface: UInt32 { phrenCardSurface ?? Self.blend(toolPanel ?? chatPanel, resolvedPhrenCardAccent, 0.08) }
+    var resolvedPhrenCardBorder: UInt32 { phrenCardBorder ?? Self.blend(resolvedPhrenCardSurface, resolvedPhrenCardAccent, 0.3) }
+    private static func blend(_ base: UInt32, _ tint: UInt32, _ amount: Double) -> UInt32 {
+        [16, 8, 0].reduce(UInt32(0)) { result, shift in
+            let value = Double((base >> shift) & 255) * (1 - amount) + Double((tint >> shift) & 255) * amount
+            return result | (UInt32(value.rounded()) << shift)
+        }
+    }
 }
 
 struct PhrenCustomTheme: Codable, Identifiable, Equatable {

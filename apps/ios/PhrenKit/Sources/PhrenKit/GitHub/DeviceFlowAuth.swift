@@ -32,7 +32,7 @@ public actor DeviceFlowAuth {
     private let clientID: String
     private let session: URLSession
 
-    public init(clientID: String = DeviceFlowAuth.defaultClientID, session: URLSession = .shared) {
+    public init(clientID: String = DeviceFlowAuth.defaultClientID, session: URLSession = GitHubClient.privateSession()) {
         self.clientID = clientID
         self.session = session
     }

@@ -65,15 +65,16 @@ enum ChatMessageDisplayCache {
         ChatRenderCacheMetrics.record("message", hit: false)
         let started = CFAbsoluteTimeGetCurrent()
         var text = message.text
-        let marker = "\n\nAttached files on this computer:\n"
-        if let section = text.range(of: marker, options: .backwards) {
-            let listed = text[section.upperBound...].components(separatedBy: "\n")
+        let marker = "Attached files on this computer:"
+        if let section = text.range(of: marker, options: .backwards),
+           section.lowerBound == text.startIndex || text[text.index(before: section.lowerBound)].isNewline {
+            let listed = text[section.upperBound...].components(separatedBy: "\n").filter { !$0.isEmpty }
             let previewPaths = Set(paths)
             if inlineImages || (hasImages && listed.allSatisfy({ previewPaths.contains($0) })) {
-                text = String(text[..<section.lowerBound])
+                text = String(text[..<section.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
-        if inlineImages {
+        if inlineImages || hasImages {
             text = imageMarker.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }

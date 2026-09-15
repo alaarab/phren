@@ -5,7 +5,7 @@ import { appendFile, mkdir, mkdtemp, open, readdir, readFile, realpath, rm, stat
 import path from "node:path";
 import { promisify } from "node:util";
 import { conversationNamedPaths, TranscriptReader, visibleEvent } from "./transcripts.js";
-import { ToolChanges, pruneChanges, startChangeRetention } from "./changes.js";
+import { ToolChanges, capturesChanges, pruneChanges, startChangeRetention } from "./changes.js";
 import { launchDirectory, repositoryDiff } from "./projects.js";
 import { LaunchLimiter, ProcessPool } from "./limits.js";
 import { serverName } from "./protocol.js";
@@ -73,6 +73,25 @@ describe("transcript export hardening", () => {
 });
 
 describe("isolated and bounded changes", () => {
+  it("captures Write input paths outside cwd and exports their redacted change rows", async () => {
+    const dir = await repo("write-target"), changes = new ToolChanges();
+    const input = { file_path: path.join(dir, "created.txt"), content: "new line\n" };
+    expect(capturesChanges("Write", input)).toBe(true);
+    try {
+      await changes.before("codex:write", "write-call", home, "", input);
+      await writeFile(input.file_path, input.content);
+      await writeFile(path.join(dir, ".env"), "SECRET=never-export\n");
+      await changes.after("codex:write", "write-call");
+      const transcript = path.join(home, "write.jsonl");
+      await writeFile(transcript, JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "write-call", output: "Done" } }) + "\n");
+      const page = await new TranscriptReader(transcript, "codex", undefined, changes.view("codex:write")).read();
+      expect(JSON.stringify(page)).toContain("phren_changes");
+      expect(JSON.stringify(page)).toContain("+new line");
+      expect(JSON.stringify(page)).not.toContain("SECRET");
+      expect((await changes.view("codex:write").changes("write-call"))?.find(f => f.path === ".env")).toMatchObject({ redacted: true, patch: "" });
+      expect(await readdir(path.join(home, "bridge/changes-scratch"))).toEqual([]);
+    } finally { await changes.close(); }
+  });
   it("does not change real object counts or index while capturing untracked files, and removes scratch", async () => {
     const dir = await repo("repo"), objects = path.join(dir, ".git/objects"), index = path.join(dir, ".git/index");
     await writeFile(path.join(dir, "untracked.txt"), "untracked before\n");

@@ -11,6 +11,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     var connected = false
     var reconnecting = false
     var error: String?
+    var pendingLink: URL?
     var control = false
     #if DEBUG && targetEnvironment(simulator)
     var fixtureReport = ""
@@ -139,6 +140,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                 let socket = HerdrTerminalSocket(); self.socket = socket
                 connectionID = UUID()
                 terminal.layoutIfNeeded()
+                var graphicsFilter = TerminalGraphicsFilter()
                 var first = true
                 do {
                     for try await bytes in PhrenConnection.herdrTerminal(host: host, privateKey: key, socket: socket,
@@ -152,7 +154,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                             updateTerminalSize()
                             resize.attach { size in try await socket.resize(columns: size.columns, rows: size.rows) }
                         }
-                        terminal.feed(byteArray: ArraySlice(bytes))
+                        terminal.feed(byteArray: ArraySlice(graphicsFilter.filter([UInt8](bytes))))
                         // @Observable notifies on every set, changed or not; the
                         // terminal paints itself, so don't re-render the chrome per packet.
                         if !connected { connected = true }
@@ -224,10 +226,15 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func scrolled(source: TerminalView, position: Double) {}
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        guard let url = URL(string: link), ExternalLinkPolicy.host(for: url) != nil else { return }
+        pendingLink = url
+    }
+    func openConfirmedLink(_ url: URL) {
+        guard ExternalLinkPolicy.host(for: url) != nil else { return }
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { fixtureLinks.append(link); return }
+        if AgentChatFixture.enabled { fixtureLinks.append(url.absoluteString); return }
         #endif
-        if let url = URL(string: link), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { UIApplication.shared.open(url) }
+        UIApplication.shared.open(url)
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -331,6 +338,7 @@ struct HerdrTerminalView: View {
             }
         }
         #endif
+        .confirmWebLink($model.pendingLink, open: model.openConfirmedLink)
         .background(PhrenTheme.bgSunken)
         .overlay {
             if showingAgents {

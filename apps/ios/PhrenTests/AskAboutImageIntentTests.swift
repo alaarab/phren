@@ -60,6 +60,12 @@ final class AskAboutImageIntentTests: XCTestCase {
 
         try AgentLaunch.setPending(session, draft: "What should I know about this image?",
                                    attachments: [image], attachmentStore: store)
+        XCTAssertEqual(try root.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        let file = root.appendingPathComponent(image.id.uuidString.lowercased() + ".bin")
+        // The simulator does not report data-protection classes; a device does.
+        #if !targetEnvironment(simulator)
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: file.path)[.protectionKey] as? String, FileProtectionType.complete.rawValue)
+        #endif
         let pending = try XCTUnwrap(AgentLaunch.takePendingOpen())
         let content = AgentLaunch.takePendingContent(for: pending.session, store: store)
 

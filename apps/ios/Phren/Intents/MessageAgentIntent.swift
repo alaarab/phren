@@ -241,6 +241,9 @@ struct MessageAgentIntent: AppIntent {
     init() {}
     init(session: AgentSessionEntity, message: String) { self.session = session; self.message = message }
 
+    /// Suggestions predict a destination, never retain what the person said.
+    static func suggestion(session: AgentSessionEntity) -> Self { Self(session: session, message: "") }
+
     static var parameterSummary: some ParameterSummary { Summary("Message \(\.$session): \(\.$message)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -248,7 +251,7 @@ struct MessageAgentIntent: AppIntent {
         guard !text.isEmpty else { throw $message.needsValueError("What should I tell it?") }
         let delivery = try await AgentMessageService.prepare(session)
         try await AgentMessageService.send(text, delivery: delivery)
-        if await IntentDonationGate.shared.shouldDonate("message|\(session.id)") { _ = try? await self.donate() }
+        if await IntentDonationGate.shared.shouldDonate("message|\(session.id)") { _ = try? await Self.suggestion(session: session).donate() }
         let agent = delivery.target.providerName
         return .result(dialog: delivery.started
             ? "Started \(agent) in \(session.workspace) on \(session.computer) and sent your message."

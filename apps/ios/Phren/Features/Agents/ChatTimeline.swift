@@ -153,6 +153,17 @@ struct ChatToolActivity: View, Equatable {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
             }
+            if !expanded, changed.isEmpty {
+                // Older Hooks and non-Git folders still provide Edit/Write inputs.
+                // Use the already cached presentation; defer the diff's body until tapped.
+                ForEach(messages.filter { !$0.isToolResult && !$0.isChange }) { message in
+                    let presentation = ToolPresentationCache.value(message)
+                    if let patch = presentation.patch {
+                        CodeDiffView(patch: patch, cacheKey: message.renderKey, previewLineLimit: 12, collapsible: true)
+                            .padding(.horizontal, 10).padding(.bottom, 10)
+                    }
+                }
+            }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(messages) { message in
@@ -200,7 +211,7 @@ private struct ToolDetailView: View {
                         openToolOutput(.init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body))
                     }.frame(width: 36, height: 32).contentShape(Rectangle())
                         .accessibilityIdentifier("chat-tool-output:\(id)")
-                    Button("Copy tool details", systemImage: "doc.on.doc") { UIPasteboard.general.string = presentation.body }
+                    Button("Copy tool details", systemImage: "doc.on.doc") { ChatClipboard.copy(presentation.body) }
                         .frame(width: 36, height: 32).contentShape(Rectangle())
                 }.font(.caption2).foregroundStyle(PhrenTheme.chatNeutral)
                     .labelStyle(.iconOnly).buttonStyle(.plain).frame(minHeight: 32)
@@ -264,6 +275,7 @@ struct FullToolOutputView: View {
                     .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: true).padding(16)
             }
+            .confirmsWebLinks()
             .id(page)
             .background(PhrenTheme.chatPanel).navigationTitle(output.title).navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -290,7 +302,7 @@ struct FullToolOutputView: View {
                     Button("Done") { dismiss() }.accessibilityIdentifier("chat-tool-output-done")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Copy output", systemImage: "doc.on.doc") { UIPasteboard.general.string = contents.source }
+                    Button("Copy output", systemImage: "doc.on.doc") { ChatClipboard.copy(contents.source) }
                 }
             }
     }

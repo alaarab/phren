@@ -1,0 +1,77 @@
+import PhrenKit
+import SwiftUI
+
+struct PhrenToolCard: View {
+    let presentation: PhrenToolPresentation
+    let messages: [AgentChatMessage]
+    @Environment(\.openToolOutput) private var openOutput
+
+    var body: some View {
+        Button {
+            let raw = messages.map { message in
+                (message.isToolResult ? "Output" : message.isChange ? "Changes" : "Input") + "\n" + message.text
+            }.joined(separator: "\n\n")
+            openOutput(.init(title: presentation.verb, text: raw))
+        } label: {
+            VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
+                HStack(spacing: PhrenTheme.Space.small) {
+                    Image("PhrenMark").resizable().scaledToFit().frame(width: 22, height: 22).accessibilityHidden(true)
+                    Text(presentation.verb).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(PhrenTheme.text).lineLimit(2)
+                    Spacer(minLength: 0)
+                    status
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityHidden(true)
+                }
+                if presentation.project != nil || presentation.tag != nil {
+                    HStack(spacing: 6) {
+                        if let project = presentation.project {
+                            Text(project).font(.caption.weight(.medium)).lineLimit(1)
+                                .foregroundStyle(PhrenTheme.sessionProject)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+                        }
+                        if let tag = presentation.tag {
+                            Text(tag).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                        }
+                    }
+                }
+                if !presentation.body.isEmpty {
+                    Text(presentation.body).font(.subheadline).foregroundStyle(PhrenTheme.textSecondary)
+                        .lineLimit(4).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(Array(presentation.fields.enumerated()), id: \.offset) { _, field in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(field.name).foregroundStyle(PhrenTheme.textMuted).lineLimit(1)
+                        Text(field.value).foregroundStyle(PhrenTheme.textSecondary).lineLimit(2)
+                    }.font(.caption)
+                }
+                if let summary = presentation.resultSummary {
+                    Text(summary).font(.caption.weight(.medium)).lineLimit(2)
+                        .foregroundStyle(presentation.status == .failed ? PhrenTheme.danger : PhrenTheme.phrenCardAccent)
+                }
+                ForEach(Array(presentation.titles.enumerated()), id: \.offset) { _, title in
+                    Text("· \(title)").font(.caption).foregroundStyle(PhrenTheme.textSecondary).lineLimit(1)
+                }
+            }
+            .padding(PhrenTheme.Space.medium).frame(maxWidth: .infinity, alignment: .leading)
+            .background(PhrenTheme.phrenCardSurface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+            .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium).strokeBorder(PhrenTheme.phrenCardBorder, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("chat-phren-card:\(messages.first?.toolCallID ?? messages.first?.id ?? "")")
+        .accessibilityHint("Read full input and output")
+    }
+
+    @ViewBuilder private var status: some View {
+        switch presentation.status {
+        case .running:
+            Image(systemName: "ellipsis").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Running")
+        case .succeeded:
+            Image(systemName: "checkmark").foregroundStyle(PhrenTheme.phrenCardAccent).accessibilityLabel("Completed")
+        case .failed:
+            Image(systemName: "exclamationmark.circle").foregroundStyle(PhrenTheme.danger).accessibilityLabel("Failed")
+        }
+    }
+}

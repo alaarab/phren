@@ -179,11 +179,11 @@ extension PhrenAppShortcuts {
         }
     }
 
-    static func donateMessage(_ text: String, to session: LiveAgentSession) {
+    static func donateMessage(to session: LiveAgentSession) {
         let entity = AgentSessionEntity(session)
         Task {
             guard await IntentDonationGate.shared.shouldDonate("message|\(entity.id)") else { return }
-            _ = try? await MessageAgentIntent(session: entity, message: text).donate()
+            _ = try? await MessageAgentIntent.suggestion(session: entity).donate()
         }
     }
 }

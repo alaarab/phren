@@ -215,7 +215,10 @@ struct PendingChatAttachmentStore: Sendable {
     func save(_ attachment: AgentAttachment) throws -> Record {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let filename = attachment.id.uuidString.lowercased() + ".bin"
-        try attachment.data.write(to: root.appendingPathComponent(filename), options: .atomic)
+        var protectedRoot = root
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try protectedRoot.setResourceValues(values)
+        try attachment.data.write(to: root.appendingPathComponent(filename), options: [.atomic, .completeFileProtection])
         return Record(id: attachment.id, name: attachment.name, filename: filename, isImage: attachment.isImage)
     }
 

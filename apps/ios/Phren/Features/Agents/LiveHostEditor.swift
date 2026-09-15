@@ -87,12 +87,15 @@ struct LiveHostEditor: View {
         }
         .confirmationDialog("Forget this computer and delete its SSH key from this iPhone?", isPresented: $removing, titleVisibility: .visible) {
             Button("Forget computer", role: .destructive) {
-                do {
-                    let next = try LiveSessionPreferences.removing(id, from: data)
-                    try DeviceSSHKey.delete(id)
-                    data = next
-                    dismiss()
-                } catch { self.error = error.localizedDescription }
+                Task { @MainActor in
+                    do {
+                        let next = try LiveSessionPreferences.removing(id, from: data)
+                        try await SessionOverviewDiskCache.shared.purge(forgetting: id)
+                        try DeviceSSHKey.delete(id)
+                        data = next
+                        dismiss()
+                    } catch { self.error = error.localizedDescription }
+                }
             }
         }
     }

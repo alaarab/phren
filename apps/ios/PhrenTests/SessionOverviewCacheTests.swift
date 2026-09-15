@@ -4,6 +4,28 @@ import PhrenKit
 
 @MainActor
 final class SessionOverviewCacheTests: XCTestCase {
+    func testForgetPurgesDiskAndRejectsInFlightSavesForThatComputer() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = SessionOverviewDiskCache(directory: directory)
+        let host = try LiveHost(name: "Private Mac", address: "test.invalid", username: "test")
+        let record = SessionOverviewDiskCache.Record(savedAt: .now, hosts: [.init(host: host, snapshot: nil, lastUpdated: nil)],
+            screen: .init(groups: [], computers: [], projects: [:], pinned: []), preferences: nil)
+        await cache.save(record)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        XCTAssertEqual(files.count, 1)
+        let attributes = try FileManager.default.attributesOfItem(atPath: XCTUnwrap(files.first).path)
+        #if !targetEnvironment(simulator)
+        XCTAssertEqual(attributes[.protectionKey] as? String, FileProtectionType.complete.rawValue)
+        #endif
+        try await cache.purge(forgetting: host.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        await cache.save(record, force: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path), "A queued save must not recreate forgotten data")
+        let loaded = await cache.load(hosts: [host], preferences: nil, query: "", focusFilter: nil)
+        XCTAssertNil(loaded)
+    }
+
     func testDiskRoundTripRestoresTheWholeScreenAndExpiresAtSixtySeconds() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -131,13 +131,19 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
-    func testShellLinksOpenOnFirstTapAndBlankTapsKeepKeyboardHidden() throws {
+    func testShellLinksConfirmTheirHostAndBlankTapsKeepKeyboardHidden() throws {
         let app = launch("--terminal-links-fixture")
         try tapCell(app, column: 4, row: 1)
-        XCTAssertEqual(try state(app).links, ["https://example.com/explicit"])
+        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.alerts.staticTexts["example.com"].exists)
+        XCTAssertEqual(try state(app).links, [])
+        app.alerts.buttons["Open website"].firstMatch.tap()
+        XCTAssertEqual(try links(app, expecting: 1), ["https://example.com/explicit"])
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         try tapCell(app, column: 10, row: 2)
-        XCTAssertEqual(try state(app).links, ["https://example.com/explicit", "https://example.com/plain"])
+        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
+        app.alerts.buttons["Open website"].firstMatch.tap()
+        XCTAssertEqual(try links(app, expecting: 2), ["https://example.com/explicit", "https://example.com/plain"])
         try tapCell(app, column: 10, row: 8)
         XCTAssertEqual(try state(app).input, "")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
@@ -187,7 +193,9 @@ final class TerminalInteractionTests: XCTestCase {
         XCTAssertTrue(try state(app).switchOpen)
         let clicked = try state(app).input
         try tapCell(app, column: 4, row: 5)
-        XCTAssertEqual(try state(app).links, ["https://example.com/herdr"])
+        XCTAssertTrue(app.alerts["Open website?"].waitForExistence(timeout: 3))
+        app.alerts.buttons["Open website"].firstMatch.tap()
+        XCTAssertEqual(try links(app, expecting: 1), ["https://example.com/herdr"])
         XCTAssertEqual(try state(app).input, clicked, "A link tap must not also click through to Herdr")
         XCTAssertFalse(app.keyboards.firstMatch.exists)
         capture(app, "Pinch out to fit Herdr sidebar")
@@ -372,6 +380,17 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
+    /// The confirmation alert dismisses before the fixture records the
+    /// opened link, and the report refreshes at 10 Hz — wait for the count.
+    private func links(_ app: XCUIApplication, expecting count: Int, timeout: TimeInterval = 4) throws -> [String] {
+        let deadline = Date().addingTimeInterval(timeout)
+        var current = try state(app).links
+        while current.count < count && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            current = try state(app).links
+        }
+        return current
+    }
     private func state(_ app: XCUIApplication) throws -> State {
         // Reading AX waits for the gesture/animation to settle; the fixture reports at 10 Hz.
         try JSONDecoder().decode(State.self, from: Data(app.staticTexts["terminal-fixture-report"].label.utf8))

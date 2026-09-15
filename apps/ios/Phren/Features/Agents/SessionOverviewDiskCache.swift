@@ -21,12 +21,13 @@ actor SessionOverviewDiskCache {
         .appendingPathComponent(AppRuntime.isUITesting ? "session-overview-tests" : "session-overview", isDirectory: true))
     private let directory: URL
     private var lastWrite: [String: Date] = [:]
+    private var forgottenHosts: Set<UUID> = []
 
     init(directory: URL) { self.directory = directory }
 
     func load(hosts: [LiveHost], preferences: LiveSessionPreferences?, query: String,
               focusFilter: AgentFocusFilter?, now: Date = .now) -> Record? {
-        guard let url = file(hosts), let data = try? Data(contentsOf: url), data.count <= 8_388_608,
+        guard hosts.allSatisfy({ !forgottenHosts.contains($0.id) }), let url = file(hosts), let data = try? Data(contentsOf: url), data.count <= 8_388_608,
               let record = try? JSONDecoder().decode(Record.self, from: data), record.version == 1,
               (0..<60).contains(now.timeIntervalSince(record.savedAt)),
               record.hosts.map(\.host).sorted(by: Self.ordered) == hosts.sorted(by: Self.ordered),
@@ -42,7 +43,7 @@ actor SessionOverviewDiskCache {
     }
 
     func save(_ record: Record, force: Bool = false) {
-        guard let url = file(record.hosts.map(\.host)) else { return }
+        guard record.hosts.allSatisfy({ !forgottenHosts.contains($0.host.id) }), let url = file(record.hosts.map(\.host)) else { return }
         // Polls with an unchanged screen still renew its age, at most twice a minute.
         if let previous = lastWrite[url.lastPathComponent] {
             guard record.savedAt >= previous else { return }
@@ -51,9 +52,19 @@ actor SessionOverviewDiskCache {
         guard let data = try? JSONEncoder().encode(record), data.count <= 8_388_608 else { return }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try data.write(to: url, options: .atomic)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
             lastWrite[url.lastPathComponent] = record.savedAt
         } catch { /* A cache failure must never hold up live discovery. */ }
+    }
+
+    /// Also reject an in-flight save captured before Forget. Removing one
+    /// computer invalidates every hosts-set render value in this directory.
+    func purge(forgetting hostID: UUID) throws {
+        forgottenHosts.insert(hostID)
+        lastWrite.removeAll()
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
     }
 
     private static func ordered(_ lhs: LiveHost, _ rhs: LiveHost) -> Bool { lhs.id.uuidString < rhs.id.uuidString }

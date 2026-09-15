@@ -391,6 +391,9 @@ final class LiveHostMonitor {
                 if previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--session-details-removed") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[]}"#.utf8))
                 }
+                if ProcessInfo.processInfo.arguments.contains("--starting-session-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"New session","agent":"codex","agentStatus":"idle","starting":true,"cwd":"/work/phone","agentPaneCount":1,"paneCount":1}]}]}"#.utf8))
+                }
                 if ProcessInfo.processInfo.arguments.contains("--terminal-uploads-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","focus":{"workspaceID":"w8","tabID":"w8:t1","paneID":"w8:p1"},"groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Original tab","agent":"codex"}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Current terminal tab","agent":"codex"}]}]}"#.utf8))
                 }

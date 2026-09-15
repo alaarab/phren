@@ -10,9 +10,24 @@ number counts up on its own.
 
 ### New
 
+- One compact Live Activity counts working agents across your computers;
+  expand it for project and tool details, or pin a session to the first row.
+- Write, Edit, and Patch cards show their changed files without opening the
+  card, with input previews available on older Hooks too.
+- New agent sessions open straight into chat. Send the first prompt from
+  your phone and the conversation attaches as soon as it is ready.
+- Phren memory and task calls have their own cards, with readable content,
+  project chips, search results, and customisable colours.
+- Sent messages stay softly muted until they land, without queued captions
+  or duplicate bubbles.
+- Pasted Claude Code images appear with their message; image placeholders
+  and attachment footers disappear once the pictures arrive.
+- Privacy and security hardening protects saved chat data, private links,
+  clipboard copies, terminal output, and downloaded fonts.
 - Account usage lists Claude's per-model weekly window (Fable) on its own
   line, dated from Claude Code's own usage check; Codex's Spark lane is left
-  out of the report.
+  out of the report. The page shows each account once — computers sharing a
+  sign-in are merged, and every window is one short line.
 - The working Live Activity's island is trimmed: the elapsed timer no longer
   stretches it across the screen and the phren mark is the sprite itself.
 - Privacy manifest declares the file-timestamp reads, the terminal's
@@ -20,8 +35,8 @@ number counts up on its own.
   export-compliance question (standard algorithms only).
 - Long chats keep tools compact while scrolling, with cached Markdown and
   full messages, outputs, and patches available on demand.
-- Messages sent while Claude Code works appear as queued conversation bubbles;
-  their queued tags clear when Claude Code consumes them.
+- Messages sent while Claude Code works appear as pending conversation bubbles;
+  they become fully visible when Claude Code consumes them.
 - Live sessions restore a recent complete screen or show one loading indicator,
   and brief backgrounding no longer makes every computer look stale.
 - Denser project rows make more projects and navigation links visible at once.

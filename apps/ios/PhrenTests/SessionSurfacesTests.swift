@@ -44,29 +44,44 @@ final class SessionSurfacesTests: XCTestCase {
         XCTAssertNil(SessionAttentionSelector.select(values.filter { $0.tab.activity == .idle }))
     }
 
-    func testWorkingActivityStartsUpdatesStopsAndTimesOut() {
-        let start = Date(timeIntervalSince1970: 1_000)
-        XCTAssertEqual(SessionWorkingActivityPolicy.action(
-            trackedSessionID: nil, incomingSessionID: "one", activity: "working",
-            optedIn: true, startedAt: nil, now: start), .start)
-        XCTAssertEqual(SessionWorkingActivityPolicy.action(
-            trackedSessionID: nil, incomingSessionID: "one", activity: "working",
-            optedIn: false, startedAt: nil, now: start), .none)
-        XCTAssertEqual(SessionWorkingActivityPolicy.action(
-            trackedSessionID: "one", incomingSessionID: "one", activity: "working",
-            optedIn: false, startedAt: start, now: start.addingTimeInterval(30)), .update)
-        for stopped in ["waiting", "done", "idle"] {
-            XCTAssertEqual(SessionWorkingActivityPolicy.action(
-                trackedSessionID: "one", incomingSessionID: "one", activity: stopped,
-                optedIn: false, startedAt: start, now: start.addingTimeInterval(30)), .end)
+    func testAggregateActivityCountsOldestStartAndRowCap() {
+        let now = Date(timeIntervalSince1970: 1000)
+        let sessions = (0..<7).map { index in
+            SessionWorkingActivityBuilder.Session(
+                entry: .init(id: "s\(index)", project: "p\(index)", provider: "codex", tool: "Read", computer: "Mini"),
+                state: index < 5 ? "working" : "waiting", startedAt: now.addingTimeInterval(Double(index * -10)))
         }
-        XCTAssertEqual(SessionWorkingActivityPolicy.action(
-            trackedSessionID: "one", incomingSessionID: "two", activity: "working",
-            optedIn: true, startedAt: start, now: start.addingTimeInterval(30)), .start)
-        XCTAssertEqual(SessionWorkingActivityPolicy.action(
-            trackedSessionID: "one", incomingSessionID: "one", activity: "working",
-            optedIn: false, startedAt: start,
-            now: start.addingTimeInterval(SessionWorkingActivityPolicy.maximumDuration)), .end)
+        let state = SessionWorkingActivityBuilder.build(sessions + [sessions[0]], pinnedID: "s6", now: now)
+        XCTAssertEqual(state.working, 5)
+        XCTAssertEqual(state.waiting, 2)
+        XCTAssertEqual(state.entries.count, 4)
+        XCTAssertEqual(state.entries.first?.id, "s6")
+        XCTAssertEqual(state.startedAt, now.addingTimeInterval(-40))
+        XCTAssertEqual(SessionWorkingActivityBuilder.build([], now: now).working, 0)
+    }
+
+    func testUnchangedSnapshotsDoNotProduceNewActivityContent() {
+        let start = Date(timeIntervalSince1970: 1000)
+        let working = SessionWorkingActivityBuilder.Session(entry: .init(id: "one", project: "App", provider: "claude", tool: nil, computer: "Mini"), state: "working", startedAt: start)
+        let waiting = SessionWorkingActivityBuilder.Session(entry: .init(id: "two", project: "CLI", provider: "codex", tool: nil, computer: "Studio"), state: "waiting", startedAt: start)
+        XCTAssertEqual(SessionWorkingActivityBuilder.build([working, waiting], now: start),
+                       SessionWorkingActivityBuilder.build([waiting, working], now: start.addingTimeInterval(2)))
+        XCTAssertEqual(SessionWorkingActivityPolicy.updateInterval, 2)
+    }
+
+    func testLegacyActivityCanBeReconciledAfterUpgrade() throws {
+        let content = try JSONDecoder().decode(SessionWorkingActivityAttributes.ContentState.self,
+            from: Data(#"{"provider":"codex","project":"old","state":"Working","startedAt":1000,"expiresAt":8200}"#.utf8))
+        XCTAssertEqual(content.working, 1)
+        XCTAssertTrue(content.entries.isEmpty)
+    }
+
+    func testActivityQuietGraceOnlyEndsAfterThirtySecondsWithNoWorkingAgents() {
+        let start = Date(timeIntervalSince1970: 1000)
+        XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: start, now: start.addingTimeInterval(29)))
+        XCTAssertTrue(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: start, now: start.addingTimeInterval(30)))
+        XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 1, quietSince: start, now: start.addingTimeInterval(31)))
+        XCTAssertFalse(SessionWorkingActivityPolicy.shouldEnd(working: 0, quietSince: nil, now: start))
     }
 
     func testElapsedTimeFormatting() {

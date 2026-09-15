@@ -25,6 +25,6 @@ struct PinSessionActivityIntent: AppIntent {
         guard await SessionWorkingActivityController.shared.pin(report.entity) else {
             return .result(dialog: "Live Activities are not available right now.")
         }
-        return .result(dialog: "Showing \(report.harnessName) on \(report.projectName) on your Lock Screen.")
+        return .result(dialog: "Pinned \(report.projectName) first in your agents Live Activity.")
     }
 }
