@@ -469,6 +469,22 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-close"].isHittable)
     }
 
+    /// Words and a picture sent together stay one bubble: the image sits
+    /// above the text inside it, and the path list the phone appended is gone.
+    @MainActor
+    func testImageAndTextOfOneTurnShareABubble() {
+        let app = launch(extra: ["--chat-image-turn"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["View conversation image"].waitForExistence(timeout: 8))
+        let bubbles = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "chat-message:", "Your message"))
+        let bubble = bubbles.allElementsBoundByIndex.first { $0.staticTexts["Look at this header"].exists }
+        XCTAssertNotNil(bubble, "The paste marker and the path list are gone")
+        XCTAssertTrue(bubble?.buttons["View conversation image"].exists == true, "The picture is inside the same bubble")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Attached files on this computer")).firstMatch.exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-message:")).count, 3, "Two fixture turns plus this one — not a fourth bubble for the image")
+        capture(app, "Image and text in one bubble")
+    }
+
     /// A slash command or `!` shell line typed at Claude Code's own prompt
     /// reads as one system line with its output, not a bubble of tags.
     @MainActor

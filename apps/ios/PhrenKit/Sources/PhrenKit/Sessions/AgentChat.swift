@@ -192,6 +192,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
             var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
+            parts = mergedUserParts(parts)
             parts += changes(raw, after: parts)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
@@ -209,7 +210,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                     progressEvents: progressEvents, context: context)
     }
 
-    private struct Part {
+    struct Part {
         let role: AgentChatMessage.Role
         var title: String? = nil
         let text: String
@@ -217,6 +218,29 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var resultImages: [AgentChatMessage.ImageRef] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
+    }
+    /// One turn from the person is one bubble: a row's text and image blocks
+    /// arrive as separate parts, and drawn apart the picture floats under
+    /// the words it came with. Fold them into the first user part, dropping
+    /// the "[Image attachment]" placeholders the pictures stood in for.
+    static func mergedUserParts(_ parts: [Part]) -> [Part] {
+        let users = parts.indices.filter { parts[$0].role == .user }
+        guard users.count > 1, let first = users.first else { return parts }
+        var merged = parts[first]
+        var texts: [String] = []
+        var imageBlocks: [Int] = []
+        for index in users {
+            let part = parts[index]
+            imageBlocks += part.imageBlocks
+            if part.text != "[Image attachment]", !part.text.isEmpty { texts.append(part.text) }
+        }
+        merged = Part(role: .user, title: merged.title, text: texts.isEmpty ? "[Image attachment]" : texts.joined(separator: "\n\n"),
+                      imageBlocks: imageBlocks, resultImages: merged.resultImages, toolCallID: merged.toolCallID, idIndex: merged.idIndex)
+        var result: [Part] = []
+        for (index, part) in parts.enumerated() {
+            if index == first { result.append(merged) } else if part.role != .user { result.append(part) }
+        }
+        return result
     }
     /// Where the images sit inside a tool result's content array.
     private static func innerImages(_ content: Any?) -> [Int] {

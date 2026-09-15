@@ -852,15 +852,29 @@ private struct ChatMessageRow<Historical: View>: View {
     let images: [ChatAttachmentDraft]
     let preview: (ChatAttachmentDraft) -> Void
     @ViewBuilder let historical: () -> Historical
+    /// The pictures the transcript itself carries. When there are any, the
+    /// local previews of the same send would only draw them twice.
+    private var inlineImages: Bool { !message.imageBlocks.isEmpty }
     private var displayText: String {
         if let revealedText { return revealedText }
+        var text = message.text
         let marker = "\n\nAttached files on this computer:\n"
-        guard !images.isEmpty, let section = message.text.range(of: marker, options: .backwards) else { return message.text }
-        let paths = message.text[section.upperBound...].components(separatedBy: "\n")
-        let previewPaths = Set(images.compactMap(\.path))
-        // Hide only our complete image attachment suffix when previews replace it.
-        guard paths.allSatisfy({ previewPaths.contains($0) }) else { return message.text }
-        return String(message.text[..<section.lowerBound])
+        if let section = text.range(of: marker, options: .backwards) {
+            let paths = text[section.upperBound...].components(separatedBy: "\n")
+            let previewPaths = Set(images.compactMap(\.path))
+            // Hide our attachment suffix once pictures replace it: local
+            // previews of every listed path, or the transcript's own images.
+            if inlineImages || (!images.isEmpty && paths.allSatisfy({ previewPaths.contains($0) })) {
+                text = String(text[..<section.lowerBound])
+            }
+        }
+        if inlineImages {
+            // Claude Code's paste markers and Codex's placeholders name
+            // pictures that now sit above the words.
+            text = text.replacingOccurrences(of: #"\[Image #\d+\]|\[Image attachment\]"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
     }
     var body: some View {
         if let command = message.localCommand {
@@ -873,10 +887,12 @@ private struct ChatMessageRow<Historical: View>: View {
         HStack(alignment: .top, spacing: 0) {
             if message.role == .user { Spacer(minLength: 30) }
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(images) { item in
+                if !inlineImages {
+                    ForEach(images) { item in
                         Button { preview(item) } label: {
                             ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
                         }.accessibilityLabel("View attached \(item.attachment.name)")
+                    }
                 }
                 historical()
                 let text = displayText

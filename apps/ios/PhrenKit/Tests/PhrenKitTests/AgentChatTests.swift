@@ -262,3 +262,44 @@ final class LocalCommandTests: XCTestCase {
         XCTAssertNil(AgentChatMessage(id: "1:0", line: 1, role: .assistant, title: nil, text: "<bash-input>pwd</bash-input>").localCommand)
     }
 }
+
+final class MergedUserTurnTests: XCTestCase {
+    private func read(_ entries: [[String: Any]]) throws -> AgentChatTranscript {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": entries]
+        return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+    }
+    func testTextAndImageBlocksOfOneTurnBecomeOneBubble() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "text", "text": "[Image #3]Look at this\n\nAttached files on this computer:\n/tmp/shot.png"],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+        ]]]
+        let transcript = try read([["line": 4, "raw": raw]])
+        XCTAssertEqual(transcript.messages.count, 1)
+        let message = try XCTUnwrap(transcript.messages.first)
+        XCTAssertEqual(message.id, "4:0")
+        XCTAssertEqual(message.role, .user)
+        XCTAssertEqual(message.imageBlocks, [1, 2])
+        XCTAssertTrue(message.text.hasPrefix("[Image #3]Look at this"))
+    }
+    func testImageOnlyTurnKeepsItsPlaceholder() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+            ["type": "image", "source": ["type": "base64", "data": ""]],
+        ]]]
+        let message = try XCTUnwrap(read([["line": 1, "raw": raw]]).messages.first)
+        XCTAssertEqual(message.text, "[Image attachment]")
+        XCTAssertEqual(message.imageBlocks, [0, 1])
+    }
+    func testToolResultsInTheSameRowStayApart() throws {
+        let raw: [String: Any] = ["type": "user", "message": ["role": "user", "content": [
+            ["type": "tool_result", "tool_use_id": "t1", "content": "done"],
+            ["type": "text", "text": "and now this"],
+        ]]]
+        let messages = read_(raw)
+        XCTAssertEqual(messages.map(\.role), [.tool, .user])
+    }
+    private func read_(_ raw: [String: Any]) -> [AgentChatMessage] {
+        (try? read([["line": 1, "raw": raw]]).messages) ?? []
+    }
+}

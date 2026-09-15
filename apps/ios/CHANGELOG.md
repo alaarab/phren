@@ -31,6 +31,8 @@ number counts up on its own.
   coding-agent sessions, so Phren keeps their precise App Intent contracts.
 
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
+- A picture sent with a message sits inside the same bubble as the words; the
+  path list and paste markers no longer show once the picture draws inline.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).
 - Files: put any file on a computer through Phren Hook and copy its path for

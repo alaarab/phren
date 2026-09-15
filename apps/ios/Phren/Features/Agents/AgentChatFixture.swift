@@ -138,6 +138,18 @@ import UIKit
             let raw: [String: Any] = ["type": "response_item", "payload": ["type": "function_call", "name": "request_user_input", "call_id": "fixture-question", "arguments": String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)]]
             entries.append(["line": entries.count, "raw": raw])
         }
+        if flag("--chat-image-turn") {
+            // One turn from the phone: words plus a picture, as Claude Code
+            // records a pasted image next to its text.
+            let raw: [String: Any] = target.source == "codex"
+                ? ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [
+                    ["type": "input_text", "text": "[Image #1]Look at this header\n\nAttached files on this computer:\n/tmp/shot.png"],
+                    ["type": "input_image", "image_url": "fixture"]]]]
+                : ["type": "user", "message": ["role": "user", "content": [
+                    ["type": "text", "text": "[Image #1]Look at this header\n\nAttached files on this computer:\n/tmp/shot.png"],
+                    ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": ""]]]]]
+            entries.append(["line": entries.count, "raw": raw])
+        }
         if flag("--chat-historical-image") {
             let raw: [String: Any] = ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_image", "image_url": "fixture"]]]]
             entries.append(["line": entries.count, "raw": raw])
