@@ -29,15 +29,17 @@ struct AccountUsageRings: View {
     var body: some View {
         let quotas = quotas
         NavigationLink { AccountUsageView() } label: {
+            // Sized like the toolbar's SF symbols beside it, so the pill
+            // reads as one row of three.
             ZStack {
                 if quotas.isEmpty {
-                    ring(nil, color: PhrenTheme.textMuted, size: 26)
+                    ring(nil, color: PhrenTheme.textMuted, size: 20)
                 } else {
                     ForEach(Array(quotas.enumerated()), id: \.element.source) { index, quota in
-                        ring(quota.percent, color: Self.color(for: quota.source), size: 26 - CGFloat(index) * 9)
+                        ring(quota.percent, color: Self.color(for: quota.source), size: 20 - CGFloat(index) * 7)
                     }
                 }
-            }.frame(width: 44, height: 44).contentShape(Rectangle())
+            }.frame(width: 22, height: 22).contentShape(Rectangle())
         }
         .accessibilityLabel("Account usage")
         .accessibilityValue(quotas.isEmpty ? "unavailable"
@@ -61,11 +63,11 @@ struct AccountUsageRings: View {
         }
     }
     private func ring(_ percent: Double?, color: Color, size: CGFloat) -> some View {
-        Circle().stroke(PhrenTheme.borderStrong, lineWidth: 2.5)
+        Circle().stroke(PhrenTheme.borderStrong, lineWidth: 2)
             .overlay {
                 if let percent {
                     Circle().trim(from: 0, to: min(1, max(0, percent / 100)))
-                        .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round)).rotationEffect(.degrees(-90))
+                        .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
                 }
             }.frame(width: size, height: size)
     }
