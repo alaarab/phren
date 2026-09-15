@@ -55,8 +55,9 @@ number counts up on its own.
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - A picture sent with a message sits inside the same bubble as the words; the
   path list and paste markers no longer show once the picture draws inline.
-- Session cards each keep their own outline on the plain page — no box
-  around a section and no lines between them.
+- Session cards are one flat rounded rectangle each, under small upper-case
+  section labels — no box around a section, no border, no lines between
+  them. The computer's name sits beside the branch instead of on its own line.
 - Scrolling up in a chat loads a few earlier pages at a time again instead
   of the whole history; a long conversation no longer hangs on open.
 - Background jobs read as running until the agent's own completion notice

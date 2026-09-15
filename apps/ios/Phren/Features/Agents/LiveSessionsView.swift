@@ -220,7 +220,9 @@ struct LiveSessionsView: View {
             } header: {
                 VStack(alignment: .leading, spacing: 10) {
                     if index == 0 { caption() }
+                    // Small, quiet, upper-case — the section label Moshi uses.
                     Text("\(group.title) · \(group.sessions.count)")
+                        .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
                 }
             }
             footer: {

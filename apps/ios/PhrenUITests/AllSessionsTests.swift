@@ -175,11 +175,12 @@ final class AllSessionsTests: XCTestCase {
         let first = row(app, host: mac)
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         let title = app.staticTexts["Build the iPhone overview"]
-        // The state is the section's business; the card's last line is the computer.
-        let metadata = first.staticTexts["Test Mac"]
+        // The state is the section's business; the computer rides the first
+        // line beside the branch, above the title.
+        let metadata = first.descendants(matching: .any)["on Test Mac"].firstMatch
         XCTAssertTrue(metadata.exists)
         XCTAssertFalse(first.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working")).firstMatch.exists)
-        XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
+        XCTAssertLessThanOrEqual(metadata.frame.minY, title.frame.minY)
         XCTAssertGreaterThan(first.frame.height, 90)
         XCTAssertTrue(first.frame.contains(metadata.frame))
         let details = app.buttons["overview-detail:\(mac):herdr:default:w1:w1:t1"]

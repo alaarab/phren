@@ -50,11 +50,12 @@ struct SessionCardContent: View {
     /// state itself is only the dot's colour here; words are for what the
     /// section can't say — a permission waiting, a stale computer — and the
     /// computer's name when the list spans several.
+    /// Only what the section can't say: a permission waiting, a stale
+    /// computer. The computer's name rides the first line, next to the branch.
     private var state: String {
         var parts: [String] = []
         if session.tab.approvalPending == true { parts.append("Permission needed") }
         if !fresh { parts.append("Stale") }
-        if let computer { parts.append(computer) }
         return parts.joined(separator: " · ")
     }
     private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
@@ -78,11 +79,20 @@ struct SessionCardContent: View {
                             .accessibilityLabel("Folder")
                     }
                     Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
+                    // Where in the code, then where it runs — one quiet line.
                     if let branch = session.tab.branch, !branch.isEmpty {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .semibold))
                             Text(branch).lineLimit(1).truncationMode(.middle)
                         }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+                            .layoutPriority(-1)
+                    }
+                    if let computer {
+                        HStack(spacing: 3) {
+                            Image(systemName: "desktopcomputer").font(.system(size: 9, weight: .semibold))
+                            Text(computer).lineLimit(1)
+                        }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.sessionMeta)
+                            .accessibilityLabel("on \(computer)")
                     }
                 }
                 if session.tab.displayTitle != headline {
@@ -209,15 +219,18 @@ extension LiveAgentSession {
 }
 
 extension View {
-    /// Each session in its own outlined card, on the plain page: no box
-    /// around the section and no lines between rows (`separatedSessionRow`).
+    /// One rectangle per session, the way Moshi draws them: a flat rounded
+    /// fill, no border, and (`separatedSessionRow`) nothing grouping the
+    /// section's cards or drawn between them.
     func sessionCard() -> some View {
-        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 1))
+        self.padding(.vertical, 4)
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     func separatedSessionRow() -> some View {
         self.listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
-            .listRowSeparator(.hidden, edges: .all).listRowBackground(Color.clear)
+            .listRowSeparator(.hidden, edges: .all)
+            .listSectionSeparator(.hidden, edges: .all)
+            .listRowBackground(Color.clear)
     }
 }
