@@ -1,16 +1,18 @@
 import { createServer, type IncomingMessage } from "node:http";
-import { chmod, mkdir, lstat, unlink, writeFile, readFile } from "node:fs/promises";
+import { chmod, mkdir, lstat, unlink, writeFile, readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
+import { LaunchLimiter } from "./limits.js";
+import { homeDirectory, startChangeRetention } from "./changes.js";
 import { ActivityJournal } from "./activity.js";
 import { paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
 import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
-import { repositoryBranch, repositoryDiff, webServers } from "./projects.js";
+import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { locateProject } from "./locate.js";
-import { historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
+import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
 import { listUploads, saveUpload } from "./uploads.js";
 import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
@@ -56,12 +58,15 @@ function send(socket: WebSocket, frame: unknown) {
 }
 
 export async function serve(version: string): Promise<void> {
+  process.umask(0o077);
   const root = bridgeRoot();
   await mkdir(root, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
   let computerID: string;
   const identityFile = path.join(root, "computer-id");
   try { computerID = (await readFile(identityFile, "utf8")).trim(); }
   catch { computerID = randomUUID(); await writeFile(identityFile, computerID, { flag: "wx", mode: 0o600 }); }
+  const launches = new LaunchLimiter();
+  const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks();
   const contextUsage = new WorkspaceContextUsage();
@@ -78,6 +83,8 @@ export async function serve(version: string): Promise<void> {
     await unlink(socketPath());
   }
 
+  const stopRetention = await startChangeRetention();
+  await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
   const http = createServer(async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
@@ -99,7 +106,14 @@ export async function serve(version: string): Promise<void> {
           case "/v1/files": result = { files: await listUploads("files") }; break;
           case "/v1/simulators/apps": result = { apps: await simulatorApps(String(url.searchParams.get("udid") ?? "")) }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
-          case "/v1/projects/locate": result = { candidates: await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent()) }; break;
+          case "/v1/projects/locate": {
+            const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
+            for (const candidate of candidates) {
+              locatedDirectories.delete(candidate.directory); locatedDirectories.add(candidate.directory);
+              if (locatedDirectories.size > 128) locatedDirectories.delete(locatedDirectories.values().next().value!);
+            }
+            result = { candidates }; break;
+          }
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
             const lastChanged = await tabActivity.observe(server, s);
@@ -139,25 +153,45 @@ export async function serve(version: string): Promise<void> {
           const { name, bytes } = uploadBody(data);
           result = { ok: true, path: await saveUpload("files", name, bytes) };
         } else if (url.pathname === "/v1/simulators/action") {
-          result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional() }).parse(data) as unknown as SimulatorAction);
+          result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
-          result = await launchSession(selectedServer(url), data);
+          result = await launches.run(async () => launchSession(selectedServer(url), { ...data, cwd: await launchDirectory(data.cwd, await journal.recent(), locatedDirectories) }));
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
-          result = await workspaceAction(selectedServer(url), url.pathname.split("/").at(-1)!, data);
+          const operation = url.pathname.split("/").at(-1)!;
+          result = operation === "create" ? await launches.run(async () => workspaceAction(selectedServer(url), operation,
+            { ...data, cwd: await launchDirectory(data.cwd ?? homeDirectory(), await journal.recent(), locatedDirectories) }))
+            : await workspaceAction(selectedServer(url), operation, data);
         } else {
           const target = targetSchema.parse(data.target);
           const pane = await validateTarget(target, ["/v1/prompt", "/v1/upload", "/v1/keys"].includes(url.pathname));
           if (url.pathname === "/v1/prompt") {
             const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
-            await rpc(target.server, "agent.prompt", { target: target.pane, text }); result = { ok: true };
+            await rpc(target.server, "agent.prompt", { target: target.pane, text });
+            // Delivery has already happened. Recheck fresh identity and never retry.
+            let confirmed = false;
+            try {
+              const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+              confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
+            } catch { /* No reliable post-delivery identity. */ }
+            result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
           } else if (url.pathname === "/v1/keys") {
             if (JSON.stringify(data.keys) !== '["Escape"]' || pane.agent_status !== "working") throw new BridgeError(409, "This agent is no longer working.");
             await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["esc"] }); result = { ok: true };
           } else if (url.pathname === "/v1/upload") {
             const { name, bytes } = uploadBody(data);
             result = { ok: true, path: await saveUpload(target.session, name, bytes) };
-          } else if (url.pathname === "/v1/diff") result = await repositoryDiff(await trustedDirectory(pane), z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? []);
+          } else if (url.pathname === "/v1/diff") {
+            const cwd = await trustedDirectory(pane), paths = z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? [];
+            const abort = new AbortController();
+            response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+            const allowed = paths.length ? await agentHooks.changes.recordedPaths(`${target.source}:${target.session}`) : [];
+            if (paths.length) {
+              try { allowed.push(...await conversationNamedPaths(await transcriptPath(target.source, target.session), target.source, cwd, abort.signal)); }
+              catch { abort.signal.throwIfAborted(); /* Missing transcripts grant no extra paths; recorded scope still works. */ }
+            }
+            result = await repositoryDiff(cwd, paths, allowed);
+          }
           else if (url.pathname === "/v1/approvals/answer") {
             await agentHooks.answer(target, z.string().uuid().parse(data.actionId), data.decision); result = { ok: true };
           } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
@@ -180,7 +214,14 @@ export async function serve(version: string): Promise<void> {
     try {
       const url = new URL(request.url || "/", "http://phren.local");
       if (!["/v1/transcripts", "/v1/status"].includes(url.pathname) || url.origin !== "http://phren.local") { socket.destroy(); return; }
-      ws.handleUpgrade(request, socket, head, client => { void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh")); });
+      ws.handleUpgrade(request, socket, head, client => {
+        while (ws.clients.size > 16) {
+          const oldest = ws.clients.values().next().value!;
+          oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
+          ws.clients.delete(oldest);
+        }
+        void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
+      });
     } catch { socket.destroy(); }
   });
   async function stream(client: WebSocket, url: URL) {
@@ -251,7 +292,9 @@ export async function serve(version: string): Promise<void> {
     if (recording) return;
     recording = true;
     void (async () => {
-      for (const server of await servers()) {
+      const live = await servers();
+      await tabActivity.pruneServers(live.map(server => String(server.session)));
+      for (const server of live) {
         try {
           const name = String(server.session), current = await snapshot(name);
           await tabActivity.observe(name, current);
@@ -262,7 +305,7 @@ export async function serve(version: string): Promise<void> {
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { clearInterval(activityTimer); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { stopRetention(); clearInterval(activityTimer); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

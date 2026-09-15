@@ -5,9 +5,27 @@ import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
-import { outputCallIds, type ChangeLookup } from "./changes.js";
+import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 
 export interface Entry { line: number; raw: Json }
+
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground"]);
+const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
+
+function taskNotification(content: string): string | undefined {
+  const envelope = /<task-notification>([\s\S]*?)<\/task-notification>/.exec(content)?.[1];
+  if (!envelope) return;
+  // Only plain tag values are public. Never copy nested output envelopes.
+  const values = new Map<string, string>();
+  for (const match of envelope.matchAll(/<([a-z-]+)(?:\s[^<>]*)?>([\s\S]*?)<\/\1>/g)) {
+    if (["task-id", "tool-use-id", "status", "summary"].includes(match[1]) && !match[2].includes("<") && !values.has(match[1])) values.set(match[1], match[2]);
+  }
+  const tags = ["task-id", "tool-use-id", "status", "summary"].flatMap(tag => {
+    const value = values.get(tag);
+    return value === undefined ? [] : [`<${tag}>${value.slice(0, tag === "summary" ? 500 : 200)}</${tag}>`];
+  });
+  return tags.some(tag => tag.startsWith("<tool-use-id>")) ? `<task-notification>\n${tags.join("\n")}\n</task-notification>` : undefined;
+}
 
 /** Preserve content positions and image types; original bytes stay in the
  * transcript for the separate image route. Only provider content blocks are
@@ -99,19 +117,28 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     // The model answering this turn is the only field of turn_context the
     // phone shows; its policies and instructions stay on the computer.
     if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp, payload: { model: p.model } } : undefined;
+    if (raw.type === "event_msg" && p.type === "error") return { type: raw.type, timestamp: raw.timestamp,
+      payload: { type: "error", ...(typeof p.message === "string" ? { message: p.message } : {}) } };
     if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
     if (raw.type !== "response_item") return undefined;
-    if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") return raw;
+    if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") {
+      const text = typeof p.content === "string" ? p.content : objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n");
+      return p.role === "user" && harnessPreamble(text) ? undefined : raw;
+    }
     if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   } else if (source === "claude") {
+    if (raw.type === "queue-operation" && raw.operation === "remove" && typeof raw.content === "string") {
+      return { type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
+    }
     // Claude Code records background completion as an internal queue row,
     // outside the ordinary user/assistant transcript. Export only the small
     // task-notification envelope; other internal events remain private.
     if (raw.type === "queue-operation" && typeof raw.content === "string"
         && raw.content.length <= 65_536 && raw.content.includes("<task-notification>")
         && raw.content.includes("<tool-use-id>")) {
-      return { type: "system", phrenBackground: true, timestamp: raw.timestamp,
-        message: { role: "user", content: raw.content } };
+      const content = taskNotification(raw.content);
+      return content ? { type: "system", phrenBackground: true, timestamp: raw.timestamp,
+        message: { role: "user", content } } : undefined;
     }
     // A message sent while the agent was mid-turn is only ever a queue row:
     // Claude Code hands it to the model inside a later tool result and never
@@ -120,7 +147,7 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     if (raw.type === "queue-operation" && ["enqueue", "remove"].includes(String(raw.operation))
         && !raw.isMeta && !raw.isSidechain && typeof raw.content === "string"
         && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")
-        && !raw.content.trimStart().startsWith("<system-reminder>")) {
+        && !raw.content.trimStart().startsWith("<")) {
       const key = createHash("sha256").update(raw.content).digest("hex");
       // Only the identity crosses the wire on consumption: no queue payload,
       // tool envelope, private metadata, or reasoning is exported.
@@ -129,9 +156,10 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
         message: { role: "user", content: raw.content } };
     }
     if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
+    raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
     const message = object(raw.message);
     // Keep indexes for historical images while removing thinking contents.
-    if (typeof message.content === "string") return raw;
+    if (typeof message.content === "string") return raw.type === "user" && harnessPreamble(message.content) ? undefined : raw;
     if (Array.isArray(message.content)) return { ...raw, message: { ...message, content: objects(message.content).map(b =>
       ["text", "image", "tool_use", "tool_result"].includes(String(b.type)) ? b : { type: "redacted" }) } };
   } else {
@@ -218,4 +246,32 @@ export async function historicalImage(file: string, line: number, block: number,
   const bytes = Buffer.from(base64, "base64");
   if (bytes.length > 8_388_608) throw new BridgeError(413, "This image is too large.");
   return bytes;
+}
+
+/** Derive optional diff scope from local tool-call rows, never phone commands. */
+export async function conversationNamedPaths(file: string, source: Provider, cwd: string, signal?: AbortSignal): Promise<string[]> {
+  return withTranscriptIndex(file, async (handle, index) => {
+    const paths = new Set<string>();
+    for await (const row of index.rows(handle, index.lines, 0, signal)) {
+      signal?.throwIfAborted();
+      try {
+        const raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), source);
+        if (!raw) continue;
+        const payload = object(raw.payload), data = object(raw.data);
+        const calls = source === "codex" ? (["function_call", "custom_tool_call"].includes(String(payload.type)) ? [payload] : [])
+          : source === "copilot" ? (raw.type === "tool.execution_start" ? [data] : [])
+          : objects(object(source === "phren" ? data.message : raw.message).content).filter(b => b.type === "tool_use");
+        for (const call of calls) {
+          if (!SHELL_TOOLS.has(String(call.name ?? call.toolName))) continue;
+          const args = call.arguments ?? call.input;
+          const input = typeof args === "string" ? object(JSON.parse(args)) : object(args);
+          const command = input.command ?? input.cmd;
+          if (typeof command !== "string") continue;
+          const base = [input.workdir, input.cwd, raw.cwd, cwd].find(v => typeof v === "string" && path.isAbsolute(v)) as string;
+          for (const named of namedPaths(command)) paths.add(named.startsWith("~/") ? path.join(homedir(), named.slice(2)) : path.resolve(base, named));
+        }
+      } catch { /* Malformed or private rows grant no additional scope. */ }
+    }
+    return [...paths];
+  }, signal);
 }

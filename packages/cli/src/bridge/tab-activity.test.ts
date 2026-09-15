@@ -67,4 +67,22 @@ describe("persisted tab activity clock", () => {
     expect((await store.observe("default", snapshot())).get(key)).toBe(now.toISOString());
     expect(JSON.parse(await readFile(destination, "utf8")).entries).toHaveProperty('"default":["w1","t1"]');
   });
+  it("persists only signature hashes, migrates old plaintext, and prunes absent servers", async () => {
+    const location = await file(), now = new Date("2026-09-15T10:00:00Z");
+    const store = new TabActivityStore(location, () => now);
+    await store.observe("default", snapshot("working", 1, "PRIVATE TITLE"));
+    await store.observe("gone", snapshot("waiting", 1, "PRIVATE OTHER"));
+    let saved = await readFile(location, "utf8");
+    expect(saved).not.toContain("PRIVATE"); expect(saved).not.toContain("Tab");
+    for (const stamp of Object.values(JSON.parse(saved).entries) as { signature: string }[]) expect(stamp.signature).toMatch(/^[a-f0-9]{64}$/);
+    await new TabActivityStore(location).pruneServers(["default"]);
+    saved = await readFile(location, "utf8");
+    expect(saved).not.toContain("gone"); expect(Object.keys(JSON.parse(saved).entries)).toHaveLength(1);
+    const plain = JSON.stringify(["working", null, "Tab", null, [["p1", "codex", null, 1, "PRIVATE TITLE"]]]);
+    await writeFile(location, JSON.stringify({ entries: { ['"default":' + key]: { signature: plain, lastChangedAt: now.toISOString() } } }));
+    const restarted = new TabActivityStore(location, () => new Date(now.getTime() + 1000));
+    expect((await restarted.observe("default", snapshot("working", 1, "PRIVATE TITLE"))).get(key)).toBe(now.toISOString());
+    expect(await readFile(location, "utf8")).not.toContain("PRIVATE");
+  });
+
 });

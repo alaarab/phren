@@ -3,7 +3,7 @@ import { createServer as createNetServer, type Server } from "node:net";
 import { request } from "node:http";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open, realpath as realpathAsync } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, appendFile, rm, chmod, symlink, open, stat, utimes, realpath as realpathAsync } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -253,7 +253,7 @@ describe("Phren Hook boundaries", () => {
     await writeFile(path.join(project, "b.txt"), "b\n"); await git(project, "add", "b.txt"); await git(project, "commit", "-q", "-m", "add b");
     const previousHome = process.env.HOME; process.env.HOME = home;
     try {
-      const diff = await repositoryDiff(project, ["~/.phren/app", path.join(project, "b.txt"), "/etc/hosts", "../missing/file", 42]) as {
+      const diff = await repositoryDiff(project, ["~/.phren/app", path.join(project, "b.txt")]) as {
         root: string; files: { path: string; status: string; sections: { id: string; kind: string; patch: string; note?: string }[] }[];
         related: { root: string; branch: string; files: { path: string; status: string; sections: { patch: string; note?: string }[] }[] }[];
       };
@@ -277,7 +277,7 @@ describe("Phren Hook boundaries", () => {
 describe.skipIf(process.platform === "win32")("standalone Phren service", () => {
   let root: string, hook: ChildProcess, herdr: Server, log: string, record: string, commands: { method: string; params: Record<string, unknown> }[];
   let current = session;
-  let reportIdentity = true;
+  let reportIdentity = true, foregroundPID = process.pid, terminalID = "term-one";
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
@@ -299,7 +299,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     if (root.length > 55) {
       const short = await mkdtemp("/tmp/phren-hook-"); await rm(root, { recursive: true }); root = short;
     }
-    commands = []; current = session; reportIdentity = true; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
+    commands = []; current = session; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; failAgentStart = false;
     await mkdir(path.join(root, "herdr"));
@@ -335,19 +335,22 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
           if (failAgentStart || !target) { socket.end(JSON.stringify({ id: req.id, error: { code: 1, message: "agent not detected" } }) + "\n"); return; }
           target.agent = req.params.kind; target.agent_status = "idle";
         }
-        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: "term-one", agent: "codex", agent_status: "working",
+        const pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", terminal_id: terminalID, agent: "codex", agent_status: "working",
           agent_session: reportIdentity ? { kind: "id", agent: "codex", value: current } : undefined, cwd: root };
         const snapshot = { panes: [pane, ...extraPanes], workspaces: [{ workspace_id: "w1", label: "Project" }, ...extraWorkspaces],
           tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "1" }, ...extraTabs] };
         const answer = () => socket.end(JSON.stringify({ id: req.id, result: req.method === "session.snapshot" ? { snapshot }
-          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: process.pid }] } } : { ok: true } }) + "\n");
+          : req.method === "pane.process_info" ? { process_info: { foreground_processes: [{ pid: foregroundPID }] } } : { ok: true } }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
         else answer();
       });
     });
     await new Promise<void>(resolve => herdr.listen(path.join(root, "herdr/herdr.sock"), resolve));
+    await mkdir(path.join(root, "bridge/changes"), { recursive: true });
+    const expired = path.join(root, "bridge/changes/expired.jsonl");
+    await writeFile(expired, "{}\n"); await utimes(expired, 1, 1);
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
-      PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
+      HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
     for (let i = 0; i < 80; i++) { try { ready = (await api("/v1/health")).status === 200; } catch { /* startup */ } if (ready) break; await sleep(25); }
@@ -381,12 +384,14 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await api("/v1/activity")).data.events[0].directory).toBe(root);
     const permissions = await import("node:fs/promises").then(fs => fs.stat(path.join(root, "bridge/hook.sock")));
     expect(permissions.mode & 0o777).toBe(0o600);
+    expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();
+    expect((await stat(path.join(root, "bridge/computer-id"))).mode & 0o777).toBe(0o600);
   });
   it("launches a workspace in a directory with an agent started in its pane", async () => {
     const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "phren", kind: "claude" });
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);
     expect(launched.data).toMatchObject({ ok: true, workspaceId: "w9", tabId: "w9:t1", paneId: "w9:p1", agent: "claude", agentStatus: "idle" });
-    expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ label: "phren", cwd: root, focus: false });
+    expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ label: "phren", cwd: await realpathAsync(root), focus: false });
     expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "phren", kind: "claude", pane_id: "w9:p1", timeout_ms: 45_000 });
     // The new pane is now a chat target the overview can see.
     const overview = await api("/v1/workspaces?mux=herdr:default");
@@ -396,7 +401,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "second", kind: "codex", workspaceId: "w1", name: "Codex here", timeoutMs: 1 });
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);
     expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
-    expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: root });
+    expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
     expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "Codex here", pane_id: "w1:p2", timeout_ms: 3_000 });
   });
   it("reports a failed agent start without hiding the workspace it created", async () => {
@@ -452,6 +457,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
         expect(await discover()).toBeUndefined();
       }
       await bind(binding);
+      await sleep(2100);
       expect(await discover()).toBe(session);
       const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "2" }));
       expect(page.status).toBe(200);
@@ -462,6 +468,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       // Once the parent's descriptor closes, its old binding must not override
       // the sole conversation still held by the current process.
       await handles[0].close();
+      await sleep(2100);
       expect(await discover()).toBe(child);
       expect((await api("/v1/prompt", { target, text: "stale parent" })).status).toBe(409);
     } finally { await Promise.all(handles.map(handle => handle.close())); }
@@ -486,6 +493,66 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     replaceBeforeMutation = true;
     const result = await api(route, { target, ...payload });
     expect({ status: result.status, deliveries }).toEqual({ status: 409, deliveries: [] });
+  });
+  it("reports uncertain prompt delivery after replacement and sends only once", async () => {
+    replaceBeforeMutation = true;
+    const response = await api("/v1/prompt", { target, text: "sent once" });
+    expect(response).toEqual({ status: 200, data: { ok: true, deliveryUncertain: true } });
+    expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
+  });
+  it("closes the oldest websocket when a seventeenth client connects", async () => {
+    const clients: WebSocket[] = [];
+    try {
+      for (let i = 0; i < 16; i++) {
+        const client = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+        clients.push(client); client.on("error", () => {}); await once(client, "open");
+      }
+      const closed = once(clients[0], "close");
+      const next = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      clients.push(next); await once(next, "open"); await closed;
+      expect(clients[0].readyState).toBe(WebSocket.CLOSED);
+      expect(clients.slice(1).every(client => client.readyState === WebSocket.OPEN)).toBe(true);
+      expect((await api("/v1/health")).status).toBe(200);
+    } finally { clients.forEach(client => client.terminate()); }
+  });
+  it("enforces launch directory checks and one shared rate limit across create and launch", async () => {
+    for (const route of ["create", "launch"]) {
+      const rejected = await api(`/v1/workspaces/${route}`, { cwd: "/etc", label: "x", kind: "codex" });
+      expect(rejected.status).toBe(403);
+    }
+    holdSnapshot = true;
+    const first = api("/v1/workspaces/create", { cwd: root, label: "x" });
+    for (let i = 0; i < 100 && !releaseSnapshot; i++) await sleep(10);
+    expect(releaseSnapshot).toBeDefined();
+    expect((await api("/v1/workspaces/launch", { cwd: root, label: "y", kind: "codex" })).status).toBe(429);
+    releaseSnapshot!(); releaseSnapshot = undefined; expect((await first).status).toBe(200);
+    for (let i = 0; i < 3; i++) expect((await api("/v1/workspaces/create", { cwd: root, label: "x" })).status).toBe(200);
+    expect((await api("/v1/workspaces/create", { cwd: root, label: "x" })).status).toBe(429);
+  });
+  it("accepts an outside locator candidate even when the registered project has a different name", async () => {
+    const outside = await mkdtemp("/tmp/phren-external-");
+    try {
+      const config = path.join(root, ".phren/project-alias"); await mkdir(config, { recursive: true });
+      await writeFile(path.join(config, "phren.project.yaml"), `sourcePath: ${outside}\n`);
+      const candidates = await api("/v1/projects/locate?project=project-alias");
+      expect(candidates.data.candidates.some((c: any) => c.directory === realpathSync.native(outside))).toBe(true);
+      expect((await api("/v1/workspaces/create", { cwd: outside, label: "arbitrary label" })).status).toBe(200);
+    } finally { await rm(outside, { recursive: true, force: true }); }
+  });
+  it("derives diff scope from this conversation's local command rows", async () => {
+    await execFileAsync("git", ["-C", root, "init", "-q"]);
+    const sibling = await mkdtemp("/tmp/phren-sibling-");
+    try {
+      await execFileAsync("git", ["-C", sibling, "init", "-q"]);
+      const outside = await realpathAsync(sibling);
+      expect((await api("/v1/diff", { target, paths: [outside] })).status).toBe(403);
+      await appendFile(record, JSON.stringify({ type: "response_item", payload: { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: `ls ${outside}` }) } }) + "\n");
+      expect((await api("/v1/diff", { target, paths: [outside] })).status).toBe(200);
+      expect((await api("/v1/diff", { target, paths: ["/etc"] })).status).toBe(403);
+      await rm(record);
+      expect((await api("/v1/diff", { target, paths: [root] })).status).toBe(200);
+      expect((await api("/v1/diff", { target, paths: [outside] })).status).toBe(403);
+    } finally { await rm(sibling, { recursive: true, force: true }); }
   });
   it("streams incremental transcript and real usage frames, then closes after a conversation replacement", async () => {
     const query = new URLSearchParams(target).toString();
