@@ -776,6 +776,13 @@ private struct ChatMessageRow<Historical: View>: View {
         return String(message.text[..<section.lowerBound])
     }
     var body: some View {
+        if let command = message.localCommand {
+            LocalCommandRow(command: command, id: message.id)
+        } else {
+            bubble
+        }
+    }
+    private var bubble: some View {
         HStack(alignment: .top, spacing: 0) {
             if message.role == .user { Spacer(minLength: 30) }
             VStack(alignment: .leading, spacing: 8) {
@@ -801,6 +808,41 @@ private struct ChatMessageRow<Historical: View>: View {
         .contextMenu {
             Button("Copy message", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
             ShareLink(item: message.text)
+        }
+    }
+}
+
+/// A slash command or `!` shell line typed at the agent's own prompt, and
+/// what it printed: system text inline, not a bubble of angle brackets.
+private struct LocalCommandRow: View {
+    let command: AgentChatMessage.LocalCommand
+    let id: String
+    var body: some View {
+        if command.kind == .output && command.text.isEmpty {
+            EmptyView()
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Group {
+                    switch command.kind {
+                    case .command: Image(systemName: "command")
+                    case .shell: Image(systemName: "terminal")
+                    case .output: Image(systemName: "arrow.turn.down.right")
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                .accessibilityHidden(true)
+                Text(command.text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(command.kind == .output ? PhrenTheme.textMuted : PhrenTheme.textSecondary)
+                    .textSelection(.enabled)
+                    .lineLimit(command.kind == .output ? 12 : nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)")
+            .accessibilityIdentifier("chat-command:\(id)")
+            .contextMenu { Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = command.text } }
         }
     }
 }

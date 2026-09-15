@@ -78,6 +78,12 @@ import UIKit
         if flag("--chat-long-history") {
             for index in 0..<20 { append("assistant", "Recent discussion \(index). " + String(repeating: "Keep the current message visible while older history loads. ", count: 3)) }
         }
+        if flag("--chat-commands") {
+            append("user", "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>")
+            append("user", "<local-command-stdout>Set model to Opus 5 (1M context) and saved as your default for new sessions</local-command-stdout>")
+            append("user", "<bash-input>pwd</bash-input>")
+            append("user", "<bash-stdout>/home/alaarab/Projects/hub</bash-stdout><bash-stderr></bash-stderr>")
+        }
         if flag("--chat-design") {
             append("user", "Make the conversation easier to read. Keep the details close by.")
             append("assistant", "I'll tighten the session header and give each tool call its own compact row. Replies will have more room to breathe.\n\n")

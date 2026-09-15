@@ -469,6 +469,22 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-close"].isHittable)
     }
 
+    /// A slash command or `!` shell line typed at Claude Code's own prompt
+    /// reads as one system line with its output, not a bubble of tags.
+    @MainActor
+    func testLocalCommandsReadAsSystemLines() {
+        let app = launch(extra: ["--chat-commands"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let model = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "chat-command:", "Command: /model")).firstMatch
+        XCTAssertTrue(model.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Command output: Set model to Opus 5")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Command: pwd")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Command output: /home/alaarab/Projects/hub")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "<command-name>")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "<bash-stdout>")).firstMatch.exists)
+        capture(app, "Slash and shell commands as inline system lines")
+    }
+
     @MainActor
     func testToolPatchShowsChangesAndUnwrapsResult() {
         let app = launch(extra: ["--chat-diffs"])

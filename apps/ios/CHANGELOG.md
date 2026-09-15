@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### New
 
+- Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).
 - Files: put any file on a computer through Phren Hook and copy its path for

@@ -241,3 +241,24 @@ final class AgentChatTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": source, "entries": rows.enumerated().map { ["line": $0.offset, "raw": $0.element] }, "hasMore": true, "totalLines": rows.count])
     }
 }
+
+final class LocalCommandTests: XCTestCase {
+    private func message(_ text: String) -> AgentChatMessage { .init(id: "1:0", line: 1, role: .user, title: nil, text: text) }
+    func testSlashCommandReadsNameAndArguments() {
+        let command = message("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>").localCommand
+        XCTAssertEqual(command?.kind, .command); XCTAssertEqual(command?.text, "/model")
+        XCTAssertEqual(message("<command-name>/review</command-name><command-message>review</command-message><command-args>ultra 12</command-args>").localCommand?.text, "/review ultra 12")
+    }
+    func testShellLineAndOutput() {
+        XCTAssertEqual(message("<bash-input>pwd</bash-input>").localCommand, .init(kind: .shell, text: "pwd"))
+        let output = message("<bash-stdout>/home/alaarab/Projects/hub</bash-stdout><bash-stderr></bash-stderr>").localCommand
+        XCTAssertEqual(output?.kind, .output); XCTAssertEqual(output?.text, "/home/alaarab/Projects/hub")
+        XCTAssertEqual(message("<bash-stdout></bash-stdout><bash-stderr></bash-stderr>").localCommand?.text, "")
+        XCTAssertEqual(message("<local-command-stdout>Set model to Opus 5</local-command-stdout>").localCommand, .init(kind: .output, text: "Set model to Opus 5"))
+    }
+    func testOrdinaryMessagesAreNotCommands() {
+        XCTAssertNil(message("Say \"go\" and I'll cut v0.11.27").localCommand)
+        XCTAssertNil(message("look at <command-name> in the docs").localCommand)
+        XCTAssertNil(AgentChatMessage(id: "1:0", line: 1, role: .assistant, title: nil, text: "<bash-input>pwd</bash-input>").localCommand)
+    }
+}

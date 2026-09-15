@@ -118,6 +118,36 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// A file a shell call changed, attached by Phren Hook — shown under the
     /// call as a diff rather than counted as a call of its own.
     public var isChange: Bool { role == .tool && title == "Changes" }
+    /// A slash command or `!` shell line typed at Claude Code's own prompt,
+    /// which the transcript records as a user turn wrapped in tags — shown
+    /// as a system line rather than a bubble of angle brackets.
+    public var localCommand: LocalCommand? { role == .user ? LocalCommand(text) : nil }
+    public struct LocalCommand: Equatable, Sendable {
+        public enum Kind: Sendable { case command, shell, output }
+        public let kind: Kind
+        /// The typed line (`/model`, `pwd`) or the command's output.
+        public let text: String
+        init(kind: Kind, text: String) { self.kind = kind; self.text = text }
+        init?(_ raw: String) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("<command-name>") || trimmed.hasPrefix("<local-command-stdout>") || trimmed.hasPrefix("<local-command-stderr>")
+                    || trimmed.hasPrefix("<bash-input>") || trimmed.hasPrefix("<bash-stdout>") || trimmed.hasPrefix("<bash-stderr>") else { return nil }
+            func tag(_ name: String) -> String? {
+                guard let open = trimmed.range(of: "<\(name)>"), let close = trimmed.range(of: "</\(name)>", range: open.upperBound..<trimmed.endIndex) else { return nil }
+                return String(trimmed[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if let name = tag("command-name") {
+                let args = tag("command-args") ?? ""
+                kind = .command; text = args.isEmpty ? name : name + " " + args
+            } else if let input = tag("bash-input") {
+                kind = .shell; text = input
+            } else {
+                kind = .output
+                text = [tag("local-command-stdout"), tag("local-command-stderr"), tag("bash-stdout"), tag("bash-stderr")]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            }
+        }
+    }
 }
 
 /// Normalize only visible conversation content. Encrypted reasoning, system
