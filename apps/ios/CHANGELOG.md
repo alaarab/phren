@@ -15,6 +15,11 @@ number counts up on its own.
 - Ask Siri what an agent is doing or which sessions need input. The answer is
   spoken without opening Phren and includes a session card with Open and,
   for pending permissions, Approve and Reject.
+- Open the session that needs you most from Control Center, the Lock Screen,
+  or the Action button using Phren's shortcuts.
+- Track working sessions on the Lock Screen and Dynamic Island with the Phren
+  icon, project, branch, elapsed time, current tool, and a tap back to chat.
+- Ask Siri to pin a named working session to its Live Activity.
 
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,

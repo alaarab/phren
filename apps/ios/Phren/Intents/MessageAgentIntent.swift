@@ -65,6 +65,7 @@ enum AgentSessions {
     static func current() async -> [LiveAgentSession] {
         let savedHosts = hosts
         SpotlightIndex.shared.reconcileHosts(savedHosts)
+        await WidgetBridge.reconcileSessionHosts(savedHosts)
         return await withTaskGroup(of: [LiveAgentSession].self) { group in
             for host in savedHosts {
                 group.addTask {
@@ -74,6 +75,7 @@ enum AgentSessions {
                     guard let snapshot = try? await fetch.value else { return [] }
                     let sessions = snapshot.sessions(on: host)
                     await SpotlightIndex.shared.refreshSessions(sessions, on: host)
+                    await WidgetBridge.publishSessions(sessions, on: host)
                     return sessions.filter { $0.tab.agent != nil }
                 }
             }

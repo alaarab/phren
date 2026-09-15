@@ -20,10 +20,60 @@ enum WidgetBridge {
     static let appGroupID = "group.com.phren.ios"
 
     private static let writer = WidgetSnapshotWriter()
+    private static let controlWriter = SessionControlSnapshotWriter()
+    private static var sessionsByHost: [UUID: [LiveAgentSession]] = [:]
 
     static func publish(from model: AppModel) async {
         let snapshot = buildSnapshot(from: model)
         await writer.publish(snapshot)
+    }
+
+    /// Live-session monitors call this after each successful host refresh.
+    /// Keeping the last successful result for every saved host lets the
+    /// control choose across computers without treating an offline host as an
+    /// empty response.
+    static func publishSessions(_ sessions: [LiveAgentSession], on host: LiveHost) async {
+        sessionsByHost[host.id] = sessions.filter { $0.tab.agent != nil }
+        await publishCurrentSessions()
+        let projects = await SpotlightProjects.current()
+        let preferences = try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
+        await SessionWorkingActivityController.shared.reconcile(sessions, on: host,
+                                                                 projects: projects, preferences: preferences)
+    }
+
+    static func reconcileSessionHosts(_ hosts: [LiveHost]) async {
+        let hadCachedSessions = !sessionsByHost.isEmpty
+        sessionsByHost = sessionsByHost.filter { id, _ in hosts.contains { $0.id == id } }
+        await SessionWorkingActivityController.shared.reconcileHosts(hosts)
+        // On a cold app launch, keep the last good control until at least one
+        // saved host answers. An explicit removal after this process observed
+        // sessions still clears its route immediately.
+        guard hadCachedSessions || hosts.isEmpty else { return }
+        await publishCurrentSessions()
+    }
+
+    private static func publishCurrentSessions() async {
+        let all = sessionsByHost.values.flatMap { $0 }
+        let projects = await SpotlightProjects.current()
+        let preferences = try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
+        let reports = SessionStatusService.reports(for: all, projects: projects, preferences: preferences)
+        let selected = SessionAttentionSelector.select(all)
+        let entity = selected.flatMap { session in reports.first { $0.entity.id == AgentSessionEntity(session).id }?.entity }
+        await controlWriter.publish(entity.map(SessionControlSnapshot.init))
+    }
+
+    static func openAttentionSession() throws {
+        guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+                .appendingPathComponent(SessionControlSnapshot.filename),
+              let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(SessionControlSnapshot.self, from: data),
+              let host = AgentSessions.hosts.first(where: { $0.id == snapshot.hostID && $0.muxID == snapshot.muxID }) else {
+            throw PhrenKitError.validation("No waiting or working session is available.")
+        }
+        let session = try AgentLaunch.session(host: host, workspaceID: snapshot.workspaceID, tabID: snapshot.tabID,
+                                              label: snapshot.label, agent: snapshot.agent,
+                                              agentStatus: snapshot.state, cwd: snapshot.cwd)
+        AgentLaunch.setPending(session)
     }
 
     private static func buildSnapshot(from model: AppModel) -> WidgetSnapshot {
@@ -66,6 +116,35 @@ enum WidgetBridge {
     }
 }
 
+enum SessionAttentionSelector {
+    static func select(_ sessions: [LiveAgentSession]) -> LiveAgentSession? {
+        sessions.filter { [.waiting, .working].contains($0.tab.activity) }.sorted { left, right in
+            let leftTier = tier(left), rightTier = tier(right)
+            if leftTier != rightTier { return leftTier < rightTier }
+            let leftSequence = left.tab.changedSeq ?? Int.min
+            let rightSequence = right.tab.changedSeq ?? Int.min
+            if leftSequence != rightSequence { return leftSequence > rightSequence }
+            return AgentSessionEntity(left).id < AgentSessionEntity(right).id
+        }.first
+    }
+
+    private static func tier(_ session: LiveAgentSession) -> Int {
+        if session.tab.approvalPending == true { return 0 }
+        return session.tab.activity == .waiting ? 1 : 2
+    }
+}
+
+private extension SessionControlSnapshot {
+    init(_ entity: AgentSessionEntity) {
+        self.init(sessionID: entity.id,
+                  displayName: "\(entity.project ?? entity.workspace) · \(entity.harnessName ?? "Agent") on \(entity.computer)",
+                  computer: entity.computer, state: entity.state?.lowercased() == "permission needed" ? "waiting" : entity.state?.lowercased() ?? "working",
+                  hostID: entity.hostID, muxID: entity.muxID,
+                  workspaceID: entity.workspaceID ?? "", tabID: entity.tabID ?? "",
+                  label: entity.title, agent: entity.agent ?? "codex", cwd: entity.folder ?? "/")
+    }
+}
+
 /// Serialize writes off the main actor. The file is rewritten when the
 /// visible content changes or the sync stamp has moved by at least a minute
 /// — not on every ~7s poll, which the widget would never read anyway; only
@@ -95,5 +174,29 @@ private actor WidgetSnapshotWriter {
         case let (.some(previous), .some(current)):
             return abs(current.timeIntervalSince(previous)) >= Self.stampInterval
         }
+    }
+}
+
+private actor SessionControlSnapshotWriter {
+    private var lastSnapshot: SessionControlSnapshot?
+    private var hasPublished = false
+
+    func publish(_ snapshot: SessionControlSnapshot?) {
+        guard (!hasPublished || snapshot != lastSnapshot),
+              let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.phren.ios")?
+                .appendingPathComponent(SessionControlSnapshot.filename) else { return }
+        do {
+            if let snapshot {
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                try encoder.encode(snapshot).write(to: url, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            lastSnapshot = snapshot
+            hasPublished = true
+            if #available(iOS 18.0, *) {
+                ControlCenter.shared.reloadControls(ofKind: "com.phren.ios.widgets.session-attention")
+            }
+        } catch { /* Keep the previous control snapshot and retry on the next successful refresh. */ }
     }
 }

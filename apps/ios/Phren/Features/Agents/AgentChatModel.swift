@@ -105,6 +105,21 @@ final class AgentChatModel {
     var questionsSupported = true
     var progressUnavailable = false
     var messages: [AgentChatMessage] { history.messages }
+    /// The newest tool call that has no matching result yet. Providers expose
+    /// tool names in transcript rows, so the Live Activity can show one when
+    /// the current work is more specific than simply "Working".
+    var currentToolName: String? {
+        var completed: Set<String> = []
+        for message in messages.reversed() where message.role == .tool {
+            if message.isToolResult {
+                if let id = message.toolCallID { completed.insert(id) }
+            } else if !message.isChange,
+                      message.toolCallID.map({ !completed.contains($0) }) ?? true {
+                return message.title
+            }
+        }
+        return nil
+    }
     var hasMore: Bool { history.hasMore }
     var error: String?
     var deliveryError: String?

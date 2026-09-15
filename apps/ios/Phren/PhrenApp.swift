@@ -10,6 +10,7 @@ struct PhrenApp: App {
 
     init() {
         Self.applyPhrenChrome()
+        _ = SessionWorkingActivityController.shared
     }
 
     var body: some Scene {
@@ -48,6 +49,10 @@ struct PhrenApp: App {
                         model.showingMemoryMaintenance = true
                     case "projects": model.selectedTab = .projects
                     case "agents": model.selectedTab = .agents
+                    case "session":
+                        guard let routeID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "route" })?.value else { return }
+                        try? SessionWorkingActivityController.shared.open(routeID: routeID)
                     case "tasks": model.selectedTab = .tasks
                     default: break
                     }

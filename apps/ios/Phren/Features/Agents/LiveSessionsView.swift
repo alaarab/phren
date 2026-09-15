@@ -134,6 +134,7 @@ struct LiveSessionsView: View {
         .task(id: PollID(hosts: hosts, active: visible && scenePhase == .active && !adding, refresh: refreshID)) {
             guard visible, scenePhase == .active, !adding else { return }
             SpotlightIndex.shared.reconcileHosts(hosts)
+            await WidgetBridge.reconcileSessionHosts(hosts)
             await overview.run(hosts: hosts)
         }
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
@@ -239,6 +240,7 @@ final class LiveHostMonitor {
                 guard generation == run else { return }
                 snapshot = value
                 SpotlightIndex.shared.refreshSessions(value.sessions(on: host), on: host)
+                await WidgetBridge.publishSessions(value.sessions(on: host), on: host)
                 lastUpdated = Date()
                 message = nil
                 fingerprint = nil

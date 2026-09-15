@@ -131,6 +131,19 @@ struct AgentChatView: View {
     }
     private var active: Bool { visible && scenePhase == .active && currentHost == session.host }
     private var selectedPane: AgentChatPanes.Pane? { model.panes.first { $0.id == model.target?.paneID } }
+    private struct WorkingActivityObservation: Equatable {
+        let project: String?
+        let provider: String?
+        let branch: String?
+        let activity: String?
+        let toolName: String?
+    }
+    private var workingActivityObservation: WorkingActivityObservation {
+        WorkingActivityObservation(project: project?.name, provider: model.target?.source ?? session.tab.agent,
+                                   branch: model.branch ?? session.tab.branch,
+                                   activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
+                                   toolName: model.currentToolName)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -323,6 +336,14 @@ struct AgentChatView: View {
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
+        .onChange(of: workingActivityObservation, initial: true) { _, value in
+            Task {
+                await SessionWorkingActivityController.shared.observe(
+                    session: session, project: value.project, provider: value.provider,
+                    branch: value.branch, activity: value.activity, toolName: value.toolName
+                )
+            }
+        }
         .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() } }
         .onChange(of: currentHost) { _, _ in sendTask?.cancel(); historyTask?.cancel() }

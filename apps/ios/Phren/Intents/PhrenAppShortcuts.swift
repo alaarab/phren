@@ -98,6 +98,15 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             shortTitle: "Waiting Sessions",
             systemImageName: "person.crop.circle.badge.questionmark"
         )
+        AppShortcut(
+            intent: PinSessionActivityIntent(),
+            phrases: [
+                "Pin \(\.$session) in \(.applicationName)",
+                "Track \(\.$session) in \(.applicationName)",
+            ],
+            shortTitle: "Pin Session",
+            systemImageName: "pin.circle"
+        )
     }
 }
 
