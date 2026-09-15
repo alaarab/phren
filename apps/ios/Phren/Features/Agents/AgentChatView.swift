@@ -93,6 +93,8 @@ struct AgentChatView: View {
     @State private var historyTask: Task<Void, Never>?
     @State private var bottomPosition: CGFloat = 0
     @State private var nearHistoryTop = false
+    /// Older pages pulled in without a scroll in between; a scroll resets it.
+    @State private var historyChain = 0
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
@@ -322,6 +324,7 @@ struct AgentChatView: View {
                 .simultaneousGesture(TapGesture().onEnded { composing = false })
                 .modifier(ChatHistoryScrollObserver { near in
                     if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
+                    if near != nearHistoryTop { historyChain = 0 }
                     nearHistoryTop = near
                     loadHistoryIfNeeded(proxy)
                 })
@@ -334,7 +337,7 @@ struct AgentChatView: View {
                     paginationReady = true
                     loadHistoryIfNeeded(proxy)
                 }
-                .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy) }
+                .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
                 .scrollDismissesKeyboard(.interactively)
                 .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: "chat-scroll")
@@ -581,10 +584,17 @@ struct AgentChatView: View {
         withAnimation(reduceMotion ? nil : .easeIn(duration: 0.18)) { showingAgentSwitcher = false }
     }
 
-    private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy) {
+    /// Pages loaded back to back without a scroll in between. A page of
+    /// nothing but lifecycle rows may need a second, but a chain past a few
+    /// means the anchor scroll isn't taking and the top stays "near" — left
+    /// alone that pulls the whole history and hangs the phone.
+    private static let automaticHistoryPages = 3
+
+    private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
         guard active, paginationReady, model.connected, model.hasMore, !model.loadingHistory,
-              historyTask == nil, nearHistoryTop,
+              historyTask == nil, nearHistoryTop, !automatic || historyChain < Self.automaticHistoryPages,
               let line = model.history.startLine, line > 0, requestedHistoryLine != line else { return }
+        if automatic { historyChain += 1 } else { historyChain = 0 }
         requestedHistoryLine = line
         let anchor = ChatTimelineEntry.group(model.messages).first?.id
         let target = model.target
@@ -596,8 +606,12 @@ struct AgentChatView: View {
             }
             await Task.yield()
             if let anchor {
+                // Older rows can fold the anchor into a read run under another
+                // id; scroll to whichever entry holds that message now.
+                let entries = ChatTimelineEntry.group(model.messages)
+                let row = entries.first { $0.id == anchor || $0.messages.contains { $0.id == anchor } }?.id ?? anchor
                 var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) { proxy.scrollTo(anchor, anchor: .top) }
+                withTransaction(transaction) { proxy.scrollTo(row, anchor: .top) }
             }
             // A page may contain only lifecycle events. Recheck after layout
             // settles so it can continue without another scroll gesture.
@@ -607,7 +621,7 @@ struct AgentChatView: View {
             }
             guard model.target == target else { return }
             historyTask = nil
-            loadHistoryIfNeeded(proxy)
+            loadHistoryIfNeeded(proxy, automatic: true)
         }
     }
 
