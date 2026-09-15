@@ -102,7 +102,13 @@ export async function serve(version: string): Promise<void> {
             const server = selectedServer(url), s = await snapshot(server);
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
             const context = await contextUsage.read(server, s);
-            await journal.record(server, objects(s.panes)); result = { ...workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s)), phren: info }; break;
+            await journal.record(server, objects(s.panes));
+            const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s));
+            // The branch each tab's agent is on, for the session cards.
+            for (const group of objects(workspaces.groups)) for (const tab of objects(group.children)) {
+              if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
+            }
+            result = { ...workspaces, phren: info }; break;
           }
           case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
           case "/v1/transcripts/blob": {
