@@ -103,6 +103,16 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") return raw;
     if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   } else if (source === "claude") {
+    // Claude Code records background completion as an internal queue row,
+    // outside the ordinary user/assistant transcript. Export only the small
+    // task-notification envelope; queued prompts and other internal events
+    // remain private.
+    if (raw.type === "queue-operation" && typeof raw.content === "string"
+        && raw.content.length <= 65_536 && raw.content.includes("<task-notification>")
+        && raw.content.includes("<tool-use-id>")) {
+      return { type: "system", phrenBackground: true, timestamp: raw.timestamp,
+        message: { role: "user", content: raw.content } };
+    }
     if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     const message = object(raw.message);
     // Keep indexes for historical images while removing thinking contents.

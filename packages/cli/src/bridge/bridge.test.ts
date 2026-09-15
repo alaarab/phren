@@ -84,6 +84,13 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent({ type: "assistant.message", agentId: "subagent", data: { content: "private" } }, "copilot")).toBeUndefined();
     expect(JSON.stringify(visibleEvent({ type: "assistant", message: { content: [{ type: "thinking", thinking: "private" }, { type: "text", text: "Visible" }] } }, "claude"))).not.toContain("private");
   });
+  it("exports only Claude background task notifications from queue rows", () => {
+    const content = "<task-notification>\n<tool-use-id>tool-1</tool-use-id>\n<status>completed</status>\n<summary>Background tests completed (exit code 0)</summary>\n</task-notification>";
+    expect(visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "now", content }, "claude"))
+      .toEqual({ type: "system", phrenBackground: true, timestamp: "now", message: { role: "user", content } });
+    expect(visibleEvent({ type: "queue-operation", content: "a queued human prompt" }, "claude")).toBeUndefined();
+    expect(visibleEvent({ type: "queue-operation", content: "<task-notification>missing id</task-notification>" }, "claude")).toBeUndefined();
+  });
   it("exports phren-agent message events without reasoning, header, or splices", () => {
     const assistant = { seq: 3, time: "2026-09-12T20:00:00.000Z", type: "assistant/message", data: { turn: 1, stop_reason: "tool_use",
       usage: { input_tokens: 120, output_tokens: 40 },
