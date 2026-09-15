@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
-import { chmod, copyFile, mkdir, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { bridgeRoot, object, objects } from "./protocol.js";
+import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 
 const exec = promisify(execFile);
@@ -86,8 +87,11 @@ async function startService() {
 export async function install(version: string, noService = false): Promise<void> {
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
-  const root = bridgeRoot(), versions = path.join(root, "versions");
+  const root = bridgeRoot(), herdr = herdrRoot(), versions = path.join(root, "versions");
   await mkdir(versions, { recursive: true, mode: 0o700 }); await chmod(root, 0o700);
+  const serviceLog = path.join(root, "service.log");
+  const log = await open(serviceLog, "a", 0o600);
+  try { await log.chmod(0o600); } finally { await log.close(); }
   const hookEdits = await planAgentHooks(path.join(root, "current/bridge-hook.mjs"));
   const own = fileURLToPath(import.meta.url);
   const bundle = own.endsWith("bridge-hook.mjs") ? own : path.join(path.dirname(own), "..", "bridge-hook.mjs");
@@ -98,16 +102,16 @@ export async function install(version: string, noService = false): Promise<void>
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
-  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
+  await atomic(path.join(root, "dispatch"), `#!/bin/sh\nexport PHREN_BRIDGE_HOME=${quote(root)}\nexport PHREN_HERDR_HOME=${quote(herdr)}\nexec ${quote(process.execPath)} ${quote(path.join(root, "current/bridge-hook.mjs"))} ssh\n`, 0o700);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
     if (process.platform === "darwin") {
       const folder = path.join(homedir(), "Library/LaunchAgents"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
+      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
     await stopService();
   }

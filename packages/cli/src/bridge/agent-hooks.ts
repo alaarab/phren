@@ -3,12 +3,12 @@ import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:f
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, bridgeRoot, object, objects, provider, serverName, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { SHELL_TOOLS, ToolChanges } from "./changes.js";
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
-const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", server, encodeURIComponent(pane) + ".json");
+const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", encodeURIComponent(serverName.parse(server)), encodeURIComponent(pane) + ".json");
 export async function recordedSession(server: string, pane: Json, pids: number[]): Promise<string | undefined> {
   try {
     const value = object(JSON.parse(await readFile(bindingPath(server, String(pane.pane_id)), "utf8")));
@@ -116,6 +116,7 @@ export class AgentHooks {
     await chmod(localSocket(), 0o600);
   }
   close() {
+    void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
   }

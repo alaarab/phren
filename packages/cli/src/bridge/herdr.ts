@@ -90,9 +90,12 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
 
 /** Only file descriptors held by this pane's foreground processes establish identity.
  * A directory match, latest log, or focused tab must never select a conversation. */
-async function processLogs(server: string, pane: Json): Promise<{ files: string[]; pids: number[] }> {
+async function foregroundPids(server: string, pane: Json): Promise<number[]> {
   const info = object((await rpc(server, "pane.process_info", { pane_id: pane.pane_id })).process_info);
   const pids = objects(info.foreground_processes).map(p => p.pid).filter((p): p is number => Number.isSafeInteger(p) && Number(p) > 0).slice(0, 16);
+  return pids.sort((a, b) => a - b);
+}
+async function processLogs(pids: number[]): Promise<string[]> {
   const paths = await Promise.all(pids.map(async pid => {
     if (process.platform === "linux") {
       const base = `/proc/${pid}/fd`;
@@ -101,13 +104,24 @@ async function processLogs(server: string, pane: Json): Promise<{ files: string[
     const result = await exec("/usr/sbin/lsof", ["-a", "-p", String(pid), "-Fn"], { timeout: 3000, maxBuffer: 1_048_576 }).catch(() => ({ stdout: "" }));
     return result.stdout.split("\n").filter(n => n.startsWith("n/")).map(n => n.slice(1));
   }));
-  return { files: [...new Set(paths.flat())].filter(p => p.endsWith(".jsonl")), pids };
+  return [...new Set(paths.flat())].filter(p => p.endsWith(".jsonl"));
 }
 
-export async function paneIdentity(server: string, pane: Json): Promise<string | undefined> {
+const identities = new Map<string, { at: number; result: Promise<string | undefined> }>();
+export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   const reported = object(pane.agent_session);
   if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && /^[a-f0-9-]{36}$/i.test(reported.value)) return reported.value;
-  const { files, pids } = await processLogs(server, pane);
+  const pids = await foregroundPids(server, pane);
+  const key = JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
+  const cached = identities.get(key);
+  if (!fresh && cached && Date.now() - cached.at < 2_000) return cached.result;
+  const result = identityFromProcesses(server, pane, pids);
+  if (identities.size >= 128) identities.delete(identities.keys().next().value!);
+  identities.set(key, { at: Date.now(), result });
+  return result;
+}
+async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<string | undefined> {
+  const files = await processLogs(pids);
   const candidates = files.flatMap(file => {
     const match = pane.agent === "codex" ? /rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file)
       : pane.agent === "claude" ? /\/([a-f0-9-]{36})\.jsonl$/i.exec(file)
@@ -140,7 +154,7 @@ export async function panes(server: string, workspace: string, tab: string): Pro
 export async function validateTarget(target: Target, sending = false): Promise<Json> {
   const s = await snapshot(target.server);
   const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
-  if (!pane || await paneIdentity(target.server, pane) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
+  if (!pane || await paneIdentity(target.server, pane, sending) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
   if (sending && ["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
   return pane;
 }
