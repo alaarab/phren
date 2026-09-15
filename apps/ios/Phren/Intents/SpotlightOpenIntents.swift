@@ -14,6 +14,9 @@ struct OpenAgentSessionIntent: OpenIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        // Donate first: the pending open is consumed the moment the Agents
+        // screen sees it, and a suspension after writing it would race that.
+        if await IntentDonationGate.shared.shouldDonate("open-chat|\(target.id)") { _ = try? await self.donate() }
         try AgentLaunch.openIndexedSession(target, destination: .chat)
         return .result()
     }

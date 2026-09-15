@@ -125,34 +125,32 @@ enum SessionStatusService {
             .flatMap { match in reports.first { $0.entity.id == match.id } }
     }
 
+    static func conversation(for session: LiveAgentSession) async throws -> (target: AgentChatTarget, transcript: AgentChatTranscript) {
+        let panes = try await AgentChatModel.fetchPanes(session)
+        guard let pane = panes.panes.first(where: { $0.agent == session.tab.agent && $0.sessionId != nil })
+                ?? panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }),
+              let target = try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                                            tabID: session.tab.id, muxID: session.host.muxID) else {
+            throw PhrenKitError.validation("No agent transcript is available in that session.")
+        }
+        return (target, try await transcript(session: session, target: target))
+    }
+
     static func detail(for session: LiveAgentSession) async -> Detail {
         do {
-            let panes = try await AgentChatModel.fetchPanes(session)
-            guard let pane = panes.panes.first(where: { $0.agent == session.tab.agent && $0.sessionId != nil })
-                    ?? panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }),
-                  let target = try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID,
-                                                tabID: session.tab.id, muxID: session.host.muxID) else { return .init() }
-            async let transcriptResult = transcript(session: session, target: target)
-            async let approvalResult = approval(session: session, target: target)
-            let transcript = try? await transcriptResult
+            let conversation = try await conversation(for: session)
+            async let approvalResult = approval(session: session, target: conversation.target)
             let approval = try? await approvalResult
-            let lastLine = transcript?.messages.last(where: { $0.role == .assistant })?.text
+            let lastLine = conversation.transcript.messages.last(where: { $0.role == .assistant })?.text
             return Detail(lastAssistantLine: SessionStatusText.cleanedAssistantLine(lastLine),
-                          approval: approval, target: target)
+                          approval: approval, target: conversation.target)
         } catch {
             return .init()
         }
     }
 
     static func summaryPrompt(for session: LiveAgentSession, project: String, state: String) async throws -> String {
-        let panes = try await AgentChatModel.fetchPanes(session)
-        guard let pane = panes.panes.first(where: { $0.agent == session.tab.agent && $0.sessionId != nil })
-                ?? panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }),
-              let target = try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID,
-                                            tabID: session.tab.id, muxID: session.host.muxID) else {
-            throw OnDeviceGenerationError.emptyTranscript
-        }
-        let transcript = try await transcript(session: session, target: target)
+        let transcript = try await conversation(for: session).transcript
         let messages = transcript.messages.map {
             SessionTranscriptLine(role: $0.role.rawValue, title: $0.title, text: $0.text)
         }
@@ -177,7 +175,7 @@ enum SessionStatusService {
                                    approvalTitle: detail.approval?.explanation ?? detail.approval?.title)
     }
 
-    private static func transcript(session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {
+    static func transcript(session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {
         #if DEBUG && targetEnvironment(simulator)
         if AgentChatFixture.enabled { return try AgentChatFixture.transcript(target) }
         #endif
@@ -254,20 +252,20 @@ struct SessionStatusIntent: AppIntent {
     static var parameterSummary: some ParameterSummary { Summary("Status of \(\.$session)") }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog & ShowsSnippetView {
+    func perform() async throws -> some IntentResult & ReturnsValue<SessionStatusEntity> & ProvidesDialog & ShowsSnippetView {
         let live = await AgentSessions.current()
         let projects = await SpotlightProjects.current()
         let preferences = try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
         let reports = SessionStatusService.reports(for: live, projects: projects, preferences: preferences)
         guard let base = SessionStatusService.resolve(session, among: reports),
               let liveSession = live.first(where: { AgentSessionEntity($0).id == base.entity.id }) else {
-            return .result(dialog: "No live agent sessions are available.", view: SessionStatusSnippetContainer(report: nil))
+            throw PhrenKitError.validation("No live agent sessions are available.")
         }
         let report = await SessionStatusService.report(base, session: liveSession,
                                                        detail: await SessionStatusService.detail(for: liveSession))
         var enriched = report
         enriched.awaySummary = await AwaySummaryCache.shared.cached(for: report.entity.id)
-        return .result(dialog: "\(SessionStatusText.dialog(for: enriched))",
+        return .result(value: SessionStatusEntity(report: enriched), dialog: "\(SessionStatusText.dialog(for: enriched))",
                        view: SessionStatusSnippetContainer(report: enriched))
     }
 }

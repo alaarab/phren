@@ -20,6 +20,9 @@ struct OpenProjectIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let resolved = try await AgentSessions.resolve(session)
+        // Donate before the pending write; a suspension after it races the
+        // Agents screen consuming it.
+        if await IntentDonationGate.shared.shouldDonate("open|\(session.id)") { _ = try? await self.donate() }
         AgentLaunch.setPending(resolved.session)
         return .result(dialog: resolved.started
             ? "Started \(AgentLaunch.defaultHarness.title) in \(session.workspace) on \(session.computer)."

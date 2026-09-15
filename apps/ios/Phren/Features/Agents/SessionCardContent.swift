@@ -4,10 +4,10 @@ import SwiftUI
 extension LiveWorkspaces.Tab.Activity {
     var color: Color {
         switch self {
-        case .working: PhrenTheme.cyan
-        case .waiting: PhrenTheme.warning
+        case .working: PhrenTheme.stateWorking
+        case .waiting: PhrenTheme.stateWaiting
         case .error: PhrenTheme.danger
-        case .done: PhrenTheme.success
+        case .done: PhrenTheme.stateDone
         case .idle, .unknown: PhrenTheme.textMuted
         }
     }
@@ -86,7 +86,7 @@ struct SessionCardContent: View {
                     }
                 }
                 if session.tab.displayTitle != headline {
-                    Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.textSecondary)
+                    Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
                 }
                 if !state.isEmpty || !subtitle.isEmpty {
@@ -95,9 +95,9 @@ struct SessionCardContent: View {
                             .accessibilityLabel(session.tab.status)
                         if !state.isEmpty {
                             Text(state).font(.caption2.weight(.medium))
-                                .foregroundStyle(session.tab.approvalPending == true || !fresh ? stateColor : PhrenTheme.textMuted)
+                                .foregroundStyle(session.tab.approvalPending == true || !fresh ? stateColor : PhrenTheme.sessionMeta)
                         }
-                        if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+                        if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1) }
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)

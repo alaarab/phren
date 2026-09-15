@@ -24,10 +24,12 @@ enum PhrenTheme {
     static var accentHover: Color { Color(hex: palette.hover) }
     static var accentSolid: Color { Color(hex: palette.solid) }
     static var cyan: Color { Color(hex: palette.action) }
-    /// The project name on a session card: its own colour so the eye lands
-    /// on it first. Follows the theme's link/action colour until themes
-    /// grow a slot of their own for it.
-    static var sessionProject: Color { link }
+    static var sessionProject: Color { Color(hex: palette.sessionProject ?? palette.link ?? palette.action) }
+    static var sessionTitle: Color { Color(hex: palette.sessionTitle ?? palette.secondary) }
+    static var sessionMeta: Color { Color(hex: palette.sessionMeta ?? palette.muted) }
+    static var stateWorking: Color { Color(hex: palette.stateWorking ?? palette.action) }
+    static var stateWaiting: Color { Color(hex: palette.stateWaiting ?? 0xE0BC7F) }
+    static var stateDone: Color { Color(hex: palette.stateDone ?? 0x8AC8AC) }
     static var lavender: Color { accent }
 
     static let border = Color.white.opacity(0.07)

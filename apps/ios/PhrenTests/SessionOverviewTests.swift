@@ -83,6 +83,31 @@ final class SessionOverviewTests: XCTestCase {
         run.cancel(); await run.value
     }
 
+    func testFocusFilterScopesGroupsToItsComputer() async throws {
+        let first = try host("Mac"), second = try host("Work")
+        let working = try snapshot("working")
+        let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in working } }
+        let run = Task { await model.run(hosts: [first, second]) }
+        await eventually { model.connectedCount(at: .now) == 2 }
+        let filter = AgentFocusFilter(computerID: second.id, storeID: nil, label: "Work")
+        let result = model.groups(at: .now, query: "", preferences: nil, projects: [], focusFilter: filter)
+        XCTAssertEqual(result.flatMap(\.sessions).map(\.host.id), [second.id])
+        run.cancel(); await run.value
+    }
+
+    func testFocusFilterUsesTheMappedStoreWhenRequested() throws {
+        let computer = try host("Work")
+        let snapshot = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w","label":"Workspace","children":[{"id":"t","label":"Agent","agent":"codex","cwd":"/work/phone"}]}]}"#.utf8))
+        let session = try XCTUnwrap(snapshot.sessions(on: computer).first)
+        var data = try LiveSessionPreferences.saving(computer, in: Data())
+        data = try LiveSessionPreferences.assigning(hostID: computer.id, directory: "/work/phone",
+                                                     storeID: "work/brain", project: "phone", in: data)
+        let preferences = try LiveSessionPreferences.read(data)
+        let projects = [SessionProject(storeID: "work/brain", name: "phone")]
+        XCTAssertTrue(AgentFocusFilter(computerID: nil, storeID: "work/brain", label: "Work").includes(session, preferences: preferences, projects: projects))
+        XCTAssertFalse(AgentFocusFilter(computerID: nil, storeID: "personal/brain", label: "Personal").includes(session, preferences: preferences, projects: projects))
+    }
+
     func testDoneSitsAboveIdleAndNewestChangeComesFirstWithinAGroup() async throws {
         let mac = try host("Mac")
         let workspaces = try LiveWorkspaces.read(Data("""

@@ -48,4 +48,24 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(reloaded.name, "Charcoal")
         XCTAssertEqual(PhrenAppearance(defaults: defaults).customThemes, [second])
     }
+
+    func testOlderCustomThemeMissingSessionSlotsUsesPaletteFallbacks() throws {
+        let suite = "phren.appearance-test.\(UUID())", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = PhrenCustomTheme(name: "Legacy colors", palette: PhrenAppearanceStyle.slate.palette)
+        var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as! [String: Any]
+        var palette = object["palette"] as! [String: Any]
+        for key in ["sessionProject", "sessionTitle", "sessionMeta", "stateWorking", "stateWaiting", "stateDone"] { palette.removeValue(forKey: key) }
+        object["palette"] = palette
+        defaults.set(try JSONSerialization.data(withJSONObject: ["schemaVersion": 2, "themes": [object]]),
+                     forKey: PhrenAppearance.customStorageKey)
+        let loaded = try XCTUnwrap(PhrenAppearance(defaults: defaults).customThemes.first?.palette)
+        XCTAssertNil(loaded.sessionProject)
+        XCTAssertEqual(ThemeColorField.sessionProject.value(in: loaded), loaded.link ?? loaded.action)
+        XCTAssertEqual(ThemeColorField.sessionTitle.value(in: loaded), loaded.secondary)
+        XCTAssertEqual(ThemeColorField.sessionMeta.value(in: loaded), loaded.muted)
+        XCTAssertEqual(ThemeColorField.stateWorking.value(in: loaded), loaded.action)
+        XCTAssertEqual(ThemeColorField.stateWaiting.value(in: loaded), 0xE0BC7F)
+        XCTAssertEqual(ThemeColorField.stateDone.value(in: loaded), 0x8AC8AC)
+    }
 }

@@ -10,6 +10,12 @@ number counts up on its own.
 
 ### New
 
+- Build richer Shortcuts with typed session status, bounded transcript text,
+  message-and-wait replies, and a Start Agent Session action.
+- Filter live sessions by computer or phren store from a Focus, with suggested
+  filters and a clear control on the Agents screen.
+- Session cards now expose project, title, metadata, working, waiting, and done
+  colors in custom themes while older saved themes keep their existing look.
 - Chat folds three or more consecutive file searches and other read-only
   commands into one expandable row, while keeping every original tool card.
 - Background agent commands stay visible above the composer with their

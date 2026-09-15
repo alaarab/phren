@@ -27,6 +27,7 @@ enum UITestFixtures {
         let defaults = AppRuntime.defaults
         defaults.removeObject(forKey: AgentLaunch.pendingKey)
         defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
+        defaults.removeObject(forKey: AgentFocusFilterStore.key)
         if arguments.contains("--session-pins-reset"), let saved = defaults.data(forKey: preferencesKey) {
             var data = saved
             for id in try LiveSessionPreferences.read(saved).pinnedSessions {

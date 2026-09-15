@@ -15,6 +15,7 @@ struct LiveSessionsView: View {
     @State private var sessionOpen: SessionOpen?
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
+    @State private var focusFilter: AgentFocusFilter?
     private struct SessionOpen: Identifiable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
@@ -117,6 +118,12 @@ struct LiveSessionsView: View {
         }
         .onAppear { if IntegrationSettings.enabled(IntegrationSettings.agentsKeepScreenOnKey, default: false) { UIApplication.shared.isIdleTimerDisabled = true } }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .task(id: scenePhase) {
+            if scenePhase == .active { focusFilter = await AgentFocusFilterStore.refreshFromSystem() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AgentFocusFilterStore.changed)) { _ in
+            focusFilter = AgentFocusFilterStore.load()
+        }
         .refreshable { refreshID = UUID() }
         .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
         .sheet(item: $selected) { selection in
@@ -157,15 +164,25 @@ struct LiveSessionsView: View {
     /// a row's worth of space above and below a single caption.
     private func caption(at date: Date) -> some View {
         let connected = overview.connectedCount(at: date)
-        return Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
-                    : "Sessions across your computers · \(connected)/\(hosts.count) connected")
-            .font(.caption).foregroundStyle(PhrenTheme.textMuted).textCase(nil)
-            .accessibilityIdentifier("agents-introduction")
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
+                 : "Sessions across your computers · \(connected)/\(hosts.count) connected")
+                .accessibilityIdentifier("agents-introduction")
+            if let focusFilter {
+                HStack(spacing: 5) {
+                    Text("Filtered by Focus · \(focusFilter.label)").accessibilityIdentifier("agents-focus-filter")
+                    Button("Clear Focus filter", systemImage: "xmark.circle.fill") {
+                        AgentFocusFilterStore.save(nil); self.focusFilter = nil
+                    }.labelStyle(.iconOnly).accessibilityIdentifier("agents-focus-clear")
+                }
+            }
+        }.font(.caption).foregroundStyle(PhrenTheme.textMuted).textCase(nil)
     }
 
     @ViewBuilder
     private func sessionSections(at date: Date) -> some View {
-        let groups = overview.groups(at: date, query: query, preferences: preferences, projects: model.sessionProjects)
+        let groups = overview.groups(at: date, query: query, preferences: preferences, projects: model.sessionProjects,
+                                     focusFilter: focusFilter)
         if groups.isEmpty {
             Section {
                 if hosts.isEmpty {

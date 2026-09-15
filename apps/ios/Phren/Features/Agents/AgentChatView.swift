@@ -11,6 +11,7 @@ struct AgentConversationLink<LabelContent: View>: View {
 
     var body: some View {
         Button {
+            PhrenAppShortcuts.donateOpen(session)
             if let onOpenInPhren { onOpenInPhren() }
             else { showingChat = true }
         } label: { label }
@@ -793,8 +794,10 @@ struct AgentChatView: View {
                             openCommandMenu()
                         } else {
                             let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
+                            let donatedMessage = model.draft
                             sendTask = Task {
                                 await model.send(session)
+                                if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(donatedMessage, to: session) }
                                 if isCommand, model.deliveryError == nil, let pane {
                                     commandDestination = .init(paneID: pane, menu: false)
                                     // /new, /clear and /resume may change the session ID.

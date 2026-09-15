@@ -5,6 +5,17 @@ final class AllSessionsTests: XCTestCase {
     private let linux = "A1000000-0000-0000-0000-000000000002"
 
     @MainActor
+    func testFocusFilterFixtureScopesSessionsAndCanBeCleared() {
+        let app = launch(extra: ["--focus-filter-fixture"])
+        XCTAssertTrue(app.staticTexts["agents-focus-filter"].waitForExistence(timeout: 10))
+        XCTAssertFalse(row(app, host: mac).exists)
+        XCTAssertTrue(row(app, host: linux).exists)
+        app.buttons["agents-focus-clear"].tap()
+        XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["agents-focus-filter"].exists)
+    }
+
+    @MainActor
     func testInitialOverviewRevealsTogetherAfterTheSlowerComputerResponds() {
         let app = launch(extra: ["--all-sessions-delayed"])
         let loading = app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch
@@ -254,3 +265,5 @@ final class AllSessionsTests: XCTestCase {
         screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
     }
 }
+
+

@@ -44,6 +44,52 @@ final class SessionStatusIntentTests: XCTestCase {
                        "Codex on phren at Mini is done.")
     }
 
+    func testTypedStatusMapsEveryShortcutField() throws {
+        let report = try report(state: .waiting, project: "phren", computer: "Mini", agent: "codex", line: "Tests need approval.")
+        let value = SessionStatusEntity(report: report)
+        XCTAssertEqual(value.id, report.entity.id)
+        XCTAssertEqual(value.state, "waiting")
+        XCTAssertEqual(value.project, "phren")
+        XCTAssertEqual(value.computer, "Mini")
+        XCTAssertEqual(value.harness, "Codex")
+        XCTAssertEqual(value.lastLine, "Tests need approval.")
+        XCTAssertEqual(value.branch, "feature/siri")
+    }
+
+    func testTranscriptTailBoundsCountToolOutputAndTotalText() throws {
+        var payloads: [[String: Any]] = (0..<205).map { index in
+            ["type": "message", "role": "assistant", "content": "line-\(index)"]
+        }
+        payloads.append(["type": "function_call_output", "output": String(repeating: "x", count: 2_000)])
+        let data = try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "entries": payloads.enumerated().map {
+            ["line": $0.offset, "raw": ["type": "response_item", "payload": $0.element]]
+        }])
+        let messages = try AgentChatTranscript.read(data, source: "codex").messages
+        let text = SessionTranscriptText.tail(messages, lines: 500)
+        XCTAssertFalse(text.contains("line-5\n"))
+        XCTAssertTrue(text.contains("line-6"))
+        XCTAssertTrue(text.contains("tool (Tool result): " + String(repeating: "x", count: SessionSummaryPrompt.maximumToolCharacters) + "…"))
+        XCTAssertLessThanOrEqual(text.count, SessionSummaryPrompt.maximumPromptCharacters)
+    }
+
+    func testMessageWaitLoopTimesOutWithFakeTranscriptSource() async {
+        actor FakeSource {
+            var polls = 0
+            func reply() -> String? { polls += 1; return nil }
+        }
+        let fake = FakeSource()
+        do {
+            _ = try await AgentReplyWaiter.wait(timeout: .milliseconds(25), pollInterval: .milliseconds(5)) {
+                await fake.reply()
+            }
+            XCTFail("Wait returned without a reply")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("timed out"))
+            let polls = await fake.polls
+            XCTAssertGreaterThan(polls, 1)
+        }
+    }
+
     func testShortAssistantLineIsSpokenAndLongOrMissingLineIsNot() throws {
         let short = try report(state: .done, line: "  Tests passed.\n Ready to merge.  ")
         XCTAssertEqual(SessionStatusText.dialog(for: short),

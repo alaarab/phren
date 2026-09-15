@@ -191,6 +191,36 @@ struct AgentSessionEntityQuery: EntityStringQuery {
 
 /// "Hey Siri, message phren on mini in Phren" — then say the message. It goes
 /// to the agent in that session exactly as a typed chat message would.
+enum AgentMessageService {
+    struct Delivery: Sendable {
+        let session: LiveAgentSession
+        let target: AgentChatTarget
+        let started: Bool
+    }
+
+    static func prepare(_ entity: AgentSessionEntity) async throws -> Delivery {
+        let resolved = try await AgentSessions.resolve(entity)
+        let live = resolved.session
+        let key = try DeviceSSHKey.load(live.host.id)
+        let panes = try await PhrenConnection.chatPanes(host: live.host, privateKey: key,
+                                                        workspaceID: live.workspaceID, tabID: live.tab.id)
+        guard let pane = panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil })
+                ?? panes.panes.first(where: { $0.agent != nil }) else {
+            throw PhrenKitError.validation("No agent is running in \(entity.workspace) on \(entity.computer) any more.")
+        }
+        return Delivery(session: live,
+                        target: try pane.target(hostID: live.host.id, workspaceID: live.workspaceID,
+                                                tabID: live.tab.id, muxID: live.host.muxID),
+                        started: resolved.started)
+    }
+
+    static func send(_ text: String, delivery: Delivery) async throws {
+        try await PhrenConnection.sendChat(host: delivery.session.host,
+                                           privateKey: DeviceSSHKey.load(delivery.session.host.id),
+                                           target: delivery.target, text: text)
+    }
+}
+
 struct MessageAgentIntent: AppIntent {
     static var title: LocalizedStringResource = "Message an Agent"
     static var description = IntentDescription(
@@ -206,22 +236,19 @@ struct MessageAgentIntent: AppIntent {
     @Parameter(title: "Message", requestValueDialog: "What should I tell it?")
     var message: String
 
+    init() {}
+    init(session: AgentSessionEntity, message: String) { self.session = session; self.message = message }
+
     static var parameterSummary: some ParameterSummary { Summary("Message \(\.$session): \(\.$message)") }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let text = SpeechSettings.apply(message.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !text.isEmpty else { throw $message.needsValueError("What should I tell it?") }
-        let resolved = try await AgentSessions.resolve(session)
-        let live = resolved.session
-        let key = try DeviceSSHKey.load(live.host.id)
-        let panes = try await PhrenConnection.chatPanes(host: live.host, privateKey: key, workspaceID: live.workspaceID, tabID: live.tab.id)
-        guard let pane = panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }) ?? panes.panes.first(where: { $0.agent != nil }) else {
-            return .result(dialog: "No agent is running in \(session.workspace) on \(session.computer) any more.")
-        }
-        let target = try pane.target(hostID: live.host.id, workspaceID: live.workspaceID, tabID: live.tab.id, muxID: live.host.muxID)
-        try await PhrenConnection.sendChat(host: live.host, privateKey: key, target: target, text: text)
-        let agent = (pane.agent ?? "the agent").capitalized
-        return .result(dialog: resolved.started
+        let delivery = try await AgentMessageService.prepare(session)
+        try await AgentMessageService.send(text, delivery: delivery)
+        if await IntentDonationGate.shared.shouldDonate("message|\(session.id)") { _ = try? await self.donate() }
+        let agent = delivery.target.providerName
+        return .result(dialog: delivery.started
             ? "Started \(agent) in \(session.workspace) on \(session.computer) and sent your message."
             : "Sent to \(agent) in \(session.workspace) on \(session.computer).")
     }

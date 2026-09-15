@@ -56,11 +56,13 @@ final class SessionOverviewMonitor {
         }
     }
 
-    func groups(at date: Date, query: String, preferences: LiveSessionPreferences?, projects: [SessionProject]) -> [Group] {
+    func groups(at date: Date, query: String, preferences: LiveSessionPreferences?, projects: [SessionProject],
+                focusFilter: AgentFocusFilter? = nil) -> [Group] {
         guard ready else { return [] }
         var live: [LiveAgentSession] = [], previous: [LiveAgentSession] = []
         for computer in computers {
             let sessions = (computer.monitor.snapshot?.sessions(on: computer.host) ?? []).filter { session in
+                guard focusFilter?.includes(session, preferences: preferences, projects: projects) != false else { return false }
                 let project = preferences?.projectMatch(hostID: computer.id, cwd: session.tab.cwd, projects: projects)
                 return session.matches(query, projectName: project?.project.name)
             }

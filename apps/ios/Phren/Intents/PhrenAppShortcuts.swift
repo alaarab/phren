@@ -79,6 +79,15 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             systemImageName: "play.circle"
         )
         AppShortcut(
+            intent: StartSessionIntent(),
+            phrases: [
+                "Start an agent for \(\.$project) in \(.applicationName)",
+                "Start an agent in \(.applicationName)",
+            ],
+            shortTitle: "Start Agent",
+            systemImageName: "play.rectangle"
+        )
+        AppShortcut(
             intent: SessionStatusIntent(),
             phrases: [
                 "What is \(.applicationName) doing",
@@ -159,5 +168,22 @@ extension PhrenAppShortcuts {
         guard projects != donatedProjects else { return }
         donatedProjects = projects
         updateAppShortcutParameters()
+    }
+
+    @MainActor
+    static func donateOpen(_ session: LiveAgentSession) {
+        let entity = AgentSessionEntity(session)
+        Task {
+            guard await IntentDonationGate.shared.shouldDonate("open-chat|\(entity.id)") else { return }
+            _ = try? await OpenAgentSessionIntent(target: entity).donate()
+        }
+    }
+
+    static func donateMessage(_ text: String, to session: LiveAgentSession) {
+        let entity = AgentSessionEntity(session)
+        Task {
+            guard await IntentDonationGate.shared.shouldDonate("message|\(entity.id)") else { return }
+            _ = try? await MessageAgentIntent(session: entity, message: text).donate()
+        }
     }
 }
