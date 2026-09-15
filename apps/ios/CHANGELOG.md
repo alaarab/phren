@@ -73,7 +73,10 @@ number counts up on its own.
 - Scrolling up in a chat loads a few earlier pages at a time again instead
   of the whole history; a long conversation no longer hangs on open.
 - Background jobs read as running until the agent's own completion notice
-  arrives, and finished ones leave the row after two minutes.
+  arrives, keep their real start and finish times, and leave the row two
+  minutes after finishing; a completion notice never draws as a bubble.
+- A conversation opens on a light first page (Phren Hook 0.2.15) so a big
+  one no longer freezes; scrolling up fetches fuller pages.
 - Closing a session from the list closes that session and the card leaves at
   once — swipe for a direct Close, hold for Close tab / Close workspace with a
   confirmation. Cards drop the redundant state text (the section already says

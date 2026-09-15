@@ -119,14 +119,15 @@ enum ChatBackgroundJobs {
     /// first saw it finished — the transcript carries no clock for either.
     static func parse(_ messages: [AgentChatMessage], firstSeen: [String: Date], finishedSeen: [String: Date] = [:], now: Date = .now) -> [ChatBackgroundJob] {
         var results: [String: AgentChatMessage] = [:]
-        var notifications: [String: (summary: String, status: String, output: String)] = [:]
+        var notifications: [String: (summary: String, status: String, output: String, at: Date?)] = [:]
         for message in messages where message.role == .tool {
             if message.isToolResult, let id = message.toolCallID { results[id] = message }
             if message.title == "Background notification",
                let id = tag("tool-use-id", in: message.text) {
                 notifications[id] = (tag("summary", in: message.text) ?? "Background command finished",
                                      tag("status", in: message.text) ?? "completed",
-                                     tag("output", in: message.text) ?? "")
+                                     tag("output", in: message.text) ?? "",
+                                     message.timestamp)
             }
         }
         return messages.compactMap { message in
@@ -147,13 +148,16 @@ enum ChatBackgroundJobs {
             let status = notification?.status.lowercased() ?? ""
             let finished = ["completed", "failed", "killed", "cancelled", "canceled", "stopped"].contains(status)
                 || (result != nil && !resultText.isEmpty && !resultLooksBackgrounded(resultText))
-            let finishedAt = finished ? (finishedSeen[id] ?? now) : nil
+            // The transcript's own clock first; the phone's first sighting
+            // only when the source stamps nothing.
+            let startedAt = message.timestamp ?? firstSeen[id] ?? now
+            let finishedAt = finished ? (notification?.at ?? result?.timestamp ?? finishedSeen[id] ?? now) : nil
             // Finished jobs linger long enough to be read, then leave.
             if let finishedAt, now.timeIntervalSince(finishedAt) > finishedLinger { return nil }
             return ChatBackgroundJob(id: id, title: summary.isEmpty ? "Background command" : summary,
                                      command: presentation.body, output: output,
                                      state: finished ? .finished(exitCode: code) : .running,
-                                     startedAt: firstSeen[id] ?? now, finishedAt: finishedAt)
+                                     startedAt: startedAt, finishedAt: finishedAt)
         }
     }
 

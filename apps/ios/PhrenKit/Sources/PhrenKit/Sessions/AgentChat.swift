@@ -107,6 +107,8 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// transcript's `blob` route addresses them.
     public var resultImages: [ImageRef] = []
     public var toolCallID: String? = nil
+    /// When the transcript row was written, where the source stamps one.
+    public var timestamp: Date? = nil
     public struct ImageRef: Hashable, Sendable {
         /// The message content block (Claude/phren: the tool_result; Codex: the output item).
         public let block: Int
@@ -200,8 +202,10 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 let id = "\(line):\(part.idIndex ?? index)"
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
-                messages.append(.init(id: id, line: line, role: part.role, title: part.title,
-                                      text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID))
+                var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
+                                               text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID)
+                message.timestamp = Self.timestamp(raw)
+                messages.append(message)
             }
         }
         return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
@@ -241,6 +245,24 @@ public struct AgentChatTranscript: Equatable, Sendable {
             if index == first { result.append(merged) } else if part.role != .user { result.append(part) }
         }
         return result
+    }
+    /// A user turn that is nothing but Claude Code's background completion
+    /// envelope (optionally inside a system-reminder wrapper).
+    static func isTaskNotification(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("<task-notification>"), trimmed.contains("<tool-use-id>") else { return false }
+        return trimmed.hasPrefix("<task-notification>") || trimmed.hasPrefix("<system-reminder>")
+    }
+    private static let isoTimestamp: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter
+    }()
+    private static let isoTimestampPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime]; return formatter
+    }()
+    static func timestamp(_ raw: [String: Any]) -> Date? {
+        if let value = raw["timestamp"] as? String { return isoTimestamp.date(from: value) ?? isoTimestampPlain.date(from: value) }
+        if let value = raw["timestamp"] as? Double { return Date(timeIntervalSince1970: value > 1e12 ? value / 1000 : value) }
+        return nil
     }
     /// Where the images sit inside a tool result's content array.
     private static func innerImages(_ content: Any?) -> [Int] {
@@ -358,6 +380,12 @@ public struct AgentChatTranscript: Equatable, Sendable {
               let message = raw["message"] as? [String: Any],
               let role = AgentChatMessage.Role(rawValue: message["role"] as? String ?? ""), role != .tool else { return [] }
         if let content = message["content"] as? String {
+            // Claude Code also records a background job's completion as a user
+            // turn wrapped in <task-notification>; that is the Background row's
+            // business, not a bubble of angle brackets.
+            if role == .user, Self.isTaskNotification(content) {
+                return [Part(role: .tool, title: "Background notification", text: content)]
+            }
             guard content.isEmpty || maximumParts > 0 else { throw LimitError.tooManyMessages }
             return [Part(role: role, text: content)]
         }
@@ -385,6 +413,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
             switch block["type"] as? String {
             case "text":
                 guard let text = block["text"] as? String, !text.isEmpty else { return nil }
+                if role == .user, Self.isTaskNotification(text) {
+                    return Part(role: .tool, title: "Background notification", text: text, idIndex: idIndex)
+                }
                 return Part(role: role, text: text, idIndex: idIndex)
             case "image": return Part(role: role, text: "[Image attachment]", imageBlocks: [index], idIndex: idIndex)
             case "tool_use": return Part(role: .tool, title: block["name"] as? String ?? "Tool", text: readable(block["input"]), toolCallID: block["id"] as? String, idIndex: idIndex)

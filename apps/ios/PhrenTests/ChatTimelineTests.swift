@@ -69,6 +69,28 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertTrue(lingered.isEmpty, "Finished jobs leave the row after lingering")
     }
 
+    /// Claude Code also writes the completion as a user turn; that must feed
+    /// the jobs row, never draw as a bubble, and a job that finished long ago
+    /// (per the row's own timestamp) never appears at all.
+    func testNotificationUserTurnsFeedJobsNotBubblesAndOldJobsStayHidden() throws {
+        let notice = "<task-notification>\n<task-id>abc</task-id>\n<tool-use-id>bg-3</tool-use-id>\n<status>completed</status>\n<summary>Background command \"Watch deploy\" completed (exit code 0)</summary>\n</task-notification>"
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "timestamp": "2026-09-15T10:00:00.000Z", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-3", "name": "Bash", "input": ["command": "sleep 60", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "user", "timestamp": "2026-09-15T10:00:01.000Z", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-3", "content": "Command running in background with ID: abc"]]]]],
+            ["line": 2, "raw": ["type": "user", "timestamp": "2026-09-15T10:01:00.000Z", "message": ["role": "user", "content": notice]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        XCTAssertFalse(transcript.messages.contains { $0.role == .user }, "The notification is not a user bubble")
+        XCTAssertEqual(transcript.messages.last?.title, "Background notification")
+        let finishedAt = Date(timeIntervalSince1970: 1_789_466_460) // 2026-09-15T10:01:00Z
+        let soon = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:], now: finishedAt.addingTimeInterval(30))
+        XCTAssertEqual(soon.map(\.state), [.finished(exitCode: 0)])
+        XCTAssertEqual(soon.first?.startedAt, Date(timeIntervalSince1970: 1_789_466_400))
+        XCTAssertEqual(soon.first?.finishedAt, finishedAt)
+        let muchLater = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:], now: finishedAt.addingTimeInterval(3_600))
+        XCTAssertTrue(muchLater.isEmpty, "An hour-old job does not reappear when the chat is opened")
+    }
+
     func testBackgroundJobStaysRunningWithoutNewHookNotification() throws {
         let messages = try read([["type": "function_call", "call_id": "bg-old", "name": "exec_command",
                                   "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]])
