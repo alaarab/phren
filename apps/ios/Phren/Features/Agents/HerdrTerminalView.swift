@@ -23,12 +23,16 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     private var commandMenuOpened = false
     private var socket: HerdrTerminalSocket?
     private var writes: Task<Void, Never>?
+    private let resize = TerminalResizeCoordinator()
     private var generation = UUID()
     private var connectionID = UUID()
     override init() {
         super.init()
         terminal.terminalDelegate = self
         terminal.configureTouchInput()
+        terminal.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        terminal.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        terminal.onBoundsChanged = { [weak self] in self?.updateTerminalSize() }
         let defaults = AppRuntime.defaults
         // Gesture fixtures always begin at a known size; production restores
         // the user's choice across terminals and app launches.
@@ -66,7 +70,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         let run = UUID(); generation = run
         connected = false; reconnecting = false; error = nil
         defer {
-            if generation == run { connected = false; reconnecting = false; self.socket = nil; writes?.cancel(); _ = terminal.resignFirstResponder() }
+            if generation == run { resize.detach(); connected = false; reconnecting = false; self.socket = nil; writes?.cancel(); _ = terminal.resignFirstResponder() }
         }
         do {
             #if DEBUG && targetEnvironment(simulator)
@@ -134,6 +138,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             while !Task.isCancelled {
                 let socket = HerdrTerminalSocket(); self.socket = socket
                 connectionID = UUID()
+                terminal.layoutIfNeeded()
                 var first = true
                 do {
                     for try await bytes in PhrenConnection.herdrTerminal(host: host, privateKey: key, socket: socket,
@@ -144,6 +149,8 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                             if receivedBefore { terminal.getTerminal().resetToInitialState() }
                             first = false; receivedBefore = true
                             recovery.connected(at: ProcessInfo.processInfo.systemUptime)
+                            updateTerminalSize()
+                            resize.attach { size in try await socket.resize(columns: size.columns, rows: size.rows) }
                         }
                         terminal.feed(byteArray: ArraySlice(bytes))
                         // @Observable notifies on every set, changed or not; the
@@ -162,6 +169,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                     throw LiveConnectionError.disconnected
                 } catch {
                     guard !Task.isCancelled, generation == run else { return }
+                    resize.detach()
                     connected = false; writes?.cancel(); writes = nil; self.socket = nil
                     guard let delay = recovery.delay(after: error, now: ProcessInfo.processInfo.systemUptime) else { throw error }
                     reconnecting = true
@@ -203,8 +211,10 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             return
         }
         #endif
-        guard connected, let socket else { return }
-        Task { try? await socket.resize(columns: newCols, rows: newRows) }
+        resize.update(columns: newCols, rows: newRows)
+    }
+    private func updateTerminalSize() {
+        sizeChanged(source: terminal, newCols: terminal.getTerminal().cols, newRows: terminal.getTerminal().rows)
     }
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         input(String(decoding: data, as: UTF8.self))
@@ -260,6 +270,10 @@ private struct HerdrTerminalSurface: UIViewRepresentable {
     let model: HerdrTerminalModel
     func makeUIView(context: Context) -> TerminalView { model.terminal }
     func updateUIView(_ view: TerminalView, context: Context) { view.isUserInteractionEnabled = model.connected }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TerminalView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height, width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: width, height: height)
+    }
 }
 
 struct HerdrTerminalView: View {
@@ -299,7 +313,7 @@ struct HerdrTerminalView: View {
                 Label(error, systemImage: "wifi.exclamationmark").font(.caption).foregroundStyle(PhrenTheme.warning).padding(.horizontal, 12).padding(.bottom, 8)
             }
             if currentHost != host { Text("Connection settings changed. Reopen Herdr from the computer list.").font(.footnote).padding() }
-            HerdrTerminalSurface(model: model).padding(.horizontal, 4)
+            HerdrTerminalSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 4)
             if !toolbarHidden {
                 TerminalControls(terminal: model.terminal, hostID: host.id,
                                  source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,

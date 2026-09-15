@@ -2,6 +2,33 @@ import XCTest
 
 final class TerminalInteractionTests: XCTestCase {
     @MainActor
+    func testTerminalGridFillsViewportAfterRotationAndKeyboardChanges() throws {
+        let app = launch("--terminal-controls-fixture")
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let terminal = app.descendants(matching: .any).matching(identifier: "herdr-terminal").firstMatch
+        func assertWidth(file: StaticString = #filePath, line: UInt = #line) throws {
+            let grid = try state(app)
+            XCTAssertGreaterThan(grid.columns, 0, file: file, line: line)
+            XCTAssertEqual(Double(grid.columns) * grid.cellWidth, terminal.frame.width,
+                           accuracy: grid.cellWidth + 2, file: file, line: line)
+        }
+        try assertWidth()
+        let portrait = try state(app)
+        // The app is portrait-only on iPhone, so a rotation request must
+        // leave the grid exactly as it was — still filling the width.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        try assertWidth()
+        XCTAssertEqual(try state(app).columns, portrait.columns)
+        XCUIDevice.shared.orientation = .portrait
+        try assertWidth()
+        app.buttons["Toggle terminal keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        try assertWidth()
+        XCTAssertLessThan(try state(app).rows, portrait.rows)
+        capture(app, "Terminal fills the width with the keyboard open")
+    }
+
+    @MainActor
     func testAgentsToolbarEntryOpensWorkspaceDrawer() {
         let app = launch("--terminal-controls-fixture")
         let agents = app.buttons.matching(NSPredicate(format: "identifier == %@", "terminal-control:agents")).firstMatch

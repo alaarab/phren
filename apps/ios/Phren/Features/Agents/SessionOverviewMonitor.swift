@@ -10,7 +10,7 @@ final class SessionOverviewMonitor {
         let monitor: LiveHostMonitor
         var id: UUID { host.id }
     }
-    struct Group: Identifiable, Equatable {
+    struct Group: Codable, Identifiable, Equatable {
         let id: String
         let title: String
         let sessions: [LiveAgentSession]
@@ -25,7 +25,7 @@ final class SessionOverviewMonitor {
         var metadataReady = true
         var memoryConnected = true
     }
-    struct ComputerRow: Identifiable, Equatable {
+    struct ComputerRow: Codable, Identifiable, Equatable {
         let host: LiveHost
         let connecting: Bool
         let fresh: Bool
@@ -35,7 +35,7 @@ final class SessionOverviewMonitor {
     }
     /// One value is published for the entire screen: header, groups, resolved
     /// projects/pins and computer rows can never come from different refreshes.
-    struct Screen: Equatable {
+    struct Screen: Codable, Equatable {
         var groups: [Group] = []
         var computers: [ComputerRow] = []
         var projects: [LiveAgentSession.ID: String] = [:]
@@ -61,17 +61,20 @@ final class SessionOverviewMonitor {
     @ObservationIgnored private var cachedGroups: (key: GroupCacheKey, value: [Group])?
     @ObservationIgnored private(set) var groupComputationCount = 0
     @ObservationIgnored private(set) var lastGroupDurationMilliseconds = 0.0
+    @ObservationIgnored private let diskCache: SessionOverviewDiskCache?
+    @ObservationIgnored private var refreshingCachedScreen = false
     @ObservationIgnored private let initialWait: Duration
     @ObservationIgnored private let makeMonitor: @MainActor () -> LiveHostMonitor
 
-    init(initialWait: Duration = .seconds(8), makeMonitor: @escaping @MainActor () -> LiveHostMonitor = { LiveHostMonitor() }) {
-        self.initialWait = initialWait; self.makeMonitor = makeMonitor
+    init(initialWait: Duration = .seconds(8), diskCache: SessionOverviewDiskCache? = nil, makeMonitor: @escaping @MainActor () -> LiveHostMonitor = { LiveHostMonitor() }) {
+        self.initialWait = initialWait; self.diskCache = diskCache; self.makeMonitor = makeMonitor
     }
 
     /// The one overview the app keeps live: the Agents list drives it and
     /// the agent drawer reads it, so the drawer opens on what is already
     /// known instead of fetching every computer again.
-    static let shared = SessionOverviewMonitor()
+    static let shared = SessionOverviewMonitor(diskCache: AppRuntime.isUITesting
+        && !ProcessInfo.processInfo.arguments.contains("--overview-disk-cache") ? nil : .shared)
     @ObservationIgnored private var ownedRun: Task<Void, Never>?
     @ObservationIgnored private var ownedHosts: [LiveHost] = []
 
@@ -81,7 +84,6 @@ final class SessionOverviewMonitor {
         if let ownedRun, !ownedRun.isCancelled, ownedHosts == hosts { return }
         ownedRun?.cancel()
         ownedHosts = hosts
-        guard !hosts.isEmpty else { ownedRun = nil; return }
         ownedRun = Task { [weak self] in await self?.run(hosts: hosts) }
     }
     func stopRunning() {
@@ -92,20 +94,41 @@ final class SessionOverviewMonitor {
         guard !Task.isCancelled else { return }
         let run = UUID(); generation = run
         let identity = hosts.sorted { $0.id.uuidString < $1.id.uuidString }
-        if latchedHosts != identity || initialDeadline == nil {
+        let cold = latchedHosts != identity || initialDeadline == nil
+        if cold {
             latchedHosts = identity
             ready = false
             screen = Screen()
+            refreshingCachedScreen = false
             listRelayoutsAfterReady = 0
             initialDeadline = .now.advanced(by: initialWait)
         }
         computers = hosts.map { host in
             computers.first(where: { $0.host == host }) ?? Computer(host: host, monitor: makeMonitor())
         }
+        if cold, let diskCache {
+            #if DEBUG && targetEnvironment(simulator)
+            await seedCacheFixture(diskCache, hosts: hosts)
+            #endif
+            let restored = await diskCache.load(hosts: hosts, preferences: configuration.preferences,
+                query: configuration.query, focusFilter: configuration.focusFilter)
+            guard generation == run, !Task.isCancelled else { return }
+            if let restored {
+                for computer in computers {
+                    let saved = restored.hosts.first { $0.host == computer.host }
+                    computer.monitor.snapshot = saved?.snapshot
+                    computer.monitor.lastUpdated = saved?.lastUpdated
+                    computer.monitor.message = restored.screen.computers.first { $0.id == computer.id }?.message
+                }
+                screen = restored.screen
+                ready = true
+                refreshingCachedScreen = true
+            }
+        }
         for computer in computers {
             computer.monitor.onSnapshotChanged = { [weak self] in self?.schedulePublication() }
         }
-        pending = Set(computers.filter { $0.monitor.snapshot == nil && $0.monitor.message == nil }.map(\.id))
+        pending = Set(computers.filter { refreshingCachedScreen || ($0.monitor.snapshot == nil && $0.monitor.message == nil) }.map(\.id))
         revealIfPossible()
         // Bound the initial reveal even when a transport cannot respond. A
         // pending computer is shown as connecting, without hiding healthy ones.
@@ -123,7 +146,7 @@ final class SessionOverviewMonitor {
                 if current != screen.computers.map(\.fresh) { publish() }
             }
         }
-        defer { deadline.cancel(); freshness.cancel(); publication?.cancel() }
+        defer { deadline.cancel(); freshness.cancel(); if generation == run { publication?.cancel() } }
         await withTaskGroup(of: Void.self) { group in
             for computer in computers {
                 group.addTask {
@@ -140,18 +163,20 @@ final class SessionOverviewMonitor {
     func configure(_ value: Configuration) {
         guard configuration != value else { return }
         configuration = value
-        if ready { publish() } else { revealIfPossible() }
+        if ready && !refreshingCachedScreen { publish() } else { revealIfPossible() }
     }
 
     private func revealIfPossible(deadlineReached: Bool = false) {
-        guard initialDeadline != nil, !ready else { return }
+        guard initialDeadline != nil, !ready || refreshingCachedScreen else { return }
         guard deadlineReached || (pending.isEmpty && configuration.metadataReady) else { return }
+        let first = !ready
+        refreshingCachedScreen = false
         ready = true
-        publish(first: true)
+        publish(first: first)
     }
 
     private func schedulePublication() {
-        guard ready else { return }
+        guard ready, !refreshingCachedScreen else { return }
         publication?.cancel()
         publication = Task {
             do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
@@ -160,7 +185,7 @@ final class SessionOverviewMonitor {
     }
 
     private func publish(first: Bool = false) {
-        guard ready else { return }
+        guard ready, !refreshingCachedScreen else { return }
         let started = CFAbsoluteTimeGetCurrent(), date = Date.now
         let groups = groups(at: date, query: configuration.query, preferences: configuration.preferences,
                             projects: configuration.projects, focusFilter: configuration.focusFilter)
@@ -175,7 +200,14 @@ final class SessionOverviewMonitor {
                 cwd: session.tab.cwd, projects: configuration.projects)?.project.name
             if configuration.preferences?.isPinned(session.id) == true { value.pinned.insert(session.id) }
         }
-        guard first || value != screen else { return }
+        let changed = first || value != screen
+        if let diskCache {
+            let record = SessionOverviewDiskCache.Record(savedAt: date, hosts: computers.map {
+                .init(host: $0.host, snapshot: $0.monitor.snapshot, lastUpdated: $0.monitor.lastUpdated)
+            }, screen: value, preferences: configuration.preferences)
+            Task { await diskCache.save(record, force: changed) }
+        }
+        guard changed else { return }
         screen = value
         if !first { listRelayoutsAfterReady += 1 }
         #if DEBUG

@@ -5,6 +5,15 @@ import PhrenLive
 
 @MainActor
 final class SessionOverviewTests: XCTestCase {
+    func testEmptyHostsCompleteTheSharedDrawerLoad() async throws {
+        let model = SessionOverviewMonitor()
+        model.ensureRunning(hosts: [])
+        await eventually { model.ready }
+        XCTAssertTrue(model.screen.groups.isEmpty)
+        XCTAssertTrue(model.screen.computers.isEmpty)
+        model.stopRunning()
+    }
+
     func testTimeoutRevealStaysLatchedAcrossRestartWithUnansweredHost() async throws {
         let computer = try host("Offline")
         let model = SessionOverviewMonitor(initialWait: .milliseconds(30)) {
@@ -66,8 +75,8 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertEqual(model.connectedCount(at: .now), 1)
         XCTAssertEqual(groups(model).flatMap(\.sessions).map(\.host.id), [fast.id])
         run.cancel(); await run.value
-        XCTAssertEqual(model.connectedCount(at: .now), 0)
-        XCTAssertEqual(groups(model).map(\.title), ["Last seen"])
+        XCTAssertEqual(model.connectedCount(at: .now), 1, "Backgrounding preserves a recent successful snapshot")
+        XCTAssertEqual(groups(model).map(\.title), ["Working"])
     }
 
     func testFirstRefreshRevealsAllHostsAtOnceAndCachedReturnDoesNotFlashLoading() async throws {
@@ -235,6 +244,7 @@ final class SessionOverviewTests: XCTestCase {
         failSecond = true
         await eventually { model.computers.first { $0.id == second.id }?.monitor.message != nil }
 
+        model.computers.first { $0.id == second.id }?.monitor.lastUpdated = .now.addingTimeInterval(-91)
         let pinned = groups(model, preferences: preferences)
         XCTAssertEqual(pinned.map(\.title), ["Pinned"])
         XCTAssertEqual(Set(pinned.flatMap(\.sessions).map(\.id)), [liveSession.id, offlineSession.id])
@@ -265,6 +275,8 @@ final class SessionOverviewTests: XCTestCase {
         await eventually { model.connectedCount(at: .now) == 2 }
         failFirst = true
         await eventually { model.computers[0].monitor.message != nil }
+        XCTAssertEqual(model.connectedCount(at: .now), 2, "A transient failure has a grace period")
+        model.computers[0].monitor.lastUpdated = .now.addingTimeInterval(-91)
         XCTAssertEqual(groups(model).map(\.title), ["Working", "Last seen"])
         XCTAssertEqual(groups(model).last?.sessions.first?.host.id, first.id)
         XCTAssertEqual(model.connectedCount(at: .now), 1)

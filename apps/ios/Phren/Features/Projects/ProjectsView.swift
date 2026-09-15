@@ -32,8 +32,9 @@ struct ProjectsView: View {
                     Section("Explore") {
                         NavigationLink { GraphView() } label: {
                             PhrenMenuRow(title: "Memory graph", subtitle: "Explore how your knowledge connects",
-                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan)
+                                         icon: "circle.hexagongrid", color: PhrenTheme.cyan, compact: true)
                         }.accessibilityLabel("Memory graph")
+                        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     }
                     Section("Projects") {
                         ForEach(projects) { item in
@@ -62,23 +63,25 @@ struct ProjectsView: View {
                                     .labelStyle(PhrenMetadataLabelStyle())
                                     .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 2)
                             }
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .accessibilityIdentifier("project:\(item.storeId):\(item.project.name)")
                         }
                     }
                     Section("Agent setup") {
                         NavigationLink { LiveSessionsView() } label: {
                             PhrenMenuRow(title: "Live sessions", subtitle: "Pick up where your agents left off",
-                                         icon: "waveform.path")
+                                         icon: "waveform.path", compact: true)
                         }.accessibilityLabel("Live sessions")
                         NavigationLink { SkillsView() } label: {
-                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender)
+                            PhrenMenuRow(title: "Skills", icon: "wand.and.stars", color: PhrenTheme.lavender, compact: true)
                         }
                         NavigationLink { AgentsView() } label: {
-                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack")
+                            PhrenMenuRow(title: "Agent instructions", icon: "person.crop.rectangle.stack", compact: true)
                         }
                     }
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                     Section {
                         NavigationLink(value: MemoryMaintenanceRoute()) {
                             Label("Memory maintenance", systemImage: "wrench.and.screwdriver")

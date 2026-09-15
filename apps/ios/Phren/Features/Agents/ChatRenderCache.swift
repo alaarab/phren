@@ -7,7 +7,7 @@ enum ToolPresentationCache {
         let cache = NSCache<NSString, Box>(); cache.countLimit = 500; cache.totalCostLimit = 24 * 1_024 * 1_024; return cache
     }()
     static func value(_ message: AgentChatMessage) -> ToolPresentation {
-        let key = "\(message.id)|\(message.title ?? "")|\(message.text.hashValue)" as NSString
+        let key = message.renderKey as NSString
         if let cached = values.object(forKey: key) {
             ChatRenderCacheMetrics.record("tool", hit: true)
             return cached.value
@@ -15,7 +15,7 @@ enum ToolPresentationCache {
         ChatRenderCacheMetrics.record("tool", hit: false)
         let started = CFAbsoluteTimeGetCurrent()
         let value = ToolPresentation(title: message.title ?? "Tool", text: message.text)
-        values.setObject(Box(value), forKey: key, cost: message.text.utf8.count * 2)
+        values.setObject(Box(value), forKey: key, cost: message.textByteCount * 2)
         #if DEBUG
         if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
             print("[PhrenPerformance] parsed tool \(message.id): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
@@ -30,8 +30,8 @@ enum DiffDocumentCache {
     private static let values: NSCache<NSString, Box> = {
         let cache = NSCache<NSString, Box>(); cache.countLimit = 250; cache.totalCostLimit = 32 * 1_024 * 1_024; return cache
     }()
-    static func value(for patch: String) -> DiffDocument {
-        let key = "\(patch.utf8.count)|\(patch.hashValue)" as NSString
+    static func value(for patch: String, key suppliedKey: String? = nil) -> DiffDocument {
+        let key = (suppliedKey ?? "\(patch.utf8.count)|\(patch.hashValue)") as NSString
         if let cached = values.object(forKey: key) {
             ChatRenderCacheMetrics.record("diff", hit: true)
             return cached.value
@@ -57,7 +57,7 @@ enum ChatMessageDisplayCache {
 
     static func text(for message: AgentChatMessage, imagePaths: [String], hasImages: Bool, inlineImages: Bool) -> String {
         let paths = imagePaths.sorted()
-        let key = "\(message.id)|\(message.text.hashValue)|\(inlineImages)|\(hasImages)|\(paths.joined(separator: "|"))" as NSString
+        let key = "\(message.renderKey)|\(inlineImages)|\(hasImages)|\(paths.joined(separator: "|"))" as NSString
         if let cached = values.object(forKey: key) {
             ChatRenderCacheMetrics.record("message", hit: true)
             return cached as String

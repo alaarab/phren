@@ -22,11 +22,11 @@ struct CodeDiffView: View {
     /// scroller instead of stopping where the longest line ends.
     @State private var width: CGFloat = 0
     private let document: DiffDocument
-    init(patch: String, previewLineLimit: Int = 36, collapsible: Bool = false) {
+    init(patch: String, cacheKey: String? = nil, previewLineLimit: Int = 36, collapsible: Bool = false) {
         self.patch = patch
         self.previewLineLimit = previewLineLimit
         self.collapsible = collapsible
-        document = DiffDocumentCache.value(for: patch)
+        document = DiffDocumentCache.value(for: patch, key: cacheKey)
     }
     /// The file named in the patch header decides the colouring.
     private func language(_ diff: DiffDocument) -> SyntaxTokenizer.Language {

@@ -14,11 +14,14 @@ struct QueuedMessage: Identifiable, Equatable {
     let id = UUID()
     var text: String
     var attachments: [ChatAttachmentDraft]
+    var submittedAfterLine: Int? = nil
+    var submittedText: String? = nil
 }
 
 /// Queues survive switching agents within a chat, like drafts do.
 @MainActor enum AgentChatQueues {
     static var items: [String: [QueuedMessage]] = [:]
+    static var reconciledRows: [String: Set<String>] = [:]
 }
 
 @MainActor enum AgentChatDrafts {
@@ -67,10 +70,47 @@ final class AgentChatModel {
     var target: AgentChatTarget?
     var history = AgentChatHistory() {
         didSet {
-            if history.messages != oldValue.messages { timeline = ChatTimelineEntry.group(history.messages) }
+            if history.messages != oldValue.messages { prepareTranscript() }
         }
     }
     private(set) var timeline: [ChatTimelineEntry] = []
+    private(set) var timelineRevision = 0
+    private(set) var backgroundJobs: [ChatBackgroundJob] = []
+    private(set) var currentToolName: String?
+    private(set) var imagesByMessage: [String: [ChatAttachmentDraft]] = [:]
+    @ObservationIgnored private var preparation = ChatTranscriptPreparation()
+    @ObservationIgnored private var preparationTask: Task<Void, Never>?
+    @ObservationIgnored private var preparationID = UUID()
+
+    private func prepareTranscript() {
+        preparationTask?.cancel()
+        let id = UUID(); preparationID = id
+        let messages = history.messages
+        if messages.isEmpty {
+            preparation = .init(); timeline = []; backgroundJobs = []; currentToolName = nil
+            timelineRevision += 1; imagesByMessage = [:]; return
+        }
+        let previous = preparation
+        preparationTask = Task {
+            let value = await Task.detached(priority: .userInitiated) {
+                var value = previous; value.update(messages); return value
+            }.value
+            guard !Task.isCancelled, preparationID == id else { return }
+            preparation = value; timeline = value.entries; backgroundJobs = value.jobs
+            currentToolName = value.currentToolName; timelineRevision += 1
+            matchSentImages()
+        }
+    }
+    private func matchSentImages() {
+        var matches: [String: [ChatAttachmentDraft]] = [:]
+        if !sentImages.isEmpty {
+            for message in messages where message.role == .user {
+                let images = sentImages.filter { item in item.path.map { message.text.contains($0) } == true }
+                if !images.isEmpty { matches[message.id] = images }
+            }
+        }
+        imagesByMessage = matches
+    }
     var progress = AgentChatProgress()
     let reveal = ChatTextReveal()
     var animateReplies = true
@@ -105,21 +145,6 @@ final class AgentChatModel {
     var questionsSupported = true
     var progressUnavailable = false
     var messages: [AgentChatMessage] { history.messages }
-    /// The newest tool call that has no matching result yet. Providers expose
-    /// tool names in transcript rows, so the Live Activity can show one when
-    /// the current work is more specific than simply "Working".
-    var currentToolName: String? {
-        var completed: Set<String> = []
-        for message in messages.reversed() where message.role == .tool {
-            if message.isToolResult {
-                if let id = message.toolCallID { completed.insert(id) }
-            } else if !message.isChange,
-                      message.toolCallID.map({ !completed.contains($0) }) ?? true {
-                return message.title
-            }
-        }
-        return nil
-    }
     var hasMore: Bool { history.hasMore }
     var error: String?
     var deliveryError: String?
@@ -149,7 +174,7 @@ final class AgentChatModel {
     private var draftRevision: UInt64 = 0
     var draft = "" { didSet { if !restoringDraft, let target { AgentChatDrafts.text[target.id] = draft; persistDraft() } } }
     var attachments: [ChatAttachmentDraft] = [] { didSet { if !restoringDraft, let target { AgentChatDrafts.attachments[target.id] = attachments; persistDraft() } } }
-    var sentImages: [ChatAttachmentDraft] = []
+    var sentImages: [ChatAttachmentDraft] = [] { didSet { matchSentImages() } }
     /// Messages waiting for the agent to finish its turn; the first goes out
     /// the moment it does.
     var queue: [QueuedMessage] = [] { didSet { if let target, !restoringDraft { AgentChatQueues.items[target.id] = queue } } }
@@ -194,6 +219,7 @@ final class AgentChatModel {
             transcriptContext = .init(); statusBranch = nil
             connected = false; error = nil; deliveryError = nil
             sentImages = []; needsAnswer = false; approval = nil; question = nil; answeredQuestions = []
+            reconciledQueueRows = AgentChatQueues.reconciledRows[chosen.id] ?? []
             queue = AgentChatQueues.items[chosen.id] ?? []
         } catch { self.error = error.localizedDescription }
     }
@@ -324,7 +350,7 @@ final class AgentChatModel {
                     while !Task.isCancelled {
                         guard self.target == target, generation == run else { return }
                         let frame = try AgentChatFixture.transcript(target)
-                        if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty { accept(frame) }
+                        if frame.kind != .append || !frame.messages.isEmpty || !frame.progressEvents.isEmpty || !frame.queueEvents.isEmpty { accept(frame) }
                         try await Task.sleep(for: .milliseconds(500))
                     }
                     return
@@ -356,7 +382,22 @@ final class AgentChatModel {
         if !progressConnected, !frame.progressEvents.isEmpty { acceptProgress(frame) }
         acceptContext(frame)
         mergeHistory(frame); hasTranscript = true; connected = true; receivedAt = .now; error = nil; loading = false
+        reconcileHandedOffQueue()
         scheduleDrain()
+    }
+
+    @ObservationIgnored private var reconciledQueueRows: Set<String> = []
+    private func reconcileHandedOffQueue() {
+        guard !queue.isEmpty else { return }
+        var observed = messages.filter { $0.wasQueued && !reconciledQueueRows.contains($0.id) }
+        queue.removeAll { item in
+            guard let after = item.submittedAfterLine, let text = item.submittedText,
+                  let index = observed.firstIndex(where: { $0.line > after && $0.text == text }) else { return false }
+            reconciledQueueRows.insert(observed.remove(at: index).id)
+            return true
+        }
+        if reconciledQueueRows.count > 4_000 { reconciledQueueRows.formIntersection(messages.map(\.id)) }
+        if let target { AgentChatQueues.reconciledRows[target.id] = reconciledQueueRows }
     }
 
     /// A backlog replaces what the transcript said (the conversation was
@@ -481,6 +522,7 @@ final class AgentChatModel {
             #endif
             guard !Task.isCancelled, self.target == target else { return }
             mergeHistory(page)
+            await preparationTask?.value
         } catch is CancellationError {
         } catch {
             guard !Task.isCancelled, self.target == target else { return }
@@ -509,20 +551,25 @@ final class AgentChatModel {
     /// Delivers a queued message now, ahead of the agent finishing — the
     /// "steer" case. On failure the item stays queued with the error shown.
     func sendNow(_ item: QueuedMessage, _ session: LiveAgentSession) async {
-        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
-        let result = await deliver(item.text, attachments: queue[index].attachments, session: session)
+        guard !sending, connected, let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
+        let result = await deliver(item.text, attachments: queue[index].attachments, session: session) { text in
+            if self.target?.source == "claude", let index = self.queue.firstIndex(where: { $0.id == item.id }) {
+                self.queue[index].submittedAfterLine = self.history.totalLines - 1
+                self.queue[index].submittedText = text
+            }
+        }
         guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
         if result.delivered { queue.remove(at: index) } else { queue[index].attachments = result.attachments }
         scheduleDrain()
     }
 
     func remove(_ item: QueuedMessage) {
-        queue.removeAll { $0.id == item.id }
+        queue.removeAll { $0.id == item.id && $0.submittedAfterLine == nil }
     }
 
     /// Pulls a queued message back into the composer to change it.
     func edit(_ item: QueuedMessage) {
-        guard let index = queue.firstIndex(where: { $0.id == item.id }) else { return }
+        guard let index = queue.firstIndex(where: { $0.id == item.id }), queue[index].submittedAfterLine == nil else { return }
         let item = queue.remove(at: index)
         draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? item.text : draft + "\n" + item.text
         attachments += item.attachments.filter { queued in !attachments.contains { $0.id == queued.id } }
@@ -532,7 +579,7 @@ final class AgentChatModel {
     /// status stream and the transcript both report the turn ending, and a
     /// reply's last frames arrive a beat after the status flips.
     private func scheduleDrain() {
-        guard !queue.isEmpty, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
+        guard let next = queue.first, next.submittedAfterLine == nil, !isBusy, !sending, connected, drainTask == nil, let session = lastSession else { return }
         drainTask = Task { @MainActor [weak self] in
             defer { self?.drainTask = nil }
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
@@ -550,9 +597,9 @@ final class AgentChatModel {
         }
         lastSession = session
         let submitted = draft, items = attachments
-        // While the agent works, a message waits its turn rather than
-        // interrupting — as in Claude Code. Slash commands go straight through.
-        if isBusy, !AgentSlashCommand.isCommand(submitted) {
+        // Claude Code owns its mid-turn queue through the normal prompt RPC.
+        // Other harnesses keep an unsent local draft until they finish.
+        if isBusy, target?.source != "claude", !AgentSlashCommand.isCommand(submitted) {
             queue.append(QueuedMessage(text: submitted, attachments: items))
             draft = ""; attachments = []; deliveryError = nil
             persistDraft(immediately: true)
@@ -571,7 +618,8 @@ final class AgentChatModel {
     /// Uploads any attachments that still lack a path, then delivers the
     /// prompt. Returns the attachments with the paths that did upload, so a
     /// retry never re-uploads; prompt delivery itself is never replayed.
-    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession) async -> (delivered: Bool, attachments: [ChatAttachmentDraft]) {
+    private func deliver(_ submitted: String, attachments items: [ChatAttachmentDraft], session: LiveAgentSession,
+                         submittedToAgent: (String) -> Void = { _ in }) async -> (delivered: Bool, attachments: [ChatAttachmentDraft]) {
         guard let target else { return (false, items) }
         var sent = items
         sending = true; deliveryError = nil
@@ -598,6 +646,7 @@ final class AgentChatModel {
         deliveryStatus = "Sending…"
         submittedAfterLine = max(0, history.totalLines) - 1
         sentAt = .now; awaitingReply = true
+        submittedToAgent(text)
         do {
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled { try await AgentChatFixture.send(target, text: text) }

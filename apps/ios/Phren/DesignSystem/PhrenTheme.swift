@@ -180,6 +180,7 @@ struct PhrenMenuRow: View {
     var subtitle: String? = nil
     let icon: String
     var color: Color = PhrenTheme.textSecondary
+    var compact = false
 
     var body: some View {
         HStack(spacing: PhrenTheme.Space.medium) {
@@ -197,7 +198,7 @@ struct PhrenMenuRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, compact ? 2 : 6)
     }
 }
 

@@ -7,7 +7,6 @@ struct LiveSessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var adding = false
-    @State private var visible = false
     @State private var lastRefreshID = UUID()
     @State private var query = ""
     @State private var refreshID = UUID()
@@ -46,13 +45,10 @@ struct LiveSessionsView: View {
         let screen = overview.screen
         Group {
             if !hosts.isEmpty && !overview.ready {
-                VStack(spacing: 14) {
-                    ProgressView().tint(PhrenTheme.cyan)
-                    Text("Connecting your sessions").font(.subheadline.weight(.medium))
-                    Text("Across \(hosts.count) \(hosts.count == 1 ? "computer" : "computers")")
-                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(PhrenTheme.bg).accessibilityIdentifier("agents-loading")
+                ProgressView().tint(PhrenTheme.cyan)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(PhrenTheme.bg).accessibilityLabel("Loading sessions")
+                    .accessibilityIdentifier("agents-loading")
                     .transition(.opacity)
             } else {
             PhrenList(plain: true) {
@@ -156,15 +152,13 @@ struct LiveSessionsView: View {
                                           draft: content.draft, attachments: content.attachments)
             }
         }
-        .onAppear { visible = true }
-        .onDisappear { visible = false }
         // The poll is a task this view owns, not a `.task` modifier: SwiftUI
         // cancels those when a pushed screen covers the list, which froze the
         // sessions behind an open chat. It runs while the app is active and
         // this list has appeared at least once; only leaving the foreground,
         // changing computers, or editing them restarts it.
         .onChange(of: PollID(hosts: hosts, active: scenePhase == .active && !adding, refresh: refreshID), initial: true) { _, id in
-            guard id.active, !hosts.isEmpty else { overview.stopRunning(); return }
+            guard id.active else { overview.stopRunning(); return }
             overview.configure(configuration)
             let currentHosts = hosts
             Task {
@@ -344,6 +338,11 @@ final class LiveHostMonitor {
                     ?? (error as? PhrenKitError)?.localizedDescription
                     ?? "Couldn't reach the computer. Check the address, Tailscale, SSH, and Phren Hook."
                 if case LiveConnectionError.untrustedHost(let key) = error { fingerprint = key }
+                #if DEBUG && targetEnvironment(simulator)
+                if AppRuntime.isUITesting && ProcessInfo.processInfo.arguments.contains("--all-sessions-offline") {
+                    lastUpdated = .now.addingTimeInterval(-91)
+                }
+                #endif
             }
             refreshing = false
             if first { first = false; onFirstRefresh?() }
@@ -624,7 +623,7 @@ private struct LiveHostView: View {
 
 extension LiveHostMonitor {
     func isFresh(at date: Date) -> Bool {
-        polling && message == nil && lastUpdated.map { date.timeIntervalSince($0) < 25 } == true
+        lastUpdated.map { date.timeIntervalSince($0) < 90 } == true
     }
 }
 

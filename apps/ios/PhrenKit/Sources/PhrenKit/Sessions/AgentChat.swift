@@ -102,6 +102,10 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public let role: Role
     public let title: String?
     public let text: String
+    /// Computed when a transcript part is decoded, never while a row scrolls.
+    /// Includes content, so an edited row of the same length invalidates caches.
+    public let renderKey: String
+    public let textByteCount: Int
     public var imageBlocks: [Int] = []
     /// Images inside a tool result — a Read of a screenshot, say — as the
     /// transcript's `blob` route addresses them.
@@ -109,6 +113,17 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public var toolCallID: String? = nil
     /// When the transcript row was written, where the source stamps one.
     public var timestamp: Date? = nil
+    public var wasQueued = false
+    public var isQueued = false
+    public var queueKey: String? = nil
+    init(id: String, line: Int, role: Role, title: String?, text: String,
+         imageBlocks: [Int] = [], resultImages: [ImageRef] = [], toolCallID: String? = nil) {
+        self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
+        self.imageBlocks = imageBlocks; self.resultImages = resultImages; self.toolCallID = toolCallID
+        localCommand = role == .user ? LocalCommand(text) : nil
+        textByteCount = text.utf8.count
+        renderKey = "\(id)|\(role.rawValue)|\(title ?? "")|\(textByteCount)|\(text.hashValue)"
+    }
     public struct ImageRef: Hashable, Sendable {
         /// The message content block (Claude/phren: the tool_result; Codex: the output item).
         public let block: Int
@@ -123,7 +138,7 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// A slash command or `!` shell line typed at Claude Code's own prompt,
     /// which the transcript records as a user turn wrapped in tags — shown
     /// as a system line rather than a bubble of angle brackets.
-    public var localCommand: LocalCommand? { role == .user ? LocalCommand(text) : nil }
+    public let localCommand: LocalCommand?
     public struct LocalCommand: Equatable, Sendable {
         public enum Kind: Sendable { case command, shell, output }
         public let kind: Kind
@@ -152,6 +167,11 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     }
 }
 
+public struct AgentQueueConsumption: Hashable, Sendable {
+    public let line: Int
+    public let key: String
+}
+
 /// Normalize only visible conversation content. Encrypted reasoning, system
 /// prompts, hook metadata, and terminal escape sequences are never rendered.
 public struct AgentChatTranscript: Equatable, Sendable {
@@ -163,6 +183,9 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
     }
     static let maximumMessages = 4_000
+    private static func validQueueKey(_ key: String) -> Bool {
+        key.utf8.count == 64 && key.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
     public let kind: Kind
     public let messages: [AgentChatMessage]
     public let hasMore: Bool
@@ -170,6 +193,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
     public let startLine: Int?
     public var questionEvents: [AgentQuestionEvent] = []
     public var progressEvents: [AgentChatProgressEvent] = []
+    public var queueEvents: [AgentQueueConsumption] = []
     /// What the newest rows say about the session itself: the model
     /// answering and the branch the agent was on.
     public var context = AgentSessionContext()
@@ -187,10 +211,15 @@ public struct AgentChatTranscript: Equatable, Sendable {
         var messages: [AgentChatMessage] = []
         var questionEvents: [AgentQuestionEvent] = []
         var progressEvents: [AgentChatProgressEvent] = []
+        var queueEvents: [AgentQueueConsumption] = []
         var context = AgentSessionContext()
         var seen: Set<String> = []
         for entry in entries {
             guard let line = entry["line"] as? Int, line >= 0, let raw = entry["raw"] as? [String: Any] else { continue }
+            if source == "claude", raw["type"] as? String == "phren_queue_consumed",
+               let key = raw["key"] as? String, Self.validQueueKey(key) {
+                queueEvents.append(.init(line: line, key: key)); continue
+            }
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
             var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
@@ -205,13 +234,17 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
                                                text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID)
                 message.timestamp = Self.timestamp(raw)
+                if source == "claude", part.role == .user, raw["phrenQueued"] as? Bool == true {
+                    message.wasQueued = true; message.isQueued = true
+                    message.queueKey = (raw["phrenQueueKey"] as? String).flatMap { Self.validQueueKey($0) ? $0 : nil }
+                }
                 messages.append(message)
             }
         }
         return Self(kind: kind, messages: messages.sorted { $0.line < $1.line }, hasMore: frame["hasMore"] as? Bool ?? false,
                     totalLines: frame["totalLines"] as? Int ?? 0,
                     startLine: frame["startLine"] as? Int ?? entries.compactMap { $0["line"] as? Int }.min(), questionEvents: questionEvents,
-                    progressEvents: progressEvents, context: context)
+                    progressEvents: progressEvents, queueEvents: queueEvents, context: context)
     }
 
     struct Part {

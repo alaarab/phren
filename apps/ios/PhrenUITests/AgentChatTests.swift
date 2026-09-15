@@ -2,6 +2,20 @@ import XCTest
 
 final class AgentChatTests: XCTestCase {
     @MainActor
+    func testHeavyTranscriptScrollingPerformance() {
+        let app = launch(extra: ["--chat-heavy"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-message:59:0").firstMatch.waitForExistence(timeout: 15))
+        let transcript = app.scrollViews["chat-transcript"]
+        let options = XCTMeasureOptions(); options.iterationCount = 3
+        measure(metrics: [XCTOSSignpostMetric.scrollingAndDecelerationMetric], options: options) {
+            for _ in 0..<4 { transcript.swipeDown(velocity: .fast) }
+            for _ in 0..<4 { transcript.swipeUp(velocity: .fast) }
+        }
+        capture(app, "Heavy transcript with fixed-height collapsed tools")
+    }
+
+    @MainActor
     func testChatPopsWithEdgeAndMiddleSwipeAndEscape() {
         let app = launch()
         let row = app.buttons["live-chat:w7:w7:t9"]
@@ -562,12 +576,13 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(read.waitForExistence(timeout: 3)); read.tap()
         XCTAssertTrue(app.descendants(matching: .any)["chat-historical-image"].firstMatch.waitForExistence(timeout: 8))
         read.tap()
-        // A python-heredoc edit shows what ran and, without opening the card,
-        // the files it changed on disk — folded to their title bars. Tap one
-        // for its preview, open it full screen, fold it again.
+        // A collapsed tool stays one fixed-height row. Opening it reveals
+        // the changed-file cards; each file can then expand or push its reader.
         let shell = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Shell")).firstMatch
         XCTAssertTrue(shell.waitForExistence(timeout: 3))
         XCTAssertTrue(shell.label.contains("Shell")); XCTAssertFalse(shell.label.contains("×"))
+        // Without opening the card, the files it changed on disk — folded to
+        // their title bars. Tap one for its preview, open it full screen, fold it again.
         let theme = app.buttons["chat-patch-file:Theme.swift"], findings = app.buttons["chat-patch-file:phone/FINDINGS.md"]
         XCTAssertTrue(theme.waitForExistence(timeout: 5)); XCTAssertTrue(findings.exists)
         let purple = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch
@@ -732,6 +747,7 @@ final class AgentChatTests: XCTestCase {
         app.buttons["chat-switch-agent"].tap()
         let linux = app.buttons["switch-session:\(linuxID)"]
         XCTAssertTrue(app.textFields["agent-drawer-search"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Finding your agents…"].exists, "The drawer reuses the revealed overview")
         app.segmentedControls["agent-drawer-order"].buttons["Recent"].tap()
         capture(app, "Recent sessions drawer")
         app.segmentedControls["agent-drawer-order"].buttons["List"].tap()
@@ -829,6 +845,25 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Keep it up"].waitForExistence(timeout: 8))
         XCTAssertFalse(queued.exists)
         XCTAssertFalse(error.exists)
+    }
+
+    @MainActor
+    func testClaudeSteeringAppearsAsAQueuedBubbleAndConsumptionClearsItsTag() {
+        let app = launch(extra: ["--chat-working", "--chat-claude-queue"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        composer.tap(); composer.typeText("Run the queued checks")
+        app.buttons["chat-queue"].tap()
+        XCTAssertTrue(app.staticTexts["Run the queued checks"].waitForExistence(timeout: 8))
+        let tag = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-tag:")).firstMatch
+        XCTAssertTrue(tag.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:")).firstMatch.exists)
+        capture(app, "Claude Code owns the queued instruction")
+        app.buttons["chat-stop"].tap()
+        XCTAssertTrue(app.staticTexts["Queued instructions consumed."].waitForExistence(timeout: 10))
+        XCTAssertFalse(tag.exists)
+        XCTAssertTrue(app.staticTexts["Run the queued checks"].exists)
     }
 
     @MainActor
@@ -975,5 +1010,6 @@ final class AgentChatTests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
+
 
 

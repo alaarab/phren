@@ -9,6 +9,7 @@ import UIKit
     static var enabled: Bool { AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--native-chat-fixture") }
     static var sent: [(String, String)] = []
     static var reads = 0
+    private static var heavyFrames: [String: AgentChatTranscript] = [:]
     static var hasReadTranscript = false
     static var sendAttempts = 0
     static var streamStarts: [String: Date] = [:]
@@ -52,7 +53,7 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : flag("--chat-claude-queue") ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
         if flag("--chat-multiple") {
@@ -63,6 +64,12 @@ import UIKit
     }
     static func transcript(_ target: AgentChatTarget) throws -> AgentChatTranscript {
         hasReadTranscript = true
+        if flag("--chat-heavy") {
+            if let cached = heavyFrames[target.source] { return cached }
+            let frame = try AgentChatTranscript.read(ChatHeavyFixture.data(source: target.source), source: target.source)
+            heavyFrames[target.source] = frame
+            return frame
+        }
         if flag("--chat-streaming") { return try streamingTranscript(target) }
         var entries: [[String: Any]] = []
         func append(_ role: String, _ text: String) {
@@ -165,10 +172,22 @@ import UIKit
         }
         if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
-        if stopped { append("assistant", "Turn stopped in the selected pane.") }
+        if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
         for (id, text) in sent where id == target.id {
-            append("user", text)
-            append("assistant", "Received in \(target.source) on \(target.paneID): \(text)")
+            if flag("--chat-claude-queue") {
+                let key = String(repeating: "a", count: 64)
+                entries.append(["line": entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": key,
+                    "message": ["role": "user", "content": text]]])
+            } else {
+                append("user", text)
+                append("assistant", "Received in \(target.source) on \(target.paneID): \(text)")
+            }
+        }
+        if flag("--chat-claude-queue"), stopped {
+            for (id, _) in sent where id == target.id {
+                entries.append(["line": entries.count, "raw": ["type": "phren_queue_consumed", "key": String(repeating: "a", count: 64)]])
+            }
+            append("assistant", "Queued instructions consumed.")
         }
         return try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": target.source,
                                                                                     "entries": entries, "startLine": flag("--chat-history") ? 20 : 0, "totalLines": (flag("--chat-history") ? 20 : 0) + entries.count, "hasMore": flag("--chat-history")]), source: target.source)

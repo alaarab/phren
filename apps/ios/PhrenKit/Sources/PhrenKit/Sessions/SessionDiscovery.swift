@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SessionProject: Hashable, Sendable {
+public struct SessionProject: Codable, Hashable, Sendable {
     public let storeID: String
     public let name: String
     public init(storeID: String, name: String) { self.storeID = storeID; self.name = name }
@@ -38,7 +38,7 @@ extension LiveSessionPreferences {
 
 /// The tab selected on a known computer. Its destination comes from the hook's
 /// workspace and (when needed) tab IDs, never the agent `sessionId` or label.
-public struct LiveAgentSession: Equatable, Hashable, Identifiable, Sendable {
+public struct LiveAgentSession: Codable, Equatable, Hashable, Identifiable, Sendable {
     public struct ID: Codable, Hashable, Sendable {
         public let hostID: UUID
         public let workspace: String

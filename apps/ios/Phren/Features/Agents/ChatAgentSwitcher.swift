@@ -11,7 +11,6 @@ struct ChatAgentSwitcher: View {
     let chooseSession: (LiveAgentSession) -> Void
     let close: () -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(AppModel.self) private var appModel
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     private var overview: SessionOverviewMonitor { .shared }
     @State private var query = ""
@@ -47,7 +46,9 @@ struct ChatAgentSwitcher: View {
                 Text("WORKSPACES").font(.caption2.weight(.semibold)).tracking(1)
                     .foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 12).padding(.top, 12)
                 if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) }.padding(12) }
-                AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, recent: recent, choose: chooseSession)
+                if overview.ready {
+                    AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, recent: recent, choose: chooseSession)
+                }
                 let hasSessions = overview.computers.contains { computer in
                     computer.monitor.snapshot?.sessions(on: computer.host).contains {
                         ($0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0) && $0.matches(query)

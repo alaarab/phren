@@ -2,8 +2,8 @@ import Foundation
 
 /// The Phren Hook v1 workspace contract. A child is a tab;
 /// it can aggregate several agent panes and is never claimed to be one agent.
-public struct LiveWorkspaces: Decodable, Equatable, Sendable {
-    public struct Tab: Decodable, Equatable, Sendable, Identifiable {
+public struct LiveWorkspaces: Codable, Equatable, Sendable {
+    public struct Tab: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
         public let title: String?
@@ -37,8 +37,12 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
             case reportedLastChangedAt = "lastChangedAt"
         }
 
-        private struct ActivityDate: Decodable, Equatable, Sendable {
+        private struct ActivityDate: Codable, Equatable, Sendable {
             let value: Date?
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(value?.formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+            }
             init(from decoder: Decoder) throws {
                 let raw = try? decoder.singleValueContainer().decode(String.self)
                 value = raw.flatMap {
@@ -48,8 +52,12 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
             }
         }
 
-        private struct ContextUsedPercent: Decodable, Equatable, Sendable {
+        private struct ContextUsedPercent: Codable, Equatable, Sendable {
             let value: Double?
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                try container.encode(value)
+            }
 
             init(from decoder: Decoder) throws {
                 let container = try decoder.singleValueContainer()
@@ -81,13 +89,13 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
         public var status: String { approvalPending == true ? "Permission needed" : activity.rawValue }
     }
-    public struct Group: Decodable, Equatable, Sendable, Identifiable {
+    public struct Group: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let label: String
         public let children: [Tab]
         init(id: String, label: String, children: [Tab]) { self.id = id; self.label = label; self.children = children }
     }
-    public struct Focus: Decodable, Equatable, Sendable {
+    public struct Focus: Codable, Equatable, Sendable {
         public let workspaceID: String
         public let tabID: String
         public let paneID: String

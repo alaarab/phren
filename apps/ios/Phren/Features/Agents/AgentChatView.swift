@@ -91,22 +91,17 @@ struct AgentChatView: View {
     @State private var fullDiff: ChatFullDiff?
     @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
-    @State private var bottomPosition: CGFloat = 0
+    @State private var atBottom = true
     @State private var nearHistoryTop = false
     /// Older pages pulled in without a scroll in between; a scroll resets it.
     @State private var historyChain = 0
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
-    @State private var backgroundFirstSeen: [String: Date] = [:]
-    @State private var backgroundFinishedSeen: [String: Date] = [:]
-    /// Advances while finished jobs linger so they can leave on time.
-    @State private var backgroundClock = Date.now
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
     // Recalculate when the keyboard changes the viewport as well as when the
     // transcript moves; either measurement can arrive first during layout.
-    private var atBottom: Bool { bottomPosition <= scrollHeight + 60 }
 
     /// Starts recognising into the composer after whatever is already typed.
     private func startDictation() {
@@ -220,14 +215,15 @@ struct AgentChatView: View {
                                    toolName: model.currentToolName)
     }
 
-    var body: some View {
+    var body: some View { ChatPerformance.measure("chat container") { content } }
+    private var content: some View {
         VStack(spacing: 0) {
             chatHeader
 
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        LazyVStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 12) {
                             if model.target == nil && !model.loading {
                                 Text("Choose an agent").font(.title2.weight(.semibold))
                                 ForEach(model.panes) { pane in
@@ -271,39 +267,10 @@ struct AgentChatView: View {
                                 })
                                 .accessibilityIdentifier("chat-history")
                             }
-                            ForEach(model.timeline) { entry in
-                                if entry.isReadRun {
-                                    ChatReadRun(messages: entry.messages, resultImages: { message in
-                                        AnyView(Group {
-                                            if let target = model.target {
-                                                ForEach(message.resultImages, id: \.self) { ref in
-                                                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner, active: active, preview: { previewImage = $0 })
-                                                }
-                                            }
-                                        })
-                                    }).id(entry.id)
-                                } else if entry.isActivity {
-                                    ChatToolActivity(messages: entry.messages, resultImages: { message in
-                                        AnyView(Group {
-                                            if let target = model.target {
-                                                ForEach(message.resultImages, id: \.self) { ref in
-                                                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner, active: active, preview: { previewImage = $0 })
-                                                }
-                                            }
-                                        })
-                                    }).equatable().id(entry.id)
-                                } else if let message = entry.messages.first {
-                                    ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
-                                        message.role == .user && item.path.map { message.text.contains($0) } == true
-                                    }, preview: { previewImage = $0 }, historical: {
-                                        if let target = model.target {
-                                            ForEach(message.imageBlocks, id: \.self) { block in
-                                                ChatHistoricalImage(session: session, target: target, line: message.line, block: block, active: active, preview: { previewImage = $0 })
-                                            }
-                                        }
-                                    }).id(message.id)
-                                }
-                            }
+                            ChatTranscriptRows(revision: model.timelineRevision, entries: model.timeline,
+                                               revealed: model.reveal.visible, revealRevision: model.reveal.revision,
+                                               images: model.imagesByMessage, session: session, target: model.target,
+                                               active: active, preview: { previewImage = $0 }).equatable()
                             if let prompt = model.question, model.needsAnswer, model.questionsSupported {
                                 ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { selections in
                                     sendTask = Task { await model.answer(session, question: prompt, selections: selections) }
@@ -348,10 +315,11 @@ struct AgentChatView: View {
                         }
                 })
                 .onPreferenceChange(ChatBottomPosition.self) { position in
-                    if abs(position - bottomPosition) > 0.5 { bottomPosition = position }
+                    let near = position <= scrollHeight + 60
+                    if near != atBottom { atBottom = near }
                 }
                 .overlay {
-                    if model.loading && model.messages.isEmpty {
+                    if (model.loading && model.messages.isEmpty) || (model.timeline.isEmpty && !model.messages.isEmpty) {
                         ProgressView()
                             .tint(PhrenTheme.chatNeutral)
                             .accessibilityLabel("Opening conversation")
@@ -375,7 +343,7 @@ struct AgentChatView: View {
                     historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
-                .onChange(of: model.messages.last?.id) { _, _ in
+                .onChange(of: model.timeline.last?.id) { _, _ in
                     if atBottom && !model.loadingHistory { withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
                 }
                 .onChange(of: model.reveal.revision) { _, _ in
@@ -393,11 +361,8 @@ struct AgentChatView: View {
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            let backgroundJobs = ChatBackgroundJobs.parse(model.messages, firstSeen: backgroundFirstSeen, finishedSeen: backgroundFinishedSeen, now: backgroundClock)
-            if !backgroundJobs.isEmpty {
-                ChatBackgroundJobsView(jobs: backgroundJobs)
-                    .padding(.horizontal, 12).padding(.vertical, 4)
-                    .accessibilityIdentifier("chat-background-jobs")
+            if !model.backgroundJobs.isEmpty {
+                ChatBackgroundJobsView(jobs: model.backgroundJobs)
             }
             // Between the transcript and the input, where Claude Code keeps
             // its queue; outside the lazy stack so the rows are always laid out.
@@ -453,21 +418,6 @@ struct AgentChatView: View {
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
-        .onChange(of: model.messages) { _, messages in
-            let now = Date.now
-            for id in ChatBackgroundJobs.backgroundIDs(messages) where backgroundFirstSeen[id] == nil { backgroundFirstSeen[id] = now }
-            for id in ChatBackgroundJobs.finishedIDs(messages, firstSeen: backgroundFirstSeen) where backgroundFinishedSeen[id] == nil { backgroundFinishedSeen[id] = now }
-            backgroundClock = now
-        }
-        .task(id: backgroundFinishedSeen.isEmpty) {
-            // Once something has finished, tick so it can leave the row after
-            // its linger; nothing to do while only running jobs exist.
-            guard !backgroundFinishedSeen.isEmpty else { return }
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
-                backgroundClock = .now
-            }
-        }
         .onChange(of: workingActivityObservation, initial: true) { _, value in
             Task {
                 await SessionWorkingActivityController.shared.observe(
@@ -596,7 +546,7 @@ struct AgentChatView: View {
               let line = model.history.startLine, line > 0, requestedHistoryLine != line else { return }
         if automatic { historyChain += 1 } else { historyChain = 0 }
         requestedHistoryLine = line
-        let anchor = ChatTimelineEntry.group(model.messages).first?.id
+        let anchor = model.timeline.first?.id
         let target = model.target
         historyTask = Task {
             await model.loadOlder(session)
@@ -608,7 +558,7 @@ struct AgentChatView: View {
             if let anchor {
                 // Older rows can fold the anchor into a read run under another
                 // id; scroll to whichever entry holds that message now.
-                let entries = ChatTimelineEntry.group(model.messages)
+                let entries = model.timeline
                 let row = entries.first { $0.id == anchor || $0.messages.contains { $0.id == anchor } }?.id ?? anchor
                 var transaction = Transaction(); transaction.disablesAnimations = true
                 withTransaction(transaction) { proxy.scrollTo(row, anchor: .top) }
@@ -903,6 +853,9 @@ struct AgentChatView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 0) {
+                        if item.submittedAfterLine != nil {
+                            Text("Awaiting confirmation in Claude Code").font(.caption2)
+                        } else {
                         Button { sendTask = Task { await model.sendNow(item, session) } } label: {
                             Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
@@ -913,6 +866,7 @@ struct AgentChatView: View {
                         Button { model.remove(item) } label: {
                             Image(systemName: "xmark").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Remove from queue").accessibilityIdentifier("chat-queued-remove:\(item.id)")
+                        }
                     }.font(.system(size: 15)).foregroundStyle(PhrenTheme.chatNeutral).buttonStyle(.plain)
                 }
                 .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
@@ -938,96 +892,6 @@ private struct ChatBottomPosition: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-
-private struct ChatMessageRow<Historical: View>: View {
-    let message: AgentChatMessage
-    var revealedText: String? = nil
-    let images: [ChatAttachmentDraft]
-    let preview: (ChatAttachmentDraft) -> Void
-    @ViewBuilder let historical: () -> Historical
-    /// The pictures the transcript itself carries. When there are any, the
-    /// local previews of the same send would only draw them twice.
-    private var inlineImages: Bool { !message.imageBlocks.isEmpty }
-    private var displayText: String {
-        if let revealedText { return revealedText }
-        return ChatMessageDisplayCache.text(for: message, imagePaths: images.compactMap(\.path), hasImages: !images.isEmpty, inlineImages: inlineImages)
-    }
-    var body: some View {
-        #if DEBUG
-        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
-        #endif
-        if let command = message.localCommand {
-            LocalCommandRow(command: command, id: message.id)
-        } else {
-            bubble
-        }
-    }
-    private var bubble: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if message.role == .user { Spacer(minLength: 30) }
-            VStack(alignment: .leading, spacing: 8) {
-                if !inlineImages {
-                    ForEach(images) { item in
-                        Button { preview(item) } label: {
-                            ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
-                        }.accessibilityLabel("View attached \(item.attachment.name)")
-                    }
-                }
-                historical()
-                let text = displayText
-                if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) { ChatRichText(text: text).equatable() }
-                if revealedText != nil {
-                    Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
-                }
-            }
-            .padding(message.role == .user ? 14 : 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
-        .accessibilityIdentifier("chat-message:\(message.id)")
-        .contextMenu {
-            Button("Copy message", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
-            ShareLink(item: message.text)
-        }
-    }
-}
-
-/// A slash command or `!` shell line typed at the agent's own prompt, and
-/// what it printed: system text inline, not a bubble of angle brackets.
-private struct LocalCommandRow: View {
-    let command: AgentChatMessage.LocalCommand
-    let id: String
-    var body: some View {
-        if command.kind == .output && command.text.isEmpty {
-            EmptyView()
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Group {
-                    switch command.kind {
-                    case .command: Image(systemName: "command")
-                    case .shell: Image(systemName: "terminal")
-                    case .output: Image(systemName: "arrow.turn.down.right")
-                    }
-                }
-                .font(.system(size: 10, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
-                .accessibilityHidden(true)
-                Text(command.text)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(command.kind == .output ? PhrenTheme.textMuted : PhrenTheme.textSecondary)
-                    .textSelection(.enabled)
-                    .lineLimit(command.kind == .output ? 12 : nil)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.vertical, 2)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)")
-            .accessibilityIdentifier("chat-command:\(id)")
-            .contextMenu { Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = command.text } }
-        }
-    }
-}
 
 private struct ChatHistoryPosition: PreferenceKey {
     static var defaultValue: CGFloat = -CGFloat.greatestFiniteMagnitude

@@ -10,13 +10,22 @@ number counts up on its own.
 
 ### New
 
+- Long chats keep tools compact while scrolling, with cached Markdown and
+  full messages, outputs, and patches available on demand.
+- Messages sent while Claude Code works appear as queued conversation bubbles;
+  their queued tags clear when Claude Code consumes them.
+- Live sessions restore a recent complete screen or show one loading indicator,
+  and brief backgrounding no longer makes every computer look stale.
+- Denser project rows make more projects and navigation links visible at once.
+- Herdr terminals fill the available width and keep their size in sync through
+  connection, rotation, and keyboard changes.
 - Session cards show when an agent last changed, with times preserved across
   Phren Hook restarts and a Recent view in the workspace drawer.
 - Agents, linked projects, pins, and computers appear together on first load;
   unchanged refreshes keep the list still.
 - The agent drawer has Recent/List views, workspace search, and full-width
   activity-tinted rows that highlight the current conversation.
-- Two usage rings beside the chat's agent mark open account usage. Cached
+- Two usage rings on the Sessions toolbar open account usage. Cached
   limits appear immediately when reopening usage pages.
 - Calmer borders, consistent corners and spacing, and subtle panel highlights
   bring chat tools, background jobs, drawers, and settings together.

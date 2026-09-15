@@ -2,6 +2,25 @@ import XCTest
 
 final class WorkflowTests: XCTestCase {
     @MainActor
+    func testProjectsAndExploreRowsKeepACompactGroupedLayout() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Projects"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["Projects"].tap()
+        let project = app.buttons["project:sample/brain:demo"]
+        XCTAssertTrue(project.waitForExistence(timeout: 8))
+        XCTAssertLessThanOrEqual(project.frame.height, 60)
+        let graph = app.buttons["Memory graph"].firstMatch
+        XCTAssertTrue(graph.exists)
+        XCTAssertLessThanOrEqual(graph.frame.height, 60)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Compact grouped projects and Explore rows"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
     func testGlobalSearchPublishesLatestQueryAndClearsOldResults() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
