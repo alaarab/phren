@@ -519,6 +519,16 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
   });
   it("serves a requested history page without sending a recent backlog", async () => {
     await writeFile(record, Array.from({ length: 450 }, (_, i) => JSON.stringify(row(`Message ${i}`))).join("\n") + "\n");
+    // Opening a conversation is a light page: 60 rows, the newest ones;
+    // history pages requested while scrolling are the fuller 200.
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams(target)}`);
+    const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+    try {
+      await once(socket, "open");
+      for (let i = 0; i < 80 && !frames.length; i++) await sleep(10);
+      expect(frames[0]).toMatchObject({ type: "backlog", startLine: 390, totalLines: 450, hasMore: true });
+      expect(frames[0].entries).toHaveLength(60);
+    } finally { socket.terminate(); }
     const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "225" }));
     expect(page.status).toBe(200);
     expect(page.data).toMatchObject({ type: "older", session, startLine: 25, totalLines: 450, hasMore: true });

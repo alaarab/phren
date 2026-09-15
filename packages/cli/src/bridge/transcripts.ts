@@ -142,6 +142,12 @@ export class TranscriptReader {
       const end = Math.min(before ?? index.lines, index.lines);
       const lower = this.imageLine ?? (reset || before !== undefined ? 0 : this.nextLine);
       const entries: Entry[] = [];
+      // The first page of a conversation is what the phone parses and lays
+      // out before anything shows; keep it light and let scrolling fetch the
+      // rest in fuller pages. A live tail (nextLine known) stays small too.
+      const opening = before === undefined && (reset || this.nextLine === 0);
+      const entryBudget = opening ? 60 : 200;
+      const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
@@ -164,12 +170,12 @@ export class TranscriptReader {
           const size = Buffer.byteLength(JSON.stringify(entry));
           if (this.imageLine !== undefined || size < 2_097_152) {
             // Leave an entry that doesn't fit for the following history page.
-            if (this.imageLine === undefined && bytes + size > 4_194_304) break;
+            if (this.imageLine === undefined && bytes + size > byteBudget) break;
             entries.push(entry); bytes += size;
           }
         }
         cursor = row.line;
-        if (entries.length >= 200) break;
+        if (entries.length >= entryBudget) break;
       }
       if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
       return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0, reset };
