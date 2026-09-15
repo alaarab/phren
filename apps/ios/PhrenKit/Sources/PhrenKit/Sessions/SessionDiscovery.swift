@@ -56,6 +56,24 @@ public struct LiveAgentSession: Equatable, Identifiable, Sendable {
     public let tab: LiveWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id, muxID: host.muxID) }
 
+    /// A human folder label for sessions whose cwd is not linked to a phren
+    /// project. Herdr workspace labels can be usernames or transport names.
+    public var folderName: String? {
+        guard let cwd = tab.cwd?.trimmingCharacters(in: .whitespacesAndNewlines), !cwd.isEmpty else { return nil }
+        let trimmed = cwd.count > 1 ? cwd.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression) : cwd
+        guard let name = trimmed.split(separator: "/").last.map(String.init), !name.isEmpty else { return nil }
+        return name
+    }
+
+    public func projectDisplayName(_ mappedProject: String?) -> String {
+        if let mappedProject = mappedProject?.trimmingCharacters(in: .whitespacesAndNewlines), !mappedProject.isEmpty { return mappedProject }
+        return folderName ?? (workspaceName.isEmpty ? tab.displayTitle : workspaceName)
+    }
+
+    public func usesFolderFallback(mappedProject: String?) -> Bool {
+        mappedProject?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false && folderName != nil
+    }
+
     public func matches(_ query: String, projectName: String? = nil) -> Bool {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         let text = [host.name, host.address, host.herdrSession ?? "default", workspaceName,

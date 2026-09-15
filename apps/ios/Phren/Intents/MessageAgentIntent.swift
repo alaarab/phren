@@ -29,7 +29,7 @@ struct AgentSessionEntity: AppEntity, Equatable, Codable {
 
     init(_ session: LiveAgentSession) {
         id = [session.host.id.uuidString, session.workspaceID, session.tab.id].joined(separator: "|")
-        workspace = session.workspaceName.isEmpty ? session.tab.displayTitle : session.workspaceName
+        workspace = session.projectDisplayName(nil)
         computer = session.host.name
         title = session.tab.displayTitle
         agent = session.tab.agent

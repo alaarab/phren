@@ -3,6 +3,56 @@ import PhrenKit
 @testable import Phren
 
 final class ChatTimelineTests: XCTestCase {
+    func testReadOnlyClassificationIsConservative() {
+        XCTAssertTrue(ReadOnlyToolCall.shell("cat README.md | rg Widget"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("sed -n '1,20p' App.swift"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("git diff --stat"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("find Sources -name '*.swift' | wc -l"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("sed -i '' s/a/b/ App.swift"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("cat input > output"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("git checkout main"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("rm -rf build"))
+    }
+
+    func testThreeConsecutiveReadsFoldAndWritesBreakTheRun() throws {
+        var payloads: [[String: Any]] = []
+        for (index, command) in ["cat One.swift", "rg TODO Sources", "git status"].enumerated() {
+            payloads.append(["type": "function_call", "call_id": "r\(index)", "name": "exec_command", "arguments": "{\"cmd\":\"\(command)\"}"])
+            payloads.append(["type": "function_call_output", "call_id": "r\(index)", "output": "ok"])
+        }
+        payloads.append(["type": "function_call", "call_id": "write", "name": "exec_command", "arguments": "{\"cmd\":\"echo changed > File.swift\"}"])
+        payloads.append(["type": "function_call_output", "call_id": "write", "output": "ok"])
+        let grouped = ChatTimelineEntry.group(try read(payloads))
+        XCTAssertEqual(grouped.count, 2)
+        XCTAssertTrue(grouped[0].isReadRun)
+        XCTAssertEqual(grouped[0].messages.count, 6)
+        XCTAssertFalse(grouped[1].isReadRun)
+    }
+
+    func testBackgroundJobsPairPendingCallAndTaskNotification() throws {
+        let content = "<task-notification>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Background tests completed (exit code 2)</summary>\n</task-notification>"
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-1", "name": "Bash", "input": ["command": "swift test", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "system", "phrenBackground": true, "message": ["role": "user", "content": content]]]
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let jobs = ChatBackgroundJobs.parse(transcript.messages, firstSeen: ["bg-1": Date(timeIntervalSince1970: 10)], now: Date(timeIntervalSince1970: 20))
+        XCTAssertEqual(jobs.count, 1)
+        XCTAssertEqual(jobs[0].command, "swift test")
+        XCTAssertEqual(jobs[0].state, .finished(exitCode: 2))
+        XCTAssertTrue(jobs[0].title.contains("completed"))
+    }
+
+    func testBackgroundJobStaysRunningWithoutNewHookNotification() throws {
+        let messages = try read([["type": "function_call", "call_id": "bg-old", "name": "exec_command",
+                                  "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]])
+        let started = Date(timeIntervalSince1970: 10)
+        let jobs = ChatBackgroundJobs.parse(messages, firstSeen: ["bg-old": started], now: Date(timeIntervalSince1970: 20))
+        XCTAssertEqual(jobs.count, 1)
+        XCTAssertEqual(jobs[0].state, .running)
+        XCTAssertEqual(jobs[0].startedAt, started)
+    }
+
     func testGroupingRetainsEveryMessageAndNeverCrossesAReply() throws {
         let messages = try read([
             ["type": "function_call_output", "output": "Older result"],

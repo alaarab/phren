@@ -45,7 +45,7 @@ struct SessionCardContent: View {
     /// Tapping the ring opens the session's details; nil makes it inert.
     var onDetails: (() -> Void)? = nil
 
-    private var headline: String { project ?? session.workspaceName }
+    private var headline: String { session.projectDisplayName(project) }
     private var state: String {
         var parts = [session.tab.status + (fresh ? "" : " · stale")]
         if let computer { parts.append(computer) }
@@ -67,6 +67,10 @@ struct SessionCardContent: View {
             .accessibilityIdentifier(identifierPrefix == "live" ? "live-detail:\(session.workspaceID):\(session.tab.id)" : "\(identifierPrefix)-detail:\(session.accessibilityKey)")
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    if session.usesFolderFallback(mappedProject: project) {
+                        Image(systemName: "folder").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                            .accessibilityLabel("Folder")
+                    }
                     Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
                     if let branch = session.tab.branch, !branch.isEmpty {
                         HStack(spacing: 3) {

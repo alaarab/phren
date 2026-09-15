@@ -4,6 +4,14 @@ import XCTest
 @testable import Phren
 
 final class SessionSurfacesTests: XCTestCase {
+    func testUnmappedSessionUsesCwdFolderInsteadOfWorkspaceLabel() throws {
+        let sessions = try sessions([["id": "t", "label": "Agent", "cwd": "/Users/alaarab/Projects/phren", "agent": "codex"]])
+        XCTAssertEqual(sessions[0].folderName, "phren")
+        XCTAssertEqual(sessions[0].projectDisplayName(nil), "phren")
+        XCTAssertTrue(sessions[0].usesFolderFallback(mappedProject: nil))
+        XCTAssertEqual(sessions[0].projectDisplayName("iOS App"), "iOS App")
+        XCTAssertFalse(sessions[0].usesFolderFallback(mappedProject: "iOS App"))
+    }
     private func sessions(_ children: [[String: Any]]) throws -> [LiveAgentSession] {
         let host = try LiveHost(name: "Mini", address: "mini.fixture.invalid", username: "fixture")
         let data = try JSONSerialization.data(withJSONObject: [

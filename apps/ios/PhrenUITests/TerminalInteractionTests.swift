@@ -2,6 +2,17 @@ import XCTest
 
 final class TerminalInteractionTests: XCTestCase {
     @MainActor
+    func testAgentsToolbarEntryOpensWorkspaceDrawer() {
+        let app = launch("--terminal-controls-fixture")
+        let agents = app.buttons.matching(NSPredicate(format: "identifier == %@", "terminal-control:agents")).firstMatch
+        XCTAssertTrue(agents.waitForExistence(timeout: 5)); agents.tap()
+        _ = app.descendants(matching: .any)["agent-drawer"].waitForExistence(timeout: 5)
+        capture(app, "Agents drawer from the terminal toolbar")
+        XCTAssertTrue(app.descendants(matching: .any)["agent-drawer"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "switch-session:")).firstMatch.waitForExistence(timeout: 8))
+    }
+
+    @MainActor
     func testArrowPadEditingAndCtrlHoldShortcutsDoNotSubmitCommands() throws {
         let app = launch("--terminal-controls-fixture")
         app.buttons["Arrow keys"].tap()

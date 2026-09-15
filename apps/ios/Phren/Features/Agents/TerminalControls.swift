@@ -11,6 +11,7 @@ struct TerminalControls: View {
     @Binding var shortcuts: Bool
     let send: (String) -> Void
     let attach: ([AgentAttachment]) -> Void
+    let openAgents: () -> Void
     @State private var attachmentSource: ChatAttachmentSource?
     @State private var pendingAttachments: [AgentAttachment] = []
     @State private var directions = false
@@ -89,6 +90,7 @@ struct TerminalControls: View {
         case .keyboard: icon(item.symbol, item.title) { terminal.toggleKeyboard() }
         case .attachments: icon(item.symbol, item.title) { attachmentSource = .photos }
         case .workspaces: icon(item.symbol, item.title) { workspaces = true }
+        case .agents: icon(item.symbol, item.title) { openAgents() }
         case .webServers: icon(item.symbol, item.title) { servers = true }
         default:
             if let sequence = item.sequence {

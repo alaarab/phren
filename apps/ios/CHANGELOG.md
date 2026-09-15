@@ -10,6 +10,16 @@ number counts up on its own.
 
 ### New
 
+- Chat folds three or more consecutive file searches and other read-only
+  commands into one expandable row, while keeping every original tool card.
+- Background agent commands stay visible above the composer with their
+  running time, completion status, exit code, and available output.
+- Sessions outside a linked phren project use their folder name and offer a
+  direct Link to project action instead of showing a misleading workspace label.
+- Switch agents from a searchable workspace tree that slides in from the left
+  of chat, including with an edge swipe.
+- Open the same Agents drawer from the terminal's new default Agents control;
+  the control can be reordered or removed in Terminal toolbar settings.
 - Find live agent sessions and projects in Spotlight on iOS 18 and later. Open
   a chat or project directly, message a session, or open its terminal.
 - Ask Siri what an agent is doing or which sessions need input. The answer is

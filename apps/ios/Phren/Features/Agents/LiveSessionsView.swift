@@ -547,6 +547,7 @@ private struct LiveSessionCard: View {
     /// Swipe or hold closes the tab (or its whole workspace) on the computer.
     @State private var closing: Closing?
     @State private var closeError: String?
+    @State private var assigningProject = false
     private enum Closing: Identifiable { case tab, workspace; var id: Self { self } }
 
     var body: some View {
@@ -556,7 +557,7 @@ private struct LiveSessionCard: View {
         let prefix = showHost ? "overview" : "live"
         HStack(spacing: 0) {
             AgentConversationLink(session: session, onOpenInPhren: onChat) {
-                SessionCardContent(session: session, fresh: fresh, project: project ?? session.workspaceName,
+                SessionCardContent(session: session, fresh: fresh, project: project,
                                    computer: showHost ? session.host.name : nil, identifierPrefix: prefix, onDetails: onDetails)
             }
             .buttonStyle(.plain)
@@ -572,6 +573,9 @@ private struct LiveSessionCard: View {
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
         }
         .contextMenu {
+            if project == nil, session.tab.cwd != nil {
+                Button("Link to project", systemImage: "link") { assigningProject = true }
+            }
             Button("Close tab", systemImage: "xmark", role: .destructive) { closing = .tab }
             Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { closing = .workspace }
         }
@@ -588,6 +592,10 @@ private struct LiveSessionCard: View {
             Text(what == .workspace ? "Every tab in \u{201C}\(session.workspaceName)\u{201D} on \(session.host.name) closes; running agents in them stop." : "\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.")
         }
         .alert("Couldn't close", isPresented: $closeError.isPresent()) { Button("OK") { closeError = nil } } message: { Text(closeError ?? "") }
+        .sheet(isPresented: $assigningProject) {
+            NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
+                                                existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }
+        }
     }
 }
 
@@ -627,7 +635,8 @@ private struct LiveSessionDetailView: View {
                                 Text(session.tab.displayTitle).font(.title2.weight(.bold)).multilineTextAlignment(.center)
                                     .fixedSize(horizontal: false, vertical: true)
                                 HStack(spacing: 6) {
-                                    Text(project?.name ?? session.workspaceName).font(.system(.subheadline, design: .monospaced)).foregroundStyle(PhrenTheme.success)
+                                    if project == nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
+                                    Text(session.projectDisplayName(project?.name)).font(.system(.subheadline, design: .monospaced)).foregroundStyle(project == nil ? PhrenTheme.textMuted : PhrenTheme.success)
                                     if let branch = session.tab.branch, !branch.isEmpty {
                                         Text("·").foregroundStyle(PhrenTheme.textDim)
                                         Label(branch, systemImage: "arrow.triangle.branch").font(.system(.caption, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
@@ -666,7 +675,7 @@ private struct LiveSessionDetailView: View {
 
                             SessionAwaySummaryCard(
                                 session: session,
-                                project: project?.name ?? session.workspaceName,
+                                project: session.projectDisplayName(project?.name),
                                 state: session.tab.activity.rawValue
                             )
 
@@ -755,7 +764,7 @@ private struct LiveSessionDetailView: View {
     }
 }
 
-private struct LiveProjectPicker: View {
+struct LiveProjectPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()

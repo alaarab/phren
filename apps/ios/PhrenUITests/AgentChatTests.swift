@@ -2,6 +2,21 @@ import XCTest
 
 final class AgentChatTests: XCTestCase {
     @MainActor
+    func testConsecutiveReadsFoldAndExpandToOriginalCards() {
+        let app = launch(extra: ["--chat-read-run"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let run = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch
+        XCTAssertTrue(run.waitForExistence(timeout: 8))
+        XCTAssertTrue(run.label.contains("3 read operations"))
+        XCTAssertFalse(app.buttons["chat-tool-group:2:0"].exists)
+        capture(app, "Read-only calls folded into one row")
+        run.tap()
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
+        XCTAssertGreaterThanOrEqual(cards.count, 3)
+        XCTAssertTrue(cards.firstMatch.isHittable)
+    }
+
+    @MainActor
     func testDownwardDragOnComposerAndIconsDismissesKeyboardWithoutSending() {
         let app = launch()
         app.buttons["live-chat:w7:w7:t9"].tap()

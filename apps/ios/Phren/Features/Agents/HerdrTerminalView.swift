@@ -277,6 +277,8 @@ struct HerdrTerminalView: View {
     @State private var reconnect = UUID()
     @State private var uploadRequest: TerminalUploadRequest?
     @State private var showingChat = false
+    @State private var chatSession: LiveAgentSession?
+    @State private var showingAgents = false
     @State private var showingDictation = false
     @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
     /// Settings → Keyboard: the toolbar steps aside for a physical keyboard.
@@ -295,7 +297,8 @@ struct HerdrTerminalView: View {
                 TerminalControls(terminal: model.terminal, hostID: host.id,
                                  source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,
                                  shortcuts: $shortcuts, send: model.input,
-                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) })
+                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) },
+                                 openAgents: { showingAgents = true })
                     .padding(.bottom, 6)
             }
         }
@@ -308,6 +311,16 @@ struct HerdrTerminalView: View {
         }
         #endif
         .background(PhrenTheme.bgSunken)
+        .overlay {
+            if showingAgents {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgents() }
+                    AgentDrawer(current: session, chooseSession: { selected in
+                        chatSession = selected; closeAgents()
+                    }, close: closeAgents)
+                }.zIndex(20)
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: PhrenAppearance.shared.palette) { _, _ in model.applyAppearance() }
@@ -316,6 +329,7 @@ struct HerdrTerminalView: View {
             TerminalUploadFlow(host: host, attachments: request.attachments)
         }
         .sheet(isPresented: $showingChat) { if let session { AgentChatSheet(session: session) } }
+        .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
         .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in hardwareKeyboard = GCKeyboard.coalesced != nil }
@@ -338,6 +352,7 @@ struct HerdrTerminalView: View {
             if active { await model.run(host: host, session: session, target: target, paneID: paneID, commandMenu: commandMenu) }
         }
     }
+    private func closeAgents() { withAnimation(.easeInOut(duration: 0.18)) { showingAgents = false } }
     private var header: some View {
         HStack(spacing: 8) {
             Button { dismiss() } label: {

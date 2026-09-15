@@ -18,7 +18,7 @@ final class SessionStatusIntentTests: XCTestCase {
         }
         var child: [String: Any] = [
             "id": "w1:t1", "label": "1", "title": "Status check", "agentStatus": rawState,
-            "cwd": "/work/\(project ?? "unknown")", "branch": "feature/siri",
+            "cwd": "/work/\(project ?? "scratch")", "branch": "feature/siri",
         ]
         if let agent { child["agent"] = agent }
         let data = try JSONSerialization.data(withJSONObject: [
@@ -50,8 +50,9 @@ final class SessionStatusIntentTests: XCTestCase {
                        "Codex on phren at Mini is done. Last update: Tests passed. Ready to merge.")
         let long = try report(state: .working, line: String(repeating: "A", count: SessionStatusText.spokenLineLimit + 1))
         XCTAssertEqual(SessionStatusText.dialog(for: long), "Codex on phren at Mini is working.")
+        // Unmapped: the folder the agent sits in, not the Herdr workspace label.
         XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .unknown, project: nil, agent: nil)),
-                       "Agent on Workspace at Mini has no current status.")
+                       "Agent on scratch at Mini has no current status.")
     }
 
     func testFreshAwaySummaryEnrichesStatusInsteadOfAssistantLine() throws {

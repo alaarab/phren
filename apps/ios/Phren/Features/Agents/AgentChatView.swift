@@ -79,12 +79,14 @@ struct AgentChatView: View {
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
     @State private var previewImage: ChatAttachmentDraft?
+    @State private var assigningProject = false
     @State private var historyTask: Task<Void, Never>?
     @State private var bottomPosition: CGFloat = 0
     @State private var nearHistoryTop = false
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
+    @State private var backgroundFirstSeen: [String: Date] = [:]
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
     // Recalculate when the keyboard changes the viewport as well as when the
@@ -255,7 +257,17 @@ struct AgentChatView: View {
                                 .accessibilityIdentifier("chat-history")
                             }
                             ForEach(model.timeline) { entry in
-                                if entry.isActivity {
+                                if entry.isReadRun {
+                                    ChatReadRun(messages: entry.messages, resultImages: { message in
+                                        AnyView(Group {
+                                            if let target = model.target {
+                                                ForEach(message.resultImages, id: \.self) { ref in
+                                                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner, active: active, preview: { previewImage = $0 })
+                                                }
+                                            }
+                                        })
+                                    }).id(entry.id)
+                                } else if entry.isActivity {
                                     ChatToolActivity(messages: entry.messages, resultImages: { message in
                                         AnyView(Group {
                                             if let target = model.target {
@@ -365,6 +377,12 @@ struct AgentChatView: View {
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
+            let backgroundJobs = ChatBackgroundJobs.parse(model.messages, firstSeen: backgroundFirstSeen)
+            if !backgroundJobs.isEmpty {
+                ChatBackgroundJobsView(jobs: backgroundJobs)
+                    .padding(.horizontal, 12).padding(.vertical, 4)
+                    .accessibilityIdentifier("chat-background-jobs")
+            }
             // Between the transcript and the input, where Claude Code keeps
             // its queue; outside the lazy stack so the rows are always laid out.
             if !model.queue.isEmpty {
@@ -388,6 +406,25 @@ struct AgentChatView: View {
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .background(PhrenTheme.chatCanvas)
+        .overlay {
+            if showingAgentSwitcher {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgentDrawer() }
+                    AgentDrawer(current: session, panes: model.panes, selectedPaneID: model.target?.paneID,
+                                choosePane: { pane in model.choose(pane, session: session); refresh = UUID() },
+                                chooseSession: switchSession, close: closeAgentDrawer)
+                }.zIndex(20)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if !showingAgentSwitcher {
+                Color.clear.frame(width: 22).contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 18).onEnded { value in
+                        if value.translation.width > 55 && abs(value.translation.height) < 80 { openAgentDrawer() }
+                    })
+                    .accessibilityHidden(true)
+            }
+        }
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
         .navigationTitle("Agent chat")
         .navigationBarTitleDisplayMode(.inline)
@@ -402,6 +439,10 @@ struct AgentChatView: View {
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
+        .onChange(of: model.messages) { _, messages in
+            let now = Date.now
+            for id in ChatBackgroundJobs.backgroundIDs(messages) where backgroundFirstSeen[id] == nil { backgroundFirstSeen[id] = now }
+        }
         .onChange(of: workingActivityObservation, initial: true) { _, value in
             Task {
                 await SessionWorkingActivityController.shared.observe(
@@ -455,14 +496,6 @@ struct AgentChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
-        .sheet(isPresented: $showingAgentSwitcher) {
-            NavigationStack {
-                ChatAgentSwitcher(session: session, panes: model.panes, selectedPaneID: model.target?.paneID,
-                                  choosePane: { pane in
-                    model.choose(pane, session: session); refresh = UUID()
-                }, chooseSession: switchSession)
-            }
-        }
         .sheet(isPresented: $showingUsage) {
             if let usage = model.progress.usage {
                 VStack(alignment: .leading, spacing: 16) {
@@ -507,10 +540,23 @@ struct AgentChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $assigningProject) {
+            NavigationStack {
+                LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
+                                  existing: (try? LiveSessionPreferences.read(hostData))?.mapping(hostID: session.host.id, cwd: session.tab.cwd))
+            }
+        }
         .task(id: RunIdentity(active: active, refresh: refresh)) {
             guard active else { return }
             await model.run(session)
         }
+    }
+
+    private func openAgentDrawer() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { showingAgentSwitcher = true }
+    }
+    private func closeAgentDrawer() {
+        withAnimation(reduceMotion ? nil : .easeIn(duration: 0.18)) { showingAgentSwitcher = false }
     }
 
     private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy) {
@@ -550,7 +596,9 @@ struct AgentChatView: View {
         let modelName = model.modelName.map { name in
             name.hasPrefix("claude-") ? String(name.dropFirst("claude-".count)) : name
         }
-        return [project?.name ?? session.workspaceName, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
+        let location = session.usesFolderFallback(mappedProject: project?.name)
+            ? "~/\(session.projectDisplayName(nil))" : session.projectDisplayName(project?.name)
+        return [location, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The computer and workspace left the visible line; VoiceOver still
@@ -577,11 +625,18 @@ struct AgentChatView: View {
                 }
                 .accessibilityElement(children: .contain)
             VStack(alignment: .leading, spacing: 3) {
-                Text(selectedPane?.displayTitle ?? session.workspaceName)
+                Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
-                Text(chatLocation)
+                HStack(spacing: 4) {
+                    if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
+                    Text(chatLocation).lineLimit(1)
+                    if project == nil, session.tab.cwd != nil {
+                        Button("Link to project", systemImage: "link") { assigningProject = true }
+                            .labelStyle(.iconOnly).frame(width: 28, height: 24)
+                            .accessibilityIdentifier("chat-link-project")
+                    }
+                }
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
-                    .lineLimit(1)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let target = model.target {

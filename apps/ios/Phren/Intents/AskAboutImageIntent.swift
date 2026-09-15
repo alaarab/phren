@@ -53,6 +53,6 @@ struct AskAboutImageIntent: AppIntent {
         try AgentLaunch.setPending(
             target, draft: "What should I know about this image?", attachments: [attachment]
         )
-        return .result(dialog: "Opening the image in \(target.workspaceName) on \(target.host.name) for review.")
+        return .result(dialog: "Opening the image in \(target.projectDisplayName(nil)) on \(target.host.name) for review.")
     }
 }

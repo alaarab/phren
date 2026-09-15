@@ -350,6 +350,10 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
     }
     private static func claude(_ raw: [String: Any], maximumParts: Int) throws -> [Part] {
+        if raw["phrenBackground"] as? Bool == true,
+           let message = raw["message"] as? [String: Any], let content = message["content"] as? String {
+            return [Part(role: .tool, title: "Background notification", text: content)]
+        }
         guard raw["isMeta"] as? Bool != true, raw["isSidechain"] as? Bool != true,
               let message = raw["message"] as? [String: Any],
               let role = AgentChatMessage.Role(rawValue: message["role"] as? String ?? ""), role != .tool else { return [] }

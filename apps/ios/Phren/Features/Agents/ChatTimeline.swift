@@ -2,17 +2,23 @@ import PhrenKit
 import SwiftUI
 
 struct ChatTimelineEntry: Identifiable {
+    enum Kind: Equatable { case message, activity, readRun }
     var messages: [AgentChatMessage]
+    var kind: Kind = .message
     var id: String { messages[0].id }
-    var isActivity: Bool { messages[0].role == .tool }
+    var isActivity: Bool { kind != .message }
+    var isReadRun: Bool { kind == .readRun }
 
     static func group(_ messages: [AgentChatMessage]) -> [Self] {
         var entries: [Self] = []
         var previousMessageID: String?
         var calls: [String: Int] = [:], ambiguous: Set<String> = []
         for message in messages {
+            // Completion metadata feeds the pinned Background panel. It is
+            // transport state, not another conversation card.
+            if message.role == .tool, message.title == "Background notification" { continue }
             guard message.role == .tool else {
-                entries.append(.init(messages: [message]))
+                entries.append(.init(messages: [message], kind: .message))
                 calls.removeAll(keepingCapacity: true); ambiguous.removeAll(keepingCapacity: true)
                 previousMessageID = message.id
                 continue
@@ -38,10 +44,217 @@ struct ChatTimelineEntry: Identifiable {
                 if calls[key] != nil { ambiguous.insert(key) }
                 else { calls[key] = entries.count }
             }
-            entries.append(.init(messages: [message]))
+            entries.append(.init(messages: [message], kind: .activity))
             previousMessageID = message.id
         }
-        return entries
+        return foldReadRuns(entries)
+    }
+
+    private static func foldReadRuns(_ entries: [Self]) -> [Self] {
+        var result: [Self] = [], run: [Self] = []
+        func flush() {
+            if run.count >= 3 {
+                result.append(.init(messages: run.flatMap(\.messages), kind: .readRun))
+            } else { result.append(contentsOf: run) }
+            run.removeAll(keepingCapacity: true)
+        }
+        for entry in entries {
+            if entry.kind == .activity, ReadOnlyToolCall.isReadOnly(entry.messages) { run.append(entry) }
+            else { flush(); result.append(entry) }
+        }
+        flush()
+        return result
+    }
+}
+
+/// Conservative classification: uncertain shell commands remain ordinary
+/// cards. A call carrying a filesystem-change attachment can never be folded.
+enum ReadOnlyToolCall {
+    static func isReadOnly(_ messages: [AgentChatMessage]) -> Bool {
+        guard !messages.contains(where: \.isChange), messages.contains(where: \.isToolResult),
+              let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
+        let presentation = ToolPresentation(title: call.title ?? "Tool", text: call.text)
+        switch presentation.title {
+        case "Read", "Browse", "List": return true
+        case "Shell": return shell(presentation.body)
+        default:
+            let raw = (call.title ?? "").split(separator: ".").last.map(String.init)?.lowercased() ?? ""
+            return ["read", "glob", "grep", "ls"].contains(raw)
+        }
+    }
+
+    static func shell(_ command: String) -> Bool {
+        let source = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, !source.contains("\n"),
+              source.range(of: #"(?:;|`|\$\(|>>?|<<|\b(?:rm|mv|cp|tee|touch|mkdir|ln|chmod|chown|install|xargs)\b|\bfind\b[^|]*(?:-delete|-exec)|\bgit\s+(?:commit|push|checkout|switch|restore|reset|clean|merge|rebase|pull|fetch|add|rm|mv|stash|apply)\b)"#,
+                           options: [.regularExpression, .caseInsensitive]) == nil else { return false }
+        let segments = source.components(separatedBy: "|").flatMap { $0.components(separatedBy: "&&") }
+        return !segments.isEmpty && segments.allSatisfy { segment in
+            let words = segment.trimmingCharacters(in: .whitespaces).split(whereSeparator: \.isWhitespace).map(String.init)
+            guard let first = words.first?.lowercased() else { return false }
+            if first == "git" { return words.count > 1 && ["diff", "log", "status", "show"].contains(words[1].lowercased()) }
+            if first == "sed" { return words.dropFirst().contains { $0 == "-n" || ($0.hasPrefix("-") && $0.contains("n") && !$0.contains("i")) } }
+            return ["cat", "head", "tail", "grep", "rg", "ls", "find", "wc", "echo", "pwd", "which", "type"].contains(first)
+        }
+    }
+}
+
+struct ChatBackgroundJob: Identifiable, Equatable {
+    enum State: Equatable { case running, finished(exitCode: Int?) }
+    let id: String
+    let title: String
+    let command: String
+    let output: String
+    let state: State
+    let startedAt: Date
+    let finishedAt: Date?
+}
+
+enum ChatBackgroundJobs {
+    static func parse(_ messages: [AgentChatMessage], firstSeen: [String: Date], now: Date = .now) -> [ChatBackgroundJob] {
+        var results: [String: AgentChatMessage] = [:]
+        var notifications: [String: (summary: String, status: String, output: String)] = [:]
+        for message in messages where message.role == .tool {
+            if message.isToolResult, let id = message.toolCallID { results[id] = message }
+            if message.title == "Background notification",
+               let id = tag("tool-use-id", in: message.text) {
+                notifications[id] = (tag("summary", in: message.text) ?? "Background command finished",
+                                     tag("status", in: message.text) ?? "completed",
+                                     tag("output", in: message.text) ?? "")
+            }
+        }
+        return messages.compactMap { message in
+            guard message.role == .tool, !message.isToolResult, !message.isChange,
+                  let id = message.toolCallID, isBackground(message) else { return nil }
+            let presentation = ToolPresentation(title: message.title ?? "Tool", text: message.text)
+            let result = results[id], notification = notifications[id]
+            let resultText = result.map { ToolPresentation(title: $0.title ?? "Tool result", text: $0.text).body } ?? ""
+            let output = notification?.output.isEmpty == false ? notification!.output : resultText
+            let summary = notification?.summary ?? presentation.preview
+            let code = exitCode(notification?.summary) ?? exitCode(resultText)
+            let finished = notification?.status.lowercased() == "completed" || notification?.status.lowercased() == "failed" || result != nil
+            return ChatBackgroundJob(id: id, title: summary.isEmpty ? "Background command" : summary,
+                                     command: presentation.body, output: output,
+                                     state: finished ? .finished(exitCode: code) : .running,
+                                     startedAt: firstSeen[id] ?? now, finishedAt: finished ? now : nil)
+        }
+    }
+
+    static func backgroundIDs(_ messages: [AgentChatMessage]) -> Set<String> {
+        Set(messages.compactMap { message in
+            guard message.role == .tool, !message.isToolResult, let id = message.toolCallID, isBackground(message) else { return nil }
+            return id
+        })
+    }
+    private static func isBackground(_ message: AgentChatMessage) -> Bool {
+        let text = message.text.lowercased()
+        guard ["shell", "tools"].contains(ToolPresentation(title: message.title ?? "Tool", text: message.text).title.lowercased()) else { return false }
+        return text.range(of: #"[\"']?run_in_background[\"']?\s*[:=]\s*true"#, options: .regularExpression) != nil
+            || text.range(of: #"[\"']?background[\"']?\s*[:=]\s*true"#, options: .regularExpression) != nil
+            || text.range(of: #"[\"']?yield_time-ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
+            || text.range(of: #"[\"']?yield_time_ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
+    }
+    private static func tag(_ name: String, in text: String) -> String? {
+        guard let open = text.range(of: "<\(name)>"), let close = text.range(of: "</\(name)>", range: open.upperBound..<text.endIndex) else { return nil }
+        return String(text[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private static func exitCode(_ text: String?) -> Int? {
+        guard let text, let match = text.range(of: #"(?i)exit (?:code )?(-?\d+)"#, options: .regularExpression) else { return nil }
+        return text[match].split(whereSeparator: { !$0.isNumber && $0 != "-" }).last.flatMap { Int($0) }
+    }
+}
+
+struct ChatBackgroundJobsView: View {
+    let jobs: [ChatBackgroundJob]
+    @State private var expanded: Set<String> = []
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { tick in
+            VStack(alignment: .leading, spacing: 5) {
+                HStack { Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold)); Spacer(); Text("\(jobs.count)").font(.caption.monospacedDigit()) }
+                ForEach(jobs) { job in
+                    Button { if expanded.contains(job.id) { expanded.remove(job.id) } else { expanded.insert(job.id) } } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                Circle().fill(job.state == .running ? PhrenTheme.cyan : PhrenTheme.success).frame(width: 6, height: 6)
+                                Text(job.title).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(status(job, at: tick.date)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                                Image(systemName: "chevron.down").rotationEffect(.degrees(expanded.contains(job.id) ? 180 : 0))
+                            }
+                            if expanded.contains(job.id) {
+                                Text(job.command).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(4)
+                                if !job.output.isEmpty { Text(ToolOutputPreview(job.output, lines: 8, characters: 1_200).text).foregroundStyle(PhrenTheme.chatText).lineLimit(8) }
+                            }
+                        }.font(.system(.caption, design: .monospaced)).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("chat-background-job:\(job.id)")
+                }
+            }.padding(10).background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+    private func status(_ job: ChatBackgroundJob, at date: Date) -> String {
+        let elapsed = Int(max(0, (job.finishedAt ?? date).timeIntervalSince(job.startedAt)))
+        let duration = elapsed < 60 ? "\(elapsed)s" : "\(elapsed / 60)m \(elapsed % 60)s"
+        switch job.state {
+        case .running: return "running · \(duration)"
+        case .finished(let code): return "finished" + (code.map { " · exit \($0)" } ?? "") + " · \(duration)"
+        }
+    }
+}
+
+struct ChatReadRun: View {
+    let messages: [AgentChatMessage]
+    var resultImages: ((AgentChatMessage) -> AnyView)? = nil
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var groups: [ChatTimelineEntry] {
+        // The outer grouping has already established the run. Re-grouping
+        // restores the exact call/result cards shown before it was folded.
+        ChatTimelineEntry.group(messages).flatMap { entry in
+            entry.isReadRun ? split(entry.messages) : [entry]
+        }
+    }
+    private func split(_ messages: [AgentChatMessage]) -> [ChatTimelineEntry] {
+        var result: [ChatTimelineEntry] = [], current: [AgentChatMessage] = []
+        for message in messages {
+            if message.role == .tool, !message.isToolResult, !message.isChange, !current.isEmpty {
+                result.append(.init(messages: current, kind: .activity)); current = []
+            }
+            current.append(message)
+        }
+        if !current.isEmpty { result.append(.init(messages: current, kind: .activity)) }
+        return result
+    }
+    private var names: [String] {
+        groups.compactMap { group in
+            group.messages.first(where: { !$0.isToolResult && !$0.isChange }).map {
+                ToolPresentation(title: $0.title ?? "Tool", text: $0.text).title
+            }
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: expanded ? 8 : 0) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "doc.text.magnifyingglass").foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                    Text("\(groups.count) reads").fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText)
+                    Text(names.prefix(4).joined(separator: ", ") + (names.count > 4 ? "…" : ""))
+                        .foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
+                }.font(.system(.caption, design: .monospaced)).padding(.horizontal, 12).frame(minHeight: 38)
+            }.buttonStyle(.plain)
+                .accessibilityLabel("\(groups.count) read operations")
+                .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
+            if expanded {
+                ForEach(groups) { group in
+                    ChatToolActivity(messages: group.messages, resultImages: resultImages).equatable()
+                }.padding(.horizontal, 8)
+            }
+        }.padding(.bottom, expanded ? 8 : 0)
+            .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PhrenTheme.border, lineWidth: 0.5))
     }
 }
 

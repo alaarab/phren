@@ -3,7 +3,7 @@ import Foundation
 public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Sendable {
     case control, escape, tab, arrows, shortcuts, paste, keyboard
     case enter, interrupt, backspace, clearLine, up, down, left, right, home, end
-    case attachments, workspaces, webServers
+    case attachments, workspaces, agents, webServers
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -26,6 +26,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "Line end"
         case .attachments: return "Attach image"
         case .workspaces: return "Workspaces & panes"
+        case .agents: return "Agents"
         case .webServers: return "Web servers"
         }
     }
@@ -53,6 +54,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "arrow.right.to.line"
         case .attachments: return "paperclip"
         case .workspaces: return "rectangle.split.3x1"
+        case .agents: return "person.2"
         case .webServers: return "globe"
         }
     }
@@ -78,7 +80,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
 public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
     public static let storageKey = "terminal.toolbar.v1"
     public static let maximumItems = 8
-    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .keyboard])
+    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .agents, .keyboard])
     public let version: Int
     public var items: [TerminalToolbarItem]
     public init(items: [TerminalToolbarItem]) { version = 1; self.items = items }

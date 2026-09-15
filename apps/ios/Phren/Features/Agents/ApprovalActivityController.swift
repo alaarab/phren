@@ -41,7 +41,7 @@ final class ApprovalActivityController {
                                                     target: target, expiresAt: min(expiration, Date().addingTimeInterval(55))))
             guard run == generation, !wasHandled(approval, target: target) else { await remove(target: target, actionID: approval.id); return }
             let content = ActivityContent(state: ApprovalActivityAttributes.ContentState(
-                provider: target.providerName, project: String(session.workspaceName.prefix(80)), host: String(session.host.name.prefix(80)),
+                provider: target.providerName, project: String(session.projectDisplayName(nil).prefix(80)), host: String(session.host.name.prefix(80)),
                 explanation: String((approval.explanation ?? approval.title ?? "Allow this action?").prefix(500)), expiresAt: record.expiresAt),
                 staleDate: record.expiresAt)
             if let existing = Activity<ApprovalActivityAttributes>.activities.first(where: { $0.attributes.requestID == record.id }) {

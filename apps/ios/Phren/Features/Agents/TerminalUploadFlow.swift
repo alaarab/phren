@@ -51,7 +51,10 @@ struct TerminalUploadFlow: View {
                                         retry = UUID()
                                     } label: {
                                         VStack(alignment: .leading, spacing: 3) {
-                                            Text(session.workspaceName).font(.subheadline.weight(.medium))
+                                            HStack(spacing: 5) {
+                                                if session.folderName != nil { Image(systemName: "folder").foregroundStyle(PhrenTheme.textMuted) }
+                                                Text(session.projectDisplayName(nil)).font(.subheadline.weight(.medium))
+                                            }
                                             Text(session.tab.displayTitle).font(.caption).foregroundStyle(PhrenTheme.textMuted)
                                         }
                                     }

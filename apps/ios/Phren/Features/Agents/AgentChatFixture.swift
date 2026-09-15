@@ -94,6 +94,15 @@ import UIKit
             }
             append("assistant", "The conversation has a quieter layout now. Commands and results stay together; expand one Shell row at a time.\n\nThe terminal is one tap away in the header, and your draft stays with this session when you come back.")
         }
+        if flag("--chat-read-run") {
+            for (index, item) in [("Read", "{\"file_path\":\"/work/phone/File.swift\"}"),
+                                  ("Grep", "{\"pattern\":\"TODO\",\"path\":\"/work/phone\"}"),
+                                  ("exec_command", "{\"cmd\":\"git status --short\"}")] .enumerated() {
+                let id = "fixture-read-\(index)"
+                entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": id, "name": item.0, "arguments": item.1]]])
+                entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": id, "output": "read output \(index)"]]])
+            }
+        }
         if flag("--chat-long-tools") || flag("--chat-dense-tools") {
             for index in 0..<3 {
                 let id = "long-tool-\(index)"

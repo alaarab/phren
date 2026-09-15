@@ -163,7 +163,7 @@ struct ProjectSessionsView: View {
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
-                    SessionCardContent(session: session, fresh: fresh, project: session.workspaceName,
+                    SessionCardContent(session: session, fresh: fresh, project: assign ? nil : project,
                                        computer: session.host.name, identifierPrefix: "discovered")
                 }
                 .buttonStyle(.plain)

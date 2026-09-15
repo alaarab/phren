@@ -4,12 +4,12 @@ import SwiftUI
 /// Reuses live discovery and exact host/tab identities; selecting a row never
 /// launches a new agent or submits anything to a running conversation.
 struct ChatAgentSwitcher: View {
-    let session: LiveAgentSession
+    let session: LiveAgentSession?
     let panes: [AgentChatPanes.Pane]
     let selectedPaneID: String?
     let choosePane: (AgentChatPanes.Pane) -> Void
     let chooseSession: (LiveAgentSession) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppModel.self) private var appModel
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -23,13 +23,14 @@ struct ChatAgentSwitcher: View {
         TimelineView(.periodic(from: .now, by: 1)) { tick in
             PhrenList {
                 let eligiblePanes = panes.filter { pane in
-                    (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
+                    guard let session else { return false }
+                    return (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
                 }
                 let local = eligiblePanes.filter { query.isEmpty || "\($0.displayTitle) \($0.agent ?? "")".localizedCaseInsensitiveContains(query) }
                 if eligiblePanes.count > 1 && !local.isEmpty {
                     Section("In this tab") {
                         ForEach(local) { pane in
-                            Button { dismiss(); choosePane(pane) } label: {
+                            Button { choosePane(pane) } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(pane.displayTitle)
@@ -43,39 +44,18 @@ struct ChatAgentSwitcher: View {
                     }
                 }
                 if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) } }
-                let groups = overview.groups(at: tick.date, query: query, preferences: preferences, projects: appModel.sessionProjects)
-                    .filter { $0.sessions.contains { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 } }
-                ForEach(groups) { group in
-                    let sessions = group.sessions.filter { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 }
-                    if !sessions.isEmpty {
-                        Section(group.title) {
-                            ForEach(sessions) { item in
-                                Button {
-                                    dismiss()
-                                    if item.id != session.id { chooseSession(item) }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(item.tab.title ?? item.workspaceName).font(.subheadline.weight(.medium)).lineLimit(1)
-                                            Text("\(item.host.name) · \(item.workspaceName) · \(item.tab.agent ?? "Agents")")
-                                                .font(.caption).foregroundStyle(PhrenTheme.textMuted).lineLimit(2)
-                                        }
-                                        Spacer(minLength: 0)
-                                        if item.id == session.id { Image(systemName: "checkmark").foregroundStyle(PhrenTheme.cyan) }
-                                    }.padding(.vertical, 3)
-                                }.disabled(!group.fresh).accessibilityIdentifier("switch-session:\(item.host.id):\(item.host.muxID):\(item.workspaceID):\(item.tab.id)")
-                            }
-                        }
-                    }
-                }
-                if overview.ready && groups.isEmpty && (eligiblePanes.count < 2 || local.isEmpty) {
+                AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, choose: chooseSession)
+                let hasSessions = overview.computers.contains { $0.monitor.snapshot?.sessions(on: $0.host).contains { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 } == true }
+                if overview.ready && !hasSessions && (eligiblePanes.count < 2 || local.isEmpty) {
                     Text("No matching agents").foregroundStyle(PhrenTheme.textMuted)
                 }
             }
         }
-        .navigationTitle("Switch agent").navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top) {
+            HStack { Text("Agents").font(.headline); Spacer(); Button("Close", systemImage: "xmark") { close() }.labelStyle(.iconOnly).frame(width: 44, height: 44) }
+                .padding(.horizontal, 12).background(PhrenTheme.chatPanel)
+        }
         .searchable(text: $query, prompt: "Agent, project, or computer")
-        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {
             if scenePhase == .active { await overview.run(hosts: hosts) }
         }

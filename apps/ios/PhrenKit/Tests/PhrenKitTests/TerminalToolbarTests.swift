@@ -4,6 +4,7 @@ import XCTest
 final class TerminalToolbarTests: XCTestCase {
     func testDefaultAndCustomOrderRoundTrip() throws {
         XCTAssertEqual(try TerminalToolbarPreferences.read(Data()), .defaults)
+        XCTAssertTrue(TerminalToolbarPreferences.defaults.items.contains(.agents))
         let value = TerminalToolbarPreferences(items: [.enter, .keyboard, .interrupt, .arrows])
         XCTAssertEqual(try TerminalToolbarPreferences.read(value.encoded()), value)
         XCTAssertEqual(TerminalToolbarItem.interrupt.sequence, "\u{03}")
