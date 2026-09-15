@@ -10,6 +10,14 @@ number counts up on its own.
 
 ### New
 
+- Account usage lists Claude's per-model weekly window (Fable) on its own
+  line, dated from Claude Code's own usage check; Codex's Spark lane is left
+  out of the report.
+- The working Live Activity's island is trimmed: the elapsed timer no longer
+  stretches it across the screen and the phren mark is the sprite itself.
+- Privacy manifest declares the file-timestamp reads, the terminal's
+  reconnect clock no longer reads boot time, and the build answers the
+  export-compliance question (standard algorithms only).
 - Long chats keep tools compact while scrolling, with cached Markdown and
   full messages, outputs, and patches available on demand.
 - Messages sent while Claude Code works appear as queued conversation bubbles;

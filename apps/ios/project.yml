@@ -152,9 +152,14 @@ targets:
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Phren transcribes dictation into your draft, on this device when possible."
         INFOPLIST_KEY_NSCameraUsageDescription: "Phren uses the camera when you attach a photo to an agent message."
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Phren connects to computers you add over SSH for agent status, chat, and attachments."
-        # SSH now includes bundled cryptographic implementation (Swift Crypto).
-        # Complete App Store Connect's encryption questionnaire for distribution;
-        # the previous OS-only HTTPS exemption no longer describes this binary.
+        # Export compliance: the binary links only Apple's CryptoKit
+        # (swift-crypto re-exports it on Apple platforms; otool -L shows no
+        # BoringSSL), and NIOSSH uses standard published algorithms
+        # (Curve25519, Ed25519, AES-GCM, ChaCha20-Poly1305). That is the
+        # "standard algorithms" exemption — answer NO so App Store Connect
+        # stops holding every build in Missing Compliance. The annual BIS
+        # self-classification report still applies to exempt apps.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: false
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: true

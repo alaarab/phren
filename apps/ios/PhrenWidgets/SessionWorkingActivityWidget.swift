@@ -24,6 +24,7 @@ struct SessionWorkingActivityWidget: Widget {
                         .foregroundStyle(WidgetTheme.cyan)
                     Spacer()
                     Text(context.state.startedAt, style: .timer).monospacedDigit()
+                        .multilineTextAlignment(.trailing).frame(width: 64, alignment: .trailing)
                         .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
                 }
                 .font(.subheadline.weight(.semibold))
@@ -44,6 +45,7 @@ struct SessionWorkingActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(context.state.startedAt, style: .timer)
                         .font(.caption.monospacedDigit()).foregroundStyle(WidgetTheme.cyan)
+                        .multilineTextAlignment(.trailing).minimumScaleFactor(0.7).frame(width: 52, alignment: .trailing)
                         .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -63,12 +65,17 @@ struct SessionWorkingActivityWidget: Widget {
                     }
                 }
             } compactLeading: {
-                PhrenActivityMark(size: 20)
+                PhrenActivityMark(size: 18)
             } compactTrailing: {
+                // An unconstrained timer Text asks for all the width it might
+                // ever need, which stretches the island across the screen.
+                // Pin it to the width of "59:59" and let longer runs shrink.
                 Text(context.state.startedAt, style: .timer).font(.caption2.monospacedDigit())
+                    .multilineTextAlignment(.trailing).minimumScaleFactor(0.7)
+                    .frame(width: 38, alignment: .trailing)
                     .accessibilityLabel("Elapsed \(SessionElapsedTime.format(from: context.state.startedAt, to: .now))")
             } minimal: {
-                PhrenActivityMark(size: 18)
+                PhrenActivityMark(size: 16)
             }
             .widgetURL(routeURL(context.attributes.routeID))
         }
@@ -87,9 +94,10 @@ private struct PhrenActivityMark: View {
     let size: CGFloat
 
     var body: some View {
+        // The mark is the sprite alone on a transparent ground, so it reads
+        // at island size instead of vanishing into a dark tile.
         Image("PhrenMark").resizable().scaledToFit()
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .accessibilityLabel("phren")
     }
 }

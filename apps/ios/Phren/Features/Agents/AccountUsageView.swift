@@ -73,6 +73,11 @@ private struct AccountUsageSection: View {
                                     } else {
                                         Text("Reset time unavailable").font(.caption).foregroundStyle(PhrenTheme.textMuted)
                                     }
+                                    if let asOf = window.asOfDate {
+                                        Text("As of \(asOf, style: .relative) ago · refreshes when Claude Code opens /usage")
+                                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                                            .accessibilityIdentifier("usage-window-as-of:\(window.id)")
+                                    }
                                 }
                             }
                             if let message = account.message {

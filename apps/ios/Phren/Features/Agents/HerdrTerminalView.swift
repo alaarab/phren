@@ -148,7 +148,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                         if first {
                             if receivedBefore { terminal.getTerminal().resetToInitialState() }
                             first = false; receivedBefore = true
-                            recovery.connected(at: ProcessInfo.processInfo.systemUptime)
+                            recovery.connected(at: HerdrTerminalRecovery.now())
                             updateTerminalSize()
                             resize.attach { size in try await socket.resize(columns: size.columns, rows: size.rows) }
                         }
@@ -171,7 +171,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                     guard !Task.isCancelled, generation == run else { return }
                     resize.detach()
                     connected = false; writes?.cancel(); writes = nil; self.socket = nil
-                    guard let delay = recovery.delay(after: error, now: ProcessInfo.processInfo.systemUptime) else { throw error }
+                    guard let delay = recovery.delay(after: error, now: HerdrTerminalRecovery.now()) else { throw error }
                     reconnecting = true
                     try await Task.sleep(for: .seconds(delay))
                     // Reattach the same server without refocusing a stale tab
