@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { glob } from "glob";
@@ -105,8 +106,7 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
   } else if (source === "claude") {
     // Claude Code records background completion as an internal queue row,
     // outside the ordinary user/assistant transcript. Export only the small
-    // task-notification envelope; queued prompts and other internal events
-    // remain private.
+    // task-notification envelope; other internal events remain private.
     if (raw.type === "queue-operation" && typeof raw.content === "string"
         && raw.content.length <= 65_536 && raw.content.includes("<task-notification>")
         && raw.content.includes("<tool-use-id>")) {
@@ -116,11 +116,16 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
     // A message sent while the agent was mid-turn is only ever a queue row:
     // Claude Code hands it to the model inside a later tool result and never
     // writes a user turn for it. Export the enqueue as the person's message so
-    // the phone can draw the bubble it sent; removals stay private.
-    if (raw.type === "queue-operation" && raw.operation === "enqueue" && typeof raw.content === "string"
+    // the phone can draw the bubble it sent. Consumption exposes only a digest.
+    if (raw.type === "queue-operation" && ["enqueue", "remove"].includes(String(raw.operation))
+        && !raw.isMeta && !raw.isSidechain && typeof raw.content === "string"
         && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")
-        && !raw.content.startsWith("<system-reminder>")) {
-      return { type: "user", phrenQueued: true, timestamp: raw.timestamp,
+        && !raw.content.trimStart().startsWith("<system-reminder>")) {
+      const key = createHash("sha256").update(raw.content).digest("hex");
+      // Only the identity crosses the wire on consumption: no queue payload,
+      // tool envelope, private metadata, or reasoning is exported.
+      if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
+      return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
         message: { role: "user", content: raw.content } };
     }
     if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;

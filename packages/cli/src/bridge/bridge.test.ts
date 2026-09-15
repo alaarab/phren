@@ -89,10 +89,11 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "now", content }, "claude"))
       .toEqual({ type: "system", phrenBackground: true, timestamp: "now", message: { role: "user", content } });
     // A prompt sent mid-turn only ever exists as its enqueue row; the phone
-    // draws it as the person's bubble. Its removal (consumption) stays private.
+    // draws it as the person's bubble. Consumption exports only its digest.
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "now", content: "a queued human prompt" }, "claude"))
-      .toEqual({ type: "user", phrenQueued: true, timestamp: "now", message: { role: "user", content: "a queued human prompt" } });
-    expect(visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "now", content: "a queued human prompt" }, "claude")).toBeUndefined();
+      .toMatchObject({ type: "user", phrenQueued: true, timestamp: "now", message: { role: "user", content: "a queued human prompt" } });
+    expect(visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "now", content: "a queued human prompt" }, "claude"))
+      .toMatchObject({ type: "phren_queue_consumed", timestamp: "now" });
     expect(visibleEvent({ type: "queue-operation", content: "<task-notification>missing id</task-notification>" }, "claude")).toBeUndefined();
     expect(visibleEvent({ type: "queue-operation", operation: "enqueue", content: "<system-reminder>internal</system-reminder>" }, "claude")).toBeUndefined();
   });
