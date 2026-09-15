@@ -6,6 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, type Json, type Target } from "./protocol.js";
 import { recordedSession } from "./agent-hooks.js";
+import { tabActivityKey } from "./tab-activity.js";
 
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
@@ -60,7 +61,7 @@ export async function servers(): Promise<Json[]> {
 }
 
 export async function snapshot(server: string): Promise<Json> { return object((await rpc(server, "session.snapshot")).snapshot); }
-export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>): Json {
+export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
   const focus = focusedPane && id.safeParse(s.focused_workspace_id).success
@@ -80,6 +81,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
       return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
         changedSeq: changed || undefined,
+        lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,
         contextUsedPercent: agent && panes.filter(p => p.agent).length === 1 ? contextUsedPercent?.get(agent) : undefined,
         agentPaneCount: panes.filter(p => p.agent).length, paneCount: panes.length };
