@@ -16,6 +16,7 @@ import { listUploads, saveUpload } from "./uploads.js";
 import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { AccountUsageReader } from "./usage.js";
+import { TabActivityStore } from "./tab-activity.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
@@ -65,6 +66,7 @@ export async function serve(version: string): Promise<void> {
   const agentHooks = new AgentHooks();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
+  const tabActivity = new TabActivityStore();
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
@@ -100,10 +102,11 @@ export async function serve(version: string): Promise<void> {
           case "/v1/projects/locate": result = { candidates: await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent()) }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url), s = await snapshot(server);
+            const lastChanged = await tabActivity.observe(server, s);
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
             const context = await contextUsage.read(server, s);
             await journal.record(server, objects(s.panes));
-            const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s));
+            const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
             // The branch each tab's agent is on, for the session cards.
             for (const group of objects(workspaces.groups)) for (const tab of objects(group.children)) {
               if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
@@ -249,7 +252,11 @@ export async function serve(version: string): Promise<void> {
     recording = true;
     void (async () => {
       for (const server of await servers()) {
-        try { await journal.record(String(server.session), objects((await snapshot(String(server.session))).panes)); }
+        try {
+          const name = String(server.session), current = await snapshot(name);
+          await tabActivity.observe(name, current);
+          await journal.record(name, objects(current.panes));
+        }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }
     })().finally(() => { recording = false; }).catch(() => {});
