@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { AccountUsageReader, claudeUsage, codexUsage, readCodexLimits, usageStatusLine } from "./usage.js";
+import { AccountUsageReader, claudeScopedWindows, claudeUsage, codexUsage, readCodexLimits, usageStatusLine } from "./usage.js";
 
 const now = new Date("2026-09-12T08:00:00Z");
 const reset = now.getTime() / 1000 + 3600;
@@ -24,8 +24,9 @@ describe("account usage", () => {
     const value = codexUsage({ rateLimits: limits, rateLimitsByLimitId: {
       codex: limits, spark: { limitName: "Spark", primary: limits.primary },
     } });
-    expect(value.windows).toHaveLength(3);
-    expect(value.windows[2].name).toBe("Spark · 5-hour limit");
+    // Spark is a separate lane nobody budgets by; it stays out of the report.
+    expect(value.windows).toHaveLength(2);
+    expect(value.windows.map(w => w.id)).toEqual(["codex:primary", "codex:secondary"]);
   });
   it("rejects malformed values and never converts missing limits into zero usage", () => {
     for (const used of [null, true, "50", -1, 101, Infinity, NaN]) {
@@ -34,6 +35,12 @@ describe("account usage", () => {
     }
     expect(claudeUsage({}).message).toContain("after Claude Code replies");
     expect(claudeUsage({ rate_limits: { five_hour: { used_percentage: 100, resets_at: "tomorrow" } } }).windows[0].resetsAt).toBeUndefined();
+    // Per-model windows each get their own line, after the two overall ones.
+    const perModel = claudeUsage({ rate_limits: {
+      seven_day_fable: { used_percentage: 12, resets_at: 1789848000 }, five_hour: { used_percentage: 10, resets_at: 1789514400 },
+      seven_day: { used_percentage: 70, resets_at: 1789848000 }, seven_day_opus: { used_percentage: 3, resets_at: 1789848000 } } });
+    expect(perModel.windows.map(w => [w.id, w.name])).toEqual([
+      ["five_hour", "5-hour limit"], ["seven_day", "7-day limit"], ["seven_day_fable", "7-day · Fable"], ["seven_day_opus", "7-day · Opus"]]);
   });
   it("normalizes Claude's documented subscription status-line data", () => {
     const value = claudeUsage({ rate_limits: { five_hour: { used_percentage: 41.2, resets_at: reset },
@@ -51,6 +58,23 @@ describe("account usage", () => {
     expect(usageStatusLine(wrapped, program, false)).toEqual(wrapped);
     expect(usageStatusLine(wrapped, program, true)).toEqual(previous);
     expect(usageStatusLine(usageStatusLine(undefined, program, false), program, true)).toBeUndefined();
+  });
+  it("lifts per-model weekly windows out of Claude Code's own usage snapshot, dated", () => {
+    const config = { oauthAccount: { emailAddress: "private@example.com" }, cachedUsageUtilization: {
+      fetchedAtMs: now.getTime() - 3_600_000, utilization: { five_hour: { utilization: 2 }, limits: [
+        { kind: "session", percent: 2, resets_at: "2026-09-12T12:59:59+00:00" },
+        { kind: "weekly_all", group: "weekly", percent: 35 },
+        { kind: "weekly_scoped", percent: 48, resets_at: "2026-09-19T20:00:00+00:00", scope: { model: { id: null, display_name: "Fable" } } },
+        { kind: "weekly_scoped", percent: 7, resets_at: "bad", scope: { model: { display_name: "Opus 5" } } },
+        { kind: "weekly_scoped", percent: 200, scope: { model: { display_name: "Broken" } } },
+      ] } } };
+    expect(claudeScopedWindows(config, now)).toEqual([
+      { id: "seven_day_fable", name: "7-day · Fable", usedPercent: 48, resetsAt: "2026-09-19T20:00:00.000Z", asOf: "2026-09-12T07:00:00.000Z" },
+      { id: "seven_day_opus_5", name: "7-day · Opus 5", usedPercent: 7, resetsAt: undefined, asOf: "2026-09-12T07:00:00.000Z" },
+    ]);
+    expect(JSON.stringify(claudeScopedWindows(config, now))).not.toContain("private");
+    expect(claudeScopedWindows({ cachedUsageUtilization: { utilization: { limits: [] } } }, now)).toEqual([]);
+    expect(claudeScopedWindows({ cachedUsageUtilization: { fetchedAtMs: now.getTime() + 120_000, utilization: { limits: [] } } }, now)).toEqual([]);
   });
   it("shares in-flight Codex requests and caches account reads for a minute", async () => {
     let calls = 0, time = 0;

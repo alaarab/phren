@@ -5,7 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { bridgeRoot, object, type Json } from "./protocol.js";
 
-export interface UsageWindow { id: string; name: string; usedPercent: number; resetsAt?: string }
+export interface UsageWindow { id: string; name: string; usedPercent: number; resetsAt?: string; asOf?: string }
 export interface AccountUsage {
   source: "codex" | "claude";
   windows: UsageWindow[];
@@ -33,6 +33,8 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
   const windows: UsageWindow[] = [];
   for (const [key, raw] of buckets) {
     const bucket = object(raw), name = safeText(bucket.limitName);
+    // Spark is a separate, lightweight lane nobody budgets by; leave it out.
+    if (/spark/i.test(String(key)) || /spark/i.test(name ?? "")) continue;
     for (const field of ["primary", "secondary"]) {
       const item = object(bucket[field]);
       const label = duration(item.windowDurationMins, field === "primary" ? "Primary limit" : "Secondary limit");
@@ -44,16 +46,62 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
     ...(!windows.length ? { message: "Codex has not reported account limits. Sign in with your ChatGPT account in Codex on this computer." } : {}) };
 }
 
+/** "seven_day_fable" → "7-day · Fable"; the two plain windows keep their names. */
+function claudeWindowName(key: string): string {
+  const spans: [string, string][] = [["five_hour", "5-hour"], ["seven_day", "7-day"], ["one_hour", "1-hour"], ["one_day", "1-day"]];
+  for (const [prefix, label] of spans) {
+    if (key === prefix) return `${label} limit`;
+    if (key.startsWith(prefix + "_")) {
+      const model = key.slice(prefix.length + 1).split("_").filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+      return `${label} · ${model}`;
+    }
+  }
+  return key.split("_").filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
 export function claudeUsage(value: unknown, now = new Date()): AccountUsage {
   const limits = object(object(value).rate_limits);
-  const windows = [["five_hour", "5-hour limit"], ["seven_day", "7-day limit"]].flatMap(([key, label]) => {
+  // Every window Claude Code reports, each on its own line — the overall
+  // ones first, then per-model windows (Fable, Opus…) in a stable order.
+  const order = (key: string) => key === "five_hour" ? 0 : key === "seven_day" ? 1 : 2;
+  const windows = Object.keys(limits).sort((a, b) => order(a) - order(b) || a.localeCompare(b)).slice(0, 16).flatMap(key => {
     const item = object(limits[key]);
-    const entry = window(key, label, item.used_percentage, item.resets_at);
+    const entry = window(key, claudeWindowName(key), item.used_percentage, item.resets_at);
     return entry ? [entry] : [];
   });
   return { source: "claude", windows, updatedAt: now.toISOString(),
     ...(!windows.length ? { message: "Usage appears after Claude Code replies with a subscription account on this computer." } : {}) };
 }
+
+/**
+ * Claude's per-model weekly windows (Fable today) never reach the status
+ * line, so they come from the snapshot Claude Code itself keeps of its usage
+ * endpoint in ~/.claude.json — refreshed whenever Claude opens /usage or
+ * checks a limit. Each window carries the snapshot's own time so the phone
+ * can say how old it is. No sign-in token is read or sent.
+ */
+export function claudeScopedWindows(config: unknown, now = new Date()): UsageWindow[] {
+  const cached = object(object(config).cachedUsageUtilization);
+  const fetched = typeof cached.fetchedAtMs === "number" && Number.isFinite(cached.fetchedAtMs) && cached.fetchedAtMs > 0
+    && cached.fetchedAtMs <= now.getTime() + 60_000 ? new Date(cached.fetchedAtMs).toISOString() : undefined;
+  if (!fetched) return [];
+  const limits = object(cached.utilization).limits;
+  if (!Array.isArray(limits)) return [];
+  const windows: UsageWindow[] = [];
+  for (const raw of limits.slice(0, 16)) {
+    const limit = object(raw);
+    if (limit.kind !== "weekly_scoped") continue;
+    const model = safeText(object(object(object(limit.scope).model)).display_name);
+    if (!model) continue;
+    const reset = Date.parse(String(limit.resets_at ?? ""));
+    const entry = window(`seven_day_${model.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`, `7-day · ${model}`, limit.percent,
+      Number.isFinite(reset) ? Math.round(reset / 1000) : undefined);
+    if (entry) windows.push({ ...entry, asOf: fetched });
+  }
+  return windows;
+}
+const claudeConfigFile = () => path.join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json");
 
 /** Only initialize and read limits. Never create a thread, prompt, or login. */
 export function readCodexLimits(executable = "codex"): Promise<AccountUsage> {
@@ -121,6 +169,16 @@ export class AccountUsageReader {
         claude = claudeUsage(saved, date);
       } finally { await handle.close(); }
     } catch { /* No status-line report yet. Keep unavailable explicit. */ }
+    try {
+      const handle = await open(claudeConfigFile(), "r");
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size > 16_777_216) throw new Error("Invalid Claude config");
+        const scoped = claudeScopedWindows(JSON.parse(await handle.readFile("utf8")), new Date(this.now()))
+          .filter(entry => !claude.windows.some(existing => existing.id === entry.id));
+        if (scoped.length) claude = { ...claude, windows: [...claude.windows, ...scoped], message: undefined };
+      } finally { await handle.close(); }
+    } catch { /* No snapshot from Claude Code; the status-line windows stand alone. */ }
     return { accounts: [codex, claude] };
   }
 }
