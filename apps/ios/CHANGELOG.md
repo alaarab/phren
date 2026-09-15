@@ -20,6 +20,10 @@ number counts up on its own.
 - Track working sessions on the Lock Screen and Dynamic Island with the Phren
   icon, project, branch, elapsed time, current tool, and a tap back to chat.
 - Ask Siri to pin a named working session to its Live Activity.
+- Catch up after time away with an Apple Intelligence summary of a session's
+  recent work, state, blockers, and suggested next step, generated on-device.
+- Optionally tighten dictated agent messages with Apple Intelligence, then
+  preview and choose the clearer wording or the original before sending.
 
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,

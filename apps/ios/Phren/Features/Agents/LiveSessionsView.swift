@@ -660,6 +660,12 @@ private struct LiveSessionDetailView: View {
                             .buttonStyle(.plain).disabled(!fresh)
                             if !fresh { Text("Reconnect this computer to resume its session.").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
 
+                            SessionAwaySummaryCard(
+                                session: session,
+                                project: project?.name ?? session.workspaceName,
+                                state: session.tab.activity.rawValue
+                            )
+
                             SessionUsageCard(host: session.host, source: session.tab.agent)
 
                             // The facts, one per row.

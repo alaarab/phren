@@ -35,6 +35,7 @@ struct SessionStatusReport: Equatable {
     let lastAssistantLine: String?
     let approvalRequestID: String?
     let approvalTitle: String?
+    var awaySummary: AwaySummary? = nil
 
     var projectName: String { entity.project ?? entity.workspace }
     var harnessName: String { entity.harnessName ?? "Agent" }
@@ -62,7 +63,9 @@ enum SessionStatusText {
         case .error: status = "needs attention"
         case .unknown: status = "has no current status"
         }
-        guard let line = cleanedAssistantLine(report.lastAssistantLine), line.count <= spokenLineLimit else {
+        let cachedSummary = cleanedAssistantLine(report.awaySummary?.conciseLine)
+        let lastUpdate = cachedSummary.map { "Away summary: \($0)" } ?? cleanedAssistantLine(report.lastAssistantLine)
+        guard let line = lastUpdate, line.count <= spokenLineLimit else {
             return "\(subject) \(status)."
         }
         return "\(subject) \(status). Last update: \(line)"
@@ -139,6 +142,23 @@ enum SessionStatusService {
         } catch {
             return .init()
         }
+    }
+
+    static func summaryPrompt(for session: LiveAgentSession, project: String, state: String) async throws -> String {
+        let panes = try await AgentChatModel.fetchPanes(session)
+        guard let pane = panes.panes.first(where: { $0.agent == session.tab.agent && $0.sessionId != nil })
+                ?? panes.panes.first(where: { $0.agent != nil && $0.sessionId != nil }),
+              let target = try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                                            tabID: session.tab.id, muxID: session.host.muxID) else {
+            throw OnDeviceGenerationError.emptyTranscript
+        }
+        let transcript = try await transcript(session: session, target: target)
+        let messages = transcript.messages.map {
+            SessionTranscriptLine(role: $0.role.rawValue, title: $0.title, text: $0.text)
+        }
+        guard !messages.isEmpty else { throw OnDeviceGenerationError.emptyTranscript }
+        return SessionSummaryPrompt.make(project: project, computer: session.host.name,
+                                         state: state, messages: messages)
     }
 
     static func report(_ base: SessionStatusReport, session: LiveAgentSession, detail: Detail) async -> SessionStatusReport {
@@ -245,8 +265,10 @@ struct SessionStatusIntent: AppIntent {
         }
         let report = await SessionStatusService.report(base, session: liveSession,
                                                        detail: await SessionStatusService.detail(for: liveSession))
-        return .result(dialog: "\(SessionStatusText.dialog(for: report))",
-                       view: SessionStatusSnippetContainer(report: report))
+        var enriched = report
+        enriched.awaySummary = await AwaySummaryCache.shared.cached(for: report.entity.id)
+        return .result(dialog: "\(SessionStatusText.dialog(for: enriched))",
+                       view: SessionStatusSnippetContainer(report: enriched))
     }
 }
 
@@ -303,7 +325,11 @@ private struct SessionStatusSnippet: View {
                 }
                 Spacer()
             }
-            if let line = report.lastAssistantLine { Text(line).font(.callout).lineLimit(3) }
+            if let summary = report.awaySummary {
+                Text(summary.conciseLine).font(.callout).lineLimit(4)
+            } else if let line = report.lastAssistantLine {
+                Text(line).font(.callout).lineLimit(3)
+            }
             if let title = report.approvalTitle { Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             HStack {
                 Button("Open", intent: OpenAgentSessionIntent(target: report.entity))

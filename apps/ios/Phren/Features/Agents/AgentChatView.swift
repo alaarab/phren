@@ -64,7 +64,10 @@ struct AgentChatView: View {
     /// message as they are recognised, no separate box to review.
     @State private var dictation = SpeechTranscriber()
     @State private var dictationPrefix = ""
+    @State private var dictationBase = ""
     @State private var dictationTask: Task<Void, Never>?
+    @State private var cleanupTask: Task<Void, Never>?
+    @State private var dictationPreview: DictationCleanupPreview?
     /// The mic is on as far as the person is concerned. The recogniser ends
     /// a segment on its own after a pause; while this is set, each finished
     /// segment is folded into the message and a new one starts.
@@ -87,16 +90,20 @@ struct AgentChatView: View {
     /// Starts recognising into the composer after whatever is already typed.
     private func startDictation() {
         dictationTask?.cancel()
+        cleanupTask?.cancel()
+        dictationPreview = nil
         dictationTask = Task {
             guard await SpeechTranscriber.requestPermissions() == .authorized else {
                 model.deliveryError = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
             }
             guard !Task.isCancelled, scenePhase == .active else { return }
-            dictationPrefix = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
+            dictationBase = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
+            dictationPrefix = dictationBase
             do { dictating = true; try dictation.start(); model.deliveryError = nil } catch { dictating = false; model.deliveryError = error.localizedDescription }
         }
     }
-    /// Stops, applies the word replacements to what was said, and sends when Settings say so.
+    /// Stops and preserves the raw words in the draft. When opted in, Apple
+    /// Intelligence prepares a candidate that remains separate until chosen.
     private func stopDictation() {
         guard dictating else { return }
         dictating = false
@@ -104,7 +111,46 @@ struct AgentChatView: View {
         dictation.stop()
         if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
         model.draft = model.draft.trimmingCharacters(in: .whitespaces)
-        if ChatSettings.autoSendsDictation, !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Task { await model.send(session) } }
+        let rawDraft = model.draft
+        let rawInstruction = rawDraft.hasPrefix(dictationBase)
+            ? String(rawDraft.dropFirst(dictationBase.count)) : rawDraft
+        guard SpeechSettings.cleanupEnabled(in: AppRuntime.defaults), !rawInstruction.isEmpty else {
+            sendDictationIfRequested()
+            return
+        }
+        cleanupTask?.cancel()
+        cleanupTask = Task {
+            do {
+                let tightened = try await DictationCleanupService.clean(rawInstruction)
+                guard !Task.isCancelled, model.draft == rawDraft else { return }
+                guard let tightened else { sendDictationIfRequested(); return }
+                dictationPreview = DictationCleanupPreview(
+                    rawDraft: rawDraft, rawInstruction: rawInstruction,
+                    tightenedDraft: dictationBase.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? tightened : dictationBase + tightened,
+                    tightenedInstruction: tightened
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                sendDictationIfRequested()
+            }
+        }
+    }
+
+    private func resolveDictationPreview(useTightened: Bool) {
+        guard let preview = dictationPreview else { return }
+        if model.draft == preview.rawDraft {
+            model.draft = useTightened ? preview.tightenedDraft : preview.rawDraft
+        }
+        dictationPreview = nil
+        sendDictationIfRequested()
+    }
+
+    private func sendDictationIfRequested() {
+        if ChatSettings.autoSendsDictation,
+           !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { await model.send(session) }
+        }
     }
 
     private func acceptIncomingAttachments() {
@@ -318,6 +364,14 @@ struct AgentChatView: View {
                 }
                 .frame(maxHeight: 190).padding(.bottom, 2)
             }
+            if let preview = dictationPreview {
+                DictationCleanupPreviewCard(
+                    preview: preview,
+                    useTightened: { resolveDictationPreview(useTightened: true) },
+                    keepOriginal: { resolveDictationPreview(useTightened: false) }
+                )
+                .padding(.horizontal, 12).padding(.top, 6)
+            }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
@@ -344,7 +398,7 @@ struct AgentChatView: View {
                 )
             }
         }
-        .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() }
+        .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); cleanupTask?.cancel(); model.flushDrafts() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() } }
         .onChange(of: currentHost) { _, _ in sendTask?.cancel(); historyTask?.cancel() }
         .onChange(of: reduceMotion || voiceOver, initial: true) { _, instant in
@@ -388,7 +442,7 @@ struct AgentChatView: View {
             if scenePhase == .active { try? dictation.start() } else { dictating = false }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
-        .onDisappear { dictationTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
+        .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingAgentSwitcher) {
             NavigationStack {
                 ChatAgentSwitcher(session: session, panes: model.panes, selectedPaneID: model.target?.paneID,

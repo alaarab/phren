@@ -54,6 +54,14 @@ final class SessionStatusIntentTests: XCTestCase {
                        "Agent on Workspace at Mini has no current status.")
     }
 
+    func testFreshAwaySummaryEnrichesStatusInsteadOfAssistantLine() throws {
+        var value = try report(state: .working, line: "Older assistant update")
+        value.awaySummary = AwaySummary(summary: "The focused tests pass and the branch is ready.",
+                                        currentState: "done", blockers: [], suggestedNextStep: "Review the diff.")
+        XCTAssertEqual(SessionStatusText.dialog(for: value),
+                       "Codex on phren at Mini is working. Last update: Away summary: The focused tests pass and the branch is ready.")
+    }
+
     func testWaitingFilterAndSpokenListUseOnlyWaitingSessions() throws {
         let reports = [
             try report(state: .working, project: "one"),

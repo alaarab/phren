@@ -6,6 +6,11 @@ import SwiftUI
 enum SpeechSettings {
     static let localeKey = "speech.locale.v1"              // "" = the phone's language
     static let replacementsKey = "speech.replacements.v1"  // JSON [[from, to]]
+    static let cleanupKey = "speech.apple-intelligence-cleanup.v1"
+
+    static func cleanupEnabled(in defaults: UserDefaults = AppRuntime.defaults) -> Bool {
+        defaults.bool(forKey: cleanupKey)
+    }
 
     static var locale: Locale {
         let id = AppRuntime.defaults.string(forKey: localeKey) ?? ""
@@ -30,6 +35,7 @@ enum SpeechSettings {
 
 struct SpeechSettingsView: View {
     @AppStorage(SpeechSettings.localeKey) private var localeID = ""
+    @AppStorage(SpeechSettings.cleanupKey) private var cleanup = false
     @State private var replacements = SpeechSettings.replacements
     @State private var newFrom = ""
     @State private var newTo = ""
@@ -52,6 +58,18 @@ struct SpeechSettingsView: View {
                     }
                 } label: { Label("Language", systemImage: "globe") }
                     .accessibilityIdentifier("speech-language")
+            }
+            Section {
+                Toggle(isOn: $cleanup) {
+                    Label {
+                        Text("Tighten agent dictation")
+                        Text("Preview an on-device Apple Intelligence rewrite before using it")
+                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    } icon: { Image(systemName: "apple.intelligence") }
+                }
+                .accessibilityIdentifier("speech-dictation-cleanup")
+            } footer: {
+                Text("When Apple Intelligence is available, Phren can clarify punctuation and sequential requests. You choose the original or tightened wording before it is sent.")
             }
             Section {
                 ForEach(Array(replacements.enumerated()), id: \.offset) { index, pair in
