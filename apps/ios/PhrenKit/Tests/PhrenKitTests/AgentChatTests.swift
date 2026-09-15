@@ -302,4 +302,18 @@ final class MergedUserTurnTests: XCTestCase {
     private func read_(_ raw: [String: Any]) -> [AgentChatMessage] {
         (try? read([["line": 1, "raw": raw]]).messages) ?? []
     }
+
+    func testHarnessPreambleTurnsAreNotBubbles() throws {
+        let codex: [String: Any] = ["type": "backlog", "source": "codex", "entries": [
+            ["line": 0, "raw": ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": "<environment_context>\n  <cwd>/home/a/p</cwd>\n</environment_context>"]]]]],
+            ["line": 1, "raw": ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_text", "text": "Fix the header"]]]]],
+        ]]
+        let read = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: codex), source: "codex")
+        XCTAssertEqual(read.messages.map(\.text), ["Fix the header"])
+        let claude: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "user", "message": ["role": "user", "content": "<system-reminder>internal</system-reminder>"]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": "hello"]]],
+        ]]
+        XCTAssertEqual(try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: claude), source: "claude").messages.map(\.text), ["hello"])
+    }
 }

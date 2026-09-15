@@ -279,6 +279,13 @@ public struct AgentChatTranscript: Equatable, Sendable {
         }
         return result
     }
+    /// Text a harness injects into the conversation as if the person typed it:
+    /// Codex's environment/filesystem/permission context, system reminders.
+    static func isHarnessPreamble(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["<environment_context>", "<filesystem>", "<permission_profile", "<system-reminder>", "<user_instructions>", "<turn_context>"]
+            .contains { trimmed.hasPrefix($0) }
+    }
     /// A user turn that is nothing but Claude Code's background completion
     /// envelope (optionally inside a system-reminder wrapper).
     static func isTaskNotification(_ text: String) -> Bool {
@@ -345,7 +352,11 @@ public struct AgentChatTranscript: Equatable, Sendable {
             let images = (payload["content"] as? [[String: Any]] ?? []).enumerated().compactMap { index, block in
                 ["input_image", "image"].contains(block["type"] as? String ?? "") ? index : nil
             }
-            return [Part(role: role, text: text(payload["content"]), imageBlocks: images)]
+            let body = text(payload["content"])
+            // Codex writes its own environment/permission preamble as the first
+            // "user" turn; that is the harness talking, not the person.
+            if role == .user, images.isEmpty, Self.isHarnessPreamble(body) { return [] }
+            return [Part(role: role, text: body, imageBlocks: images)]
         case "function_call", "custom_tool_call":
             return [Part(role: .tool, title: payload["name"] as? String ?? "Tool", text: readable(payload["arguments"] ?? payload["input"]), toolCallID: payload["call_id"] as? String)]
         case "function_call_output", "custom_tool_call_output":
@@ -419,6 +430,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             if role == .user, Self.isTaskNotification(content) {
                 return [Part(role: .tool, title: "Background notification", text: content)]
             }
+            if role == .user, Self.isHarnessPreamble(content) { return [] }
             guard content.isEmpty || maximumParts > 0 else { throw LimitError.tooManyMessages }
             return [Part(role: role, text: content)]
         }
