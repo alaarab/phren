@@ -12,6 +12,9 @@ number counts up on its own.
 
 - Find live agent sessions and projects in Spotlight on iOS 18 and later. Open
   a chat or project directly, message a session, or open its terminal.
+- Ask Siri what an agent is doing or which sessions need input. The answer is
+  spoken without opening Phren and includes a session card with Open and,
+  for pending permissions, Approve and Reject.
 
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,

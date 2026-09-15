@@ -78,6 +78,26 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             shortTitle: "Open Session",
             systemImageName: "play.circle"
         )
+        AppShortcut(
+            intent: SessionStatusIntent(),
+            phrases: [
+                "What is \(.applicationName) doing",
+                "What is happening in \(.applicationName)",
+                "Is \(\.$session) done in \(.applicationName)",
+                "What is \(\.$session) doing in \(.applicationName)",
+            ],
+            shortTitle: "Session Status",
+            systemImageName: "waveform.path.ecg"
+        )
+        AppShortcut(
+            intent: ListWaitingSessionsIntent(),
+            phrases: [
+                "Which sessions are waiting in \(.applicationName)",
+                "What needs me in \(.applicationName)",
+            ],
+            shortTitle: "Waiting Sessions",
+            systemImageName: "person.crop.circle.badge.questionmark"
+        )
     }
 }
 

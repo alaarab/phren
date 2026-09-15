@@ -9,6 +9,9 @@ struct OpenAgentSessionIntent: OpenIntent {
 
     @Parameter(title: "Session") var target: AgentSessionEntity
 
+    init() {}
+    init(target: AgentSessionEntity) { self.target = target }
+
     @MainActor
     func perform() async throws -> some IntentResult {
         try AgentLaunch.openIndexedSession(target, destination: .chat)

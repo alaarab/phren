@@ -154,19 +154,22 @@ struct AgentSessionEntityQuery: EntityStringQuery {
     static func normalized(_ text: String) -> String {
         text.lowercased().replacingOccurrences(of: #"[^\p{L}\p{N}]+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
     }
-    /// Pure, so it can be tested without a computer: strips the filler words
-    /// ("workspace", "session", "on", "the") and scores workspace and computer.
+    /// Pure, so it can be tested without a computer: strips common filler and
+    /// scores the workspace, mapped project, harness, and computer.
     static func rank(_ spoken: String, among entities: [AgentSessionEntity]) -> [AgentSessionEntity] {
         let filler: Set<String> = ["workspace", "session", "the", "my", "on", "in", "agent", "to"]
         let words = normalized(spoken).split(separator: " ").map(String.init).filter { !filler.contains($0) }
         guard !words.isEmpty else { return entities }
         let scored = entities.compactMap { entity -> (Int, AgentSessionEntity)? in
-            let workspace = normalized(entity.workspace), computer = normalized(entity.computer), title = normalized(entity.title)
+            let workspace = normalized(entity.workspace), project = normalized(entity.project ?? "")
+            let computer = normalized(entity.computer), title = normalized(entity.title), agent = normalized(entity.agent ?? "")
             let needle = words.joined(separator: " ")
             var score = 0
             if needle == workspace + " " + computer || needle == workspace { score = 100 }
             else if words.contains(where: { workspace == $0 || workspace.hasPrefix($0) && $0.count >= 3 }) { score = 60 }
             else if words.contains(where: { workspace.contains($0) && $0.count >= 3 }) { score = 40 }
+            else if !project.isEmpty, words.contains(where: { project == $0 || project.contains($0) && $0.count >= 3 }) { score = 60 }
+            else if !agent.isEmpty, words.contains(where: { agent == $0 }) { score = 50 }
             else if words.contains(where: { title.contains($0) && $0.count >= 4 }) { score = 20 }
             // The workspace (or tab) has to match; the computer only narrows.
             guard score > 0 else { return nil }
