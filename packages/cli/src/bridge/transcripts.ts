@@ -113,6 +113,16 @@ export function visibleEvent(raw: Json, source: Provider): Json | undefined {
       return { type: "system", phrenBackground: true, timestamp: raw.timestamp,
         message: { role: "user", content: raw.content } };
     }
+    // A message sent while the agent was mid-turn is only ever a queue row:
+    // Claude Code hands it to the model inside a later tool result and never
+    // writes a user turn for it. Export the enqueue as the person's message so
+    // the phone can draw the bubble it sent; removals stay private.
+    if (raw.type === "queue-operation" && raw.operation === "enqueue" && typeof raw.content === "string"
+        && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")
+        && !raw.content.startsWith("<system-reminder>")) {
+      return { type: "user", phrenQueued: true, timestamp: raw.timestamp,
+        message: { role: "user", content: raw.content } };
+    }
     if (raw.isMeta || raw.isSidechain || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     const message = object(raw.message);
     // Keep indexes for historical images while removing thinking contents.

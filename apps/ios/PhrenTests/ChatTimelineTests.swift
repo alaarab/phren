@@ -91,6 +91,21 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertTrue(muchLater.isEmpty, "An hour-old job does not reappear when the chat is opened")
     }
 
+    /// A foreground command that merely prints a background notice (a task
+    /// log, a grep) is not a background job.
+    func testForegroundCommandQuotingABackgroundNoticeIsNotAJob() throws {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "fg-1", "name": "Bash", "input": ["command": "tail -3 /tmp/tasks/b1.output"]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "fg-1", "content": "TREE: ok\nCommand running in background with ID: b1p4ogscs. Output is being written to: /tmp/x\n** TEST SUCCEEDED **"]]]]],
+            ["line": 2, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-4", "name": "Bash", "input": ["command": "sleep 5"]]]]]],
+            ["line": 3, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-4", "content": "Command did not complete within its 600s timeout and was moved to the background (ID: b2). Output is being written to: /tmp/y"]]]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let jobs = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:])
+        XCTAssertEqual(jobs.map(\.id), ["bg-4"], "Only the call the agent actually moved to the background")
+        XCTAssertEqual(jobs.first?.state, .running)
+    }
+
     func testBackgroundJobStaysRunningWithoutNewHookNotification() throws {
         let messages = try read([["type": "function_call", "call_id": "bg-old", "name": "exec_command",
                                   "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]])

@@ -167,10 +167,12 @@ enum ChatBackgroundJobs {
         Set(parse(messages, firstSeen: firstSeen, finishedSeen: [:], now: .distantFuture).filter { $0.state != .running }.map(\.id))
     }
 
+    /// Claude Code's own notice, as the whole point of the result — not a
+    /// command whose *output* merely mentions one (printing a task log, say).
     private static func resultLooksBackgrounded(_ text: String) -> Bool {
-        let lowered = text.lowercased()
-        return lowered.contains("running in background") || lowered.contains("moved to the background")
-            || lowered.contains("running in the background")
+        let first = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return first.hasPrefix("command running in background with id")
+            || first.range(of: #"^command did not complete within its \d+s timeout and was moved to the background"#, options: .regularExpression) != nil
     }
 
     static func backgroundIDs(_ messages: [AgentChatMessage]) -> Set<String> {

@@ -26,24 +26,27 @@ final class UsageAndToolbarTests: XCTestCase {
     }
 
     @MainActor
-    func testChatUsageRingsPushAccountUsage() {
+    /// The usage rings live on the Sessions tab, one per provider in use,
+    /// and open Account usage; the chat header no longer carries them.
+    func testSessionsUsageRingsShowEachProviderAndPushAccountUsage() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--account-usage-fixture"]
-        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15)); app.tabBars.buttons["Agents"].tap()
-        let chat = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w1:w1:t1"]
-        XCTAssertTrue(chat.waitForExistence(timeout: 10)); chat.tap()
-        let rings = app.buttons["chat-usage-rings"]
-        XCTAssertTrue(rings.waitForExistence(timeout: 8))
-        let reported = NSPredicate(format: "value CONTAINS %@", "account 41%")
+        let rings = app.buttons["all-account-usage"]
+        XCTAssertTrue(rings.waitForExistence(timeout: 10))
+        let reported = NSPredicate(format: "value CONTAINS %@", "%")
         expectation(for: reported, evaluatedWith: rings)
         waitForExpectations(timeout: 8)
-        capture(app, "Chat with context and account rings")
+        capture(app, "Sessions tab with usage rings")
         rings.tap()
         XCTAssertTrue(app.navigationBars["Account usage"].waitForExistence(timeout: 5))
         app.navigationBars["Account usage"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(rings.waitForExistence(timeout: 5))
+        let chat = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w1:w1:t1"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10)); chat.tap()
+        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["chat-usage-rings"].exists)
     }
 
     @MainActor

@@ -660,7 +660,6 @@ struct AgentChatView: View {
                         .offset(x: 4, y: 4)
                 }
                 .accessibilityElement(children: .contain)
-            ChatUsageRings(session: session, source: model.target?.source ?? session.tab.agent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)

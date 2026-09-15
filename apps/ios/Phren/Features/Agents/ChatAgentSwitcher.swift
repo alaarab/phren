@@ -13,7 +13,7 @@ struct ChatAgentSwitcher: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppModel.self) private var appModel
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
-    @State private var overview = SessionOverviewMonitor()
+    private var overview: SessionOverviewMonitor { .shared }
     @State private var query = ""
     @AppStorage("agents.drawer.recent.v1") private var recent = false
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
@@ -78,7 +78,9 @@ struct ChatAgentSwitcher: View {
             }.padding(12).background(PhrenTheme.chatCanvas)
         }
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {
-            if scenePhase == .active { await overview.run(hosts: hosts) }
+            // The Agents list normally has this running already; if the chat
+            // was reached without it (Spotlight, Siri), start it here.
+            if scenePhase == .active { overview.ensureRunning(hosts: hosts) }
         }
     }
 }

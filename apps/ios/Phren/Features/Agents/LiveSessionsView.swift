@@ -8,10 +8,10 @@ struct LiveSessionsView: View {
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var adding = false
     @State private var visible = false
-    @State private var pollTask: Task<Void, Never>?
+    @State private var lastRefreshID = UUID()
     @State private var query = ""
     @State private var refreshID = UUID()
-    @State private var overview = SessionOverviewMonitor()
+    private var overview: SessionOverviewMonitor { .shared }
     @State private var selected: OverviewSelection?
     @State private var sessionOpen: SessionOpen?
     @State private var closeRequest: SessionCloseRequest?
@@ -112,8 +112,7 @@ struct LiveSessionsView: View {
         .textInputAutocapitalization(.never).autocorrectionDisabled()
         .phrenScreen()
         .toolbar {
-            NavigationLink { AccountUsageView() } label: { Label("Account usage", systemImage: "chart.bar") }
-                .accessibilityIdentifier("all-account-usage")
+            AccountUsageRings(hosts: hosts)
             // Settings → Show on Agents chooses these.
             if IntegrationSettings.enabled(IntegrationSettings.showWebServersKey) {
                 NavigationLink { WebServersView() } label: { Label("Web servers", systemImage: "globe") }
@@ -165,18 +164,17 @@ struct LiveSessionsView: View {
         // this list has appeared at least once; only leaving the foreground,
         // changing computers, or editing them restarts it.
         .onChange(of: PollID(hosts: hosts, active: scenePhase == .active && !adding, refresh: refreshID), initial: true) { _, id in
-            pollTask?.cancel(); pollTask = nil
-            guard id.active, !hosts.isEmpty else { return }
+            guard id.active, !hosts.isEmpty else { overview.stopRunning(); return }
             overview.configure(configuration)
             let currentHosts = hosts
-            pollTask = Task { @MainActor in
-                Task {
-                    await Task.yield()
-                    SpotlightIndex.shared.reconcileHosts(currentHosts)
-                    await WidgetBridge.reconcileSessionHosts(currentHosts)
-                }
-                await overview.run(hosts: currentHosts)
+            Task {
+                await Task.yield()
+                SpotlightIndex.shared.reconcileHosts(currentHosts)
+                await WidgetBridge.reconcileSessionHosts(currentHosts)
             }
+            // A manual refresh restarts the run; otherwise keep the one that's going.
+            if id.refresh != lastRefreshID { lastRefreshID = id.refresh; overview.stopRunning() }
+            overview.ensureRunning(hosts: currentHosts)
         }
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
         .onChange(of: overview.ready, initial: true) { _, ready in

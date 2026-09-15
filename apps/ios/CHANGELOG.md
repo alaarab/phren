@@ -75,6 +75,12 @@ number counts up on its own.
 - Background jobs read as running until the agent's own completion notice
   arrives, keep their real start and finish times, and leave the row two
   minutes after finishing; a completion notice never draws as a bubble.
+- The usage rings live on the Sessions tab, one ring per provider you use
+  (Claude and Codex both when both are), and open Account usage.
+- Messages sent while the agent is mid-turn show as your bubble right away
+  instead of vanishing until the turn picks them up (Phren Hook 0.2.15).
+- The agent drawer reads the same live overview as the Sessions tab, so it
+  opens on what is already known instead of re-fetching every computer.
 - A conversation opens on a light first page (Phren Hook 0.2.15) so a big
   one no longer freezes; scrolling up fetches fuller pages.
 - Closing a session from the list closes that session and the card leaves at

@@ -68,6 +68,26 @@ final class SessionOverviewMonitor {
         self.initialWait = initialWait; self.makeMonitor = makeMonitor
     }
 
+    /// The one overview the app keeps live: the Agents list drives it and
+    /// the agent drawer reads it, so the drawer opens on what is already
+    /// known instead of fetching every computer again.
+    static let shared = SessionOverviewMonitor()
+    @ObservationIgnored private var ownedRun: Task<Void, Never>?
+    @ObservationIgnored private var ownedHosts: [LiveHost] = []
+
+    /// Start (or keep) polling these computers from a task this object owns,
+    /// so no screen's disappearance can cancel it.
+    func ensureRunning(hosts: [LiveHost]) {
+        if let ownedRun, !ownedRun.isCancelled, ownedHosts == hosts { return }
+        ownedRun?.cancel()
+        ownedHosts = hosts
+        guard !hosts.isEmpty else { ownedRun = nil; return }
+        ownedRun = Task { [weak self] in await self?.run(hosts: hosts) }
+    }
+    func stopRunning() {
+        ownedRun?.cancel(); ownedRun = nil; ownedHosts = []
+    }
+
     func run(hosts: [LiveHost]) async {
         guard !Task.isCancelled else { return }
         let run = UUID(); generation = run
