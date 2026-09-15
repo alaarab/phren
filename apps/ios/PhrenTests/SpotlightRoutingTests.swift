@@ -5,7 +5,8 @@ import XCTest
 
 @MainActor
 final class SpotlightRoutingTests: XCTestCase {
-    private let keys = ["sessions.live.preferences.v1", AgentLaunch.pendingKey, AgentLaunch.pendingProjectKey]
+    private let keys = ["sessions.live.preferences.v1", AgentLaunch.pendingKey,
+                        AgentLaunch.pendingProjectKey, AgentLaunch.pendingContentKey]
     private var saved: [String: Any] = [:]
 
     override func setUp() async throws {

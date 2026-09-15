@@ -91,6 +91,7 @@ enum AgentLaunch {
 
     static let pendingKey = "agents.pendingChat.v1"
     static let pendingProjectKey = "projects.pendingOpen.v1"
+    static let pendingContentKey = "agents.pendingChatContent.v1"
     enum Destination: String, Codable { case chat, terminal }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
@@ -102,12 +103,28 @@ enum AgentLaunch {
         let project: String
     }
     static func setPending(_ session: LiveAgentSession, destination: Destination = .chat) {
+        clearPendingContent()
+        writePending(session, destination: destination)
+    }
+    static func setPending(_ session: LiveAgentSession, destination: Destination = .chat,
+                           draft: String, attachments: [AgentAttachment],
+                           attachmentStore: PendingChatAttachmentStore = .shared) throws {
+        let records = try attachments.map(attachmentStore.save)
+        clearPendingContent(store: attachmentStore)
+        let content = PendingChatContent(hostID: session.host.id, muxID: session.host.muxID,
+                                         workspaceID: session.workspaceID, tabID: session.tab.id,
+                                         draft: draft, attachments: records)
+        AppRuntime.defaults.set(try JSONEncoder().encode(content), forKey: pendingContentKey)
+        writePending(session, destination: destination)
+    }
+    private static func writePending(_ session: LiveAgentSession, destination: Destination) {
         let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/", muxID: session.host.muxID, destination: destination)
         AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(pending), forKey: pendingKey)
         restorePendingNavigation()
     }
     static func setPendingProject(storeID: String, project: String) {
+        clearPendingContent()
         AppRuntime.defaults.removeObject(forKey: pendingKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(PendingProject(storeID: storeID, project: project)), forKey: pendingProjectKey)
         restorePendingNavigation()
@@ -143,8 +160,76 @@ enum AgentLaunch {
         guard let pending = try? JSONDecoder().decode(Pending.self, from: data),
               let host = AgentSessions.hosts.first(where: { $0.id == pending.hostID && (pending.muxID == nil || $0.muxID == pending.muxID) }),
               let live = try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID,
-                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd) else { return nil }
+                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd) else {
+            clearPendingContent()
+            return nil
+        }
         return (live, pending.destination ?? .chat)
     }
+    static func takePendingContent(for session: LiveAgentSession,
+                                   store: PendingChatAttachmentStore = .shared) -> (draft: String, attachments: [AgentAttachment]) {
+        guard let data = AppRuntime.defaults.data(forKey: pendingContentKey) else { return ("", []) }
+        AppRuntime.defaults.removeObject(forKey: pendingContentKey)
+        guard let content = try? JSONDecoder().decode(PendingChatContent.self, from: data) else { return ("", []) }
+        guard content.hostID == session.host.id, content.muxID == session.host.muxID,
+              content.workspaceID == session.workspaceID, content.tabID == session.tab.id else {
+            store.discard(content.attachments)
+            return ("", [])
+        }
+        return (content.draft, content.attachments.compactMap(store.take))
+    }
+    private static func clearPendingContent(store: PendingChatAttachmentStore = .shared) {
+        if let data = AppRuntime.defaults.data(forKey: pendingContentKey),
+           let content = try? JSONDecoder().decode(PendingChatContent.self, from: data) {
+            store.discard(content.attachments)
+        }
+        AppRuntime.defaults.removeObject(forKey: pendingContentKey)
+    }
     static func takePending() -> LiveAgentSession? { takePendingOpen()?.session }
+}
+
+struct PendingChatContent: Codable, Equatable {
+    let hostID: UUID
+    let muxID: String
+    let workspaceID: String
+    let tabID: String
+    let draft: String
+    let attachments: [PendingChatAttachmentStore.Record]
+}
+
+struct PendingChatAttachmentStore: Sendable {
+    struct Record: Codable, Equatable, Sendable {
+        let id: UUID
+        let name: String
+        let filename: String
+        let isImage: Bool
+    }
+
+    static let shared: Self = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return Self(root: support.appendingPathComponent("PendingChatAttachments", isDirectory: true))
+    }()
+
+    let root: URL
+
+    func save(_ attachment: AgentAttachment) throws -> Record {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let filename = attachment.id.uuidString.lowercased() + ".bin"
+        try attachment.data.write(to: root.appendingPathComponent(filename), options: .atomic)
+        return Record(id: attachment.id, name: attachment.name, filename: filename, isImage: attachment.isImage)
+    }
+
+    func take(_ record: Record) -> AgentAttachment? {
+        guard record.filename == record.id.uuidString.lowercased() + ".bin" else { return nil }
+        let url = root.appendingPathComponent(record.filename)
+        defer { try? FileManager.default.removeItem(at: url) }
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? AgentAttachment(id: record.id, name: record.name, data: data, isImage: record.isImage)
+    }
+
+    func discard(_ records: [Record]) {
+        for record in records where record.filename == record.id.uuidString.lowercased() + ".bin" {
+            try? FileManager.default.removeItem(at: root.appendingPathComponent(record.filename))
+        }
+    }
 }

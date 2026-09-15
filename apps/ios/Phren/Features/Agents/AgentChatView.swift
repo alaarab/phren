@@ -25,11 +25,14 @@ struct AgentConversationLink<LabelContent: View>: View {
 struct AgentChatSheet: View {
     @State private var session: LiveAgentSession
     @State private var incomingAttachments: [AgentAttachment]
+    @State private var incomingDraft: String
     private let initialSessionID: LiveAgentSession.ID
     private let initialPane: AgentChatPanes.Pane?
-    init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil, attachments: [AgentAttachment] = []) {
+    init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
+         attachments: [AgentAttachment] = [], draft: String = "") {
         _session = State(initialValue: session)
         _incomingAttachments = State(initialValue: attachments)
+        _incomingDraft = State(initialValue: draft)
         initialSessionID = session.id
         self.initialPane = initialPane
     }
@@ -37,7 +40,7 @@ struct AgentChatSheet: View {
         NavigationStack {
             AgentChatView(session: session, switchSession: { session = $0 },
                           initialPane: session.id == initialSessionID ? initialPane : nil,
-                          incomingAttachments: $incomingAttachments).id(session.id)
+                          incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft).id(session.id)
         }
     }
 }
@@ -47,6 +50,7 @@ struct AgentChatView: View {
     let switchSession: (LiveAgentSession) -> Void
     let initialPane: AgentChatPanes.Pane?
     @Binding var incomingAttachments: [AgentAttachment]
+    @Binding var incomingDraft: String
     @State private var initialized = false
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
@@ -154,10 +158,13 @@ struct AgentChatView: View {
     }
 
     private func acceptIncomingAttachments() {
-        guard !incomingAttachments.isEmpty, !model.restoringDraft, let initialPane,
-              let expected = try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID,
-                                                    tabID: session.tab.id, muxID: session.host.muxID),
-              model.target == expected else { return }
+        guard !incomingAttachments.isEmpty || !incomingDraft.isEmpty,
+              !model.restoringDraft, let target = model.target else { return }
+        if let initialPane {
+            guard let expected = try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                                                         tabID: session.tab.id, muxID: session.host.muxID),
+                  target == expected else { return }
+        }
         guard model.attachments.count + incomingAttachments.count <= ChatAttachmentLimit.maximum else {
             model.deliveryError = "Make room for \(incomingAttachments.count) attachment(s). Each message can include four."
             return
@@ -165,6 +172,11 @@ struct AgentChatView: View {
         let items = incomingAttachments
         incomingAttachments = []
         for item in items { model.add(item) }
+        let text = incomingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        incomingDraft = ""
+        if !text.isEmpty {
+            model.draft += (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n") + text
+        }
     }
 
     private var currentHost: LiveHost? {

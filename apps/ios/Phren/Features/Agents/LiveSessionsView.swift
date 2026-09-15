@@ -16,6 +16,8 @@ struct LiveSessionsView: View {
     private struct SessionOpen: Identifiable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
+        var draft = ""
+        var attachments: [AgentAttachment] = []
         var id: String { "\(session.id.hostID)|\(session.id.muxID)|\(session.id.workspace)|\(session.id.tab)|\(destination.rawValue)" }
     }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
@@ -118,7 +120,7 @@ struct LiveSessionsView: View {
         }
         .sheet(item: $sessionOpen) { open in
             switch open.destination {
-            case .chat: AgentChatSheet(session: open.session).id(open.id)
+            case .chat: AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft).id(open.id)
             case .terminal: NavigationStack { HerdrTerminalView(host: open.session.host, session: open.session) }.id(open.id)
             }
         }
@@ -126,7 +128,9 @@ struct LiveSessionsView: View {
         .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
             if let pending = AgentLaunch.takePendingOpen() {
                 selected = nil
-                sessionOpen = SessionOpen(session: pending.session, destination: pending.destination)
+                let content = AgentLaunch.takePendingContent(for: pending.session)
+                sessionOpen = SessionOpen(session: pending.session, destination: pending.destination,
+                                          draft: content.draft, attachments: content.attachments)
             }
         }
         .onAppear { visible = true }

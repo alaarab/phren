@@ -24,6 +24,11 @@ number counts up on its own.
   recent work, state, blockers, and suggested next step, generated on-device.
 - Optionally tighten dictated agent messages with Apple Intelligence, then
   preview and choose the clearer wording or the original before sending.
+- Send a terminal, error, or diff image from Shortcuts or Screenshots into
+  the live agent session that needs attention, then review it before sending.
+- Reviewed Apple's assistant schemas for session and project actions; the
+  published file, document, search, and visual-search domains do not describe
+  coding-agent sessions, so Phren keeps their precise App Intent contracts.
 
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,

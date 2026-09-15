@@ -107,6 +107,18 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             shortTitle: "Pin Session",
             systemImageName: "pin.circle"
         )
+        AppShortcut(
+            intent: AskAboutImageIntent(),
+            phrases: [
+                "Ask \(.applicationName) about this",
+                "Ask \(.applicationName) about this image",
+                "Ask \(.applicationName) about a screenshot",
+                "Show this image to \(.applicationName)",
+                "Ask \(\.$session) about an image in \(.applicationName)",
+            ],
+            shortTitle: "Ask About Image",
+            systemImageName: "photo.badge.arrow.down"
+        )
     }
 }
 
