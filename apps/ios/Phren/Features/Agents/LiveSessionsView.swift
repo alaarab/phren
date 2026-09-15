@@ -16,27 +16,41 @@ struct LiveSessionsView: View {
     @State private var closeRequest: SessionCloseRequest?
     @State private var closeError: String?
     @State private var focusFilter: AgentFocusFilter?
-    private struct SessionOpen: Identifiable {
+    private struct SessionOpen: Identifiable, Hashable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
         var draft = ""
         var attachments: [AgentAttachment] = []
         var id: String { "\(session.id.hostID)|\(session.id.muxID)|\(session.id.workspace)|\(session.id.tab)|\(destination.rawValue)" }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.draft == rhs.draft && lhs.attachments.count == rhs.attachments.count }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
 
-    private struct OverviewSelection: Identifiable {
+    private struct OverviewSelection: Identifiable, Hashable {
         let session: LiveAgentSession
         let monitor: LiveHostMonitor
         var id: LiveAgentSession.ID { session.id }
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.monitor === rhs.monitor }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
     }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool; let refresh: UUID }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        Group {
+            if !hosts.isEmpty && !overview.ready {
+                VStack(spacing: 14) {
+                    ProgressView().tint(PhrenTheme.cyan)
+                    Text("Connecting your sessions").font(.subheadline.weight(.medium))
+                    Text("Across \(hosts.count) \(hosts.count == 1 ? "computer" : "computers")")
+                        .font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(PhrenTheme.bg).accessibilityIdentifier("agents-loading")
+                    .transition(.opacity)
+            } else {
             PhrenList {
-                sessionSections(at: context.date)
+                sessionSections()
                 Section {
                     if let preferences = try? LiveSessionPreferences.read(data) {
                         ForEach(preferences.hosts) { host in
@@ -76,21 +90,10 @@ struct LiveSessionsView: View {
             .listSectionSpacing(12)
             .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError,
                                           monitor: { session in overview.computers.first { $0.id == session.host.id }?.monitor }))
-            .opacity(hosts.isEmpty || overview.ready ? 1 : 0)
-            .allowsHitTesting(hosts.isEmpty || overview.ready)
-            .accessibilityHidden(!hosts.isEmpty && !overview.ready)
-            .overlay {
-                if !hosts.isEmpty && !overview.ready {
-                    VStack(spacing: 14) {
-                        ProgressView().tint(PhrenTheme.cyan)
-                        Text("Connecting your sessions").font(.subheadline.weight(.medium))
-                        Text("Across \(hosts.count) \(hosts.count == 1 ? "computer" : "computers")")
-                            .font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(PhrenTheme.bg).accessibilityIdentifier("agents-loading")
-                }
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: overview.ready)
         .navigationTitle("Live sessions")
         // Keep the title in the navigation bar rather than the collapsible
         // large-title region when this list is hosted directly by a tab.
@@ -126,13 +129,13 @@ struct LiveSessionsView: View {
         }
         .refreshable { refreshID = UUID() }
         .sheet(isPresented: $adding) { NavigationStack { LiveHostEditor() } }
-        .sheet(item: $selected) { selection in
+        .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
-        .sheet(item: $sessionOpen) { open in
+        .navigationDestination(item: $sessionOpen) { open in
             switch open.destination {
             case .chat: AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft).id(open.id)
-            case .terminal: NavigationStack { HerdrTerminalView(host: open.session.host, session: open.session) }.id(open.id)
+            case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
             }
         }
         // Siri and Spotlight leave an exact session and destination here.
@@ -162,12 +165,13 @@ struct LiveSessionsView: View {
     /// The one-line status above the sessions. It rides in the first
     /// section's header rather than a section of its own, which used to put
     /// a row's worth of space above and below a single caption.
-    private func caption(at date: Date) -> some View {
-        let connected = overview.connectedCount(at: date)
-        return VStack(alignment: .leading, spacing: 5) {
-            Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
-                 : "Sessions across your computers · \(connected)/\(hosts.count) connected")
-                .accessibilityIdentifier("agents-introduction")
+    private func caption() -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(hosts.isEmpty ? "Connect a computer to see its sessions here."
+                     : "Sessions across your computers · \(overview.connectedCount(at: context.date))/\(hosts.count) connected")
+                    .accessibilityIdentifier("agents-introduction")
+            }
             if let focusFilter {
                 HStack(spacing: 5) {
                     Text("Filtered by Focus · \(focusFilter.label)").accessibilityIdentifier("agents-focus-filter")
@@ -180,7 +184,8 @@ struct LiveSessionsView: View {
     }
 
     @ViewBuilder
-    private func sessionSections(at date: Date) -> some View {
+    private func sessionSections() -> some View {
+        let date = Date.now
         let groups = overview.groups(at: date, query: query, preferences: preferences, projects: model.sessionProjects,
                                      focusFilter: focusFilter)
         if groups.isEmpty {
@@ -195,24 +200,26 @@ struct LiveSessionsView: View {
                          ? "No computers connected" : "No sessions running on the connected computers")
                         .font(.subheadline).foregroundStyle(PhrenTheme.textMuted)
                 }
-            } header: { caption(at: date) }
+            } header: { caption() }
         }
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
-                        if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
-                            selected = OverviewSelection(session: session, monitor: computer.monitor)
-                        }
-                    }, onClose: { request, confirm in
-                        if confirm { closeRequest = request }
-                        else { SessionCloseDialogs.perform(request, monitor: overview.computers.first { $0.id == request.session.host.id }?.monitor) { closeError = $0 } }
-                    })
-                    .separatedSessionRow()
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        LiveSessionCard(session: session, fresh: overview.isFresh(session, at: context.date), showHost: true, onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
+                            if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
+                                selected = OverviewSelection(session: session, monitor: computer.monitor)
+                            }
+                        }, onClose: { request, confirm in
+                            if confirm { closeRequest = request }
+                            else { SessionCloseDialogs.perform(request, monitor: overview.computers.first { $0.id == request.session.host.id }?.monitor) { closeError = $0 } }
+                        })
+                        .separatedSessionRow()
+                    }
                 }
             } header: {
                 VStack(alignment: .leading, spacing: 10) {
-                    if index == 0 { caption(at: date) }
+                    if index == 0 { caption() }
                     Text("\(group.title) · \(group.sessions.count)")
                 }
             }
@@ -254,6 +261,19 @@ final class LiveHostMonitor {
     /// Fetch again now rather than at the end of the poll interval — after a
     /// close, a launch, anything the person just did to the computer.
     func refreshNow() { refreshRequested = true }
+
+    /// For a screen pushed over the list: take over polling as soon as the
+    /// list's own task is cancelled (that happens after this screen appears),
+    /// and keep going until this screen leaves.
+    func keepRunning(host: LiveHost) async {
+        while !Task.isCancelled {
+            if polling {
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            } else {
+                await run(host: host)
+            }
+        }
+    }
 
     /// Herdr confirmed a close: drop the tab (or workspace) from the snapshot
     /// at once, then fetch so the truth replaces the guess.
@@ -479,7 +499,7 @@ private struct LiveHostView: View {
         .sheet(isPresented: $editing) {
             if let host { NavigationStack { LiveHostEditor(existing: host) } }
         }
-        .sheet(item: $selected) { selection in
+        .navigationDestination(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: monitor)
         }
         .task(id: PollIdentity(host: host, active: scenePhase == .active && !editing, refresh: refreshID)) {
@@ -713,8 +733,7 @@ private struct LiveSessionDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { context in
                 let fresh = monitor.isFresh(at: context.date)
                 if let session {
                     let project = match?.project
@@ -836,24 +855,24 @@ private struct LiveSessionDetailView: View {
             }
             .navigationTitle("Session details")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
-            }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
+            // Pushed over the list, this page is what's on screen, and SwiftUI
+            // cancels the list's polling task when it disappears. Keep the
+            // computer's monitor running from here; the list picks it back up
+            // when it reappears.
+            .task(id: host) {
+                guard let host else { return }
+                await monitor.keepRunning(host: host)
             }
             .onChange(of: session?.tab.cwd) { _, _ in
                 copiedFolder = false
                 assigning = false
             }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .sheet(isPresented: $assigning) {
                 NavigationStack {
                     LiveProjectPicker(hostID: sessionID.hostID, cwd: session?.tab.cwd ?? "",
                                       existing: preferences?.mapping(hostID: sessionID.hostID, cwd: session?.tab.cwd))
                 }
             }
-        }
     }
 }
 

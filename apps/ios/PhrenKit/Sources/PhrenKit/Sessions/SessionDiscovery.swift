@@ -38,7 +38,7 @@ extension LiveSessionPreferences {
 
 /// The tab selected on a known computer. Its destination comes from the hook's
 /// workspace and (when needed) tab IDs, never the agent `sessionId` or label.
-public struct LiveAgentSession: Equatable, Identifiable, Sendable {
+public struct LiveAgentSession: Equatable, Hashable, Identifiable, Sendable {
     public struct ID: Codable, Hashable, Sendable {
         public let hostID: UUID
         public let workspace: String
@@ -55,6 +55,9 @@ public struct LiveAgentSession: Equatable, Identifiable, Sendable {
     public let workspaceTabCount: Int?
     public let tab: LiveWorkspaces.Tab
     public var id: ID { ID(hostID: host.id, workspace: workspaceID, tab: tab.id, muxID: host.muxID) }
+    /// Navigation destinations hash sessions; equal sessions share an id, so
+    /// the id alone keeps Hashable consistent with Equatable.
+    public func hash(into hasher: inout Hasher) { hasher.combine(id) }
 
     /// A human folder label for sessions whose cwd is not linked to a phren
     /// project. Herdr workspace labels can be usernames or transport names.

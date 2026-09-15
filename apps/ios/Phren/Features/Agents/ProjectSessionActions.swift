@@ -7,8 +7,12 @@ struct ProjectSessionActions: View {
     let storeId: String
     let project: String
     var presentation: Presentation = .menu
-    @State private var chatting = false
-    @State private var terminal = false
+    private enum RouteKind: Hashable { case chat, terminal }
+    private struct Route: Identifiable, Hashable {
+        let id = UUID()
+        let kind: RouteKind
+    }
+    @State private var route: Route?
     @State private var launching = false
     var body: some View {
         Group {
@@ -19,16 +23,17 @@ struct ProjectSessionActions: View {
             case .section: Section("Session") { actions }
             }
         }
-        .sheet(isPresented: $chatting) { ProjectSessionsView(storeID: storeId, project: project, openChat: true) }
-        .sheet(isPresented: $terminal) { ProjectSessionsView(storeID: storeId, project: project) }
+        .navigationDestination(item: $route) { route in
+            ProjectSessionsView(storeID: storeId, project: project, openChat: route.kind == .chat)
+        }
         .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeId, project: project) }
     }
     private var actions: some View {
         Group {
             Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
                 .accessibilityIdentifier("project-open-on-computer")
-            Button("Chat with agent", systemImage: "bubble.left.and.bubble.right") { chatting = true }
-            Button("Herdr terminal", systemImage: "terminal") { terminal = true }
+            Button("Chat with agent", systemImage: "bubble.left.and.bubble.right") { route = .init(kind: .chat) }
+            Button("Herdr terminal", systemImage: "terminal") { route = .init(kind: .terminal) }
         }
     }
 }

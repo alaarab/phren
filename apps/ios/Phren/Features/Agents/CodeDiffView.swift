@@ -1,6 +1,26 @@
 import PhrenKit
 import SwiftUI
 
+enum DiffDocumentCache {
+    final class Box: NSObject { let value: DiffDocument; init(_ value: DiffDocument) { self.value = value } }
+    private static let values: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>(); cache.countLimit = 250; return cache
+    }()
+    static func value(for patch: String) -> DiffDocument {
+        let key = "\(patch.utf8.count)|\(patch.hashValue)" as NSString
+        if let cached = values.object(forKey: key) { return cached.value }
+        let started = CFAbsoluteTimeGetCurrent()
+        let document = DiffDocument(patch: patch)
+        values.setObject(Box(document), forKey: key)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+            print("[PhrenPerformance] parsed diff \(patch.utf8.count) bytes: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+        }
+        #endif
+        return document
+    }
+}
+
 /// A tool's patch inside the chat, drawn with the same rows as the file diff
 /// screen (VS Code's inline diff: gutter numbers, row tints, changed
 /// characters tinted harder). It stays a preview: a bounded number of lines
@@ -8,19 +28,25 @@ import SwiftUI
 /// at once inside the timeline.
 struct CodeDiffView: View {
     let patch: String
-    var previewLineLimit = 36
+    let previewLineLimit: Int
     /// A file under a shell call starts as its title bar alone: tap it for
     /// the preview, tap again to fold it, or open the whole diff full screen.
-    var collapsible = false
+    let collapsible: Bool
     @State private var open = false
-    @State private var fullScreen = false
+    @Environment(\.openChatDiff) private var openFullDiff
     @State private var showAll = false
     @State private var page = 0
     @AppStorage(ChatSettings.wrapKey) private var wrap = false
     /// The card's width, so row tints run edge to edge inside the horizontal
     /// scroller instead of stopping where the longest line ends.
     @State private var width: CGFloat = 0
-    private var document: DiffDocument { DiffDocument(patch: patch) }
+    private let document: DiffDocument
+    init(patch: String, previewLineLimit: Int = 36, collapsible: Bool = false) {
+        self.patch = patch
+        self.previewLineLimit = previewLineLimit
+        self.collapsible = collapsible
+        document = DiffDocumentCache.value(for: patch)
+    }
     /// The file named in the patch header decides the colouring.
     private func language(_ diff: DiffDocument) -> SyntaxTokenizer.Language {
         let header = diff.rows.first { $0.kind == .header }?.text ?? ""
@@ -53,7 +79,12 @@ struct CodeDiffView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(header?.text ?? "Patch"), \(open ? "expanded" : "collapsed")")
                     .accessibilityIdentifier("chat-patch-file:\(header?.text ?? "")")
-                    Button("Open full diff", systemImage: "arrow.up.left.and.arrow.down.right") { fullScreen = true }
+                    Button("Open full diff", systemImage: "arrow.up.left.and.arrow.down.right") {
+                        let path = (header?.text ?? "Patch").replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: "")
+                        let status = (header?.text ?? "").hasPrefix("New file") ? "A " : (header?.text ?? "").hasPrefix("Deleted file") ? "D " : " M"
+                        openFullDiff(.init(file: .init(path: path, status: status, sections: []),
+                                           section: .init(id: "chat:\(path)", kind: "unstaged", patch: patch)))
+                    }
                         .labelStyle(.iconOnly).foregroundStyle(PhrenTheme.textMuted).frame(width: 36, height: 32)
                         .accessibilityIdentifier("chat-patch-open")
                 } else {
@@ -105,15 +136,6 @@ struct CodeDiffView: View {
                     .accessibilityIdentifier("chat-patch-expand")
             }
             if unfolded, diff.truncated { Text("Preview truncated. Copy the patch for all supplied lines.").font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(10) }
-        }
-        .sheet(isPresented: $fullScreen) {
-            // The same editor as Repository changes, for this one patch.
-            let path = (header?.text ?? "Patch").replacingOccurrences(of: "New file · ", with: "").replacingOccurrences(of: "Deleted file · ", with: "")
-            let status = (header?.text ?? "").hasPrefix("New file") ? "A " : (header?.text ?? "").hasPrefix("Deleted file") ? "D " : " M"
-            NavigationStack {
-                FileDiffView(file: .init(path: path, status: status, sections: []), section: .init(id: "chat:\(path)", kind: "unstaged", patch: patch))
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { fullScreen = false } } }
-            }
         }
         .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 0.5))

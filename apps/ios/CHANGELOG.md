@@ -10,6 +10,12 @@ number counts up on its own.
 
 ### New
 
+- Drill-in screens now push sideways with system edge-back, hold-and-swipe back
+  from the middle of the screen, and Escape or Command-[ keyboard navigation.
+- Live sessions reveal in one complete view after the computers answer, then
+  refresh in place without rebuilding every section each second.
+- Cached chat text, tool presentation, diffs, and display-sized image decoding
+  keep long agent transcripts responsive while scrolling.
 - Build richer Shortcuts with typed session status, bounded transcript text,
   message-and-wait replies, and a Start Agent Session action.
 - Filter live sessions by computer or phren store from a Focus, with suggested

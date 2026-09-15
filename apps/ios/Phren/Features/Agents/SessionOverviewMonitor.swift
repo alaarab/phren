@@ -21,6 +21,9 @@ final class SessionOverviewMonitor {
     private(set) var ready = false
     private var generation = UUID()
     private var pending: Set<UUID> = []
+    @ObservationIgnored private var cachedGroups: (key: GroupCacheKey, value: [Group])?
+    @ObservationIgnored private(set) var groupComputationCount = 0
+    @ObservationIgnored private(set) var lastGroupDurationMilliseconds = 0.0
     @ObservationIgnored private let initialWait: Duration
     @ObservationIgnored private let makeMonitor: @MainActor () -> LiveHostMonitor
 
@@ -59,6 +62,16 @@ final class SessionOverviewMonitor {
     func groups(at date: Date, query: String, preferences: LiveSessionPreferences?, projects: [SessionProject],
                 focusFilter: AgentFocusFilter? = nil) -> [Group] {
         guard ready else { return [] }
+        // Freshness is the one clock-driven input: it flips a computer's
+        // sessions between the live sections and "Last seen", so it is part
+        // of the key — but it changes at most once per poll interval, not
+        // once per tick.
+        let key = GroupCacheKey(revisions: computers.map {
+            .init(id: $0.id, updated: $0.monitor.lastUpdated, message: $0.monitor.message,
+                  snapshot: $0.monitor.snapshot, fresh: $0.monitor.isFresh(at: date))
+        }, query: query, preferences: preferences, projects: projects, focusFilter: focusFilter)
+        if let cachedGroups, cachedGroups.key == key { return cachedGroups.value }
+        let started = CFAbsoluteTimeGetCurrent()
         var live: [LiveAgentSession] = [], previous: [LiveAgentSession] = []
         for computer in computers {
             let sessions = (computer.monitor.snapshot?.sessions(on: computer.host) ?? []).filter { session in
@@ -86,6 +99,14 @@ final class SessionOverviewMonitor {
         if !previous.isEmpty {
             groups.append(Group(id: "previous", title: "Last seen", sessions: previous.sorted(by: Self.ordered), fresh: false))
         }
+        cachedGroups = (key, groups)
+        groupComputationCount += 1
+        lastGroupDurationMilliseconds = (CFAbsoluteTimeGetCurrent() - started) * 1_000
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+            print("[PhrenPerformance] session groups #\(groupComputationCount): \(String(format: "%.3f", lastGroupDurationMilliseconds)) ms")
+        }
+        #endif
         return groups
     }
 
@@ -101,5 +122,20 @@ final class SessionOverviewMonitor {
         if lhs.host.id == rhs.host.id, let l = lhs.tab.changedSeq, let r = rhs.tab.changedSeq, l != r { return l > r }
         return (lhs.host.name.lowercased(), lhs.host.id.uuidString, lhs.workspaceName.lowercased(), lhs.tab.id)
             < (rhs.host.name.lowercased(), rhs.host.id.uuidString, rhs.workspaceName.lowercased(), rhs.tab.id)
+    }
+
+    private struct Revision: Equatable {
+        let id: UUID
+        let updated: Date?
+        let message: String?
+        let snapshot: LiveWorkspaces?
+        let fresh: Bool
+    }
+    private struct GroupCacheKey: Equatable {
+        let revisions: [Revision]
+        let query: String
+        let preferences: LiveSessionPreferences?
+        let projects: [SessionProject]
+        let focusFilter: AgentFocusFilter?
     }
 }

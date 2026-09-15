@@ -52,6 +52,20 @@ final class SessionOverviewTests: XCTestCase {
         next.cancel(); await next.value
     }
 
+    func testGroupComputationIsMemoizedAcrossClockTicks() async throws {
+        let computer = try host("Mac"), snapshot = try snapshot("working")
+        let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in snapshot } }
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.ready }
+        _ = model.groups(at: .now, query: "", preferences: nil, projects: [])
+        let firstCount = model.groupComputationCount
+        _ = model.groups(at: .now.addingTimeInterval(1), query: "", preferences: nil, projects: [])
+        XCTAssertEqual(model.groupComputationCount, firstCount, "The one-second freshness clock must reuse snapshot grouping")
+        _ = model.groups(at: .now, query: "working", preferences: nil, projects: [])
+        XCTAssertEqual(model.groupComputationCount, firstCount + 1, "A query change must invalidate grouping")
+        run.cancel(); await run.value
+    }
+
     func testCancelledBatchCannotRevealAReplacementBatch() async throws {
         let first = try host("Old"), second = try host("New")
         let model = SessionOverviewMonitor(initialWait: .seconds(1)) {

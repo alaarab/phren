@@ -82,11 +82,12 @@ final class SessionDetailsTests: XCTestCase {
     func testClosedSessionRemovesActionsFromItsOpenDetails() {
         let app = launch(extra: ["--session-details-removed"])
         app.buttons["live-detail:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["session-detail-chat"].waitForExistence(timeout: 5))
+        // The pushed page takes over polling at once, so the fixture's
+        // second fetch (the removal) can land before the actions ever draw.
         XCTAssertTrue(app.staticTexts["Session no longer available"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["session-detail-chat"].exists)
         XCTAssertFalse(app.buttons["session-detail-project"].exists)
-        app.navigationBars["Session details"].buttons["Done"].tap()
+        app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.staticTexts["No sessions running"].waitForExistence(timeout: 5))
     }
 
@@ -110,3 +111,4 @@ final class SessionDetailsTests: XCTestCase {
         add(attachment)
     }
 }
+

@@ -40,7 +40,7 @@ final class LiveSessionsTests: XCTestCase {
         graph.tap()
         XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
-        app.navigationBars["Session details"].buttons["Done"].tap()
+        app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Showing previous status")).firstMatch
         XCTAssertTrue(stale.waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working · stale")).firstMatch.exists)
@@ -63,7 +63,7 @@ final class LiveSessionsTests: XCTestCase {
         app.buttons["Change project link"].tap()
         app.buttons["Remove directory link"].tap()
         XCTAssertTrue(app.buttons["Link to project"].waitForExistence(timeout: 5))
-        app.navigationBars["Session details"].buttons["Done"].tap()
+        app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         app.buttons["Connection settings"].tap()
         app.swipeUp()
         app.buttons["Forget computer"].tap()

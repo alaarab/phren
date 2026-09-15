@@ -276,8 +276,7 @@ struct HerdrTerminalView: View {
     @State private var shortcuts = false
     @State private var reconnect = UUID()
     @State private var uploadRequest: TerminalUploadRequest?
-    @State private var showingChat = false
-    @State private var chatSession: LiveAgentSession?
+    @State private var chatOpen: ChatOpen?
     @State private var showingAgents = false
     @State private var showingDictation = false
     @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
@@ -285,6 +284,14 @@ struct HerdrTerminalView: View {
     private var toolbarHidden: Bool { hardwareKeyboard && IntegrationSettings.enabled(IntegrationSettings.autoHideToolbarKey, default: false) }
     private var currentHost: LiveHost? { (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } }
     private var active: Bool { visible && scenePhase == .active && currentHost == host }
+    private struct ChatOpen: Identifiable, Hashable {
+        let id = UUID()
+        let session: LiveAgentSession
+        var pane: AgentChatPanes.Pane? = nil
+        var attachments: [AgentAttachment] = []
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -316,20 +323,24 @@ struct HerdrTerminalView: View {
                 ZStack(alignment: .leading) {
                     Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgents() }
                     AgentDrawer(current: session, chooseSession: { selected in
-                        chatSession = selected; closeAgents()
+                        chatOpen = .init(session: selected); closeAgents()
                     }, close: closeAgents)
                 }.zIndex(20)
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .keepsInteractivePop()
         .onChange(of: PhrenAppearance.shared.palette) { _, _ in model.applyAppearance() }
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $uploadRequest) { request in
-            TerminalUploadFlow(host: host, attachments: request.attachments)
+            TerminalUploadFlow(host: host, attachments: request.attachments) { session, pane, attachments in
+                chatOpen = .init(session: session, pane: pane, attachments: attachments)
+            }
         }
-        .sheet(isPresented: $showingChat) { if let session { AgentChatSheet(session: session) } }
-        .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
+        .navigationDestination(item: $chatOpen) {
+            AgentChatSheet(session: $0.session, initialPane: $0.pane, attachments: $0.attachments)
+        }
         .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in hardwareKeyboard = GCKeyboard.coalesced != nil }
@@ -338,7 +349,7 @@ struct HerdrTerminalView: View {
             if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
-            model.terminal.onOpenChat = { if session != nil { showingChat = true } }
+            model.terminal.onOpenChat = { if let session { chatOpen = .init(session: session) } }
             model.terminal.onDictate = { showingDictation = true }
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false

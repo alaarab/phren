@@ -11,26 +11,21 @@ struct TerminalUploadRequest: Identifiable {
 struct TerminalUploadFlow: View {
     let host: LiveHost
     let attachments: [AgentAttachment]
+    let onOpen: (LiveAgentSession, AgentChatPanes.Pane, [AgentAttachment]) -> Void
     @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var hostData = Data()
     @State private var snapshot: LiveWorkspaces?
     @State private var selectedSession: LiveAgentSession?
     @State private var panes: [AgentChatPanes.Pane] = []
-    @State private var destination: Destination?
     @State private var loading = true
     @State private var error: String?
     @State private var retry = UUID()
-    private struct Destination { let session: LiveAgentSession; let pane: AgentChatPanes.Pane }
     private var hostMatches: Bool {
         (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } == host
     }
 
     var body: some View {
-        Group {
-            if let destination {
-                AgentChatSheet(session: destination.session, initialPane: destination.pane, attachments: attachments)
-            } else {
-                NavigationStack {
+        NavigationStack {
                     PhrenList {
                         if let error { Text(error).font(.callout).foregroundStyle(PhrenTheme.warning) }
                         if let selectedSession {
@@ -38,7 +33,10 @@ struct TerminalUploadFlow: View {
                                 ForEach(panes) { pane in
                                     if (try? pane.target(hostID: host.id, workspaceID: selectedSession.workspaceID,
                                                          tabID: selectedSession.tab.id, muxID: host.muxID)) != nil {
-                                        Button(pane.displayTitle) { destination = .init(session: selectedSession, pane: pane) }
+                                        Button(pane.displayTitle) {
+                                            onOpen(selectedSession, pane, attachments)
+                                            dismiss()
+                                        }
                                     }
                                 }
                             }
@@ -67,11 +65,8 @@ struct TerminalUploadFlow: View {
                     .navigationTitle("Attach to agent")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-                }
-            }
         }
         .task(id: retry) {
-            guard destination == nil else { return }
             loading = true; error = nil
             defer { loading = false }
             do {
@@ -102,10 +97,14 @@ struct TerminalUploadFlow: View {
         let supported = panes.filter { (try? $0.target(hostID: host.id, workspaceID: session.workspaceID,
                                                       tabID: session.tab.id, muxID: host.muxID)) != nil }
         if let focusedPane {
-            if let pane = supported.first(where: { $0.id == focusedPane }) { destination = .init(session: session, pane: pane) }
+            if let pane = supported.first(where: { $0.id == focusedPane }) {
+                onOpen(session, pane, attachments)
+                dismiss()
+            }
             else { error = "Choose an agent for this attachment. The focused pane has no supported conversation." }
         } else if supported.count == 1 {
-            destination = .init(session: session, pane: supported[0])
+            onOpen(session, supported[0], attachments)
+            dismiss()
         } else if supported.isEmpty {
             error = "No supported agent conversation was found in this tab. Choose another tab."
         }

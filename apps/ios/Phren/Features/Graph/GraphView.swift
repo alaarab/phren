@@ -94,6 +94,7 @@ struct GraphView: View {
         // Hiding the system back item removes its swipe gesture; keep an
         // explicit, accessible way out in the leading toolbar instead.
         .navigationBarBackButtonHidden(true)
+        .disablesNavigationPopGestures()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: {

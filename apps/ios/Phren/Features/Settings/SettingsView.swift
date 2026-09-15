@@ -37,7 +37,7 @@ struct SettingsView: View {
     private static let needsAttentionAnchor = "needs-attention"
 
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             VStack(spacing: 0) {
                 ActionErrorBanner()
                 ScrollViewReader { proxy in
@@ -99,8 +99,10 @@ struct SettingsView: View {
                 recentCapturesSection
 
                 Section("Memory") {
-                    Button("Memory maintenance", systemImage: "wrench.and.screwdriver") {
-                        model.showingMemoryMaintenance = true
+                    NavigationLink {
+                        MemoryMaintenanceView()
+                    } label: {
+                        Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
                     }
                 }
                 }

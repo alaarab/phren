@@ -3,7 +3,7 @@ import PhrenKit
 
 struct TasksView: View {
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
@@ -15,12 +15,14 @@ struct TasksView: View {
     }
 }
 
-struct TaskListRow: Identifiable {
+struct TaskListRow: Identifiable, Hashable {
     let storeId: String
     let storeName: String
     let project: String
     let task: PhrenTask
     var id: String { "\(storeId)/\(project)/\(task.stableId ?? task.id)" }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.task == rhs.task }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// Task list: cross-store + cross-project in the Tasks tab, or scoped to one
@@ -189,7 +191,7 @@ struct TaskListView: View {
         .sheet(item: $editing) { row in
             TaskEditSheet(row: row)
         }
-        .sheet(item: $reading) { row in
+        .navigationDestination(item: $reading) { row in
             TaskDetailsSheet(row: row)
         }
     }
@@ -581,7 +583,6 @@ struct TaskRow: View {
 /// Reading a long task never opens a text editor or changes its state.
 private struct TaskDetailsSheet: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var editing = false
     let row: TaskListRow
 
@@ -596,8 +597,7 @@ private struct TaskDetailsSheet: View {
 
     var body: some View {
         let row = currentRow
-        NavigationStack {
-            PhrenList {
+        PhrenList {
                 Section {
                     Text(.init(TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))))
                         .textSelection(.enabled)
@@ -618,14 +618,12 @@ private struct TaskDetailsSheet: View {
             .navigationTitle("Task details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 if model.canWrite(storeId: row.storeId, project: row.project) {
                     ToolbarItem(placement: .primaryAction) { Button("Edit") { editing = true } }
                 }
             }
             .phrenScreen()
             .sheet(isPresented: $editing) { TaskEditSheet(row: row) }
-        }
     }
 }
 

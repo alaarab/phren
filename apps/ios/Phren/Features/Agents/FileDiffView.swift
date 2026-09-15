@@ -13,7 +13,12 @@ struct FileDiffView: View {
     @State private var change = 0
     @State private var focused: Int?
 
-    private var document: DiffDocument? { section.patch.map(DiffDocument.init(patch:)) }
+    private let document: DiffDocument?
+    init(file: AgentRepositoryDiff.File, section: AgentRepositoryDiff.Section) {
+        self.file = file
+        self.section = section
+        document = section.patch.map { DiffDocumentCache.value(for: $0) }
+    }
     private var language: SyntaxTokenizer.Language { .detect(file.path) }
     private var fileName: String { file.path.split(separator: "/").last.map(String.init) ?? file.path }
 

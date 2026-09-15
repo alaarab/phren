@@ -2,6 +2,36 @@ import XCTest
 
 final class AgentChatTests: XCTestCase {
     @MainActor
+    func testChatPopsWithEdgeAndMiddleSwipeAndEscape() {
+        let app = launch()
+        let row = app.buttons["live-chat:w7:w7:t9"]
+        row.tap()
+        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
+        // A finger rests before it drags; the instant synthetic drag never
+        // registers as an edge pan over a scrollable transcript.
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
+        edge.press(forDuration: 0.4, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "The system edge swipe should pop the chat")
+
+        row.tap()
+        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
+        let middle = app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.36))
+        middle.press(forDuration: 0.12, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.36)))
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "A held rightward pan from the middle should pop chat")
+
+        row.tap()
+        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 5))
+        // Escape is registered too, but XCUITest's synthesized Escape does not
+        // reach UIKit key commands on the simulator; ⌘[ proves the wiring.
+        // The simulator swallows the first synthesized key event while it
+        // attaches the hardware keyboard; Escape (also registered) warms it up.
+        app.typeKey(XCUIKeyboardKey.escape, modifierFlags: [])
+        sleep(1)
+        if !row.exists { app.typeKey("[", modifierFlags: .command) }
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Escape or ⌘[ should go back")
+    }
+
+    @MainActor
     func testConsecutiveReadsFoldAndExpandToOriginalCards() {
         let app = launch(extra: ["--chat-read-run"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -555,7 +585,7 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(wrap.waitForExistence(timeout: 3)); wrap.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "+let accent = purple")).firstMatch.waitForExistence(timeout: 3))
         app.buttons["diff-options"].tap(); app.buttons["Wrap long lines"].tap()
-        app.buttons["Done"].tap()
+        app.navigationBars["Theme.swift"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(theme.waitForExistence(timeout: 5)); theme.tap()
         XCTAssertFalse(purple.waitForExistence(timeout: 1))
         // A run of removed then added lines draws as one block.
@@ -939,3 +969,4 @@ final class AgentChatTests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
+

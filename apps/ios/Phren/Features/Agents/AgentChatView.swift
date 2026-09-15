@@ -7,19 +7,28 @@ struct AgentConversationLink<LabelContent: View>: View {
     let session: LiveAgentSession
     var onOpenInPhren: (() -> Void)? = nil
     @ViewBuilder var label: LabelContent
-    @State private var showingChat = false
 
     var body: some View {
-        Button {
-            PhrenAppShortcuts.donateOpen(session)
-            if let onOpenInPhren { onOpenInPhren() }
-            else { showingChat = true }
-        } label: { label }
-        .sheet(isPresented: $showingChat) {
-            // Settings → Chat decides which of the two views a session opens in.
-            if ChatSettings.opensInTerminal { NavigationStack { HerdrTerminalView(host: session.host, session: session) } }
-            else { AgentChatSheet(session: session) }
+        Group {
+            if let onOpenInPhren {
+                Button {
+                    PhrenAppShortcuts.donateOpen(session)
+                    onOpenInPhren()
+                } label: { label }
+            } else {
+                NavigationLink {
+                    AgentSessionDestination(session: session).onAppear { PhrenAppShortcuts.donateOpen(session) }
+                } label: { label }
+            }
         }
+    }
+}
+
+struct AgentSessionDestination: View {
+    let session: LiveAgentSession
+    var body: some View {
+        if ChatSettings.opensInTerminal { HerdrTerminalView(host: session.host, session: session) }
+        else { AgentChatSheet(session: session) }
     }
 }
 
@@ -38,11 +47,9 @@ struct AgentChatSheet: View {
         self.initialPane = initialPane
     }
     var body: some View {
-        NavigationStack {
-            AgentChatView(session: session, switchSession: { session = $0 },
-                          initialPane: session.id == initialSessionID ? initialPane : nil,
-                          incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft).id(session.id)
-        }
+        AgentChatView(session: session, switchSession: { session = $0 },
+                      initialPane: session.id == initialSessionID ? initialPane : nil,
+                      incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft).id(session.id)
     }
 }
 
@@ -81,6 +88,8 @@ struct AgentChatView: View {
     @State private var showingUsage = false
     @State private var previewImage: ChatAttachmentDraft?
     @State private var assigningProject = false
+    @State private var fullDiff: ChatFullDiff?
+    @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
     @State private var bottomPosition: CGFloat = 0
     @State private var nearHistoryTop = false
@@ -407,6 +416,8 @@ struct AgentChatView: View {
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .background(PhrenTheme.chatCanvas)
+        .environment(\.openChatDiff) { fullDiff = $0 }
+        .environment(\.openToolOutput) { fullToolOutput = $0 }
         .overlay {
             if showingAgentSwitcher {
                 ZStack(alignment: .leading) {
@@ -417,19 +428,15 @@ struct AgentChatView: View {
                 }.zIndex(20)
             }
         }
-        .overlay(alignment: .leading) {
-            if !showingAgentSwitcher {
-                Color.clear.frame(width: 22).contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 18).onEnded { value in
-                        if value.translation.width > 55 && abs(value.translation.height) < 80 { openAgentDrawer() }
-                    })
-                    .accessibilityHidden(true)
-            }
-        }
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
         .navigationTitle("Agent chat")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        // Pushed inside a tab, the chat is a full-height screen: the tab bar
+        // would otherwise sit under the composer.
+        .toolbar(.hidden, for: .tabBar)
+        .keepsInteractivePop(hidesNavigationBar: true)
+        .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {
             if !initialized {
                 initialized = true
@@ -904,6 +911,40 @@ private struct ChatBottomPosition: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
+private enum ChatMessageDisplayCache {
+    static let values: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>(); cache.countLimit = 1_000; return cache
+    }()
+    private static let imageMarker = try! NSRegularExpression(pattern: #"\[Image #\d+\]|\[Image attachment\]"#)
+
+    static func text(for message: AgentChatMessage, images: [ChatAttachmentDraft], inlineImages: Bool) -> String {
+        let paths = images.compactMap(\.path).sorted()
+        let key = "\(message.id)|\(message.text.hashValue)|\(inlineImages)|\(paths.joined(separator: "|"))" as NSString
+        if let cached = values.object(forKey: key) { return cached as String }
+        let started = CFAbsoluteTimeGetCurrent()
+        var text = message.text
+        let marker = "\n\nAttached files on this computer:\n"
+        if let section = text.range(of: marker, options: .backwards) {
+            let listed = text[section.upperBound...].components(separatedBy: "\n")
+            let previewPaths = Set(paths)
+            if inlineImages || (!images.isEmpty && listed.allSatisfy({ previewPaths.contains($0) })) {
+                text = String(text[..<section.lowerBound])
+            }
+        }
+        if inlineImages {
+            text = imageMarker.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        values.setObject(text as NSString, forKey: key)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+            print("[PhrenPerformance] prepared message \(message.id): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+        }
+        #endif
+        return text
+    }
+}
+
 private struct ChatMessageRow<Historical: View>: View {
     let message: AgentChatMessage
     var revealedText: String? = nil
@@ -915,24 +956,7 @@ private struct ChatMessageRow<Historical: View>: View {
     private var inlineImages: Bool { !message.imageBlocks.isEmpty }
     private var displayText: String {
         if let revealedText { return revealedText }
-        var text = message.text
-        let marker = "\n\nAttached files on this computer:\n"
-        if let section = text.range(of: marker, options: .backwards) {
-            let paths = text[section.upperBound...].components(separatedBy: "\n")
-            let previewPaths = Set(images.compactMap(\.path))
-            // Hide our attachment suffix once pictures replace it: local
-            // previews of every listed path, or the transcript's own images.
-            if inlineImages || (!images.isEmpty && paths.allSatisfy({ previewPaths.contains($0) })) {
-                text = String(text[..<section.lowerBound])
-            }
-        }
-        if inlineImages {
-            // Claude Code's paste markers and Codex's placeholders name
-            // pictures that now sit above the words.
-            text = text.replacingOccurrences(of: #"\[Image #\d+\]|\[Image attachment\]"#, with: "", options: .regularExpression)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return text
+        return ChatMessageDisplayCache.text(for: message, images: images, inlineImages: inlineImages)
     }
     var body: some View {
         if let command = message.localCommand {

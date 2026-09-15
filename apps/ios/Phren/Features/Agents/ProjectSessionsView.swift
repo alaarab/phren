@@ -68,7 +68,6 @@ struct ProjectSessionsView: View {
     var openChat = false
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var discovery = ProjectSessionDiscovery()
     @State private var visible = false
@@ -89,8 +88,7 @@ struct ProjectSessionsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            PhrenList {
+        PhrenList {
                 Section {
                     Text("\(project) · \(storeID)").font(.caption).foregroundStyle(.secondary)
                     if discovery.refreshing { ProgressView("Finding project sessions…") }
@@ -132,7 +130,6 @@ struct ProjectSessionsView: View {
             .navigationTitle("Project sessions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
                     Button("Refresh sessions", systemImage: "arrow.clockwise") { refreshID = UUID() }
                         .disabled(discovery.refreshing)
@@ -140,10 +137,8 @@ struct ProjectSessionsView: View {
             }
             .phrenScreen()
             .modifier(SessionLaunchAlert(error: $error))
-            .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
-            .sheet(item: $terminalSession) { session in
-                NavigationStack { HerdrTerminalView(host: session.host, session: session) }
-            }
+            .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
+            .navigationDestination(item: $terminalSession) { HerdrTerminalView(host: $0.host, session: $0) }
             .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeID, project: project) }
             .onAppear { visible = true }
             .onDisappear { visible = false }
@@ -155,7 +150,6 @@ struct ProjectSessionsView: View {
                     do { try await Task.sleep(for: .seconds(10)) } catch { return }
                 }
             }
-        }
     }
 
     private func sessionRow(_ session: LiveAgentSession, assign: Bool) -> some View {

@@ -23,7 +23,7 @@ struct SearchView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()

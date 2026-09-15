@@ -21,6 +21,8 @@ final class AllSessionsTests: XCTestCase {
         let loading = app.descendants(matching: .any).matching(identifier: "agents-loading").firstMatch
         XCTAssertTrue(loading.exists)
         XCTAssertFalse(row(app, host: mac).exists, "The fast host must not appear as a partial page")
+        XCTAssertFalse(section(app, title: "Computers").exists, "Computer management must join the same first reveal")
+        XCTAssertFalse(section(app, title: "Working").exists, "No session section may appear before the batch is ready")
         XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 8))
         XCTAssertTrue(row(app, host: linux).exists)
         XCTAssertFalse(loading.exists)
@@ -62,7 +64,7 @@ final class AllSessionsTests: XCTestCase {
         app.buttons["overview-detail:\(linux):herdr:default:w1:w1:t1"].tap()
         XCTAssertTrue(app.navigationBars["Session details"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Review Linux deployment"].exists)
-        app.navigationBars.buttons["Done"].tap()
+        app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["all-web-servers"].exists)
@@ -265,5 +267,3 @@ final class AllSessionsTests: XCTestCase {
         screenshot.name = name; screenshot.lifetime = .keepAlways; add(screenshot)
     }
 }
-
-

@@ -1,6 +1,8 @@
 import SwiftUI
 import PhrenKit
 
+struct MemoryMaintenanceRoute: Hashable { }
+
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var filter = ""
@@ -22,7 +24,7 @@ struct ProjectsView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack(path: $navigationPath) {
+        PhrenNavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
@@ -78,8 +80,8 @@ struct ProjectsView: View {
                         }
                     }
                     Section {
-                        Button("Memory maintenance", systemImage: "wrench.and.screwdriver") {
-                            model.showingMemoryMaintenance = true
+                        NavigationLink(value: MemoryMaintenanceRoute()) {
+                            Label("Memory maintenance", systemImage: "wrench.and.screwdriver")
                         }
                         .foregroundStyle(.secondary)
                     } footer: {
@@ -158,6 +160,13 @@ struct ProjectsView: View {
             .navigationDestination(for: AgentLaunch.PendingProject.self) { target in
                 ProjectDetailView(storeId: target.storeID, project: target.project)
             }
+            .navigationDestination(for: MemoryMaintenanceRoute.self) { _ in MemoryMaintenanceView() }
+            .onChange(of: model.showingMemoryMaintenance, initial: true) { _, showing in
+                guard showing else { return }
+                model.showingMemoryMaintenance = false
+                navigationPath = NavigationPath()
+                navigationPath.append(MemoryMaintenanceRoute())
+            }
             .onChange(of: model.pendingProjectVersion, initial: true) { _, _ in
                 guard let target = AgentLaunch.takePendingProject() else { return }
                 guard model.storeContexts.contains(where: { context in
@@ -168,16 +177,6 @@ struct ProjectsView: View {
                 }
                 navigationPath = NavigationPath()
                 navigationPath.append(target)
-            }
-            // Archive destinations are registered here, at the stack root,
-            // rather than on the pushed views that link to them — a
-            // .navigationDestination declared on an already-pushed view
-            // resolves a tap twice and stacks duplicates behind you.
-            .navigationDestination(for: ArchiveRoute.self) { route in
-                ArchiveBrowserView(storeId: route.storeId, project: route.project)
-            }
-            .navigationDestination(for: ArchiveTopicRoute.self) { route in
-                ArchiveTopicView(storeId: route.storeId, topic: route.topic)
             }
             .sheet(isPresented: $showVoiceCapture) {
                 VoiceCaptureView(targets: voiceCaptureTargets)
@@ -256,7 +255,14 @@ struct ProjectDetailView: View {
             }
         }
         .background(PhrenTheme.bg)
-        .accessibilityIdentifier("project-detail:\(storeId):\(project)")
+        // An identifier on the stack itself would be stamped onto every
+        // child (hiding "project-skills" and the rest); a zero-size marker
+        // names the page instead.
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1)
+                .accessibilityElement().accessibilityLabel("Project page")
+                .accessibilityIdentifier("project-detail:\(storeId):\(project)")
+        }
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -269,10 +275,8 @@ struct ProjectDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingSkills) {
-            NavigationStack {
-                SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
-            }
+        .navigationDestination(isPresented: $showingSkills) {
+            SkillsView(project: project, storeId: storeId, returnToProject: { showingSkills = false })
             .id(skillsPresentationID)
         }
     }

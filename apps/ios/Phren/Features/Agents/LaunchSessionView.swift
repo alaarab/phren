@@ -71,7 +71,7 @@ struct LaunchSessionView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        PhrenNavigationStack {
             PhrenList {
                 Section {
                     if hosts.isEmpty {
@@ -168,7 +168,7 @@ struct LaunchSessionView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(launching) } }
             .phrenScreen()
             .modifier(SessionLaunchAlert(error: $error))
-            .sheet(item: $chatSession, onDismiss: { dismiss() }) { AgentChatSheet(session: $0) }
+            .navigationDestination(item: $chatSession) { AgentChatSheet(session: $0) }
             .interactiveDismissDisabled(launching)
             .task { await prepare() }
         }

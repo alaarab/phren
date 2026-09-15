@@ -66,12 +66,14 @@ struct StoreProject: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-struct StoreQueueEntry: Identifiable {
+struct StoreQueueEntry: Identifiable, Hashable {
     let storeId: String
     let storeName: String
     let entry: ProjectQueueItem
 
     var id: String { "\(storeId)/\(entry.id)" }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct FailedOpEntry: Identifiable {

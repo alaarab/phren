@@ -1,6 +1,26 @@
 import PhrenKit
 import SwiftUI
 
+private enum ToolPresentationCache {
+    final class Box: NSObject { let value: ToolPresentation; init(_ value: ToolPresentation) { self.value = value } }
+    static let values: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>(); cache.countLimit = 500; return cache
+    }()
+    static func value(_ message: AgentChatMessage) -> ToolPresentation {
+        let key = "\(message.id)|\(message.title ?? "")|\(message.text.hashValue)" as NSString
+        if let cached = values.object(forKey: key) { return cached.value }
+        let started = CFAbsoluteTimeGetCurrent()
+        let value = ToolPresentation(title: message.title ?? "Tool", text: message.text)
+        values.setObject(Box(value), forKey: key)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+            print("[PhrenPerformance] parsed tool \(message.id): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+        }
+        #endif
+        return value
+    }
+}
+
 struct ChatTimelineEntry: Identifiable {
     enum Kind: Equatable { case message, activity, readRun }
     var messages: [AgentChatMessage]
@@ -226,7 +246,7 @@ struct ChatReadRun: View {
     private var names: [String] {
         groups.compactMap { group in
             group.messages.first(where: { !$0.isToolResult && !$0.isChange }).map {
-                ToolPresentation(title: $0.title ?? "Tool", text: $0.text).title
+                ToolPresentationCache.value($0).title
             }
         }
     }
@@ -267,12 +287,12 @@ struct ChatToolSummary {
     init(_ messages: [AgentChatMessage]) {
         // What a call changed on disk is listed under it, not counted as a call.
         let calls = messages.filter { $0.title != "Tool result" && !$0.isChange }
-        let presentations = calls.map { ToolPresentation(title: $0.title ?? "Tool", text: $0.text) }
+        let presentations = calls.map(ToolPresentationCache.value)
         let names = presentations.map(\.title)
         title = Set(names).count == 1 ? names[0] : calls.isEmpty ? "Tool results" : "Activity"
         icon = title == "Shell" ? "terminal" : title == "Browse" ? "globe" : title == "Patch" ? "pencil.line" : title == "Write" ? "doc.badge.plus" : "wrench.and.screwdriver"
         count = max(1, calls.isEmpty ? messages.count : calls.count)
-        preview = presentations.last?.preview ?? messages.last.map { ToolPresentation(title: $0.title ?? "Tool result", text: $0.text).preview } ?? ""
+        preview = presentations.last?.preview ?? messages.last.map { ToolPresentationCache.value($0).preview } ?? ""
     }
 }
 
@@ -333,7 +353,7 @@ struct ChatToolActivity: View, Equatable {
                         // The call and its output, both in full: the command
                         // is what tells you what happened, so it is never
                         // folded behind a disclosure.
-                        ToolDetailView(presentation: ToolPresentation(title: message.title ?? "Tool activity", text: message.text),
+                        ToolDetailView(presentation: ToolPresentationCache.value(message),
                                        id: message.id, isResult: message.isToolResult, collapsible: message.isChange)
                         if message.isToolResult, !message.resultImages.isEmpty, let resultImages { resultImages(message) }
                     }
@@ -351,7 +371,7 @@ private struct ToolDetailView: View {
     var isResult = false
     var collapsible = false
     @AppStorage(ChatSettings.wrapKey) private var wrap = false
-    @State private var fullOutput: FullToolOutput?
+    @Environment(\.openToolOutput) private var openToolOutput
     @State private var showMore = false
     /// Six lines in the card, eighty once opened; the sheet has the rest.
     private static let previewLines = 6, moreLines = 80
@@ -367,7 +387,7 @@ private struct ToolDetailView: View {
                     Text(isResult ? "Output" : presentation.title).fontWeight(.medium)
                     Spacer()
                     Button("View full output", systemImage: "arrow.up.left.and.arrow.down.right") {
-                        fullOutput = .init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body)
+                        openToolOutput(.init(title: isResult ? "Tool Result" : presentation.title, text: presentation.body))
                     }.frame(width: 36, height: 32).contentShape(Rectangle())
                         .accessibilityIdentifier("chat-tool-output:\(id)")
                     Button("Copy tool details", systemImage: "doc.on.doc") { UIPasteboard.general.string = presentation.body }
@@ -404,32 +424,32 @@ private struct ToolDetailView: View {
                 }
             }
             if presentation.raw != presentation.body {
-                Button("Raw details") { fullOutput = .init(title: "Raw details", text: presentation.raw) }
+                Button("Raw details") { openToolOutput(.init(title: "Raw details", text: presentation.raw)) }
                     .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.vertical, 4)
             }
         }
-        .sheet(item: $fullOutput) { output in FullToolOutputView(output: output) }
     }
 }
 
-private struct FullToolOutput: Identifiable {
+struct FullToolOutput: Identifiable, Hashable {
     let id = UUID()
     let title: String
     let contents: ToolOutputPages
     init(title: String, text: String) {
         self.title = title; contents = .init(text)
     }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-private struct FullToolOutputView: View {
+struct FullToolOutputView: View {
     let output: FullToolOutput
     @State private var page = 0
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         let contents = output.contents
         let current = contents.pages[page]
-        NavigationStack {
-            ScrollView([.horizontal, .vertical]) {
+        ScrollView([.horizontal, .vertical]) {
                 Text(current.displayText).font(.system(.caption, design: .monospaced))
                     .foregroundStyle(PhrenTheme.chatText).textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: true).padding(16)
@@ -463,7 +483,6 @@ private struct FullToolOutputView: View {
                     Button("Copy output", systemImage: "doc.on.doc") { UIPasteboard.general.string = contents.source }
                 }
             }
-        }.presentationDetents([.large])
     }
     private func pageButton(_ title: String, _ icon: String, _ id: String, destination: Int) -> some View {
         Button { page = destination } label: {
