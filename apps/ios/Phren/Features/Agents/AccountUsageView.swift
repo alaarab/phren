@@ -5,7 +5,7 @@ import SwiftUI
 struct AccountUsageView: View {
     var hostID: UUID? = nil
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
-    @State private var refresh = UUID()
+    @State private var refresh = 0
     private var hosts: [LiveHost] {
         ((try? LiveSessionPreferences.read(data))?.hosts ?? []).filter { hostID == nil || $0.id == hostID }
     }
@@ -21,23 +21,25 @@ struct AccountUsageView: View {
         .navigationTitle("Account usage")
         .navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
-        .toolbar { Button("Refresh usage", systemImage: "arrow.clockwise") { refresh = UUID() } }
-        .refreshable { refresh = UUID() }
+        .toolbar { Button("Refresh usage", systemImage: "arrow.clockwise") { refresh += 1 } }
+        .refreshable { refresh += 1 }
     }
 }
 
 private struct AccountUsageSection: View {
     let host: LiveHost
-    let refresh: UUID
+    let refresh: Int
     @Environment(\.scenePhase) private var phase
-    @State private var snapshot: AccountUsageSnapshot?
+    private let cache = AccountUsageCache.shared
     @State private var error: String?
     @State private var loading = true
-    private struct PollID: Equatable { let host: LiveHost; let refresh: UUID; let active: Bool }
+    @State private var lastRefresh = 0
+    @State private var openedAt = CFAbsoluteTimeGetCurrent()
+    private struct PollID: Equatable { let host: LiveHost; let refresh: Int; let active: Bool }
 
     var body: some View {
         Section(host.name) {
-            if let snapshot {
+            if let snapshot = cache.snapshot(for: host) {
                 ForEach(snapshot.accounts) { account in
                     TimelineView(.periodic(from: .now, by: 30)) { context in
                         let stale = account.isStale(at: context.date) || error != nil
@@ -89,12 +91,17 @@ private struct AccountUsageSection: View {
         }
         .task(id: PollID(host: host, refresh: refresh, active: phase == .active)) {
             guard phase == .active else { return }
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1", cache.snapshot(for: host) != nil {
+                print("[PhrenPerformance] usage open from cache: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - openedAt) * 1_000)) ms")
+            }
+            #endif
             repeat {
-                loading = true
+                loading = cache.snapshot(for: host) == nil
                 do {
-                    let value = try await fetch()
+                    _ = try await cache.refresh(host, force: refresh != lastRefresh)
                     try Task.checkCancellation()
-                    snapshot = value; error = nil
+                    lastRefresh = refresh; error = nil
                 } catch {
                     guard !Task.isCancelled else { return }
                     self.error = error.localizedDescription
@@ -105,19 +112,4 @@ private struct AccountUsageSection: View {
         }
     }
 
-    private func fetch() async throws -> AccountUsageSnapshot {
-        #if DEBUG && targetEnvironment(simulator)
-        if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--account-usage-fixture") {
-            let now = Date()
-            let payload: [String: Any] = ["accounts": ["codex", "claude"].map { source in
-                ["source": source, "updatedAt": now.ISO8601Format(), "windows": [
-                    ["id": "five_hour", "name": "5-hour limit", "usedPercent": 23.5, "resetsAt": now.addingTimeInterval(7200).ISO8601Format()],
-                    ["id": "seven_day", "name": "7-day limit", "usedPercent": 41.2, "resetsAt": now.addingTimeInterval(172800).ISO8601Format()]
-                ]] as [String: Any]
-            }]
-            return try AccountUsageSnapshot.read(JSONSerialization.data(withJSONObject: payload))
-        }
-        #endif
-        return try await PhrenConnection.accountUsage(host: host, privateKey: DeviceSSHKey.load(host.id))
-    }
 }

@@ -35,6 +35,7 @@ extension AgentSessionEntity: IndexedEntity {
         attributes.containerTitle = project ?? workspace
         attributes.containerDisplayName = computer
         attributes.path = folder
+        attributes.contentModificationDate = lastChangedAt
         return attributes
     }
 }

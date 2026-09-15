@@ -25,6 +25,7 @@ struct AgentSessionEntity: AppEntity, Equatable, Codable {
     let state: String?
     let branch: String?
     let folder: String?
+    var lastChangedAt: Date? = nil
     var isLive: Bool { kind == .live }
 
     init(_ session: LiveAgentSession) {
@@ -36,6 +37,7 @@ struct AgentSessionEntity: AppEntity, Equatable, Codable {
         hostID = session.host.id; muxID = session.host.muxID
         workspaceID = session.workspaceID; tabID = session.tab.id
         state = session.tab.status; branch = session.tab.branch; folder = session.tab.cwd
+        lastChangedAt = session.tab.lastChangedAt
         kind = .live
     }
     init(host: LiveHost, storeID: String, project: String) {

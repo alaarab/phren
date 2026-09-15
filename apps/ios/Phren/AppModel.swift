@@ -131,10 +131,21 @@ final class AppModel {
     private(set) static weak var current: AppModel?
 
     struct Credentials {
-        var load: () -> KeychainStore.StoredToken?
+        var load: () async -> KeychainStore.StoredToken?
         var save: (KeychainStore.StoredToken) throws -> Void
         var delete: () -> Void
-        static let keychain = Self(load: KeychainStore.load, save: KeychainStore.save, delete: KeychainStore.delete)
+        static let keychain = Self(load: {
+            await Task.detached(priority: .userInitiated) {
+                let started = CFAbsoluteTimeGetCurrent()
+                let value = KeychainStore.load()
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                    print("[PhrenPerformance] startup keychain off-main=\(!ChatRenderCacheMetrics.isMainThread): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+                }
+                #endif
+                return value
+            }.value
+        }, save: KeychainStore.save, delete: KeychainStore.delete)
     }
 
     init(client: GitHubClient = GitHubClient(), credentials: Credentials = .keychain,
@@ -509,7 +520,10 @@ final class AppModel {
             return
         }
         #endif
-        guard let stored = credentials.load() else {
+        let generation = authenticationGeneration
+        let stored = await credentials.load()
+        guard generation == authenticationGeneration else { return }
+        guard let stored else {
             selectedTab = .agents
             phase = .signedOut
             return
@@ -620,8 +634,8 @@ final class AppModel {
     /// intact; the existing sync loop retries when connectivity returns.
     @discardableResult
     private func refreshAccount() async -> Bool {
-        guard let stored = credentials.load() else { return false }
         let generation = authenticationGeneration
+        guard let stored = await credentials.load(), generation == authenticationGeneration else { return false }
         do {
             let verified = try await client.currentUser()
             guard generation == authenticationGeneration else { return false }

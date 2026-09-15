@@ -15,13 +15,14 @@ struct ChatAgentSwitcher: View {
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
     @State private var overview = SessionOverviewMonitor()
     @State private var query = ""
+    @AppStorage("agents.drawer.recent.v1") private var recent = false
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
     private struct PollID: Equatable { let hosts: [LiveHost]; let active: Bool }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { tick in
-            PhrenList {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
                 let eligiblePanes = panes.filter { pane in
                     guard let session else { return false }
                     return (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil
@@ -43,19 +44,39 @@ struct ChatAgentSwitcher: View {
                         }
                     }
                 }
-                if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) } }
-                AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, choose: chooseSession)
-                let hasSessions = overview.computers.contains { $0.monitor.snapshot?.sessions(on: $0.host).contains { $0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0 } == true }
+                Text("WORKSPACES").font(.caption2.weight(.semibold)).tracking(1)
+                    .foregroundStyle(PhrenTheme.textMuted).padding(.horizontal, 12).padding(.top, 12)
+                if !overview.ready { HStack { ProgressView(); Text("Finding your agents…").font(.subheadline) }.padding(12) }
+                AgentWorkspaceTree(computers: overview.computers, query: query, current: session?.id, recent: recent, choose: chooseSession)
+                let hasSessions = overview.computers.contains { computer in
+                    computer.monitor.snapshot?.sessions(on: computer.host).contains {
+                        ($0.tab.agent != nil || ($0.tab.agentPaneCount ?? 0) > 0) && $0.matches(query)
+                    } == true
+                }
                 if overview.ready && !hasSessions && (eligiblePanes.count < 2 || local.isEmpty) {
                     Text("No matching agents").foregroundStyle(PhrenTheme.textMuted)
                 }
             }
         }
         .safeAreaInset(edge: .top) {
-            HStack { Text("Agents").font(.headline); Spacer(); Button("Close", systemImage: "xmark") { close() }.labelStyle(.iconOnly).frame(width: 44, height: 44) }
-                .padding(.horizontal, 12).background(PhrenTheme.chatPanel)
+            VStack(spacing: 8) {
+                HStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(PhrenTheme.textMuted)
+                        TextField("Search workspaces, tabs…", text: $query)
+                            .font(.subheadline).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("agent-drawer-search")
+                    }.padding(12).phrenPanel()
+                    Button("Close", systemImage: "xmark") { close() }
+                        .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                        .accessibilityIdentifier("agent-drawer-close")
+                }
+                Picker("Workspace order", selection: $recent) {
+                    Text("Recent").tag(true)
+                    Text("List").tag(false)
+                }.pickerStyle(.segmented).accessibilityIdentifier("agent-drawer-order")
+            }.padding(12).background(PhrenTheme.chatCanvas)
         }
-        .searchable(text: $query, prompt: "Agent, project, or computer")
         .task(id: PollID(hosts: hosts, active: scenePhase == .active)) {
             if scenePhase == .active { await overview.run(hosts: hosts) }
         }

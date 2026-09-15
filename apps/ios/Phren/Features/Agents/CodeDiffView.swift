@@ -1,25 +1,6 @@
 import PhrenKit
 import SwiftUI
 
-enum DiffDocumentCache {
-    final class Box: NSObject { let value: DiffDocument; init(_ value: DiffDocument) { self.value = value } }
-    private static let values: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>(); cache.countLimit = 250; return cache
-    }()
-    static func value(for patch: String) -> DiffDocument {
-        let key = "\(patch.utf8.count)|\(patch.hashValue)" as NSString
-        if let cached = values.object(forKey: key) { return cached.value }
-        let started = CFAbsoluteTimeGetCurrent()
-        let document = DiffDocument(patch: patch)
-        values.setObject(Box(document), forKey: key)
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
-            print("[PhrenPerformance] parsed diff \(patch.utf8.count) bytes: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
-        }
-        #endif
-        return document
-    }
-}
 
 /// A tool's patch inside the chat, drawn with the same rows as the file diff
 /// screen (VS Code's inline diff: gutter numbers, row tints, changed
@@ -137,9 +118,7 @@ struct CodeDiffView: View {
             }
             if unfolded, diff.truncated { Text("Preview truncated. Copy the patch for all supplied lines.").font(.caption).foregroundStyle(PhrenTheme.textMuted).padding(10) }
         }
-        .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .phrenPanel(tool: true)
         .background(GeometryReader { geometry in
             Color.clear.preference(key: DiffCardWidth.self, value: geometry.size.width)
         })

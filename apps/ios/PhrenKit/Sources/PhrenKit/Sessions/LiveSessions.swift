@@ -18,6 +18,10 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         /// Herdr's state-change counter for the tab's panes: higher means the
         /// agent's status moved more recently. Not a timestamp; only an order.
         public let changedSeq: Int?
+        /// The Hook's persisted wall clock for the last title or activity change.
+        /// Older Hooks and malformed timestamps leave it unknown.
+        public var lastChangedAt: Date? { reportedLastChangedAt?.value }
+        private let reportedLastChangedAt: ActivityDate?
         private let reportedContextUsedPercent: ContextUsedPercent?
 
         /// Provider-reported percentage, when available. Missing or malformed
@@ -30,6 +34,18 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         private enum CodingKeys: String, CodingKey {
             case id, label, title, agentStatus, approvalPending, agent, cwd, branch, agentPaneCount, paneCount, changedSeq
             case reportedContextUsedPercent = "contextUsedPercent"
+            case reportedLastChangedAt = "lastChangedAt"
+        }
+
+        private struct ActivityDate: Decodable, Equatable, Sendable {
+            let value: Date?
+            init(from decoder: Decoder) throws {
+                let raw = try? decoder.singleValueContainer().decode(String.self)
+                value = raw.flatMap {
+                    (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0))
+                        ?? (try? Date.ISO8601FormatStyle().parse($0))
+                }
+            }
         }
 
         private struct ContextUsedPercent: Decodable, Equatable, Sendable {

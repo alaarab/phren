@@ -31,7 +31,7 @@ extension LiveWorkspaces.Tab.Activity {
 /// sits inside a ring that carries the state — cyan and spinning while it
 /// works, amber when it needs you, green when done, grey when idle — with the
 /// context used drawn as the ring's fill and a small state badge at its foot.
-struct SessionCardContent: View {
+struct SessionCardContent: View, Equatable {
     @Environment(\.dynamicTypeSize) private var textSize
     let session: LiveAgentSession
     let fresh: Bool
@@ -44,6 +44,12 @@ struct SessionCardContent: View {
     let identifierPrefix: String
     /// Tapping the ring opens the session's details; nil makes it inert.
     var onDetails: (() -> Void)? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.project == rhs.project
+            && lhs.computer == rhs.computer && lhs.subtitle == rhs.subtitle
+            && lhs.identifierPrefix == rhs.identifierPrefix && (lhs.onDetails == nil) == (rhs.onDetails == nil)
+    }
 
     private var headline: String { session.projectDisplayName(project) }
     /// The quiet last line. The list is already sectioned by state, so the
@@ -61,7 +67,10 @@ struct SessionCardContent: View {
     private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
 
     var body: some View {
-        HStack(spacing: 10) {
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
+        HStack(spacing: PhrenTheme.Space.small) {
             Button { onDetails?() } label: {
                 SessionActivityIndicator(tab: session.tab, fresh: fresh)
                     .accessibilityIdentifier("\(identifierPrefix)-context:\(session.accessibilityKey)")
@@ -94,6 +103,10 @@ struct SessionCardContent: View {
                         }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.sessionMeta)
                             .accessibilityLabel("on \(computer)")
                     }
+                    if let changedAt = session.tab.lastChangedAt {
+                        SessionRelativeTimeLabel(changedAt: changedAt)
+                            .accessibilityIdentifier("\(identifierPrefix)-changed:\(session.accessibilityKey)")
+                    }
                 }
                 if session.tab.displayTitle != headline {
                     Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
@@ -112,8 +125,8 @@ struct SessionCardContent: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 8)
-        .frame(minHeight: 64)
+        .padding(.leading, PhrenTheme.Space.medium).padding(.trailing, PhrenTheme.Space.xs).padding(.vertical, PhrenTheme.Space.xs)
+        .frame(minHeight: 56)
         .overlay(alignment: .leading) {
             // A bar on the edge for the states that want a glance: working, and needs you.
             if fresh, session.tab.activity == .working || session.tab.activity == .waiting {
@@ -223,12 +236,31 @@ extension View {
     /// fill, no border, and (`separatedSessionRow`) nothing grouping the
     /// section's cards or drawn between them.
     func sessionCard() -> some View {
-        self.padding(.vertical, 4)
-            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium, style: .continuous))
     }
 
+    /// A row below the sessions (a computer, a setup link) in the same plain
+    /// list: its own small card, the same margins as the session cards.
+    func plainListCardRow() -> some View {
+        self.padding(.horizontal, 12).padding(.vertical, 8)
+            .listRowInsets(EdgeInsets(top: 3, leading: 14, bottom: 3, trailing: 14))
+            .listRowSeparator(.hidden, edges: .all)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(PhrenTheme.surface)
+                    .padding(.horizontal, 14).padding(.vertical, 3))
+    }
+
+    /// A small upper-case section label for the plain sessions list.
+    func plainListSectionLabel() -> some View {
+        self.font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
+            .padding(.leading, 14).padding(.top, 8)
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
+    }
+
+    /// In a plain list the row insets are the card's margins: a short gap
+    /// between cards and nearly the full width across.
     func separatedSessionRow() -> some View {
-        self.listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
+        self.listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
             .listRowSeparator(.hidden, edges: .all)
             .listSectionSeparator(.hidden, edges: .all)
             .listRowBackground(Color.clear)

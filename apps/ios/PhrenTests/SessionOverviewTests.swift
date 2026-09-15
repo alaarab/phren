@@ -5,6 +5,49 @@ import PhrenLive
 
 @MainActor
 final class SessionOverviewTests: XCTestCase {
+    func testTimeoutRevealStaysLatchedAcrossRestartWithUnansweredHost() async throws {
+        let computer = try host("Offline")
+        let model = SessionOverviewMonitor(initialWait: .milliseconds(30)) {
+            LiveHostMonitor { _, _ in try await Task.sleep(for: .seconds(30)); throw LiveConnectionError.disconnected }
+        }
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.ready }
+        let shown = model.screen
+        run.cancel(); await run.value
+        let again = Task { await model.run(hosts: [computer]) }
+        await eventually { model.computers.first?.monitor.polling == true }
+        XCTAssertTrue(model.ready)
+        XCTAssertEqual(model.screen, shown)
+        again.cancel(); await again.value
+    }
+
+    func testScreenRevealsResolvedProjectsPinsAndComputersTogetherAndSkipsUnchangedPolls() async throws {
+        let computer = try host("Mac"), work = try snapshot("working")
+        let model = SessionOverviewMonitor {
+            LiveHostMonitor(pollInterval: .milliseconds(250)) { _, _ in work }
+        }
+        model.configure(.init(metadataReady: false))
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.computers.first?.monitor.snapshot != nil }
+        XCTAssertFalse(model.ready, "Wait for the first local project metadata as well as the computers")
+        XCTAssertTrue(model.screen.computers.isEmpty)
+        let session = work.sessions(on: computer)[0]
+        var data = try LiveSessionPreferences.saving(computer, in: Data())
+        data = try LiveSessionPreferences.setPinned(true, for: session.id, in: data)
+        data = try LiveSessionPreferences.assigning(hostID: computer.id, directory: "/work/phone",
+                                                   storeID: "work/brain", project: "phone", in: data)
+        model.configure(.init(preferences: try LiveSessionPreferences.read(data),
+                              projects: [.init(storeID: "work/brain", name: "phone")]))
+        XCTAssertTrue(model.ready)
+        XCTAssertEqual(model.screen.computers.map(\.id), [computer.id])
+        XCTAssertEqual(model.screen.groups.map(\.id), ["pinned"])
+        XCTAssertEqual(model.screen.pinned, [session.id])
+        XCTAssertEqual(model.screen.projects[session.id], "phone")
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertEqual(model.listRelayoutsAfterReady, 0, "Unchanged host polls must not publish a new layout")
+        run.cancel(); await run.value
+    }
+
     func testInitialRefreshAppearsTogetherWithoutWaitingForeverForAnOfflineComputer() async throws {
         let fast = try host("Fast"), slow = try host("Slow")
         let snapshot = try snapshot("working")
@@ -256,7 +299,7 @@ final class SessionOverviewTests: XCTestCase {
     private func host(_ name: String) throws -> LiveHost { try LiveHost(name: name, address: name.lowercased() + ".invalid", username: "fixture") }
     private func snapshot(_ status: String) throws -> LiveWorkspaces {
         try LiveWorkspaces.read(Data("""
-        {"kind":"herdr","groups":[{"id":"w1","label":"Project","children":[{"id":"w1:t1","label":"Build","agent":"codex","agentStatus":"\(status)"}]}]}
+        {"kind":"herdr","groups":[{"id":"w1","label":"Project","children":[{"id":"w1:t1","label":"Build","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone"}]}]}
         """.utf8))
     }
     private func eventually(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {

@@ -660,6 +660,7 @@ struct AgentChatView: View {
                         .offset(x: 4, y: 4)
                 }
                 .accessibilityElement(children: .contain)
+            ChatUsageRings(session: session, source: model.target?.source ?? session.tab.agent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
@@ -680,7 +681,7 @@ struct AgentChatView: View {
                     // Besides the pane's tree: whatever the session's commands
                     // wrote elsewhere — the phren store, a sibling checkout.
                     AgentDiffView(session: session, target: target, paths: Array(Set(model.messages.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange }
-                        .flatMap { ToolPresentation(title: $0.title ?? "", text: $0.text).editedPaths }).sorted().prefix(24)))
+                        .flatMap { ToolPresentationCache.value($0).editedPaths }).sorted().prefix(24)))
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                         .foregroundStyle(PhrenTheme.chatText)
@@ -690,8 +691,7 @@ struct AgentChatView: View {
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 8).padding(.vertical, 8)
-        .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(PhrenTheme.borderStrong, lineWidth: 1))
+        .phrenPanel(radius: PhrenTheme.Radius.large)
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain).accessibilityIdentifier("chat-header")
@@ -939,39 +939,6 @@ private struct ChatBottomPosition: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-private enum ChatMessageDisplayCache {
-    static let values: NSCache<NSString, NSString> = {
-        let cache = NSCache<NSString, NSString>(); cache.countLimit = 1_000; return cache
-    }()
-    private static let imageMarker = try! NSRegularExpression(pattern: #"\[Image #\d+\]|\[Image attachment\]"#)
-
-    static func text(for message: AgentChatMessage, images: [ChatAttachmentDraft], inlineImages: Bool) -> String {
-        let paths = images.compactMap(\.path).sorted()
-        let key = "\(message.id)|\(message.text.hashValue)|\(inlineImages)|\(paths.joined(separator: "|"))" as NSString
-        if let cached = values.object(forKey: key) { return cached as String }
-        let started = CFAbsoluteTimeGetCurrent()
-        var text = message.text
-        let marker = "\n\nAttached files on this computer:\n"
-        if let section = text.range(of: marker, options: .backwards) {
-            let listed = text[section.upperBound...].components(separatedBy: "\n")
-            let previewPaths = Set(paths)
-            if inlineImages || (!images.isEmpty && listed.allSatisfy({ previewPaths.contains($0) })) {
-                text = String(text[..<section.lowerBound])
-            }
-        }
-        if inlineImages {
-            text = imageMarker.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        values.setObject(text as NSString, forKey: key)
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
-            print("[PhrenPerformance] prepared message \(message.id): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
-        }
-        #endif
-        return text
-    }
-}
 
 private struct ChatMessageRow<Historical: View>: View {
     let message: AgentChatMessage
@@ -984,9 +951,12 @@ private struct ChatMessageRow<Historical: View>: View {
     private var inlineImages: Bool { !message.imageBlocks.isEmpty }
     private var displayText: String {
         if let revealedText { return revealedText }
-        return ChatMessageDisplayCache.text(for: message, images: images, inlineImages: inlineImages)
+        return ChatMessageDisplayCache.text(for: message, imagePaths: images.compactMap(\.path), hasImages: !images.isEmpty, inlineImages: inlineImages)
     }
     var body: some View {
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
         if let command = message.localCommand {
             LocalCommandRow(command: command, id: message.id)
         } else {

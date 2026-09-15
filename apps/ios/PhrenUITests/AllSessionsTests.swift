@@ -10,6 +10,7 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["agents-focus-filter"].waitForExistence(timeout: 10))
         XCTAssertFalse(row(app, host: mac).exists)
         XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers must appear in the same reveal as the cards")
         app.buttons["agents-focus-clear"].tap()
         XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["agents-focus-filter"].exists)
@@ -25,8 +26,18 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertFalse(section(app, title: "Working").exists, "No session section may appear before the batch is ready")
         XCTAssertTrue(row(app, host: mac).waitForExistence(timeout: 8))
         XCTAssertTrue(row(app, host: linux).exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Computers")).firstMatch.exists, "Computers must appear in the same reveal as the cards")
         XCTAssertFalse(loading.exists)
         capture(app, "Complete overview after coordinated loading")
+    }
+
+    @MainActor
+    func testSessionCardsShowReportedRelativeTime() {
+        let app = launch(extra: ["--session-relative-time-fixture"])
+        let time = app.staticTexts["overview-changed:\(mac):herdr:default:w1:w1:t1"]
+        XCTAssertTrue(time.waitForExistence(timeout: 10))
+        XCTAssertEqual(time.label, "· 2m ago")
+        capture(app, "Session activity times")
     }
 
     @MainActor
@@ -237,6 +248,7 @@ final class AllSessionsTests: XCTestCase {
     @MainActor
     private func launch(extra: [String] = [], resetPins: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture"]
             + (resetPins ? ["--session-pins-reset"] : []) + extra
         app.launch()

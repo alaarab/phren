@@ -717,7 +717,8 @@ final class AgentChatTests: XCTestCase {
     @MainActor
     func testSwitchAgentAcrossComputersPreservesSeparateDrafts() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--session-relative-time-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
         app.tabBars.buttons["Agents"].tap()
@@ -730,6 +731,10 @@ final class AgentChatTests: XCTestCase {
         composer.tap(); composer.typeText("Mac draft")
         app.buttons["chat-switch-agent"].tap()
         let linux = app.buttons["switch-session:\(linuxID)"]
+        XCTAssertTrue(app.textFields["agent-drawer-search"].waitForExistence(timeout: 5))
+        app.segmentedControls["agent-drawer-order"].buttons["Recent"].tap()
+        capture(app, "Recent sessions drawer")
+        app.segmentedControls["agent-drawer-order"].buttons["List"].tap()
         XCTAssertTrue(linux.waitForExistence(timeout: 8)); linux.tap()
         XCTAssertTrue(app.staticTexts["chat-location"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Test Linux"))
@@ -952,6 +957,7 @@ final class AgentChatTests: XCTestCase {
     @MainActor
     private func launch(extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture"] + extra
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
@@ -969,4 +975,5 @@ final class AgentChatTests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
+
 

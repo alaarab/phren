@@ -4,7 +4,8 @@ final class UsageAndToolbarTests: XCTestCase {
     @MainActor
     func testUsageShowsBothProvidersPercentagesAndResetTimes() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--account-usage-fixture"]
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--account-usage-fixture", "--usage-delayed"]
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
         app.tabBars.buttons["Agents"].tap()
@@ -17,15 +18,42 @@ final class UsageAndToolbarTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Resets ")).firstMatch.exists)
         XCTAssertTrue(app.buttons["Refresh usage"].isHittable)
         capture(app, "Claude and Codex account usage")
+        app.navigationBars["Account usage"].buttons.element(boundBy: 0).tap()
+        usage.tap()
+        XCTAssertTrue(app.staticTexts["Codex"].exists, "A cached report must render immediately on reopen")
+        XCTAssertFalse(app.progressIndicators["Reading account limits…"].exists)
+        capture(app, "Account usage reopened from cache")
+    }
+
+    @MainActor
+    func testChatUsageRingsPushAccountUsage() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--native-chat-fixture", "--account-usage-fixture"]
+        app.launchEnvironment["PHREN_PERFORMANCE_LOG"] = "1"
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15)); app.tabBars.buttons["Agents"].tap()
+        let chat = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w1:w1:t1"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10)); chat.tap()
+        let rings = app.buttons["chat-usage-rings"]
+        XCTAssertTrue(rings.waitForExistence(timeout: 8))
+        let reported = NSPredicate(format: "value CONTAINS %@", "account 41%")
+        expectation(for: reported, evaluatedWith: rings)
+        waitForExpectations(timeout: 8)
+        capture(app, "Chat with context and account rings")
+        rings.tap()
+        XCTAssertTrue(app.navigationBars["Account usage"].waitForExistence(timeout: 5))
+        app.navigationBars["Account usage"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(rings.waitForExistence(timeout: 5))
     }
 
     @MainActor
     func testTerminalControlsCanBeAddedAndPersistAcrossLaunches() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture"]
+        // The defaults fill all eight slots (Agents took the last); the
+        // fixture leaves one free so there is something to add.
+        app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--toolbar-with-room"]
         app.launch()
         openToolbar(app)
-        restoreDefaults(app)
         let add = app.buttons["toolbar-add:enter"]
         scrollTo(add, in: app)
         XCTAssertTrue(add.isEnabled); add.tap()
@@ -61,3 +89,4 @@ final class UsageAndToolbarTests: XCTestCase {
         shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 }
+

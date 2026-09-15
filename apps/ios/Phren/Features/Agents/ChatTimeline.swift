@@ -1,25 +1,6 @@
 import PhrenKit
 import SwiftUI
 
-private enum ToolPresentationCache {
-    final class Box: NSObject { let value: ToolPresentation; init(_ value: ToolPresentation) { self.value = value } }
-    static let values: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>(); cache.countLimit = 500; return cache
-    }()
-    static func value(_ message: AgentChatMessage) -> ToolPresentation {
-        let key = "\(message.id)|\(message.title ?? "")|\(message.text.hashValue)" as NSString
-        if let cached = values.object(forKey: key) { return cached.value }
-        let started = CFAbsoluteTimeGetCurrent()
-        let value = ToolPresentation(title: message.title ?? "Tool", text: message.text)
-        values.setObject(Box(value), forKey: key)
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
-            print("[PhrenPerformance] parsed tool \(message.id): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
-        }
-        #endif
-        return value
-    }
-}
 
 struct ChatTimelineEntry: Identifiable {
     enum Kind: Equatable { case message, activity, readRun }
@@ -238,7 +219,7 @@ struct ChatBackgroundJobsView: View {
                         }.font(.system(.caption, design: .monospaced)).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("chat-background-job:\(job.id)")
                 }
-            }.padding(10).background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 14))
+            }.padding(PhrenTheme.Space.medium).phrenPanel(tool: true)
         }
     }
     private func status(_ job: ChatBackgroundJob, at date: Date) -> String {
@@ -274,14 +255,13 @@ struct ChatReadRun: View {
         if !current.isEmpty { result.append(.init(messages: current, kind: .activity)) }
         return result
     }
-    private var names: [String] {
-        groups.compactMap { group in
+    var body: some View {
+        let groups = groups
+        let names = groups.compactMap { group in
             group.messages.first(where: { !$0.isToolResult && !$0.isChange }).map {
                 ToolPresentationCache.value($0).title
             }
         }
-    }
-    var body: some View {
         VStack(alignment: .leading, spacing: expanded ? 8 : 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
@@ -304,8 +284,7 @@ struct ChatReadRun: View {
                 }.padding(.horizontal, 8)
             }
         }.padding(.bottom, expanded ? 8 : 0)
-            .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PhrenTheme.border, lineWidth: 0.5))
+            .phrenPanel(tool: true)
     }
 }
 
@@ -337,6 +316,9 @@ struct ChatToolActivity: View, Equatable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         let summary = ChatToolSummary(messages)
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { expanded.toggle() }
@@ -391,8 +373,7 @@ struct ChatToolActivity: View, Equatable {
                 }.padding(.horizontal, 10).padding(.bottom, 10)
             }
         }
-        .background(PhrenTheme.toolPanel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(PhrenTheme.border, lineWidth: 0.5))
+        .phrenPanel(tool: true)
     }
 }
 

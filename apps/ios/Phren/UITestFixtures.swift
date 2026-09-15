@@ -6,6 +6,7 @@ import PhrenKit
 /// build isolated stores; AppModel remains responsible for installing state.
 @MainActor
 enum UITestFixtures {
+    static let sessionActivityDate = Date.now.addingTimeInterval(-125)
     #if DEBUG && targetEnvironment(simulator)
     /// Tabs a UI test closed from the list; the all-sessions fixture leaves
     /// them out of later snapshots the way Herdr would.
@@ -34,6 +35,13 @@ enum UITestFixtures {
                 data = try LiveSessionPreferences.setPinned(false, for: id, in: data)
             }
             defaults.set(data, forKey: preferencesKey)
+        }
+        if arguments.contains("--toolbar-with-room"), (defaults.data(forKey: TerminalToolbarPreferences.storageKey) ?? Data()).isEmpty {
+            // The defaults fill every slot; leave one free for a test to add
+            // to. Only on a clean slate, so a relaunch keeps what the test added.
+            var layout = TerminalToolbarPreferences.defaults
+            layout.items.removeAll { $0 == .paste }
+            defaults.set(try JSONEncoder().encode(layout), forKey: TerminalToolbarPreferences.storageKey)
         }
         if arguments.contains("--agents-without-github") {
             defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
