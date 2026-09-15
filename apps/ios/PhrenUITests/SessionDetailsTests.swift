@@ -5,9 +5,10 @@ final class SessionDetailsTests: XCTestCase {
     func testRowsGrowForLargeTextAndKeepDetailsReachable() {
         let app = launch()
         let title = app.staticTexts["Polish the phone app"]
-        let metadata = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Working")).firstMatch
-        XCTAssertTrue(metadata.exists)
-        XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        // One computer, fresh, nothing pending: no last line at all — the
+        // section already says "Working".
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Working")).firstMatch.exists)
         let details = app.buttons["live-detail:w7:w7:t9"]
         XCTAssertTrue(details.isHittable)
         XCTAssertGreaterThanOrEqual(details.frame.height, 44)

@@ -43,6 +43,10 @@ number counts up on its own.
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - A picture sent with a message sits inside the same bubble as the words; the
   path list and paste markers no longer show once the picture draws inline.
+- Closing a session from the list closes that session and the card leaves at
+  once — swipe for a direct Close, hold for Close tab / Close workspace with a
+  confirmation. Cards drop the redundant state text (the section already says
+  it), keep the computer name, and colour the project name.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).
 - Files: put any file on a computer through Phren Hook and copy its path for

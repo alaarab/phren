@@ -162,8 +162,10 @@ final class AllSessionsTests: XCTestCase {
         let first = row(app, host: mac)
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         let title = app.staticTexts["Build the iPhone overview"]
-        let metadata = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Working", "Test Mac")).firstMatch
+        // The state is the section's business; the card's last line is the computer.
+        let metadata = first.staticTexts["Test Mac"]
         XCTAssertTrue(metadata.exists)
+        XCTAssertFalse(first.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working")).firstMatch.exists)
         XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
         XCTAssertGreaterThan(first.frame.height, 90)
         XCTAssertTrue(first.frame.contains(metadata.frame))
@@ -182,6 +184,40 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertTrue(app.buttons["all-web-servers"].isHittable)
         XCTAssertTrue(app.buttons["live-host:\(mac)"].exists)
         XCTAssertTrue(app.buttons["Add computer"].exists)
+    }
+
+    /// Swipe → Close on a card closes that tab, not its neighbour, and the
+    /// card leaves without a manual refresh; the other computer's identical
+    /// tab ids are untouched.
+    @MainActor
+    func testClosingFromTheListRemovesExactlyThatCardAtOnce() {
+        let app = launch()
+        let target = row(app, host: mac, tab: "w1:t2"), neighbour = row(app, host: mac, tab: "w1:t1"), other = row(app, host: linux, tab: "w1:t2")
+        XCTAssertTrue(target.waitForExistence(timeout: 15)); XCTAssertTrue(neighbour.exists); XCTAssertTrue(other.exists)
+        target.swipeLeft()
+        let close = app.buttons["overview-close:\(mac):herdr:default:w1:w1:t2"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+        XCTAssertTrue(target.waitForNonExistence(timeout: 3), "The closed card leaves without a refresh")
+        XCTAssertTrue(neighbour.exists, "The neighbour stays"); XCTAssertTrue(other.exists, "The other computer's tab with the same id stays")
+        capture(app, "Closed from the list")
+    }
+
+    /// Hold → Close tab confirms first, naming the held tab, then that card
+    /// leaves at once.
+    @MainActor
+    func testClosingFromTheMenuConfirmsThenRemovesThatCard() {
+        let app = launch()
+        let target = row(app, host: mac, tab: "w1:t2"), neighbour = row(app, host: mac, tab: "w1:t1")
+        XCTAssertTrue(target.waitForExistence(timeout: 15))
+        target.press(forDuration: 1.2)
+        let close = app.buttons["Close tab"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5)); close.tap()
+        let confirm = app.buttons["Close tab"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Check project status")).firstMatch.exists, "The dialog names the held tab")
+        confirm.tap()
+        XCTAssertTrue(target.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(neighbour.exists, "The neighbour stays")
     }
 
     @MainActor

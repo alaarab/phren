@@ -6,6 +6,11 @@ import PhrenKit
 /// build isolated stores; AppModel remains responsible for installing state.
 @MainActor
 enum UITestFixtures {
+    #if DEBUG && targetEnvironment(simulator)
+    /// Tabs a UI test closed from the list; the all-sessions fixture leaves
+    /// them out of later snapshots the way Herdr would.
+    @MainActor static var closedTabs: Set<String> = []
+    #endif
     enum Bootstrap {
         case agentsOnly
         case memory([StoreContext])

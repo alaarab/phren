@@ -13,6 +13,8 @@ struct LiveSessionsView: View {
     @State private var overview = SessionOverviewMonitor()
     @State private var selected: OverviewSelection?
     @State private var sessionOpen: SessionOpen?
+    @State private var closeRequest: SessionCloseRequest?
+    @State private var closeError: String?
     private struct SessionOpen: Identifiable {
         let session: LiveAgentSession
         let destination: AgentLaunch.Destination
@@ -71,6 +73,8 @@ struct LiveSessionsView: View {
                 }
             }
             .listSectionSpacing(12)
+            .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError,
+                                          monitor: { session in overview.computers.first { $0.id == session.host.id }?.monitor }))
             .opacity(hosts.isEmpty || overview.ready ? 1 : 0)
             .allowsHitTesting(hosts.isEmpty || overview.ready)
             .accessibilityHidden(!hosts.isEmpty && !overview.ready)
@@ -179,11 +183,14 @@ struct LiveSessionsView: View {
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }) {
+                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }, onDetails: {
                         if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
                             selected = OverviewSelection(session: session, monitor: computer.monitor)
                         }
-                    }
+                    }, onClose: { request, confirm in
+                        if confirm { closeRequest = request }
+                        else { SessionCloseDialogs.perform(request, monitor: overview.computers.first { $0.id == request.session.host.id }?.monitor) { closeError = $0 } }
+                    })
                     .separatedSessionRow()
                 }
             } header: {
@@ -223,8 +230,20 @@ final class LiveHostMonitor {
     var refreshing = false
     var polling = false
     private var generation = UUID()
+    @ObservationIgnored private var refreshRequested = false
     @ObservationIgnored private let fetchSnapshot: (LiveHost, Date?) async throws -> LiveWorkspaces
     @ObservationIgnored private let pollInterval: Duration
+
+    /// Fetch again now rather than at the end of the poll interval — after a
+    /// close, a launch, anything the person just did to the computer.
+    func refreshNow() { refreshRequested = true }
+
+    /// Herdr confirmed a close: drop the tab (or workspace) from the snapshot
+    /// at once, then fetch so the truth replaces the guess.
+    func closed(workspace: String, tab: String?) {
+        snapshot = snapshot?.closing(workspace: workspace, tab: tab)
+        refreshNow()
+    }
 
     init(pollInterval: Duration = .seconds(10), fetch: @escaping (LiveHost, Date?) async throws -> LiveWorkspaces = { try await LiveHostMonitor.fetch($0, previousUpdate: $1) }) {
         self.pollInterval = pollInterval; self.fetchSnapshot = fetch
@@ -258,7 +277,12 @@ final class LiveHostMonitor {
             refreshing = false
             if first { first = false; onFirstRefresh?() }
             if fingerprint != nil { return }
-            do { try await Task.sleep(for: pollInterval) } catch { return }
+            // Sleep in slices so refreshNow() cuts the wait short.
+            refreshRequested = false
+            let slices = max(1, Int(pollInterval / .milliseconds(250)))
+            for _ in 0..<slices where !refreshRequested {
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
         }
     }
 
@@ -279,10 +303,13 @@ final class LiveHostMonitor {
             let finished = previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-change")
             let status = remote ? "waiting" : finished ? "done" : "working"
             let other = remote ? "Inspect logs" : "Check project status"
+            let closed = await UITestFixtures.closedTabs
+            let tabs = [
+                #"{"id":"w1:t1","label":"1","title":"\#(title)","agent":"codex","agentStatus":"\#(status)","cwd":"/work/phone","branch":"main","contextUsedPercent":\#(remote ? 62 : 37)}"#,
+                #"{"id":"w1:t2","label":"2","title":"\#(other)","agent":"claude","agentStatus":"idle","cwd":"/work/phone","branch":"feature/settings"}"#,
+            ].enumerated().filter { !closed.contains("\(host.id):w1:t\($0.offset + 1)") }.map(\.element)
             return try LiveWorkspaces.read(Data("""
-            {"kind":"herdr","groups":[{"id":"w1","label":"Shared project","children":[
-            {"id":"w1:t1","label":"1","title":"\(title)","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone","branch":"main","contextUsedPercent":\(remote ? 62 : 37)},
-            {"id":"w1:t2","label":"2","title":"\(other)","agent":"claude","agentStatus":"idle","cwd":"/work/phone","branch":"feature/settings"}]}]}
+            {"kind":"herdr","groups":[{"id":"w1","label":"Shared project","children":[\(tabs.joined(separator: ","))]}]}
             """.utf8))
         }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
@@ -333,6 +360,8 @@ private struct LiveHostView: View {
     @State private var query = ""
     @State private var mode: SessionViewMode = .workspaces
     @State private var selected: LiveAgentSession?
+    @State private var closeRequest: SessionCloseRequest?
+    @State private var closeError: String?
     let hostID: UUID
 
     private enum SessionViewMode: String, CaseIterable {
@@ -402,6 +431,7 @@ private struct LiveHostView: View {
             .padding(.horizontal, 16).padding(.vertical, 8)
         }
         .background(PhrenTheme.bg)
+        .modifier(SessionCloseDialogs(request: $closeRequest, error: $closeError, monitor: { _ in monitor }))
         .navigationTitle(host?.name ?? "Computer removed")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search sessions")
@@ -494,7 +524,9 @@ private struct LiveHostView: View {
     private func sessionCards(_ entries: [LiveAgentSession]) -> some View {
         ForEach(entries) { session in
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date)) { selected = session }
+                LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
+                    if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
+                })
             }
         }
     }
@@ -536,6 +568,60 @@ private struct SessionStatusIcon: View {
     }
 }
 
+/// A close asked for from a card, answered by the list that owns the dialog.
+struct SessionCloseRequest: Identifiable {
+    enum Scope { case tab, workspace }
+    let session: LiveAgentSession
+    let scope: Scope
+    var id: String { "\(session.id.hostID):\(session.workspaceID):\(scope == .tab ? session.tab.id : "*")" }
+}
+
+/// The one confirmation dialog for closing sessions from a list, plus the
+/// error alert. On Herdr's confirmation the card leaves at once and the
+/// computer is asked again right away.
+private struct SessionCloseDialogs: ViewModifier {
+    @Binding var request: SessionCloseRequest?
+    @Binding var error: String?
+    let monitor: (LiveAgentSession) -> LiveHostMonitor?
+
+    /// Close on the computer, then take the card out of the list at once and
+    /// ask that computer again so the truth replaces the guess.
+    static func perform(_ what: SessionCloseRequest, monitor: LiveHostMonitor?, failed: @escaping (String) -> Void) {
+        let session = what.session, tab = what.scope == .tab ? session.tab.id : nil
+        Task { @MainActor in
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if AppModel.isUITesting {
+                    for id in tab.map({ [$0] }) ?? ["w1:t1", "w1:t2"] { UITestFixtures.closedTabs.insert("\(session.host.id):\(id)") }
+                } else {
+                    try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
+                                                         workspaceID: session.workspaceID, tabID: tab)
+                }
+                #else
+                try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
+                                                     workspaceID: session.workspaceID, tabID: tab)
+                #endif
+                withAnimation { monitor?.closed(workspace: session.workspaceID, tab: tab) }
+            } catch let failure { failed(failure.localizedDescription) }
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(request?.scope == .workspace ? "Close the whole workspace?" : "Close this tab?",
+                                isPresented: $request.isPresent(), titleVisibility: .visible, presenting: request) { what in
+                Button(what.scope == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
+                    Self.perform(what, monitor: monitor(what.session)) { error = $0 }
+                }
+            } message: { what in
+                Text(what.scope == .workspace
+                     ? "Every tab in \u{201C}\(what.session.workspaceName)\u{201D} on \(what.session.host.name) closes; running agents in them stop."
+                     : "\u{201C}\(what.session.tab.displayTitle)\u{201D} on \(what.session.host.name) closes; an agent running in it stops.")
+            }
+            .alert("Couldn't close", isPresented: $error.isPresent()) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+    }
+}
+
 private struct LiveSessionCard: View {
     @Environment(AppModel.self) private var model
     @AppStorage("sessions.live.preferences.v1") private var data = Data()
@@ -544,11 +630,14 @@ private struct LiveSessionCard: View {
     var showHost = false
     var onChat: (() -> Void)? = nil
     let onDetails: () -> Void
-    /// Swipe or hold closes the tab (or its whole workspace) on the computer.
-    @State private var closing: Closing?
-    @State private var closeError: String?
+    /// The swipe's red Close acts at once, the way Mail's does — the person
+    /// already swiped and hit a red button. Hold → Close tab / Close
+    /// workspace confirm first, through the one dialog the list owns: a dialog
+    /// per row inside a list that re-renders every second presented for the
+    /// wrong row, and deleting a row after its swipe action ran under a dialog
+    /// tripped UIKit's batch-update check.
+    let onClose: (SessionCloseRequest, _ confirm: Bool) -> Void
     @State private var assigningProject = false
-    private enum Closing: Identifiable { case tab, workspace; var id: Self { self } }
 
     var body: some View {
         let preferences = try? LiveSessionPreferences.read(data)
@@ -569,29 +658,16 @@ private struct LiveSessionCard: View {
         }
         .sessionCard()
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("Close", systemImage: "xmark", role: .destructive) { closing = .tab }
+            Button("Close", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), false) }
                 .accessibilityIdentifier("\(prefix)-close:\(session.accessibilityKey)")
         }
         .contextMenu {
             if project == nil, session.tab.cwd != nil {
                 Button("Link to project", systemImage: "link") { assigningProject = true }
             }
-            Button("Close tab", systemImage: "xmark", role: .destructive) { closing = .tab }
-            Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { closing = .workspace }
+            Button("Close tab", systemImage: "xmark", role: .destructive) { onClose(.init(session: session, scope: .tab), true) }
+            Button("Close workspace \u{201C}\(session.workspaceName)\u{201D}", systemImage: "xmark.square", role: .destructive) { onClose(.init(session: session, scope: .workspace), true) }
         }
-        .confirmationDialog(closing == .workspace ? "Close the whole workspace?" : "Close this tab?", isPresented: $closing.isPresent(), titleVisibility: .visible, presenting: closing) { what in
-            Button(what == .workspace ? "Close workspace" : "Close tab", role: .destructive) {
-                Task {
-                    do {
-                        try await PhrenConnection.herdrAction(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), operation: .close,
-                                                             workspaceID: session.workspaceID, tabID: what == .tab ? session.tab.id : nil)
-                    } catch { closeError = error.localizedDescription }
-                }
-            }
-        } message: { what in
-            Text(what == .workspace ? "Every tab in \u{201C}\(session.workspaceName)\u{201D} on \(session.host.name) closes; running agents in them stop." : "\u{201C}\(session.tab.displayTitle)\u{201D} on \(session.host.name) closes; an agent running in it stops.")
-        }
-        .alert("Couldn't close", isPresented: $closeError.isPresent()) { Button("OK") { closeError = nil } } message: { Text(closeError ?? "") }
         .sheet(isPresented: $assigningProject) {
             NavigationStack { LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
                                                 existing: preferences?.mapping(hostID: session.host.id, cwd: session.tab.cwd)) }

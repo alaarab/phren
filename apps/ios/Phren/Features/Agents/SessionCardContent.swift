@@ -46,8 +46,14 @@ struct SessionCardContent: View {
     var onDetails: (() -> Void)? = nil
 
     private var headline: String { session.projectDisplayName(project) }
+    /// The quiet last line. The list is already sectioned by state, so the
+    /// state itself is only the dot's colour here; words are for what the
+    /// section can't say — a permission waiting, a stale computer — and the
+    /// computer's name when the list spans several.
     private var state: String {
-        var parts = [session.tab.status + (fresh ? "" : " · stale")]
+        var parts: [String] = []
+        if session.tab.approvalPending == true { parts.append("Permission needed") }
+        if !fresh { parts.append("Stale") }
         if let computer { parts.append(computer) }
         return parts.joined(separator: " · ")
     }
@@ -71,7 +77,7 @@ struct SessionCardContent: View {
                         Image(systemName: "folder").font(.caption).foregroundStyle(PhrenTheme.textMuted)
                             .accessibilityLabel("Folder")
                     }
-                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
                     if let branch = session.tab.branch, !branch.isEmpty {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .semibold))
@@ -83,10 +89,16 @@ struct SessionCardContent: View {
                     Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.textSecondary)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
                 }
-                HStack(spacing: 5) {
-                    Circle().fill(stateColor).frame(width: 6, height: 6)
-                    Text(state).font(.caption2.weight(.medium)).foregroundStyle(stateColor)
-                    if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+                if !state.isEmpty || !subtitle.isEmpty {
+                    HStack(spacing: 5) {
+                        Circle().fill(stateColor).frame(width: 6, height: 6)
+                            .accessibilityLabel(session.tab.status)
+                        if !state.isEmpty {
+                            Text(state).font(.caption2.weight(.medium))
+                                .foregroundStyle(session.tab.approvalPending == true || !fresh ? stateColor : PhrenTheme.textMuted)
+                        }
+                        if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+                    }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }

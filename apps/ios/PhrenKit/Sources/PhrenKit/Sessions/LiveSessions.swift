@@ -69,6 +69,7 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         public let id: String
         public let label: String
         public let children: [Tab]
+        init(id: String, label: String, children: [Tab]) { self.id = id; self.label = label; self.children = children }
     }
     public struct Focus: Decodable, Equatable, Sendable {
         public let workspaceID: String
@@ -78,6 +79,24 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
     public let kind: String
     public let groups: [Group]
     public let focus: Focus?
+
+    /// The snapshot as it will read once Herdr has closed a tab (or a whole
+    /// workspace when `tab` is nil): the card leaves the list the moment the
+    /// close is confirmed instead of on the next poll.
+    public func closing(workspace: String, tab: String?) -> Self {
+        let groups = groups.compactMap { group -> Group? in
+            guard group.id == workspace else { return group }
+            guard let tab else { return nil }
+            let children = group.children.filter { $0.id != tab }
+            return children.isEmpty ? nil : Group(id: group.id, label: group.label, children: children)
+        }
+        let focus = focus.flatMap { focus -> Focus? in
+            focus.workspaceID == workspace && (tab == nil || focus.tabID == tab) ? nil : focus
+        }
+        return Self(kind: kind, groups: groups, focus: focus)
+    }
+
+    init(kind: String, groups: [Group], focus: Focus?) { self.kind = kind; self.groups = groups; self.focus = focus }
 
     public static func read(_ data: Data) throws -> Self {
         guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The session response is too large.") }
