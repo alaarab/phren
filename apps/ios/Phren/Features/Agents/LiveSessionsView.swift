@@ -12,7 +12,12 @@ struct LiveSessionsView: View {
     @State private var refreshID = UUID()
     @State private var overview = SessionOverviewMonitor()
     @State private var selected: OverviewSelection?
-    @State private var chatSession: LiveAgentSession?
+    @State private var sessionOpen: SessionOpen?
+    private struct SessionOpen: Identifiable {
+        let session: LiveAgentSession
+        let destination: AgentLaunch.Destination
+        var id: String { "\(session.id.hostID)|\(session.id.muxID)|\(session.id.workspace)|\(session.id.tab)|\(destination.rawValue)" }
+    }
     private var preferences: LiveSessionPreferences? { try? LiveSessionPreferences.read(data) }
     private var hosts: [LiveHost] { preferences?.hosts ?? [] }
 
@@ -111,15 +116,24 @@ struct LiveSessionsView: View {
         .sheet(item: $selected) { selection in
             LiveSessionDetailView(sessionID: selection.id, monitor: selection.monitor)
         }
-        .sheet(item: $chatSession) { AgentChatSheet(session: $0) }
-        // A Siri "open … in Phren" leaves the session to show here.
+        .sheet(item: $sessionOpen) { open in
+            switch open.destination {
+            case .chat: AgentChatSheet(session: open.session).id(open.id)
+            case .terminal: NavigationStack { HerdrTerminalView(host: open.session.host, session: open.session) }.id(open.id)
+            }
+        }
+        // Siri and Spotlight leave an exact session and destination here.
         .onChange(of: model.pendingChatVersion, initial: true) { _, _ in
-            if let pending = AgentLaunch.takePending() { chatSession = pending }
+            if let pending = AgentLaunch.takePendingOpen() {
+                selected = nil
+                sessionOpen = SessionOpen(session: pending.session, destination: pending.destination)
+            }
         }
         .onAppear { visible = true }
         .onDisappear { visible = false }
         .task(id: PollID(hosts: hosts, active: visible && scenePhase == .active && !adding, refresh: refreshID)) {
             guard visible, scenePhase == .active, !adding else { return }
+            SpotlightIndex.shared.reconcileHosts(hosts)
             await overview.run(hosts: hosts)
         }
         // Once the sessions are known, Siri can name them ("message phren on mini in phren").
@@ -160,7 +174,7 @@ struct LiveSessionsView: View {
         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
             Section {
                 ForEach(group.sessions) { session in
-                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { chatSession = session }) {
+                    LiveSessionCard(session: session, fresh: overview.isFresh(session, at: date), showHost: true, onChat: { sessionOpen = SessionOpen(session: session, destination: .chat) }) {
                         if let computer = overview.computers.first(where: { $0.id == session.host.id }) {
                             selected = OverviewSelection(session: session, monitor: computer.monitor)
                         }
@@ -224,6 +238,7 @@ final class LiveHostMonitor {
                 try Task.checkCancellation()
                 guard generation == run else { return }
                 snapshot = value
+                SpotlightIndex.shared.refreshSessions(value.sessions(on: host), on: host)
                 lastUpdated = Date()
                 message = nil
                 fingerprint = nil

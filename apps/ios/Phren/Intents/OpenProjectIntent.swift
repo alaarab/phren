@@ -21,8 +21,6 @@ struct OpenProjectIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let resolved = try await AgentSessions.resolve(session)
         AgentLaunch.setPending(resolved.session)
-        AppModel.current?.selectedTab = .agents
-        AppModel.current?.pendingChatVersion += 1
         return .result(dialog: resolved.started
             ? "Started \(AgentLaunch.defaultHarness.title) in \(session.workspace) on \(session.computer)."
             : "Opening \(session.workspace) on \(session.computer).")

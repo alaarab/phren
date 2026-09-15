@@ -49,8 +49,23 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
                 "Message my agent in \(.applicationName)",
                 "Talk to my agent in \(.applicationName)",
             ],
-            shortTitle: "Message Agent",
-            systemImageName: "bubble.left.and.text.bubble.right"
+            shortTitle: "Message",
+            systemImageName: "bubble.left.and.text.bubble.right",
+            parameterPresentation: ParameterPresentation(for: \.$session, summary: Summary("Message \(\.$session)")) {
+                OptionsCollection(AgentSessionEntityQuery(), title: "Sessions", systemImageName: "terminal")
+            }
+        )
+        AppShortcut(
+            intent: OpenSessionTerminalIntent(),
+            phrases: [
+                "Open terminal for \(\.$session) in \(.applicationName)",
+                "Open terminal in \(.applicationName)",
+            ],
+            shortTitle: "Open terminal",
+            systemImageName: "terminal",
+            parameterPresentation: ParameterPresentation(for: \.$session, summary: Summary("Open terminal for \(\.$session)")) {
+                OptionsCollection(AgentSessionEntityQuery(), title: "Sessions", systemImageName: "terminal")
+            }
         )
         AppShortcut(
             intent: OpenProjectIntent(),

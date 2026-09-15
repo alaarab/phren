@@ -187,6 +187,7 @@ final class AppModel {
     var selectedTab: AppTab = .projects
     /// Bumped by an intent that left a chat to open under `AgentLaunch.takePending()`.
     var pendingChatVersion = 0
+    var pendingProjectVersion = 0
     var showingMemoryMaintenance = false
     var showingMemoryConnection = false
 
@@ -688,6 +689,7 @@ final class AppModel {
         StorageIssueLog.shared.removeAll()
         storageIssues = []
         lastSurfacedIssueId = nil
+        SpotlightIndex.shared.refreshProjects(from: self)
         phase = .signedOut
     }
 
@@ -829,6 +831,7 @@ final class AppModel {
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
+        SpotlightIndex.shared.refreshProjects(from: self)
     }
 
     /// The status-only counterpart of `refreshOnce`, for a `SyncEngine.Update`

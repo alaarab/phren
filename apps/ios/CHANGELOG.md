@@ -10,6 +10,9 @@ number counts up on its own.
 
 ### New
 
+- Find live agent sessions and projects in Spotlight on iOS 18 and later. Open
+  a chat or project directly, message a session, or open its terminal.
+
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).

@@ -90,19 +90,61 @@ enum AgentLaunch {
     // MARK: - A chat the app should open next (set by an intent, consumed by the Agents tab)
 
     static let pendingKey = "agents.pendingChat.v1"
+    static let pendingProjectKey = "projects.pendingOpen.v1"
+    enum Destination: String, Codable { case chat, terminal }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
+        var muxID: String? = nil
+        var destination: Destination? = nil
     }
-    static func setPending(_ session: LiveAgentSession) {
-        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/")
+    struct PendingProject: Codable, Hashable {
+        let storeID: String
+        let project: String
+    }
+    static func setPending(_ session: LiveAgentSession, destination: Destination = .chat) {
+        let pending = Pending(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, label: session.tab.displayTitle, agent: session.tab.agent ?? "codex", cwd: session.tab.cwd ?? "/", muxID: session.host.muxID, destination: destination)
+        AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
         AppRuntime.defaults.set(try? JSONEncoder().encode(pending), forKey: pendingKey)
+        restorePendingNavigation()
     }
-    /// The pending chat, once, as a session on one of the saved hosts.
-    static func takePending() -> LiveAgentSession? {
-        guard let data = AppRuntime.defaults.data(forKey: pendingKey), let pending = try? JSONDecoder().decode(Pending.self, from: data) else { return nil }
+    static func setPendingProject(storeID: String, project: String) {
         AppRuntime.defaults.removeObject(forKey: pendingKey)
-        let hosts = (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
-        guard let host = hosts.first(where: { $0.id == pending.hostID }) else { return nil }
-        return try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID, label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd)
+        AppRuntime.defaults.set(try? JSONEncoder().encode(PendingProject(storeID: storeID, project: project)), forKey: pendingProjectKey)
+        restorePendingNavigation()
     }
+    static func restorePendingNavigation() {
+        if AppRuntime.defaults.data(forKey: pendingKey) != nil {
+            AppModel.current?.selectedTab = .agents
+            AppModel.current?.pendingChatVersion += 1
+        } else if AppRuntime.defaults.data(forKey: pendingProjectKey) != nil {
+            AppModel.current?.selectedTab = .projects
+            AppModel.current?.pendingProjectVersion += 1
+        }
+    }
+    static func takePendingProject() -> PendingProject? {
+        guard let data = AppRuntime.defaults.data(forKey: pendingProjectKey) else { return nil }
+        AppRuntime.defaults.removeObject(forKey: pendingProjectKey)
+        return try? JSONDecoder().decode(PendingProject.self, from: data)
+    }
+    /// Carry identity into the native view; chat/terminal performs its normal
+    /// fresh connection and pane validation before any remote interaction.
+    static func openIndexedSession(_ entity: AgentSessionEntity, destination: Destination) throws {
+        guard entity.isLive, let workspace = entity.workspaceID, let tab = entity.tabID,
+              let host = AgentSessions.hosts.first(where: { $0.id == entity.hostID && $0.muxID == entity.muxID }) else {
+            throw PhrenKitError.validation("That session's computer or terminal server is no longer saved.")
+        }
+        let live = try session(host: host, workspaceID: workspace, tabID: tab, label: entity.title,
+                               agent: entity.agent ?? "codex", agentStatus: nil, cwd: entity.folder ?? "/")
+        setPending(live, destination: destination)
+    }
+    static func takePendingOpen() -> (session: LiveAgentSession, destination: Destination)? {
+        guard let data = AppRuntime.defaults.data(forKey: pendingKey) else { return nil }
+        AppRuntime.defaults.removeObject(forKey: pendingKey)
+        guard let pending = try? JSONDecoder().decode(Pending.self, from: data),
+              let host = AgentSessions.hosts.first(where: { $0.id == pending.hostID && (pending.muxID == nil || $0.muxID == pending.muxID) }),
+              let live = try? session(host: host, workspaceID: pending.workspaceID, tabID: pending.tabID,
+                                      label: pending.label, agent: pending.agent, agentStatus: nil, cwd: pending.cwd) else { return nil }
+        return (live, pending.destination ?? .chat)
+    }
+    static func takePending() -> LiveAgentSession? { takePendingOpen()?.session }
 }

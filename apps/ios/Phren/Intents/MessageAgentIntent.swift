@@ -5,17 +5,26 @@ import PhrenLive
 /// Somewhere Siri can send a message: a running session ("phren on Mini"),
 /// or a phren project on a computer that has it, where a session would be
 /// started first.
-struct AgentSessionEntity: AppEntity, Equatable {
+struct AgentSessionEntity: AppEntity, Equatable, Codable {
     static var typeDisplayRepresentation: TypeDisplayRepresentation { TypeDisplayRepresentation(name: "Agent session") }
     static var defaultQuery = AgentSessionEntityQuery()
 
-    enum Kind: Equatable { case live, launch(storeID: String) }
+    enum Kind: Equatable, Codable { case live, launch(storeID: String) }
     let id: String
     let workspace: String
     let computer: String
     let title: String
     let agent: String?
     let kind: Kind
+    let hostID: UUID
+    let muxID: String
+    let workspaceID: String?
+    let tabID: String?
+    var project: String?
+    var projectStoreID: String?
+    let state: String?
+    let branch: String?
+    let folder: String?
     var isLive: Bool { kind == .live }
 
     init(_ session: LiveAgentSession) {
@@ -24,17 +33,24 @@ struct AgentSessionEntity: AppEntity, Equatable {
         computer = session.host.name
         title = session.tab.displayTitle
         agent = session.tab.agent
+        hostID = session.host.id; muxID = session.host.muxID
+        workspaceID = session.workspaceID; tabID = session.tab.id
+        state = session.tab.status; branch = session.tab.branch; folder = session.tab.cwd
         kind = .live
     }
     init(host: LiveHost, storeID: String, project: String) {
         id = ["launch", host.id.uuidString, storeID, project].joined(separator: "|")
         workspace = project; computer = host.name; title = project; agent = nil
+        hostID = host.id; muxID = host.muxID; workspaceID = nil; tabID = nil
+        self.project = project; projectStoreID = storeID
+        state = nil; branch = nil; folder = nil
         kind = .launch(storeID: storeID)
     }
 
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(title: "\(workspace) on \(computer)",
                               subtitle: isLive ? "\((agent ?? "agent").capitalized) · \(title)" : "Start a session here",
+                              image: spotlightImage,
                               synonyms: ["\(workspace)", "\(workspace) workspace", "\(workspace) project", "\(workspace) workspace on \(computer)", "\(workspace) session on \(computer)", "\(workspace) on the \(computer)"])
     }
 }
@@ -47,13 +63,18 @@ enum AgentSessions {
         (try? LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data()))?.hosts ?? []
     }
     static func current() async -> [LiveAgentSession] {
-        await withTaskGroup(of: [LiveAgentSession].self) { group in
-            for host in hosts {
+        let savedHosts = hosts
+        SpotlightIndex.shared.reconcileHosts(savedHosts)
+        return await withTaskGroup(of: [LiveAgentSession].self) { group in
+            for host in savedHosts {
                 group.addTask {
-                    let fetch = Task { try await PhrenConnection.fetch(host: host, privateKey: DeviceSSHKey.load(host.id)) }
+                    let fetch = Task { try await LiveHostMonitor.fetch(host) }
                     let timeout = Task { try await Task.sleep(for: .seconds(8)); fetch.cancel() }
                     defer { timeout.cancel() }
-                    return ((try? await fetch.value)?.sessions(on: host) ?? []).filter { $0.tab.agent != nil }
+                    guard let snapshot = try? await fetch.value else { return [] }
+                    let sessions = snapshot.sessions(on: host)
+                    await SpotlightIndex.shared.refreshSessions(sessions, on: host)
+                    return sessions.filter { $0.tab.agent != nil }
                 }
             }
             var all: [LiveAgentSession] = []
@@ -89,7 +110,7 @@ enum AgentSessions {
     static func resolve(_ entity: AgentSessionEntity, progress: @MainActor (String) -> Void = { _ in }) async throws -> (session: LiveAgentSession, started: Bool) {
         let parts = entity.id.split(separator: "|").map(String.init)
         if case .launch(let storeID) = entity.kind {
-            guard parts.count == 4, let hostID = UUID(uuidString: parts[1]), let host = hosts.first(where: { $0.id == hostID }) else {
+            guard parts.count == 4, let hostID = UUID(uuidString: parts[1]), let host = hosts.first(where: { $0.id == hostID && $0.muxID == entity.muxID }) else {
                 throw PhrenKitError.validation("That computer is no longer saved.")
             }
             let project = parts[3]
@@ -101,7 +122,7 @@ enum AgentSessions {
             AgentLaunch.remember(host: host, cwd: cwd, storeID: storeID, project: project)
             return (session, true)
         }
-        guard parts.count == 3, let hostID = UUID(uuidString: parts[0]), let host = hosts.first(where: { $0.id == hostID }) else {
+        guard parts.count == 3, let hostID = UUID(uuidString: parts[0]), let host = hosts.first(where: { $0.id == hostID && $0.muxID == entity.muxID }) else {
             throw PhrenKitError.validation("That computer is no longer saved.")
         }
         if let session = (try? await PhrenConnection.fetch(host: host, privateKey: DeviceSSHKey.load(host.id)))?.sessions(on: host)
@@ -116,7 +137,12 @@ enum AgentSessions {
 struct AgentSessionEntityQuery: EntityStringQuery {
     func entities(for identifiers: [AgentSessionEntity.ID]) async throws -> [AgentSessionEntity] {
         let wanted = Set(identifiers)
-        return await AgentSessions.targets().filter { wanted.contains($0.id) }
+        // Resolve indexed IDs locally so tapping a result can open the chat
+        // even while SSH is reconnecting. Spoken matching still asks live hosts.
+        let cached = await SpotlightIndex.shared.sessions(for: identifiers)
+        let remaining = wanted.subtracting(cached.map(\.id))
+        guard !remaining.isEmpty else { return cached }
+        return cached + (await AgentSessions.targets()).filter { remaining.contains($0.id) }
     }
     func suggestedEntities() async throws -> [AgentSessionEntity] {
         await AgentSessions.targets()

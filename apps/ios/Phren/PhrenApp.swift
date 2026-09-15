@@ -23,7 +23,7 @@ struct PhrenApp: App {
                 .preferredColorScheme(.dark)
                 .onChange(of: appearance.palette) { _, _ in Self.applyPhrenChrome() }
                 .modifier(ExternalURLTestCapture())
-                .task { await model.bootstrap() }
+                .task { await model.bootstrap(); AgentLaunch.restorePendingNavigation() }
                 .alert("Permission request", isPresented: $approvals.message.isPresent()) {
                     Button("OK") { approvals.message = nil }
                 } message: { Text(approvals.message ?? "") }

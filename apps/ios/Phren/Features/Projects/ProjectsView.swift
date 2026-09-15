@@ -4,6 +4,7 @@ import PhrenKit
 struct ProjectsView: View {
     @Environment(AppModel.self) private var model
     @State private var filter = ""
+    @State private var navigationPath = NavigationPath()
     @State private var showVoiceCapture = false
 
     private var projects: [StoreProject] {
@@ -21,7 +22,7 @@ struct ProjectsView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 LiveStatusBar()
                 ActionErrorBanner()
@@ -154,6 +155,20 @@ struct ProjectsView: View {
             .navigationDestination(for: StoreProject.self) { item in
                 ProjectDetailView(storeId: item.storeId, project: item.project.name)
             }
+            .navigationDestination(for: AgentLaunch.PendingProject.self) { target in
+                ProjectDetailView(storeId: target.storeID, project: target.project)
+            }
+            .onChange(of: model.pendingProjectVersion, initial: true) { _, _ in
+                guard let target = AgentLaunch.takePendingProject() else { return }
+                guard model.storeContexts.contains(where: { context in
+                    context.id == target.storeID && context.snapshot.projects.contains { $0.name == target.project }
+                }) else {
+                    model.lastActionError = "That project is no longer available on this iPhone."
+                    return
+                }
+                navigationPath = NavigationPath()
+                navigationPath.append(target)
+            }
             // Archive destinations are registered here, at the stack root,
             // rather than on the pushed views that link to them — a
             // .navigationDestination declared on an already-pushed view
@@ -241,6 +256,7 @@ struct ProjectDetailView: View {
             }
         }
         .background(PhrenTheme.bg)
+        .accessibilityIdentifier("project-detail:\(storeId):\(project)")
         .navigationTitle(model.hasMultipleStores ? "\(project) · \(model.storeName(for: storeId))" : project)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
