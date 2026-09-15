@@ -29,6 +29,20 @@ number counts up on its own.
 - The shortcuts panel is denser: four to a row, the command and one word,
   agent tabs as glyphs, Add in the header.
 - Full-screen diffs scroll sideways again for long lines.
+- Session details is a proper page: the agent's mark in its state's tint,
+  the title, project · branch · computer, a state pill, Chat and Open
+  terminal buttons, this computer's account limits, the facts, Close session.
+  The ring on a session card opens it; the (i) button is gone.
+- Queued messages no longer leave a hole above the composer.
+- Close a session from the list: swipe a card, or hold it to close the tab
+  or its whole workspace on the computer.
+- Herdr workspaces read as one tree — workspace rows you can fold, tabs with
+  the agent's mark, a dot for the ones that need you, the tab Herdr has in
+  front highlighted — with search across workspaces, tabs and agents.
+- Session cards say more at a glance: the harness's mark inside a ring
+  that carries the state (spinning cyan while working, amber when it needs
+  you, green when done), a state badge on the ring, the project in bold with
+  its branch, then the conversation title and a coloured state line.
 - The real agent marks everywhere: Claude's starburst, OpenAI's knot for
   Codex, GitHub Copilot's goggles.
 - Dictation types straight into the message as you speak — tap the mic, talk,

@@ -24,31 +24,75 @@ extension LiveWorkspaces.Tab.Activity {
 }
 
 /// Shared compact content for overview, computer, and project session lists.
+///
+/// Reads top-down the way you ask about a session: *which project* (bold,
+/// with its branch), *which conversation* (the tab title), *what's happening*
+/// (a state line in the state's colour). On the left, the harness's own mark
+/// sits inside a ring that carries the state — cyan and spinning while it
+/// works, amber when it needs you, green when done, grey when idle — with the
+/// context used drawn as the ring's fill and a small state badge at its foot.
 struct SessionCardContent: View {
     @Environment(\.dynamicTypeSize) private var textSize
     let session: LiveAgentSession
     let fresh: Bool
-    let subtitle: String
+    /// The project name the store matched to this session, when it has one.
+    var project: String? = nil
+    /// The computer, shown when the list spans several.
+    var computer: String? = nil
+    /// Kept for callers that build their own line; unused when `project` is given.
+    var subtitle: String = ""
     let identifierPrefix: String
+    /// Tapping the ring opens the session's details; nil makes it inert.
+    var onDetails: (() -> Void)? = nil
+
+    private var headline: String { project ?? session.workspaceName }
+    private var state: String {
+        var parts = [session.tab.status + (fresh ? "" : " · stale")]
+        if let computer { parts.append(computer) }
+        return parts.joined(separator: " · ")
+    }
+    private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
 
     var body: some View {
-        HStack(spacing: 9) {
-            SessionActivityIndicator(tab: session.tab, fresh: fresh)
-                .accessibilityIdentifier("\(identifierPrefix)-context:\(session.accessibilityKey)")
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.tab.displayTitle)
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text)
-                    .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
-                Text(subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted)
-                    .lineLimit(textSize.isAccessibilitySize ? nil : 1)
+        HStack(spacing: 10) {
+            Button { onDetails?() } label: {
+                SessionActivityIndicator(tab: session.tab, fresh: fresh)
+                    .accessibilityIdentifier("\(identifierPrefix)-context:\(session.accessibilityKey)")
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(onDetails == nil)
+            .accessibilityLabel("\(session.tab.agent?.capitalized ?? "Agent"), \(session.tab.status)")
+            .accessibilityValue(session.tab.contextUsedPercent.map { "context \(Int($0.rounded()))%" } ?? "")
+            .accessibilityHint("Session details")
+            .accessibilityIdentifier(identifierPrefix == "live" ? "live-detail:\(session.workspaceID):\(session.tab.id)" : "\(identifierPrefix)-detail:\(session.accessibilityKey)")
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    if let branch = session.tab.branch, !branch.isEmpty {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .semibold))
+                            Text(branch).lineLimit(1).truncationMode(.middle)
+                        }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+                    }
+                }
+                if session.tab.displayTitle != headline {
+                    Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.textSecondary)
+                        .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
+                }
+                HStack(spacing: 5) {
+                    Circle().fill(stateColor).frame(width: 6, height: 6)
+                    Text(state).font(.caption2.weight(.medium)).foregroundStyle(stateColor)
+                    if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 8)
-        .frame(minHeight: 60)
+        .frame(minHeight: 64)
         .overlay(alignment: .leading) {
-            if fresh && session.tab.activity == .working {
-                Capsule().fill(PhrenTheme.cyan).frame(width: 3, height: 24)
-                    .accessibilityLabel("Agent is active")
+            // A bar on the edge for the states that want a glance: working, and needs you.
+            if fresh, session.tab.activity == .working || session.tab.activity == .waiting {
+                Capsule().fill(stateColor).frame(width: 3, height: 26)
+                    .accessibilityLabel(session.tab.activity == .working ? "Agent is active" : "Agent needs you")
                     .accessibilityIdentifier("\(identifierPrefix)-running:\(session.accessibilityKey)")
             }
         }
@@ -64,26 +108,31 @@ private struct SessionActivityIndicator: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(color.opacity(0.18), lineWidth: 2).frame(width: 29, height: 29)
+            Circle().stroke(color.opacity(0.22), lineWidth: 2).frame(width: 36, height: 36)
             if let percent {
+                // Context used, as how much of the ring is lit.
                 Circle().trim(from: 0, to: percent / 100)
                     .stroke(color.opacity(fresh ? 0.85 : 0.4), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90)).frame(width: 29, height: 29)
-                Text("\(Int(percent.rounded()))%")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(fresh ? PhrenTheme.text : PhrenTheme.textMuted)
-            } else {
-                Image(systemName: tab.activity.icon).font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color)
+                    .rotationEffect(.degrees(-90)).frame(width: 36, height: 36)
             }
             if fresh && tab.activity == .working {
-                SessionActivityArc(color: color).frame(width: 36, height: 36)
+                SessionActivityArc(color: color).frame(width: 42, height: 42)
             }
+            AgentProviderGlyph(source: tab.agent, size: 20).opacity(fresh ? 1 : 0.55)
         }
-        .frame(width: 36, height: 36)
+        .frame(width: 42, height: 42)
+        .overlay(alignment: .bottomTrailing) {
+            // What it is doing, on the ring's foot.
+            Image(systemName: tab.activity.icon).font(.system(size: 7.5, weight: .bold))
+                .foregroundStyle(tab.activity == .idle || tab.activity == .unknown ? PhrenTheme.textMuted : Color.black.opacity(0.85))
+                .frame(width: 15, height: 15)
+                .background(tab.activity == .idle || tab.activity == .unknown ? PhrenTheme.surface : color, in: Circle())
+                .overlay(Circle().strokeBorder(PhrenTheme.bg, lineWidth: 1.5))
+                .offset(x: 2, y: 2)
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Context used")
-        .accessibilityValue(percent.map { "\(Int($0.rounded()))%" } ?? "Unavailable")
+        .accessibilityLabel("\(tab.agent?.capitalized ?? "Agent"), \(tab.status)")
+        .accessibilityValue(percent.map { "context \(Int($0.rounded()))%" } ?? "")
     }
 }
 

@@ -11,6 +11,8 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         public let approvalPending: Bool?
         public let agent: String?
         public let cwd: String?
+        /// The git branch of the agent's folder, when the Hook reports one.
+        public let branch: String?
         public let agentPaneCount: Int?
         public let paneCount: Int?
         /// Herdr's state-change counter for the tab's panes: higher means the
@@ -26,7 +28,7 @@ public struct LiveWorkspaces: Decodable, Equatable, Sendable {
         }
 
         private enum CodingKeys: String, CodingKey {
-            case id, label, title, agentStatus, approvalPending, agent, cwd, agentPaneCount, paneCount, changedSeq
+            case id, label, title, agentStatus, approvalPending, agent, cwd, branch, agentPaneCount, paneCount, changedSeq
             case reportedContextUsedPercent = "contextUsedPercent"
         }
 

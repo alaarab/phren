@@ -163,9 +163,8 @@ struct ProjectSessionsView: View {
             let fresh = discovery.updated.map { context.date.timeIntervalSince($0) < 25 } == true
             HStack(spacing: 0) {
                 Button { open(session, assign: assign) } label: {
-                    SessionCardContent(session: session, fresh: fresh,
-                                       subtitle: "\(session.host.name) · \(session.workspaceName) · \(session.tab.status)\(fresh ? "" : " · stale")",
-                                       identifierPrefix: "discovered")
+                    SessionCardContent(session: session, fresh: fresh, project: session.workspaceName,
+                                       computer: session.host.name, identifierPrefix: "discovered")
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint(openChat ? (assign ? "Use for \(project) and chat" : "Chat with agent")

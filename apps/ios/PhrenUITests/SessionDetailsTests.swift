@@ -5,7 +5,7 @@ final class SessionDetailsTests: XCTestCase {
     func testRowsGrowForLargeTextAndKeepDetailsReachable() {
         let app = launch()
         let title = app.staticTexts["Polish the phone app"]
-        let metadata = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "codex", "Working")).firstMatch
+        let metadata = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Working")).firstMatch
         XCTAssertTrue(metadata.exists)
         XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
         let details = app.buttons["live-detail:w7:w7:t9"]
@@ -67,9 +67,8 @@ final class SessionDetailsTests: XCTestCase {
         XCTAssertTrue(app.webViews.staticTexts["PHONE"].firstMatch.waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
         XCTAssertTrue(title.waitForExistence(timeout: 5))
-        let list = app.collectionViews.firstMatch
         let copy = app.buttons["Copy folder"]
-        for _ in 0..<4 where !copy.isHittable { list.swipeUp() }
+        for _ in 0..<4 where !copy.isHittable { app.swipeUp() }
         XCTAssertTrue(app.staticTexts["Agent panes, 2"].exists)
         XCTAssertTrue(app.staticTexts["Total panes, 3"].exists)
         XCTAssertTrue(app.staticTexts["/work/phone/src"].exists)

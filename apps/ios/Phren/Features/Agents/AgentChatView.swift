@@ -297,8 +297,13 @@ struct AgentChatView: View {
             // Between the transcript and the input, where Claude Code keeps
             // its queue; outside the lazy stack so the rows are always laid out.
             if !model.queue.isEmpty {
-                ScrollView { queuedMessages.padding(.horizontal, 12) }
-                    .frame(maxHeight: 190).padding(.bottom, 2)
+                // As tall as its rows; a scroller only once they pass the cap —
+                // a bare ScrollView would take the whole cap and leave a hole.
+                ViewThatFits(in: .vertical) {
+                    queuedMessages.padding(.horizontal, 12)
+                    ScrollView { queuedMessages.padding(.horizontal, 12) }
+                }
+                .frame(maxHeight: 190).padding(.bottom, 2)
             }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)

@@ -17,6 +17,8 @@ struct HerdrWorkspacesView: View {
     @State private var cwd = ""
     @State private var closing: Edit?
     @State private var action: Task<Void, Never>?
+    @State private var query = ""
+    @State private var collapsed: Set<String> = []
     private var host: LiveHost? { (try? LiveSessionPreferences.read(data))?.hosts.first { $0.id == hostID } }
     private var active: Bool { visible && scenePhase == .active }
     private struct Edit: Identifiable {
@@ -45,32 +47,71 @@ struct HerdrWorkspacesView: View {
                 }
                 if let error { Section { Text(error).font(.footnote).foregroundStyle(PhrenTheme.warning) } }
                 if let snapshot {
-                    ForEach(snapshot.groups) { group in
-                        Section {
-                            ForEach(group.children) { tab in
-                                let session = LiveAgentSession(host: host, workspaceID: group.id, workspaceName: group.label, tab: tab)
-                                NavigationLink { HerdrPanesView(session: session) } label: {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(tab.displayTitle).font(.headline).lineLimit(2)
-                                        Text("\(tab.status) · \(tab.paneCount ?? 1) panes").font(.caption).foregroundStyle(PhrenTheme.textMuted)
-                                    }.padding(.vertical, 5)
-                                }
-                                .contextMenu {
-                                    Button("Rename tab") { name = tab.label; operation = .init(workspace: group.id, tab: tab.id, title: "Rename tab") }
-                                    Button("Close tab", role: .destructive) { closing = .init(workspace: group.id, tab: tab.id, title: tab.displayTitle) }
+                    // One tree: workspaces as plain rows you can fold, their
+                    // tabs beneath with the harness mark, the state on the
+                    // right, and the tab Herdr has in front tinted.
+                    let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+                    let groups = snapshot.groups.filter { group in
+                        needle.isEmpty || group.label.lowercased().contains(needle) || group.children.contains { $0.displayTitle.lowercased().contains(needle) || ($0.agent ?? "").contains(needle) }
+                    }
+                    Section {
+                        ForEach(groups) { group in
+                            let open = !collapsed.contains(group.id)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) { if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) } }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold)).foregroundStyle(PhrenTheme.textMuted)
+                                        .rotationEffect(.degrees(open ? 0 : -90)).frame(width: 14)
+                                    Text(group.label).font(.title3.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                                    Spacer()
+                                    if !open { Text("\(group.children.count)").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
+                                }.frame(minHeight: 40).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                            .accessibilityLabel("\(group.label) workspace, \(open ? "expanded" : "collapsed")")
+                            .accessibilityIdentifier("workspace:\(group.id)")
+                            .contextMenu {
+                                Button("New tab", systemImage: "plus") { perform(.create, host: host, workspace: group.id) }
+                                Button("Rename workspace", systemImage: "pencil") { name = group.label; operation = .init(workspace: group.id, title: "Rename workspace") }
+                                Button("Close workspace", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, title: group.label) }
+                            }
+                            if open {
+                                ForEach(group.children.filter { needle.isEmpty || $0.displayTitle.lowercased().contains(needle) || ($0.agent ?? "").contains(needle) || group.label.lowercased().contains(needle) }) { tab in
+                                    let session = LiveAgentSession(host: host, workspaceID: group.id, workspaceName: group.label, tab: tab)
+                                    let focused = snapshot.focus?.workspaceID == group.id && snapshot.focus?.tabID == tab.id
+                                    let color = tab.activity.color
+                                    NavigationLink { HerdrPanesView(session: session) } label: {
+                                        HStack(spacing: 10) {
+                                            if tab.agent != nil { AgentProviderGlyph(source: tab.agent, size: 18) }
+                                            else { Image(systemName: "terminal").font(.system(size: 14)).foregroundStyle(PhrenTheme.textMuted).frame(width: 18) }
+                                            Text(tab.displayTitle).font(.body).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                                            Spacer()
+                                            if tab.activity == .working || tab.activity == .waiting || tab.activity == .error {
+                                                Circle().fill(color).frame(width: 8, height: 8).accessibilityLabel(tab.status)
+                                            }
+                                        }.frame(minHeight: 40)
+                                    }
+                                    .listRowBackground(focused ? PhrenTheme.success.opacity(0.14) : Color.clear)
+                                    .listRowInsets(EdgeInsets(top: 2, leading: 44, bottom: 2, trailing: 16))
+                                    .accessibilityIdentifier("workspace-tab:\(tab.id)")
+                                    .swipeActions(edge: .trailing) {
+                                        Button("Close", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, tab: tab.id, title: tab.displayTitle) }
+                                    }
+                                    .contextMenu {
+                                        Button("Rename tab", systemImage: "pencil") { name = tab.label; operation = .init(workspace: group.id, tab: tab.id, title: "Rename tab") }
+                                        Button("Close tab", systemImage: "xmark", role: .destructive) { closing = .init(workspace: group.id, tab: tab.id, title: tab.displayTitle) }
+                                    }
                                 }
                             }
-                            Menu {
-                                Button("New tab", systemImage: "plus") { perform(.create, host: host, workspace: group.id) }
-                                Button("Rename workspace") { name = group.label; operation = .init(workspace: group.id, title: "Rename workspace") }
-                                Button("Close workspace", role: .destructive) { closing = .init(workspace: group.id, title: group.label) }
-                            } label: { Label("Workspace actions", systemImage: "ellipsis.circle") }.disabled(busy)
-                        } header: { Text(group.label) }
-                    }
+                        }
+                    } header: { Text("Workspaces") }
                     if snapshot.groups.isEmpty { ContentUnavailableView("No workspaces", systemImage: "rectangle.split.3x1", description: Text("Create a workspace to open a shell on this computer.")) }
                 } else if error == nil { ProgressView("Loading Herdr…") }
             }
         }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search workspaces, tabs, agents")
         .navigationTitle("Herdr").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Button("New workspace", systemImage: "plus") { name = ""; cwd = snapshot?.groups.flatMap(\.children).compactMap(\.cwd).first ?? ""; operation = .init(workspace: nil, title: "New workspace") }.disabled(busy || host == nil)

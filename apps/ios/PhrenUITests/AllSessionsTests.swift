@@ -63,15 +63,17 @@ final class AllSessionsTests: XCTestCase {
         let working = row(app, host: mac), waiting = row(app, host: linux)
         XCTAssertTrue(working.waitForExistence(timeout: 10))
         XCTAssertTrue(waiting.waitForExistence(timeout: 10))
+        // The ring names the harness and the state; context used is its value.
         let known = indicator(app, kind: "context", host: mac)
         XCTAssertTrue(known.exists)
-        XCTAssertEqual(known.label, "Context used")
-        XCTAssertEqual(known.value as? String, "37%")
-        XCTAssertEqual(indicator(app, kind: "context", host: linux).value as? String, "62%")
+        XCTAssertEqual(known.label, "Codex, Working")
+        XCTAssertEqual(known.value as? String, "context 37%")
+        XCTAssertEqual(indicator(app, kind: "context", host: linux).value as? String, "context 62%")
         XCTAssertTrue(indicator(app, kind: "running", host: mac).exists)
-        XCTAssertFalse(indicator(app, kind: "running", host: linux).exists, "Waiting for input is not active work")
-        XCTAssertLessThanOrEqual(working.frame.height, 68)
-        XCTAssertLessThanOrEqual(waiting.frame.height, 68)
+        // Waiting for input gets the edge bar too: it is the one that needs you.
+        XCTAssertTrue(indicator(app, kind: "running", host: linux).exists)
+        XCTAssertLessThanOrEqual(working.frame.height, 76)
+        XCTAssertLessThanOrEqual(waiting.frame.height, 76)
 
         let linuxIdle = row(app, host: linux, tab: "w1:t2")
         let macIdle = row(app, host: mac, tab: "w1:t2")
@@ -80,8 +82,8 @@ final class AllSessionsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(macIdle.frame.minY - linuxIdle.frame.maxY, 6,
                                    "Cards in the same section need visible space between them")
         for host in [mac, linux] {
-            XCTAssertLessThanOrEqual(row(app, host: host, tab: "w1:t2").frame.height, 68)
-            XCTAssertEqual(indicator(app, kind: "context", host: host, tab: "w1:t2").value as? String, "Unavailable")
+            XCTAssertLessThanOrEqual(row(app, host: host, tab: "w1:t2").frame.height, 76)
+            XCTAssertEqual(indicator(app, kind: "context", host: host, tab: "w1:t2").value as? String, "")
             XCTAssertFalse(indicator(app, kind: "running", host: host, tab: "w1:t2").exists)
             let pin = pin(app, host: host, tab: "w1:t2")
             XCTAssertEqual(pin.label, "Pin session")
@@ -160,7 +162,7 @@ final class AllSessionsTests: XCTestCase {
         let first = row(app, host: mac)
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         let title = app.staticTexts["Build the iPhone overview"]
-        let metadata = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Test Mac ·", "Working")).firstMatch
+        let metadata = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Working", "Test Mac")).firstMatch
         XCTAssertTrue(metadata.exists)
         XCTAssertLessThanOrEqual(title.frame.maxY, metadata.frame.minY)
         XCTAssertGreaterThan(first.frame.height, 90)
@@ -202,7 +204,9 @@ final class AllSessionsTests: XCTestCase {
     }
     @MainActor
     private func indicator(_ app: XCUIApplication, kind: String, host: String, tab: String = "w1:t1") -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: "overview-\(kind):\(host):herdr:default:w1:\(tab)").firstMatch
+        // The ring is the details button now; its label and value describe the state and context.
+        let name = kind == "context" ? "detail" : kind
+        return app.descendants(matching: .any).matching(identifier: "overview-\(name):\(host):herdr:default:w1:\(tab)").firstMatch
     }
     @MainActor
     private func section(_ app: XCUIApplication, title: String) -> XCUIElement {
