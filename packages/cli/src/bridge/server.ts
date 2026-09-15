@@ -8,8 +8,8 @@ import { z } from "zod";
 import { LaunchLimiter } from "./limits.js";
 import { homeDirectory, startChangeRetention } from "./changes.js";
 import { ActivityJournal } from "./activity.js";
-import { paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
-import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, type Json } from "./protocol.js";
+import { paneChatState, validateStartingTarget, paneIdentity, panes, rpc, servers, snapshot, trustedDirectory, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { BridgeError, bridgeRoot, id, MAX_FRAME, object, objects, PROTOCOL, serverName, socketPath, targetFromURL, targetSchema, startingTargetSchema, type Json } from "./protocol.js";
 import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from "./projects.js";
 import { locateProject } from "./locate.js";
 import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
@@ -120,9 +120,16 @@ export async function serve(version: string): Promise<void> {
             if (url.searchParams.get("watchApprovals") === "1") agentHooks.overview.renew(server);
             const context = await contextUsage.read(server, s);
             await journal.record(server, objects(s.panes));
+            const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
+              [p, await paneChatState(server, p).catch((): Json => ({}))] as const)));
             const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
             // The branch each tab's agent is on, for the session cards.
             for (const group of objects(workspaces.groups)) for (const tab of objects(group.children)) {
+              const agents = objects(s.panes).filter(p => p.workspace_id === group.id && p.tab_id === tab.id && p.agent);
+              if (agents.length === 1) {
+                const chat = chatStates.get(agents[0]);
+                if (chat?.starting === true) tab.starting = true;
+              }
               if (typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
             }
             result = { ...workspaces, phren: info }; break;
@@ -163,6 +170,20 @@ export async function serve(version: string): Promise<void> {
             { ...data, cwd: await launchDirectory(data.cwd ?? homeDirectory(), await journal.recent(), locatedDirectories) }))
             : await workspaceAction(selectedServer(url), operation, data);
         } else {
+          if (url.pathname === "/v1/prompt" && object(data.target).starting === true) {
+            const target = startingTargetSchema.parse(data.target);
+            const pane = await validateStartingTarget(target);
+            const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
+            await rpc(target.server, "agent.prompt", { target: target.pane, text });
+            // A first prompt may create its transcript immediately. Recheck the
+            // terminal/process binding, not the absence of a session. Never retry.
+            let confirmed = false;
+            try {
+              const current = objects((await snapshot(target.server)).panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+              confirmed = !!current && current.terminal_id === pane.terminal_id && (await paneChatState(target.server, current)).startingToken === target.startingToken;
+            } catch { /* Already delivered; an uncertain reply must not resend. */ }
+            result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+          } else {
           const target = targetSchema.parse(data.target);
           const pane = await validateTarget(target, ["/v1/prompt", "/v1/upload", "/v1/keys"].includes(url.pathname));
           if (url.pathname === "/v1/prompt") {
@@ -196,6 +217,7 @@ export async function serve(version: string): Promise<void> {
             await agentHooks.answer(target, z.string().uuid().parse(data.actionId), data.decision); result = { ok: true };
           } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
           else throw new BridgeError(404, "Unknown Phren Hook route.");
+          }
         }
       }
       } else throw new BridgeError(405, "Unsupported request method.");

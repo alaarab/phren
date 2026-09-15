@@ -16,7 +16,7 @@ import { dispatch } from "./transport.js";
 import { workspaceSnapshot } from "./herdr.js";
 import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { locateProject } from "./locate.js";
-import { ToolChanges, namedPaths, outputCallIds } from "./changes.js";
+import { ToolChanges, namedPaths, outputCallIds, capturesChanges } from "./changes.js";
 import { ApprovalWatchLeases } from "./agent-hooks.js";
 import { object } from "./protocol.js";
 
@@ -40,6 +40,14 @@ describe("Phren Hook boundaries", () => {
     expect(leases.has("default")).toBe(false);
     leases.renew("default");
     expect(leases.has("default")).toBe(true);
+  });
+  it("captures file tools and resolves their literal paths including patch headers", () => {
+    for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "functions.apply_patch", "str_replace_editor", "create_file", "replace_string_in_file"]) {
+      expect(capturesChanges(tool, {})).toBe(true);
+    }
+    expect(capturesChanges("Read", { file_path: "/work/file" })).toBe(false);
+    expect(namedPaths("", { file_path: "/work/a file.swift", notebook_path: "notes.ipynb", path: "relative/file" })).toEqual(["/work/a file.swift", "relative/file", "notes.ipynb"]);
+    expect(namedPaths("", { patch: "*** Begin Patch\n*** Update File: ../repo/a.swift\n@@\n-old\n+new\n*** Add File: new.txt\n+x\n*** End Patch" })).toEqual(["../repo/a.swift", "new.txt"]);
   });
   it("exports the shared iPhone lifecycle and usage contract", async () => {
     const cases = JSON.parse(await readFile(new URL("../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/hook-events.json", import.meta.url), "utf8"));
@@ -387,6 +395,58 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();
     expect((await stat(path.join(root, "bridge/computer-id"))).mode & 0o777).toBe(0o600);
   });
+  it("exports starting panes and sends a first prompt only to their verified terminal", async () => {
+    reportIdentity = false;
+    const discover = async () => (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0];
+    const pane = await discover();
+    expect(pane).toMatchObject({ agent: "codex", starting: true });
+    expect(pane.sessionId).toBeUndefined(); expect(pane.startingToken).toMatch(/^[a-f0-9]{64}$/);
+    const overview = await api("/v1/workspaces");
+    expect(overview.data.groups[0].children[0]).toMatchObject({ agent: "codex", starting: true });
+    const { session: _session, ...location } = target;
+    const starting = { ...location, starting: true, startingToken: pane.startingToken };
+    expect((await api("/v1/prompt", { target: { ...starting, startingToken: "0".repeat(64) }, text: "wrong token" })).status).toBe(409);
+    for (const route of ["/v1/upload", "/v1/diff", "/v1/approvals/answer", "/v1/keys"]) {
+      expect((await api(route, { target: starting, text: "must not run" })).status).toBe(400);
+    }
+    expect((await api("/v1/prompt", { target: starting, text: "First message" })).status).toBe(200);
+    expect(deliveries).toHaveLength(1);
+    reportIdentity = true;
+    const attached = await discover();
+    expect(attached.sessionId).toBe(session); expect(attached.starting).toBeUndefined();
+    expect(attached.startingToken).toBe(starting.startingToken);
+    expect((await api("/v1/prompt", { target: starting, text: "stale first send" })).status).toBe(409);
+    reportIdentity = false; terminalID = "replacement";
+    expect((await api("/v1/prompt", { target: starting, text: "replaced terminal" })).status).toBe(409);
+    expect(deliveries).toHaveLength(1);
+  });
+
+  it("captures a Write PreToolUse/PostToolUse pair as phren_changes without altering the repository index", async () => {
+    const repo = path.join(root, "write-repo"); await mkdir(repo);
+    await execFileAsync("git", ["init", "-q", repo]);
+    const file = path.join(repo, "new.txt");
+    const callback = (event: string) => new Promise<any>((resolve, reject) => {
+      const payload = JSON.stringify({ target, event, tool: "Write", toolUseId: "write-one", cwd: root,
+        input: { file_path: file, content: "hello from Write\n" } });
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+        let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+      }); req.on("error", reject); req.end(payload);
+    });
+    expect(await callback("PreToolUse")).toEqual({});
+    await writeFile(file, "hello from Write\n");
+    await writeFile(path.join(repo, ".env"), "SECRET=hidden\n");
+    expect(await callback("PostToolUse")).toEqual({});
+    expect(await stat(path.join(repo, ".git/index")).catch(() => undefined)).toBeUndefined();
+    await appendFile(record, JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "write-one", output: "Done" } }) + "\n");
+    const page = await api("/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "9" }));
+    expect(page.status).toBe(200);
+    const files = page.data.entries.find((entry: any) => entry.raw.phren_changes)?.raw.phren_changes["write-one"];
+    expect(files.find((f: any) => f.path === "new.txt").patch).toContain("+hello from Write");
+    expect(files.find((f: any) => f.path === ".env")).toMatchObject({ patch: "", redacted: true });
+    expect(JSON.stringify(page.data)).not.toContain("SECRET");
+  });
+
   it("launches a workspace in a directory with an agent started in its pane", async () => {
     const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "phren", kind: "claude" });
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);
@@ -719,7 +779,7 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       expect(changes[0].after).toContain("PermissionRequest");
       expect(JSON.parse(changes[0].after).hooks.PreToolUse[0]).toMatchObject({ hooks: [{ timeout: 10 }] });
       expect(JSON.parse(changes[0].after).hooks.PreToolUse[0].matcher).toBeUndefined(); // Codex: every tool, filtered by the Hook
-      expect(JSON.parse(changes.find(c => c.file.endsWith("settings.json"))!.after).hooks.PreToolUse[0].matcher).toBe("Bash");
+      expect(JSON.parse(changes.find(c => c.file.endsWith("settings.json"))!.after).hooks.PreToolUse[0].matcher).toBe("Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor");
       expect(JSON.parse(changes[0].after).hooks.PostToolUse).toHaveLength(1);
       expect(await readFile(file, "utf8")).toBe(original);
       await writeFile(file, changes[0].after);

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, provider, serverName, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
-import { SHELL_TOOLS, ToolChanges } from "./changes.js";
+import { capturesChanges, ToolChanges } from "./changes.js";
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
 const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", encodeURIComponent(serverName.parse(server)), encodeURIComponent(pane) + ".json");
@@ -90,12 +90,12 @@ export class AgentHooks {
         await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
         // What a shell call changed on disk: snapshot before, diff after.
-        const input = object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
+        const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
         // Codex has renamed its shell tool more than once.
-        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && (SHELL_TOOLS.has(String(body.tool)) || command !== undefined)) {
+        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
-          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "");
+          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
           else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }

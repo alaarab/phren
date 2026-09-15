@@ -207,12 +207,11 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     } else {
       for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse"]) {
         const groups = objects(hooks[event]).map(group => ({ ...group, hooks: objects(group.hooks).filter(h => !ownHook(h.command)) })).filter(group => group.hooks.length);
-        // Tool hooks snapshot the working tree around shell calls, so the phone
-        // can show what a command changed; other tools carry their own patch.
-        // Claude Code matches the tool by name here; Codex names its shell
-        // tool differently across versions, so its hook runs for every tool
-        // and the Hook itself keeps only shell calls.
-        const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
+        // Snapshot shell and file-edit calls so every card can show actual
+        // changed-file rows, including files outside the original cwd.
+        // Codex names tools differently across versions; filter its callbacks
+        // inside the Hook. Claude can narrow its registration here.
+        const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
           : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
         hooks[event] = remove ? groups : [...groups, group];
       }

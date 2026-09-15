@@ -1,10 +1,11 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { BridgeError, id, object, objects, requestID, serverName, type Json, type Target } from "./protocol.js";
+import { BridgeError, id, object, objects, requestID, serverName, provider, type Json, type Target, type StartingTarget } from "./protocol.js";
 import { recordedSession } from "./agent-hooks.js";
 import { tabActivityKey } from "./tab-activity.js";
 
@@ -107,20 +108,22 @@ async function processLogs(pids: number[]): Promise<string[]> {
   return [...new Set(paths.flat())].filter(p => p.endsWith(".jsonl"));
 }
 
-const identities = new Map<string, { at: number; result: Promise<string | undefined> }>();
+interface PaneIdentity { sessionId?: string; noTranscriptLogs: boolean }
+const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }>();
+const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   const reported = object(pane.agent_session);
   if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && /^[a-f0-9-]{36}$/i.test(reported.value)) return reported.value;
   const pids = await foregroundPids(server, pane);
-  const key = JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
+  const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < 2_000) return cached.result;
+  if (!fresh && cached && Date.now() - cached.at < 2_000) return (await cached.result).sessionId;
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
   identities.set(key, { at: Date.now(), result });
-  return result;
+  return (await result).sessionId;
 }
-async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<string | undefined> {
+async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
   const files = await processLogs(pids);
   const candidates = files.flatMap(file => {
     const match = pane.agent === "codex" ? /rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file)
@@ -131,13 +134,30 @@ async function identityFromProcesses(server: string, pane: Json, pids: number[])
       : /\/session-state\/([a-f0-9-]{36})\/events\.jsonl$/i.exec(file);
     return match ? [match[1]] : [];
   });
-  if (new Set(candidates).size === 1) return candidates[0];
+  if (new Set(candidates).size === 1) return { sessionId: candidates[0], noTranscriptLogs: false };
   // A lifecycle callback is bound to the process and terminal, never just cwd.
   // Codex can hold its parent and subagent transcripts in the same process.
   // Use the verified binding to disambiguate only if its log is still open;
   // a stale binding must not override evidence of other conversations.
   const recorded = await recordedSession(server, pane, pids);
-  return candidates.length === 0 || (recorded && candidates.includes(recorded)) ? recorded : undefined;
+  return { sessionId: candidates.length === 0 || (recorded && candidates.includes(recorded)) ? recorded : undefined, noTranscriptLogs: candidates.length === 0 };
+}
+
+const startingKey = randomBytes(32);
+/** Bind first-send permission to the actual terminal/process, never a cwd or
+ * a guessed conversation. Tokens expire naturally when the Hook/process restarts. */
+export async function paneChatState(server: string, pane: Json): Promise<Json> {
+  if (!provider.safeParse(pane.agent).success) return {};
+  const sessionId = await paneIdentity(server, pane);
+  const pids = await foregroundPids(server, pane);
+  const startingToken = typeof pane.terminal_id === "string" && pids.length
+    ? createHmac("sha256", startingKey).update(JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent, pids])).digest("hex") : undefined;
+  // An ambiguous set of open logs is not a brand-new conversation.
+  // Reuse the same two-second identity probe as context/overview polling;
+  // discovering a new chat must not run lsof again for every list refresh.
+  const evidence = identities.get(identityKey(server, pane, pids));
+  const starting = !sessionId && !!startingToken && !!evidence && Date.now() - evidence.at < 2_000 && (await evidence.result).noTranscriptLogs;
+  return { sessionId, ...(startingToken ? { startingToken } : {}), ...(starting ? { starting: true } : {}) };
 }
 
 export async function panes(server: string, workspace: string, tab: string): Promise<Json> {
@@ -148,7 +168,19 @@ export async function panes(server: string, workspace: string, tab: string): Pro
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => ({ id: p.pane_id,
       label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
       title: p.title || p.terminal_title_stripped, cwd: p.foreground_cwd || p.cwd,
-      sessionId: p.agent ? await paneIdentity(server, p) : undefined }))) };
+      ...await paneChatState(server, p) }))) };
+}
+
+export async function validateStartingTarget(target: StartingTarget): Promise<Json> {
+  const s = await snapshot(target.server);
+  const pane = objects(s.panes).find(p => p.pane_id === target.pane && p.tab_id === target.tab && p.workspace_id === target.workspace && p.agent === target.source);
+  if (!pane) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
+  // Force fresh process/log evidence before a mutation.
+  if (await paneIdentity(target.server, pane, true)) throw new BridgeError(409, "The conversation is ready. Wait for chat to attach before sending.");
+  const state = await paneChatState(target.server, pane);
+  if (!state.starting || state.startingToken !== target.startingToken) throw new BridgeError(409, "This starting agent changed. Reopen the chat.");
+  if (["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
+  return pane;
 }
 
 export async function validateTarget(target: Target, sending = false): Promise<Json> {
