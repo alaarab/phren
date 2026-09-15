@@ -43,7 +43,8 @@ final class LiveSessionsTests: XCTestCase {
         app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         let stale = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Showing previous status")).firstMatch
         XCTAssertTrue(stale.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Working · stale")).firstMatch.exists)
+        // The card's last line only says what the section can't: Stale.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Stale")).firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Live sessions retain clearly stale status"
         screenshot.lifetime = .keepAlways

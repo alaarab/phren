@@ -209,13 +209,14 @@ extension LiveAgentSession {
 }
 
 extension View {
+    /// One flat, rounded card per session — no border, and (see
+    /// `separatedSessionRow`) no box around the section or lines between rows.
     func sessionCard() -> some View {
-        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 1))
+        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     func separatedSessionRow() -> some View {
-        self.listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            .listRowSeparator(.hidden).listRowBackground(PhrenTheme.bg)
+        self.listRowInsets(EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0))
+            .listRowSeparator(.hidden, edges: .all).listRowBackground(Color.clear)
     }
 }

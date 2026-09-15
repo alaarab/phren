@@ -97,7 +97,7 @@ final class WorkflowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Date unknown"].firstMatch.exists)
         unknown.tap()
         XCTAssertTrue(app.navigationBars["Task details"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Date unknown"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Date unknown")).firstMatch.waitForExistence(timeout: 3))
         app.navigationBars["Task details"].buttons.element(boundBy: 0).tap()
         app.buttons["task-filters"].tap()
         app.buttons["Clear filters"].tap()

@@ -97,6 +97,9 @@ struct AgentChatView: View {
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
     @State private var backgroundFirstSeen: [String: Date] = [:]
+    @State private var backgroundFinishedSeen: [String: Date] = [:]
+    /// Advances while finished jobs linger so they can leave on time.
+    @State private var backgroundClock = Date.now
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
     // Recalculate when the keyboard changes the viewport as well as when the
@@ -387,7 +390,7 @@ struct AgentChatView: View {
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            let backgroundJobs = ChatBackgroundJobs.parse(model.messages, firstSeen: backgroundFirstSeen)
+            let backgroundJobs = ChatBackgroundJobs.parse(model.messages, firstSeen: backgroundFirstSeen, finishedSeen: backgroundFinishedSeen, now: backgroundClock)
             if !backgroundJobs.isEmpty {
                 ChatBackgroundJobsView(jobs: backgroundJobs)
                     .padding(.horizontal, 12).padding(.vertical, 4)
@@ -450,6 +453,17 @@ struct AgentChatView: View {
         .onChange(of: model.messages) { _, messages in
             let now = Date.now
             for id in ChatBackgroundJobs.backgroundIDs(messages) where backgroundFirstSeen[id] == nil { backgroundFirstSeen[id] = now }
+            for id in ChatBackgroundJobs.finishedIDs(messages, firstSeen: backgroundFirstSeen) where backgroundFinishedSeen[id] == nil { backgroundFinishedSeen[id] = now }
+            backgroundClock = now
+        }
+        .task(id: backgroundFinishedSeen.isEmpty) {
+            // Once something has finished, tick so it can leave the row after
+            // its linger; nothing to do while only running jobs exist.
+            guard !backgroundFinishedSeen.isEmpty else { return }
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                backgroundClock = .now
+            }
         }
         .onChange(of: workingActivityObservation, initial: true) { _, value in
             Task {

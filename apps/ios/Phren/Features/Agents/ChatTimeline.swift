@@ -131,7 +131,12 @@ struct ChatBackgroundJob: Identifiable, Equatable {
 }
 
 enum ChatBackgroundJobs {
-    static func parse(_ messages: [AgentChatMessage], firstSeen: [String: Date], now: Date = .now) -> [ChatBackgroundJob] {
+    /// How long a finished job stays in the row before it leaves.
+    static let finishedLinger: TimeInterval = 120
+
+    /// `firstSeen` / `finishedSeen`: when the phone first saw each job, and
+    /// first saw it finished — the transcript carries no clock for either.
+    static func parse(_ messages: [AgentChatMessage], firstSeen: [String: Date], finishedSeen: [String: Date] = [:], now: Date = .now) -> [ChatBackgroundJob] {
         var results: [String: AgentChatMessage] = [:]
         var notifications: [String: (summary: String, status: String, output: String)] = [:]
         for message in messages where message.role == .tool {
@@ -144,27 +149,47 @@ enum ChatBackgroundJobs {
             }
         }
         return messages.compactMap { message in
-            guard message.role == .tool, !message.isToolResult, !message.isChange,
-                  let id = message.toolCallID, isBackground(message) else { return nil }
-            let presentation = ToolPresentation(title: message.title ?? "Tool", text: message.text)
-            let result = results[id], notification = notifications[id]
+            guard message.role == .tool, !message.isToolResult, !message.isChange, let id = message.toolCallID else { return nil }
+            let result = results[id]
             let resultText = result.map { ToolPresentation(title: $0.title ?? "Tool result", text: $0.text).body } ?? ""
+            // A call flagged for the background, or one the agent moved there
+            // after it outran its timeout.
+            guard isBackground(message) || resultLooksBackgrounded(resultText) else { return nil }
+            let presentation = ToolPresentation(title: message.title ?? "Tool", text: message.text)
+            let notification = notifications[id]
             let output = notification?.output.isEmpty == false ? notification!.output : resultText
             let summary = notification?.summary ?? presentation.preview
             let code = exitCode(notification?.summary) ?? exitCode(resultText)
-            let finished = notification?.status.lowercased() == "completed" || notification?.status.lowercased() == "failed" || result != nil
+            // The tool result of a background call arrives at once and only
+            // says the job started; done means the task notification came,
+            // or the result carried real output instead of that notice.
+            let status = notification?.status.lowercased() ?? ""
+            let finished = ["completed", "failed", "killed", "cancelled", "canceled", "stopped"].contains(status)
+                || (result != nil && !resultText.isEmpty && !resultLooksBackgrounded(resultText))
+            let finishedAt = finished ? (finishedSeen[id] ?? now) : nil
+            // Finished jobs linger long enough to be read, then leave.
+            if let finishedAt, now.timeIntervalSince(finishedAt) > finishedLinger { return nil }
             return ChatBackgroundJob(id: id, title: summary.isEmpty ? "Background command" : summary,
                                      command: presentation.body, output: output,
                                      state: finished ? .finished(exitCode: code) : .running,
-                                     startedAt: firstSeen[id] ?? now, finishedAt: finished ? now : nil)
+                                     startedAt: firstSeen[id] ?? now, finishedAt: finishedAt)
         }
     }
 
+    /// Ids of jobs that are finished as of these messages, for the caller to
+    /// stamp with the time it first saw them so.
+    static func finishedIDs(_ messages: [AgentChatMessage], firstSeen: [String: Date]) -> Set<String> {
+        Set(parse(messages, firstSeen: firstSeen, finishedSeen: [:], now: .distantFuture).filter { $0.state != .running }.map(\.id))
+    }
+
+    private static func resultLooksBackgrounded(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("running in background") || lowered.contains("moved to the background")
+            || lowered.contains("running in the background")
+    }
+
     static func backgroundIDs(_ messages: [AgentChatMessage]) -> Set<String> {
-        Set(messages.compactMap { message in
-            guard message.role == .tool, !message.isToolResult, let id = message.toolCallID, isBackground(message) else { return nil }
-            return id
-        })
+        Set(parse(messages, firstSeen: [:], finishedSeen: [:], now: .distantPast).map(\.id))
     }
     private static func isBackground(_ message: AgentChatMessage) -> Bool {
         let text = message.text.lowercased()
@@ -190,7 +215,13 @@ struct ChatBackgroundJobsView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tick in
             VStack(alignment: .leading, spacing: 5) {
-                HStack { Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold)); Spacer(); Text("\(jobs.count)").font(.caption.monospacedDigit()) }
+                let running = jobs.filter { $0.state == .running }.count
+                HStack {
+                    Label("Background", systemImage: "clock.arrow.circlepath").font(.caption.weight(.semibold))
+                    Spacer()
+                    Text(running > 0 ? "\(running) running" : "done").font(.caption.monospacedDigit()).foregroundStyle(PhrenTheme.chatNeutralDim)
+                        .accessibilityIdentifier("chat-background-count")
+                }
                 ForEach(jobs) { job in
                     Button { if expanded.contains(job.id) { expanded.remove(job.id) } else { expanded.insert(job.id) } } label: {
                         VStack(alignment: .leading, spacing: 4) {

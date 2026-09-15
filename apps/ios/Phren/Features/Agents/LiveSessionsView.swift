@@ -564,6 +564,7 @@ private struct LiveHostView: View {
                 LiveSessionCard(session: session, fresh: monitor.isFresh(at: context.date), onDetails: { selected = session }, onClose: { request, confirm in
                     if confirm { closeRequest = request } else { SessionCloseDialogs.perform(request, monitor: monitor) { closeError = $0 } }
                 })
+                .separatedSessionRow()
             }
         }
     }

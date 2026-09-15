@@ -43,6 +43,32 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertTrue(jobs[0].title.contains("completed"))
     }
 
+    /// A background call's tool result comes back at once and only says it
+    /// started; that must not read as finished.
+    func testBackgroundJobWithOnlyItsStartNoticeIsStillRunningAndFinishedJobsLeaveAfterLingering() throws {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-2", "name": "Bash", "input": ["command": "xcodebuild test", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-2", "content": "Command running in background with ID: b1p4. Output is being written to: /tmp/x.output"]]]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let started = Date(timeIntervalSince1970: 10)
+        let running = ChatBackgroundJobs.parse(transcript.messages, firstSeen: ["bg-2": started], now: Date(timeIntervalSince1970: 40))
+        XCTAssertEqual(running.map(\.state), [.running])
+        XCTAssertEqual(running.first?.startedAt, started)
+        XCTAssertTrue(ChatBackgroundJobs.finishedIDs(transcript.messages, firstSeen: ["bg-2": started]).isEmpty)
+        // A notification later: finished, and gone once it has lingered.
+        let done: [String: Any] = ["line": 2, "raw": ["type": "system", "phrenBackground": true, "message": ["role": "user", "content":
+            "<task-notification>\n<tool-use-id>bg-2</tool-use-id>\n<status>completed</status>\n<summary>Background command finished (exit code 0)</summary>\n</task-notification>"]]]
+        let later = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude", "entries": (frame["entries"] as! [[String: Any]]) + [done]]), source: "claude")
+        XCTAssertEqual(ChatBackgroundJobs.finishedIDs(later.messages, firstSeen: ["bg-2": started]), ["bg-2"])
+        let finishedAt = Date(timeIntervalSince1970: 100)
+        let justDone = ChatBackgroundJobs.parse(later.messages, firstSeen: ["bg-2": started], finishedSeen: ["bg-2": finishedAt], now: finishedAt.addingTimeInterval(30))
+        XCTAssertEqual(justDone.map(\.state), [.finished(exitCode: 0)])
+        XCTAssertEqual(justDone.first?.finishedAt, finishedAt)
+        let lingered = ChatBackgroundJobs.parse(later.messages, firstSeen: ["bg-2": started], finishedSeen: ["bg-2": finishedAt], now: finishedAt.addingTimeInterval(ChatBackgroundJobs.finishedLinger + 1))
+        XCTAssertTrue(lingered.isEmpty, "Finished jobs leave the row after lingering")
+    }
+
     func testBackgroundJobStaysRunningWithoutNewHookNotification() throws {
         let messages = try read([["type": "function_call", "call_id": "bg-old", "name": "exec_command",
                                   "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]])

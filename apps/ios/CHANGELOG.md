@@ -55,6 +55,10 @@ number counts up on its own.
 - Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
 - A picture sent with a message sits inside the same bubble as the words; the
   path list and paste markers no longer show once the picture draws inline.
+- Session cards sit flat on the page — no box around a section, no border,
+  no lines between them.
+- Background jobs read as running until the agent's own completion notice
+  arrives, and finished ones leave the row after two minutes.
 - Closing a session from the list closes that session and the card leaves at
   once — swipe for a direct Close, hold for Close tab / Close workspace with a
   confirmation. Cards drop the redundant state text (the section already says
