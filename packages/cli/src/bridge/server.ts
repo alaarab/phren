@@ -14,7 +14,7 @@ import { launchDirectory, repositoryBranch, repositoryDiff, webServers } from ".
 import { locateProject } from "./locate.js";
 import { conversationNamedPaths, historicalImage, TranscriptReader, transcriptPath } from "./transcripts.js";
 import { AgentHooks } from "./agent-hooks.js";
-import { listUploads, saveUpload } from "./uploads.js";
+import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { AccountUsageReader } from "./usage.js";
@@ -104,6 +104,11 @@ export async function serve(version: string): Promise<void> {
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/uploads/image": {
+            // A picture the phone sent, as the transcript names it by path.
+            const bytes = await uploadImage(String(url.searchParams.get("path") ?? ""));
+            response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
+          }
           case "/v1/simulators/apps": result = { apps: await simulatorApps(String(url.searchParams.get("udid") ?? "")) }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
           case "/v1/projects/locate": {

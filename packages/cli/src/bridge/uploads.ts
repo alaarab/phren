@@ -1,4 +1,4 @@
-import { mkdir, readdir, lstat, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, lstat, realpath, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { bridgeRoot, BridgeError, MAX_FRAME } from "./protocol.js";
@@ -55,4 +55,23 @@ export async function listUploads(session: string): Promise<{ name: string; path
     files.push({ name: entry.name.replace(/^[0-9a-f-]{36}-/, ""), path: file, size: metadata.size, modified: metadata.mtime.toISOString() });
   }
   return files.sort((a, b) => b.modified.localeCompare(a.modified)).slice(0, 200);
+}
+
+/** The bytes of one image the phone put under uploads/, by the absolute
+ * path the transcript names. Served only when the path resolves (through
+ * any link) to a regular file inside the uploads folder whose bytes are
+ * an image; anything else — outside, traversal, a note — is 404. */
+export async function uploadImage(requested: string): Promise<Buffer> {
+  const missing = new BridgeError(404, "This image is not one of the phone's uploads.");
+  if (!requested || requested.length > 4096 || !path.isAbsolute(requested)) throw missing;
+  const root = await realpath(path.join(bridgeRoot(), "uploads")).catch(() => undefined);
+  const file = await realpath(requested).catch(() => undefined);
+  if (!root || !file || !file.startsWith(root + path.sep)) throw missing;
+  const metadata = await stat(file);
+  if (!metadata.isFile()) throw missing;
+  if (metadata.size > 8_388_608) throw new BridgeError(413, "This image is too large.");
+  const bytes = await readFile(file);
+  if (bytes.length > 8_388_608) throw new BridgeError(413, "This image is too large.");
+  if (!imageBytes(bytes)) throw missing;
+  return bytes;
 }
