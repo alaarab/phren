@@ -13,6 +13,9 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     var error: String?
     var pendingLink: URL?
     var control = false
+    /// The pane this terminal was opened on, once the computer has confirmed
+    /// it: its agent names the toolbar's Chat control.
+    var pane: AgentChatPanes.Pane?
     #if DEBUG && targetEnvironment(simulator)
     var fixtureReport = ""
     private var fixtureInput = ""
@@ -69,7 +72,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     }
     func run(host: LiveHost, session: LiveAgentSession?, target: AgentChatTarget?, paneID: String?, commandMenu: Bool = false) async {
         let run = UUID(); generation = run
-        connected = false; reconnecting = false; error = nil
+        connected = false; reconnecting = false; error = nil; pane = nil
         defer {
             if generation == run { resize.detach(); connected = false; reconnecting = false; self.socket = nil; writes?.cancel(); _ = terminal.resignFirstResponder() }
         }
@@ -121,6 +124,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             if let target {
                 guard target.hostID == host.id, target.muxID == host.muxID else { throw PhrenKitError.validation("Reopen this terminal from the current computer.") }
                 let pane = try await PhrenConnection.chatPanes(host: host, privateKey: key, workspaceID: target.workspaceID, tabID: target.tabID).validate(target)
+                self.pane = pane
                 canOpenCommands = ["idle", "done"].contains(pane.agentStatus ?? "")
                 try await PhrenConnection.herdrAction(host: host, privateKey: key, operation: .focus,
                                                      workspaceID: target.workspaceID, tabID: target.tabID, paneID: target.paneID)
@@ -130,7 +134,8 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                 guard fresh.sessions(on: host).contains(where: { $0.id == session.id }) else { throw PhrenKitError.validation("This Herdr tab has closed.") }
                 if let paneID {
                     let list = try await PhrenConnection.chatPanes(host: host, privateKey: key, workspaceID: session.workspaceID, tabID: session.tab.id)
-                    guard list.panes.contains(where: { $0.id == paneID }) else { throw PhrenKitError.validation("This pane has closed.") }
+                    guard let pane = list.panes.first(where: { $0.id == paneID }) else { throw PhrenKitError.validation("This pane has closed.") }
+                    self.pane = pane
                 }
                 try await PhrenConnection.herdrAction(host: host, privateKey: key, operation: .focus, workspaceID: session.workspaceID, tabID: session.tab.id, paneID: paneID)
             }
@@ -301,10 +306,33 @@ struct HerdrTerminalView: View {
     @State private var showingAgents = false
     @State private var showingDictation = false
     @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
+    @State private var stack = NavigationStackHandle()
     /// Settings → Keyboard: the toolbar steps aside for a physical keyboard.
     private var toolbarHidden: Bool { hardwareKeyboard && IntegrationSettings.enabled(IntegrationSettings.autoHideToolbarKey, default: false) }
     private var currentHost: LiveHost? { (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } }
     private var active: Bool { visible && scenePhase == .active && currentHost == host }
+    /// A terminal opened for the computer as a whole shows whatever Herdr
+    /// has in front; the sessions overview knows which tab that is.
+    private var focusedSession: LiveAgentSession? {
+        guard session == nil, target == nil,
+              let snapshot = SessionOverviewMonitor.shared.computers.first(where: { $0.host.id == host.id })?.monitor.snapshot,
+              let focus = snapshot.focus else { return nil }
+        return snapshot.sessions(on: host).first { $0.workspaceID == focus.workspaceID && $0.tab.id == focus.tabID }
+    }
+    private var chatSession: LiveAgentSession? { session ?? focusedSession }
+    /// The agent in the pane on screen: the chat's target, the pane this
+    /// terminal was opened on, or the tab's agent.
+    private var paneAgent: String? {
+        if let target { return target.source }
+        if paneID != nil { return model.pane?.agent }
+        return chatSession?.tab.agent
+    }
+    /// The opened pane, when chat can take it up directly.
+    private var chatPane: AgentChatPanes.Pane? {
+        guard let pane = model.pane, let session,
+              (try? pane.target(hostID: session.host.id, workspaceID: session.workspaceID, tabID: session.tab.id, muxID: session.host.muxID)) != nil else { return nil }
+        return pane
+    }
     private struct ChatOpen: Identifiable, Hashable {
         let id = UUID()
         let session: LiveAgentSession
@@ -323,10 +351,10 @@ struct HerdrTerminalView: View {
             HerdrTerminalSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 4)
             if !toolbarHidden {
                 TerminalControls(terminal: model.terminal, hostID: host.id,
-                                 source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,
+                                 source: paneAgent ?? "", enabled: model.connected && active, control: $model.control,
                                  shortcuts: $shortcuts, send: model.input,
                                  attach: { uploadRequest = TerminalUploadRequest(attachments: $0) },
-                                 openAgents: { showingAgents = true })
+                                 openAgents: { showingAgents = true }, openChat: openChat)
                     .padding(.bottom, 6)
             }
         }
@@ -352,7 +380,7 @@ struct HerdrTerminalView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .keepsInteractivePop()
+        .keepsInteractivePop(stack: stack)
         .onChange(of: PhrenAppearance.shared.palette) { _, _ in model.applyAppearance() }
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $uploadRequest) { request in
@@ -371,7 +399,7 @@ struct HerdrTerminalView: View {
             if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
-            model.terminal.onOpenChat = { if let session { chatOpen = .init(session: session) } }
+            model.terminal.onOpenChat = openChat
             model.terminal.onDictate = { showingDictation = true }
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -386,6 +414,14 @@ struct HerdrTerminalView: View {
         }
     }
     private func closeAgents() { withAnimation(.easeInOut(duration: 0.18)) { showingAgents = false } }
+    /// Back to the chat this terminal was opened from — through the diff
+    /// screen if that is where it came from — else into this pane's chat;
+    /// a terminal that knows no agent asks which one.
+    private func openChat() {
+        if stack.pop(toScreen: AgentChatView.screenTag) { return }
+        if let chatSession { chatOpen = .init(session: chatSession, pane: chatPane) }
+        else { showingAgents = true }
+    }
     private var header: some View {
         HStack(spacing: 8) {
             Button { dismiss() } label: {

@@ -12,6 +12,7 @@ struct TerminalControls: View {
     let send: (String) -> Void
     let attach: ([AgentAttachment]) -> Void
     let openAgents: () -> Void
+    let openChat: () -> Void
     @State private var attachmentSource: ChatAttachmentSource?
     @State private var pendingAttachments: [AgentAttachment] = []
     @State private var directions = false
@@ -90,6 +91,16 @@ struct TerminalControls: View {
         case .keyboard: icon(item.symbol, item.title) { terminal.toggleKeyboard() }
         case .attachments: icon(item.symbol, item.title) { attachmentSource = .photos }
         case .workspaces: icon(item.symbol, item.title) { workspaces = true }
+        case .chat:
+            // The agent in this pane, so the control reads as "back to Claude"
+            // rather than a generic bubble; a shell pane keeps the bubble.
+            let known = AgentChatTarget.sources.contains(source)
+            Button(action: openChat) {
+                Group {
+                    if known { AgentProviderGlyph(source: source, size: 18) }
+                    else { Image(systemName: item.symbol) }
+                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }.accessibilityLabel(known ? AgentProviderGlyph.name(for: source) + " chat" : item.title)
         case .agents: icon(item.symbol, item.title) { openAgents() }
         case .webServers: icon(item.symbol, item.title) { servers = true }
         default:

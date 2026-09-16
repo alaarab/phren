@@ -40,6 +40,48 @@ final class TerminalInteractionTests: XCTestCase {
     }
 
     @MainActor
+    func testChatToolbarEntryPopsBackToTheChatTheTerminalCameFrom() {
+        let app = launchToHost("--terminal-controls-fixture")
+        let row = app.buttons["live-chat:w7:w7:t9"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10)); row.tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        let terminal = app.buttons["chat-composer-terminal"]
+        XCTAssertTrue(terminal.waitForExistence(timeout: 8))
+        expectation(for: NSPredicate(format: "isEnabled == true"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 8)
+        terminal.tap()
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 8))
+        let chat = app.buttons.matching(NSPredicate(format: "identifier == %@", "terminal-control:chat")).firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 5))
+        XCTAssertEqual(chat.label, "Codex chat", "The control wears the pane's agent")
+        capture(app, "Chat control in the terminal opened from chat")
+        chat.tap()
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.otherElements["herdr-terminal-header"].exists, "Back to the same chat, not a second one")
+        app.buttons["chat-close"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testChatToolbarEntryOpensTheFocusedTabsChatFromAComputerTerminal() {
+        let app = launch("--terminal-uploads-fixture")
+        let chat = app.buttons.matching(NSPredicate(format: "identifier == %@", "terminal-control:chat")).firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 5))
+        // A terminal opened for the computer shows Herdr's focused tab; the
+        // control follows it once the sessions overview has reported.
+        expectation(for: NSPredicate(format: "label == %@", "Codex chat"), evaluatedWith: chat)
+        waitForExpectations(timeout: 10)
+        chat.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["chat-location"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Other work"), "The focused tab, not the first workspace")
+        capture(app, "Chat opened from a computer terminal")
+        app.buttons["chat-close"].tap()
+        XCTAssertTrue(app.otherElements["herdr-terminal-header"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testArrowPadEditingAndCtrlHoldShortcutsDoNotSubmitCommands() throws {
         let app = launch("--terminal-controls-fixture")
         app.buttons["Arrow keys"].tap()
@@ -343,16 +385,22 @@ final class TerminalInteractionTests: XCTestCase {
 
     @MainActor
     private func launch(_ fixture: String) -> XCUIApplication {
+        let app = launchToHost(fixture)
+        XCTAssertTrue(app.buttons["Herdr workspaces & terminal"].waitForExistence(timeout: 5))
+        app.buttons["Herdr workspaces & terminal"].tap()
+        app.buttons["Open Herdr terminal"].tap()
+        XCTAssertTrue(app.staticTexts["terminal-fixture-report"].waitForExistence(timeout: 8))
+        return app
+    }
+    /// The fixture computer's details, where its sessions and terminal are.
+    @MainActor
+    private func launchToHost(_ fixture: String) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--session-details-fixture", "--native-chat-fixture", fixture]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["Agents"].waitForExistence(timeout: 15))
         app.tabBars.buttons["Agents"].tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Test Mac,")).firstMatch.tap()
-        XCTAssertTrue(app.buttons["Herdr workspaces & terminal"].waitForExistence(timeout: 5))
-        app.buttons["Herdr workspaces & terminal"].tap()
-        app.buttons["Open Herdr terminal"].tap()
-        XCTAssertTrue(app.staticTexts["terminal-fixture-report"].waitForExistence(timeout: 8))
         return app
     }
 

@@ -10,6 +10,12 @@ number counts up on its own.
 
 ### New
 
+- The terminal toolbar has a Chat control wearing the pane's agent mark:
+  it pops back to the chat the terminal came from, or opens this pane's
+  chat when the terminal was opened on its own. The phren mark now draws
+  the same size as Claude, Codex, and Copilot everywhere it appears.
+- Commands that only looked around — builds, tests, greps — fold into one
+  "Shell ×6" row; a call that changed a file keeps its card and its diff.
 - The queued-steer strip is exactly as tall as its rows and sits on the
   composer, instead of a tall box with the message floating in the middle.
 - A steer that is only a picture clears itself once the picture lands in the

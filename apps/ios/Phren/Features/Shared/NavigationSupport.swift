@@ -33,9 +33,25 @@ private final class NavigationBridgeHandle: ObservableObject {
     }
 }
 
+/// A screen's UIKit navigation controller, for the one move SwiftUI's
+/// `dismiss` cannot make: popping back through the screens in between.
+@MainActor final class NavigationStackHandle {
+    fileprivate weak var navigationController: UINavigationController?
+    /// Pops to the nearest screen beneath this one tagged `tag` (see
+    /// `keepsInteractivePop(screenTag:)`); false when none is on the stack.
+    @discardableResult func pop(toScreen tag: String) -> Bool {
+        guard let navigationController,
+              let target = navigationController.viewControllers.dropLast().last(where: { $0.phrenHostsScreen(tag) }) else { return false }
+        navigationController.popToViewController(target, animated: true)
+        return true
+    }
+}
+
 private struct NavigationBridgeModifier: ViewModifier {
     let installsPan: Bool
     var hidesNavigationBar = false
+    var screenTag: String? = nil
+    var stack: NavigationStackHandle? = nil
     @StateObject private var handle = NavigationBridgeHandle()
     func body(content: Content) -> some View {
         content
@@ -43,7 +59,8 @@ private struct NavigationBridgeModifier: ViewModifier {
             // commands on the navigation controller — see
             // UINavigationController.installPhrenKeyCommands — because it sits
             // in the responder chain of everything it hosts, whatever has focus.
-            .background(NavigationControllerBridge(installsPan: installsPan, hidesNavigationBar: hidesNavigationBar, handle: handle).frame(width: 0, height: 0))
+            .background(NavigationControllerBridge(installsPan: installsPan, hidesNavigationBar: hidesNavigationBar,
+                                                   screenTag: screenTag, stack: stack, handle: handle).frame(width: 0, height: 0))
     }
 }
 
@@ -53,12 +70,18 @@ private struct NavigationBridgeModifier: ViewModifier {
 private struct NavigationControllerBridge: UIViewControllerRepresentable {
     var installsPan = false
     var hidesNavigationBar = false
+    var screenTag: String? = nil
+    var stack: NavigationStackHandle? = nil
     let handle: NavigationBridgeHandle
 
-    func makeUIViewController(context: Context) -> Controller { Controller(installsPan: installsPan, hidesNavigationBar: hidesNavigationBar, handle: handle) }
+    func makeUIViewController(context: Context) -> Controller {
+        Controller(installsPan: installsPan, hidesNavigationBar: hidesNavigationBar, screenTag: screenTag, stack: stack, handle: handle)
+    }
     func updateUIViewController(_ controller: Controller, context: Context) {
         controller.installsPan = installsPan
         controller.hidesNavigationBar = hidesNavigationBar
+        controller.screenTag = screenTag
+        controller.stack = stack
         controller.installIfNeeded()
     }
     static func dismantleUIViewController(_ controller: Controller, coordinator: Void) { controller.uninstall() }
@@ -66,14 +89,18 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
     final class Controller: UIViewController, UIGestureRecognizerDelegate {
         var installsPan: Bool
         var hidesNavigationBar: Bool
+        var screenTag: String?
+        var stack: NavigationStackHandle?
         let handle: NavigationBridgeHandle
         private weak var installedNavigationController: UINavigationController?
         private var pan: UIPanGestureRecognizer?
 
         private var observers: [NSObjectProtocol] = []
-        init(installsPan: Bool, hidesNavigationBar: Bool, handle: NavigationBridgeHandle) {
+        init(installsPan: Bool, hidesNavigationBar: Bool, screenTag: String?, stack: NavigationStackHandle?, handle: NavigationBridgeHandle) {
             self.installsPan = installsPan
             self.hidesNavigationBar = hidesNavigationBar
+            self.screenTag = screenTag
+            self.stack = stack
             self.handle = handle
             super.init(nibName: nil, bundle: nil)
             let center = NotificationCenter.default
@@ -118,6 +145,7 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
             parent?.phrenHidesNavigationBar = hidesNavigationBar
+            if let screenTag { parent?.phrenScreenTag = screenTag }
         }
         // Key commands are found by walking up from the first responder. With
         // no field focused there is none, so this zero-size controller stands
@@ -140,6 +168,7 @@ private struct NavigationControllerBridge: UIViewControllerRepresentable {
         func installIfNeeded() {
             guard let navigationController else { return }
             handle.navigationController = navigationController
+            stack?.navigationController = navigationController
             navigationController.installPhrenKeyCommands()
             // With a hidden bar UIKit's own delegate refuses the edge pop;
             // owning the delegate keeps it available on every pushed screen.
@@ -245,9 +274,12 @@ extension View {
     /// Use on pushed full-bleed screens whose custom header replaces the
     /// native bar. `hidesNavigationBar` hides it at the UIKit level: SwiftUI's
     /// `.toolbar(.hidden, for: .navigationBar)` also switches off the edge
-    /// pop in a way no delegate can bring back.
-    func keepsInteractivePop(hidesNavigationBar: Bool = false) -> some View {
-        modifier(NavigationBridgeModifier(installsPan: false, hidesNavigationBar: hidesNavigationBar))
+    /// pop in a way no delegate can bring back. `screenTag` names the screen
+    /// so a later one can pop back to it through whatever sits between
+    /// (`NavigationStackHandle.pop(toScreen:)`); `stack` receives the
+    /// screen's navigation controller for that.
+    func keepsInteractivePop(hidesNavigationBar: Bool = false, screenTag: String? = nil, stack: NavigationStackHandle? = nil) -> some View {
+        modifier(NavigationBridgeModifier(installsPan: false, hidesNavigationBar: hidesNavigationBar, screenTag: screenTag, stack: stack))
     }
 
     /// Full-width horizontal canvases own their drag gesture completely.
@@ -308,15 +340,24 @@ extension UINavigationController {
 }
 
 /// Whether a hosting controller was marked (by its bridge) as replacing the
-/// navigation bar with its own header, so a sibling leaving it alone.
+/// navigation bar with its own header, so a sibling leaving it alone; and
+/// the screen name its bridge gave it, for popping back to it.
 private var phrenHidesNavigationBarKey: UInt8 = 0
+private var phrenScreenTagKey: UInt8 = 0
 extension UIViewController {
     var phrenHidesNavigationBar: Bool {
         get { objc_getAssociatedObject(self, &phrenHidesNavigationBarKey) as? Bool ?? false }
         set { objc_setAssociatedObject(self, &phrenHidesNavigationBarKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
+    var phrenScreenTag: String? {
+        get { objc_getAssociatedObject(self, &phrenScreenTagKey) as? String }
+        set { objc_setAssociatedObject(self, &phrenScreenTagKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
+    }
     var prefersPhrenHiddenNavigationBar: Bool {
         phrenHidesNavigationBar || children.contains { $0.prefersPhrenHiddenNavigationBar }
+    }
+    func phrenHostsScreen(_ tag: String) -> Bool {
+        phrenScreenTag == tag || children.contains { $0.phrenHostsScreen(tag) }
     }
 }
 

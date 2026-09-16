@@ -57,6 +57,8 @@ struct AgentChatSheet: View {
 }
 
 struct AgentChatView: View {
+    /// The terminal's Chat control pops back to the nearest chat beneath it.
+    static let screenTag = "agent-chat"
     let session: LiveAgentSession
     let switchSession: (LiveAgentSession) -> Void
     let initialPane: AgentChatPanes.Pane?
@@ -437,7 +439,7 @@ struct AgentChatView: View {
         // Pushed inside a tab, the chat is a full-height screen: the tab bar
         // would otherwise sit under the composer.
         .toolbar(.hidden, for: .tabBar)
-        .keepsInteractivePop(hidesNavigationBar: true)
+        .keepsInteractivePop(hidesNavigationBar: true, screenTag: Self.screenTag)
         .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
         .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {

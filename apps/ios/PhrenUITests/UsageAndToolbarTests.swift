@@ -53,8 +53,8 @@ final class UsageAndToolbarTests: XCTestCase {
     @MainActor
     func testTerminalControlsCanBeAddedAndPersistAcrossLaunches() {
         let app = XCUIApplication()
-        // The defaults fill all eight slots (Agents took the last); the
-        // fixture leaves one free so there is something to add.
+        // The defaults fill every slot (Chat and Agents took the last two);
+        // the fixture leaves one free so there is something to add.
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--toolbar-with-room"]
         app.launch()
         openToolbar(app)

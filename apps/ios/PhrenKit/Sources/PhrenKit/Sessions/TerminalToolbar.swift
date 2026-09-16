@@ -3,7 +3,7 @@ import Foundation
 public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Sendable {
     case control, escape, tab, arrows, shortcuts, paste, keyboard
     case enter, interrupt, backspace, clearLine, up, down, left, right, home, end
-    case attachments, workspaces, agents, webServers
+    case attachments, workspaces, chat, agents, webServers
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -26,6 +26,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "Line end"
         case .attachments: return "Attach image"
         case .workspaces: return "Workspaces & panes"
+        case .chat: return "Chat"
         case .agents: return "Agents"
         case .webServers: return "Web servers"
         }
@@ -54,6 +55,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "arrow.right.to.line"
         case .attachments: return "paperclip"
         case .workspaces: return "rectangle.split.3x1"
+        case .chat: return "bubble.left"
         case .agents: return "person.2"
         case .webServers: return "globe"
         }
@@ -79,23 +81,29 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
 
 public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
     public static let storageKey = "terminal.toolbar.v1"
-    public static let maximumItems = 8
-    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .agents, .keyboard])
-    /// 1: the original layout. 2: has been offered the Agents control, so a
-    /// layout without it is a choice and stays that way.
+    /// Nine since Chat joined: every earlier default kept its place.
+    public static let maximumItems = 9
+    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .chat, .agents, .keyboard])
+    /// 1: the original layout. 2: has been offered the Agents control. 3: has
+    /// been offered the Chat control. A layout without an offered control is
+    /// a choice and stays that way.
     public let version: Int
     public var items: [TerminalToolbarItem]
-    public init(items: [TerminalToolbarItem]) { version = 2; self.items = items }
+    public init(items: [TerminalToolbarItem]) { version = 3; self.items = items }
     private var valid: Bool {
-        (1...2).contains(version) && items.count <= Self.maximumItems && items.contains(.keyboard) && Set(items).count == items.count
+        (1...3).contains(version) && items.count <= Self.maximumItems && items.contains(.keyboard) && Set(items).count == items.count
     }
-    /// A layout saved before the Agents control existed gains it once, in
-    /// the default's second-to-last slot, when there is room for it.
+    /// A layout saved before a control existed gains it once, where the
+    /// defaults keep it — Agents second to last, Chat just before Agents —
+    /// when there is room for it.
     private var migrated: Self {
-        guard version < 2 else { return self }
+        guard version < 3 else { return self }
         var items = items
-        if !items.contains(.agents), items.count < Self.maximumItems {
+        if version < 2, !items.contains(.agents), items.count < Self.maximumItems {
             items.insert(.agents, at: max(0, items.count - 1))
+        }
+        if !items.contains(.chat), items.count < Self.maximumItems {
+            items.insert(.chat, at: items.firstIndex(of: .agents) ?? max(0, items.count - 1))
         }
         return Self(items: items)
     }
@@ -111,7 +119,7 @@ public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
         return value.migrated
     }
     public func encoded() throws -> Data {
-        guard valid else { throw PhrenKitError.validation("Choose up to eight different controls, including Keyboard.") }
+        guard valid else { throw PhrenKitError.validation("Choose up to nine different controls, including Keyboard.") }
         return try JSONEncoder().encode(self)
     }
 }
