@@ -64,6 +64,9 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         return foldingReads ? foldReadRuns(entries) : entries
     }
 
+    /// Three or more calls in a row that only looked around become one row.
+    /// Anything that changed a file, failed, or is still out there interrupts
+    /// the run and keeps its own card.
     private static func foldReadRuns(_ entries: [Self]) -> [Self] {
         var result: [Self] = [], run: [Self] = []
         func flush() {
@@ -73,7 +76,7 @@ struct ChatTimelineEntry: Identifiable, Equatable {
             run.removeAll(keepingCapacity: true)
         }
         for entry in entries {
-            if entry.kind == .activity, ReadOnlyToolCall.isReadOnly(entry.messages) { run.append(entry) }
+            if entry.kind == .activity, ReadOnlyToolCall.looksAround(entry.messages) { run.append(entry) }
             else { flush(); result.append(entry) }
         }
         flush()
@@ -81,21 +84,36 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     }
 }
 
-/// Conservative classification: uncertain shell commands remain ordinary
-/// cards. A call carrying a filesystem-change attachment can never be folded.
+/// Conservative classification: a call that was only looking around — it came
+/// back, changed nothing on disk and did not fail. A call carrying a
+/// filesystem-change attachment can never be folded, and neither can one that
+/// is still running, failed, or went to the background.
 enum ReadOnlyToolCall {
-    static func isReadOnly(_ messages: [AgentChatMessage]) -> Bool {
-        guard !messages.contains(where: \.isChange), messages.contains(where: \.isToolResult),
-              let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
-        guard !PhrenToolPresentation.recognizes(call.title) else { return false }
+    static func looksAround(_ messages: [AgentChatMessage]) -> Bool {
+        guard !messages.contains(where: \.isChange), let result = messages.first(where: \.isToolResult),
+              !failed(result), let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
+        guard !PhrenToolPresentation.recognizes(call.title), !ChatBackgroundJobs.isBackground(call) else { return false }
         let presentation = ToolPresentationCache.value(call)
         switch presentation.title {
         case "Read", "Browse", "List": return true
-        case "Shell": return shell(presentation.body)
+        // Phren Hook attaches what a call wrote, so a result carrying no
+        // change is the agent finding something out — a build, a test run, a
+        // grep — however long the command. Commands that read as writes keep
+        // their own card for the folders the Hook does not cover; a command
+        // that is plainly a read survives that heuristic's false positives.
+        case "Shell", "Tools": return shell(presentation.body) || (presentation.patch == nil && !presentation.editsFiles)
         default:
             let raw = (call.title ?? "").split(separator: ".").last.map(String.init)?.lowercased() ?? ""
             return ["read", "glob", "grep", "ls"].contains(raw)
         }
+    }
+
+    /// A result that reports failure: the provider's own error flag, or the
+    /// non-zero exit the presentation appends to a command's output.
+    static func failed(_ result: AgentChatMessage) -> Bool {
+        if result.isToolError { return true }
+        let body = ToolPresentationCache.value(result).body
+        return String(body.suffix(40)).range(of: #"(?:^|\n)Exit code: -?\d+\s*$"#, options: .regularExpression) != nil
     }
 
     static func shell(_ command: String) -> Bool {
@@ -204,7 +222,7 @@ enum ChatBackgroundJobs {
     /// each body evaluation hung the main thread for seconds on a big page
     /// (watchdog kills on 2026-09-15). Results are cached per message.
     private static let backgroundFlags = NSCache<NSString, NSNumber>()
-    private static func isBackground(_ message: AgentChatMessage) -> Bool {
+    static func isBackground(_ message: AgentChatMessage) -> Bool {
         let key = "\(message.id)|\(message.text.utf8.count)" as NSString
         if let cached = backgroundFlags.object(forKey: key) { return cached.boolValue }
         let value = computeIsBackground(message)

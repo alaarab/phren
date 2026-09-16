@@ -147,6 +147,38 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testShellRunsFoldEitherSideOfTheCallThatChangedAFile() {
+        let app = launch(extra: ["--chat-shell-run"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let runs = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:"))
+        let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:"))
+        XCTAssertTrue(runs.firstMatch.waitForExistence(timeout: 8))
+        for _ in 0..<6 where !runs.firstMatch.isHittable { transcript.swipeDown() }
+        XCTAssertEqual(runs.count, 2, "The command that changed a file splits the looking around")
+        XCTAssertTrue(runs.element(boundBy: 0).label.contains("Shell ×3"), runs.element(boundBy: 0).label)
+        XCTAssertTrue(runs.element(boundBy: 1).label.contains("Shell ×4"), runs.element(boundBy: 1).label)
+        XCTAssertLessThanOrEqual(runs.firstMatch.frame.height, 54, "A folded run is one pill tall")
+        // The change card sits between them with its file row already showing.
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards.firstMatch.label, "Shell, 1 operation")
+        XCTAssertTrue(app.buttons["chat-patch-file:Changed.swift"].waitForExistence(timeout: 5))
+        capture(app, "Shell runs folded around a change")
+        runs.element(boundBy: 0).tap()
+        XCTAssertEqual(runs.element(boundBy: 0).value as? String, "Expanded")
+        XCTAssertTrue(cards.element(boundBy: 3).waitForExistence(timeout: 5))
+        XCTAssertEqual(cards.count, 4, "Expanding shows the three original cards")
+        XCTAssertTrue(cards.firstMatch.isHittable)
+        XCTAssertTrue(app.buttons["chat-patch-file:Changed.swift"].exists)
+        capture(app, "Shell run expanded to its cards")
+        runs.element(boundBy: 0).tap()
+        XCTAssertEqual(runs.element(boundBy: 0).value as? String, "Collapsed")
+        XCTAssertTrue(cards.element(boundBy: 3).waitForNonExistence(timeout: 5))
+        XCTAssertEqual(cards.count, 1)
+    }
+
+    @MainActor
     func testDownwardDragOnComposerAndIconsDismissesKeyboardWithoutSending() {
         let app = launch()
         app.buttons["live-chat:w7:w7:t9"].tap()

@@ -136,6 +136,22 @@ import UIKit
                 entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": id, "output": "read output \(index)"]]])
             }
         }
+        if flag("--chat-shell-run") {
+            // Eight commands in a row, one of which changed a file: the looking
+            // around folds either side of the call that wrote something.
+            let patch = "diff --git a/Changed.swift b/Changed.swift\n--- a/Changed.swift\n+++ b/Changed.swift\n@@ -1,2 +1,2 @@\n import SwiftUI\n-let value = 1\n+let value = 2\n"
+            for (index, command) in ["swift build", "git log --oneline -5", "rg TODO Sources", "make fmt",
+                                     "swift test --filter ChatTimelineTests", "ls -R Sources | head -20",
+                                     "git status --short", "wc -l Sources/App.swift"].enumerated() {
+                let id = "shell-run-\(index)"
+                let arguments = String(decoding: try JSONSerialization.data(withJSONObject: ["cmd": command]), as: UTF8.self)
+                entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": id, "name": "exec_command", "arguments": arguments]]])
+                var result: [String: Any] = ["type": "response_item", "payload": ["type": "function_call_output", "call_id": id, "output": "command output \(index)"]]
+                if index == 3 { result["phren_changes"] = [id: [["root": "/work/phone", "path": "Changed.swift", "status": "M", "added": 1, "removed": 1, "patch": patch]]] }
+                entries.append(["line": entries.count, "raw": result])
+            }
+            append("assistant", "The formatter touched one file; everything else was a look.")
+        }
         if flag("--chat-long-tools") || flag("--chat-dense-tools") {
             for index in 0..<3 {
                 let id = "long-tool-\(index)"

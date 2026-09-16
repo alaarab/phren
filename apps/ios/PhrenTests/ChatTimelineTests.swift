@@ -46,6 +46,67 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertFalse(grouped[1].isReadRun)
     }
 
+    /// Commands that changed nothing are the agent looking around, however
+    /// they read; the Hook's change row is what makes one its own card — and
+    /// it may land a revision after the call, splitting the run it was in.
+    func testCommandsThatChangedNothingFoldAndAChangeRowSplitsTheRun() throws {
+        let commands = ["swift build", "xcodebuild test -scheme Phren", "pnpm lint", "make fmt", "swift test", "cargo check", "pytest -q", "go vet ./..."]
+        func raws(changed: Int?) throws -> [[String: Any]] {
+            try commands.enumerated().flatMap { index, command -> [[String: Any]] in
+                let arguments = String(decoding: try JSONSerialization.data(withJSONObject: ["cmd": command]), as: UTF8.self)
+                var result: [String: Any] = ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "s\(index)", "output": "ok \(index)"]]
+                if index == changed {
+                    result["phren_changes"] = ["s\(index)": [["root": "/work", "path": "Formatted.swift", "status": "M", "patch": "diff --git a/Formatted.swift b/Formatted.swift\n--- a/Formatted.swift\n+++ b/Formatted.swift\n@@ -1 +1 @@\n-a\n+b\n"]]]
+                }
+                return [["type": "response_item", "payload": ["type": "function_call", "call_id": "s\(index)", "name": "exec_command", "arguments": arguments]], result]
+            }
+        }
+        let folded = ChatTimelineEntry.group(try readRaw(raws(changed: nil)))
+        XCTAssertEqual(folded.map(\.isReadRun), [true])
+        XCTAssertEqual(folded[0].messages.count, 16)
+        let split = ChatTimelineEntry.group(try readRaw(raws(changed: 3)))
+        XCTAssertEqual(split.map(\.isReadRun), [true, false, true])
+        XCTAssertEqual(split.map { $0.messages.count }, [6, 3, 8])
+        XCTAssertTrue(split[1].messages.contains(where: \.isChange))
+        XCTAssertEqual(split[0].id, folded[0].id, "The run before the change keeps its identity")
+        XCTAssertEqual(ChatTimelineEntry.group(try readRaw(raws(changed: 3)), foldingReads: false).count, 8)
+    }
+
+    /// A call still out, one that failed, or one sent to the background stays
+    /// visible as its own card; the looking around either side still folds.
+    func testPendingFailedAndBackgroundCallsInterruptTheRun() throws {
+        func raws(middle: [[String: Any]]) throws -> [[String: Any]] {
+            var raws: [[String: Any]] = []
+            for index in 0..<6 {
+                if index == 3 { raws += middle }
+                raws.append(["type": "response_item", "payload": ["type": "function_call", "call_id": "l\(index)", "name": "exec_command", "arguments": "{\"cmd\":\"rg TODO Sources\"}"]])
+                raws.append(["type": "response_item", "payload": ["type": "function_call_output", "call_id": "l\(index)", "output": "ok"]])
+            }
+            return raws
+        }
+        let pending = ChatTimelineEntry.group(try readRaw(raws(middle: [
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "wait", "name": "exec_command", "arguments": "{\"cmd\":\"swift test\"}"]]])))
+        XCTAssertEqual(pending.map(\.isReadRun), [true, false, true], "A call without its result is still running")
+        XCTAssertEqual(pending[1].messages.map(\.toolCallID), ["wait"])
+        let failed = ChatTimelineEntry.group(try readRaw(raws(middle: [
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "fail", "name": "exec_command", "arguments": "{\"cmd\":\"swift test\"}"]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "fail", "output": "{\"output\":\"error: build failed\",\"exit_code\":65}"]]])))
+        XCTAssertEqual(failed.map(\.isReadRun), [true, false, true], "A non-zero exit keeps the card")
+        XCTAssertEqual(failed[1].messages.first?.toolCallID, "fail")
+        let background = ChatTimelineEntry.group(try readRaw(raws(middle: [
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "bg", "name": "exec_command", "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "bg", "output": "Command running in background with ID: b1"]]])))
+        XCTAssertEqual(background.map(\.isReadRun), [true, false, true], "A background job keeps the card")
+        // Claude's own error flag on a result, with no exit code in the text.
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "e1", "name": "Read", "input": ["file_path": "/missing.swift"]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "e1", "is_error": true, "content": "File does not exist."]]]]],
+        ]]
+        let errored = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude").messages
+        XCTAssertTrue(ReadOnlyToolCall.failed(errored[1]))
+        XCTAssertFalse(ReadOnlyToolCall.looksAround(errored))
+    }
+
     func testBackgroundJobsPairPendingCallAndTaskNotification() throws {
         let content = "<task-notification>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Background tests completed (exit code 2)</summary>\n</task-notification>"
         let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
@@ -290,6 +351,13 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(longLine.pages.count, 4)
         XCTAssertTrue(longLine.pages.allSatisfy { $0.firstLine == 1 && $0.lastLine == 1 })
         XCTAssertEqual(ToolPresentation(title: "Tool result", text: "\n\nPreview\n" + sources[2]).preview, "Preview")
+    }
+
+    /// Rows as the Hook writes them, so a `phren_changes` attachment can ride
+    /// next to its payload.
+    private func readRaw(_ raws: [[String: Any]]) throws -> [AgentChatMessage] {
+        try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "totalLines": raws.count,
+            "entries": raws.enumerated().map { ["line": $0.offset, "raw": $0.element] }]), source: "codex").messages
     }
 
     private func read(_ payloads: [[String: Any]]) throws -> [AgentChatMessage] {

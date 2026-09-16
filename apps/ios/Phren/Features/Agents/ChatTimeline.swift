@@ -56,17 +56,24 @@ struct ChatReadRun: View, Equatable {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.messages == rhs.messages && lhs.imageContext == rhs.imageContext }
     private let groups: [ChatTimelineEntry]
-    private let names: [String]
+    private let title: String
+    private let preview: String
     init(messages: [AgentChatMessage], resultImages: ((AgentChatMessage) -> AnyView)? = nil, imageContext: String = "") {
         self.messages = messages; self.resultImages = resultImages; self.imageContext = imageContext
         // The outer grouping has already established the run. Re-grouping
         // restores the exact call/result cards shown before it was folded.
         groups = ChatTimelineEntry.group(messages, foldingReads: false)
-        names = groups.compactMap { group in
-            group.messages.first(where: { !$0.isToolResult && !$0.isChange }).map {
-                ToolPresentationCache.value($0).title
-            }
+        let calls = groups.compactMap { $0.messages.first(where: { !$0.isToolResult && !$0.isChange }) }
+        // What the agent did, in the order it did it: "Shell ×4 · Read ×2".
+        var counts: [(name: String, count: Int)] = []
+        for name in calls.map({ ToolPresentationCache.value($0).title }) {
+            if let index = counts.firstIndex(where: { $0.name == name }) { counts[index].count += 1 }
+            else { counts.append((name, 1)) }
         }
+        title = counts.prefix(3).map { $0.count > 1 ? "\($0.name) ×\($0.count)" : $0.name }.joined(separator: " · ")
+            + (counts.count > 3 ? " …" : "")
+        // The last command, so the row still says where the agent got to.
+        preview = calls.last.map { ToolPresentationCache.value($0).preview } ?? ""
     }
     var body: some View { ChatPerformance.measure("read-run row") { content } }
     @ViewBuilder private var content: some View {
@@ -76,14 +83,14 @@ struct ChatReadRun: View, Equatable {
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "doc.text.magnifyingglass").foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
-                    Text("\(groups.count) reads").fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText)
-                    Text(names.prefix(4).joined(separator: ", ") + (names.count > 4 ? "…" : ""))
-                        .foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(title).fontWeight(.semibold).foregroundStyle(PhrenTheme.chatText).lineLimit(1)
+                    Text(preview).foregroundStyle(PhrenTheme.chatNeutral).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 180 : 0)).foregroundStyle(PhrenTheme.chatNeutralDim)
                 }.font(.system(.caption, design: .monospaced)).padding(.horizontal, 12).frame(height: 44)
             }.buttonStyle(.plain)
-                .accessibilityLabel("\(groups.count) read operations")
+                .accessibilityLabel("\(title), \(groups.count) read operations")
                 .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                 .accessibilityIdentifier("chat-read-run:\(messages[0].id)")
             if expanded {
