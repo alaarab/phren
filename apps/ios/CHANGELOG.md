@@ -6,7 +6,7 @@ Settings → About. `scripts/changelog.py` refuses to build a version that has n
 section here; the version is `MARKETING_VERSION` in `project.yml`, the build
 number counts up on its own.
 
-## 0.0.8
+## 1.0.0
 
 ### New
 
