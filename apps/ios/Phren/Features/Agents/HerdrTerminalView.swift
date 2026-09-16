@@ -96,6 +96,8 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                     terminal.feed(text: (1...18).map { "Selectable terminal text · line \($0)" }.joined(separator: "\r\n"))
                 } else if args.contains("--terminal-scrollback-fixture") {
                     terminal.feed(text: (1...100).map { "Scrollback history · line \($0)" }.joined(separator: "\r\n"))
+                } else if args.contains("--terminal-tour-fixture") {
+                    renderTourFixture()
                 } else {
                     terminal.feed(text: "\u{1B}[2J\u{1B}[HPhren · Herdr\r\nFixture workspace · pane 1\r\n$ ")
                 }
@@ -243,6 +245,47 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     }
 
     #if DEBUG && targetEnvironment(simulator)
+    /// The App Store tour: a Claude Code turn as it looks in Herdr, drawn to
+    /// the current width.
+    private func renderTourFixture() {
+        let cols = max(24, terminal.getTerminal().cols)
+        let lavender = "\u{1B}[38;2;185;148;244m", cyan = "\u{1B}[38;2;40;211;242m", dim = "\u{1B}[38;2;164;169;177m"
+        let green = "\u{1B}[38;2;138;200;172m", bold = "\u{1B}[1m", reset = "\u{1B}[0m"
+        func box(_ lines: [String]) -> [String] {
+            let inner = cols - 2
+            // Pad by what the terminal shows, not by the colour codes.
+            func visible(_ line: String) -> Int { line.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).count }
+            func fit(_ line: String) -> String { line + String(repeating: " ", count: max(0, inner - 1 - visible(line))) }
+            return [dim + "╭" + String(repeating: "─", count: inner) + "╮" + reset]
+                + lines.map { dim + "│" + reset + fit($0) + dim + " │" + reset }
+                + [dim + "╰" + String(repeating: "─", count: inner) + "╯" + reset]
+        }
+        let screen = ["\(dim)$ claude\(reset)"]
+            + box([" \(lavender)✻\(reset) \(bold)Claude Code\(reset) \(dim)· Opus 5\(reset)", "   \(dim)/work/phren · main\(reset)"])
+            + ["",
+               "\(dim)>\(reset) Ship the onboarding flow",
+               "",
+               "\(lavender)●\(reset) I'll start with the first-run screens.",
+               "",
+               "\(lavender)●\(reset) \(bold)Read\(reset)(Onboarding/WelcomeView.swift)",
+               "  \(dim)⎿  Read 84 lines\(reset)",
+               "",
+               "\(lavender)●\(reset) \(bold)Update\(reset)(Onboarding/WelcomeView.swift)",
+               "  \(dim)⎿  Updated with \(green)12 additions\(dim) and 3 removals\(reset)",
+               "",
+               "\(lavender)●\(reset) \(bold)Bash\(reset)(xcodebuild build -scheme Phren)",
+               "  \(dim)⎿  ** BUILD SUCCEEDED **\(reset)",
+               "",
+               "\(lavender)●\(reset) \(bold)phren\(reset) - add_finding \(dim)(MCP)\(reset)",
+               "  \(dim)⎿  Saved: [decision] One tap to the first screen\(reset)",
+               "",
+               "\(cyan)✻\(reset) \(dim)Thinking… (12s · ↑ 1.2k tokens)\(reset)",
+               ""]
+            + box([" \(dim)>\(reset) "])
+            + ["  \(dim)? for shortcuts\(reset)"]
+        terminal.feed(text: "\u{1B}[2J\u{1B}[H" + screen.joined(separator: "\r\n") + "\u{1B}[2 q")
+    }
+
     private func renderControlsFixture() {
         let column = max(1, terminal.getTerminal().cols - 7)
         let sidebar = terminal.getTerminal().cols >= 100 ? "Sidebar visible" : "Narrow layout"

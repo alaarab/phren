@@ -372,19 +372,24 @@ final class LiveHostMonitor {
             if remote && previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-offline") {
                 throw LiveConnectionError.disconnected
             }
-            let title = remote ? "Review Linux deployment" : "Build the iPhone overview"
+            let tour = ProcessInfo.processInfo.arguments.contains("--store-tour-fixture")
+            let title = tour ? (remote ? "Review the deployment" : "Ship the onboarding flow") : remote ? "Review Linux deployment" : "Build the iPhone overview"
             let finished = previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-change")
             let status = remote ? "waiting" : finished ? "done" : "working"
-            let other = remote ? "Inspect logs" : "Check project status"
-            let changed = ProcessInfo.processInfo.arguments.contains("--session-relative-time-fixture")
+            let other = tour ? (remote ? "Fix the widget timeline" : "Write the release notes") : remote ? "Inspect logs" : "Check project status"
+            let changed = ProcessInfo.processInfo.arguments.contains("--session-relative-time-fixture") || tour
                 ? ",\"lastChangedAt\":\"\(UITestFixtures.sessionActivityDate.ISO8601Format())\"" : ""
             let closed = await UITestFixtures.closedTabs
+            // The tour names real projects and shows all three harnesses.
+            let project = tour ? (remote ? "mina" : "phren") : "phone"
+            let agents = tour ? (remote ? ("codex", "claude") : ("claude", "copilot")) : ("codex", "claude")
+            let branch = tour ? (remote ? "feature/widgets" : "release/1.0") : "feature/settings"
             let tabs = [
-                #"{"id":"w1:t1","label":"1","title":"\#(title)","agent":"codex","agentStatus":"\#(status)","cwd":"/work/phone","branch":"main","contextUsedPercent":\#(remote ? 62 : 37)\#(changed)}"#,
-                #"{"id":"w1:t2","label":"2","title":"\#(other)","agent":"claude","agentStatus":"idle","cwd":"/work/phone","branch":"feature/settings"}"#,
+                #"{"id":"w1:t1","label":"1","title":"\#(title)","agent":"\#(agents.0)","agentStatus":"\#(status)","cwd":"/work/\#(project)","branch":"main","contextUsedPercent":\#(remote ? 62 : 37)\#(changed)}"#,
+                #"{"id":"w1:t2","label":"2","title":"\#(other)","agent":"\#(agents.1)","agentStatus":"idle","cwd":"/work/\#(project)","branch":"\#(branch)"}"#,
             ].enumerated().filter { !closed.contains("\(host.id):w1:t\($0.offset + 1)") }.map(\.element)
             return try LiveWorkspaces.read(Data("""
-            {"kind":"herdr","groups":[{"id":"w1","label":"Shared project","children":[\(tabs.joined(separator: ","))]}]}
+            {"kind":"herdr","groups":[{"id":"w1","label":"\(tour ? project : "Shared project")","children":[\(tabs.joined(separator: ","))]}]}
             """.utf8))
         }
         if AppModel.isUITesting && ProcessInfo.processInfo.arguments.contains("--automatic-sessions-fixture") {
@@ -398,6 +403,9 @@ final class LiveHostMonitor {
                 }
                 if ProcessInfo.processInfo.arguments.contains("--terminal-uploads-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","focus":{"workspaceID":"w8","tabID":"w8:t1","paneID":"w8:p1"},"groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Original tab","agent":"codex"}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Current terminal tab","agent":"codex"}]}]}"#.utf8))
+                }
+                if ProcessInfo.processInfo.arguments.contains("--store-tour-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"phren","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/phren","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"mina","children":[{"id":"w8:t1","label":"1","title":"Review the deployment","agent":"codex","agentStatus":"waiting","cwd":"/work/mina","branch":"main"}]}]}"#.utf8))
                 }
                 return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Polish the phone app","agent":"codex","agentStatus":"working","cwd":"/work/phone/src","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Choose the deployment target","agent":"claude","agentStatus":"waiting","cwd":"/work/other"}]},{"id":"w9","label":"Shell","children":[{"id":"w9:t1","label":"1"}]}]}"#.utf8))
             }

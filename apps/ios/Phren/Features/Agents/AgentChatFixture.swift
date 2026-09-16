@@ -64,12 +64,29 @@ import UIKit
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-plan-action", "toolName": "ExitPlanMode", "title": "Allow ExitPlanMode?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
         guard flag("--chat-approval") else { return nil }
-        return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": "Run project tests", "message": "npm test", "expiresAt": approvalExpiry]]]), target: target)?.approval
+        let (title, message) = tour ? ("Push the release branch", "git push origin release/1.0") : ("Run project tests", "npm test")
+        return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": title, "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
     }
     static var uploads = 0
-    static var image: AgentAttachment {
-        let data = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 90)).pngData { context in
-            UIColor.cyan.setFill(); context.fill(CGRect(x: 0, y: 0, width: 120, height: 90))
+    /// The App Store tour: named computers, real project names, a picture
+    /// worth looking at where a test only needs some bytes.
+    static var tour: Bool { flag("--store-tour-fixture") }
+    /// Where the fixture's project lives on the computer.
+    static var root: String { tour ? "/work/phren" : "/work/phone" }
+    static var image: AgentAttachment { picture(0) }
+    /// The tour's pictures are design stills — the app's canvas, a tinted
+    /// card, the mascot — in a different tint per picture so four in one
+    /// conversation read as four; elsewhere a plain cyan rectangle.
+    static func picture(_ index: Int) -> AgentAttachment {
+        let size = tour ? CGSize(width: 360, height: 240) : CGSize(width: 120, height: 90)
+        let tints = [UIColor(red: 0.725, green: 0.58, blue: 0.957, alpha: 1), UIColor(red: 0.157, green: 0.827, blue: 0.949, alpha: 1),
+                     UIColor(red: 0.878, green: 0.737, blue: 0.498, alpha: 1), UIColor(red: 0.541, green: 0.784, blue: 0.675, alpha: 1)]
+        let data = UIGraphicsImageRenderer(size: size).pngData { context in
+            guard tour else { UIColor.cyan.setFill(); context.fill(CGRect(origin: .zero, size: size)); return }
+            UIColor(red: 0.118, green: 0.118, blue: 0.118, alpha: 1).setFill(); context.fill(CGRect(origin: .zero, size: size))
+            tints[index % tints.count].withAlphaComponent(0.22).setFill()
+            UIBezierPath(roundedRect: CGRect(x: 24, y: 24, width: size.width - 48, height: size.height - 48), cornerRadius: 20).fill()
+            UIImage(named: "PhrenMascot")?.draw(in: CGRect(x: (size.width - 150) / 2, y: (size.height - 150) / 2, width: 150, height: 150))
         }
         return try! AgentAttachment(name: "Screenshot.png", data: data, isImage: true)
     }
@@ -77,8 +94,13 @@ import UIKit
     /// the fixture picture for any transcript block, and for an upload only
     /// when the path is one the fixture's own turns name.
     static func imageBytes(_ reference: ChatImageReference) throws -> Data {
-        if case .upload(let path) = reference, !path.hasPrefix("/work/phone/uploads/") { throw LiveConnectionError.response(404) }
-        return image.data
+        switch reference {
+        case .upload(let path):
+            guard path.hasPrefix(root + "/uploads/") else { throw LiveConnectionError.response(404) }
+            return picture(path.hasSuffix("b.png") ? 3 : 2).data
+        case .transcript(_, _, let inner):
+            return picture(inner ?? 0).data
+        }
     }
     static func upload(_ attachment: AgentAttachment) throws -> String {
         uploads += 1
@@ -98,9 +120,9 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card")) ? "claude" : "codex")
-        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -133,7 +155,10 @@ import UIKit
                 : ["type": role, "message": ["role": role, "content": [["type": "text", "text": text]]]]
             entries.append(["line": (flag("--chat-history") ? 20 : 0) + entries.count, "raw": raw])
         }
-        if !flag("--starting-session-fixture") {
+        if tour {
+            append("user", "Pick up the onboarding flow where we left off.")
+            append("assistant", "Picking it up. The welcome screen is done; GitHub sign-in and Add computer are next.")
+        } else if !flag("--starting-session-fixture") {
         append("user", "Can you refine the project screen?")
         append("assistant", target.source == "codex" ? "The project screen is ready. What would you like to change?" : target.source == "copilot" ? "Copilot is connected to this project. What would you like to change?" : "I reviewed the changes. The project navigation looks consistent.")
         }
@@ -222,20 +247,24 @@ import UIKit
         if flag("--chat-diffs") {
             // A shell-driven edit: the card can only show what ran, so it
             // offers the repository diff for what changed.
+            let memory = tour ? "phren" : "phone"
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call", "call_id": "edit-py", "name": "exec_command",
-                "arguments": "{\"cmd\":\"python3 - <<'EOF'\\np='Theme.swift'\\ns=open(p).read().replace('green','purple')\\nopen(p,'w').write(s)\\nopen('/Users/fixture/.phren/phone/FINDINGS.md','a').write('- Accent is purple now\\\\n')\\nEOF\"}"]]])
+                "arguments": "{\"cmd\":\"python3 - <<'EOF'\\np='Theme.swift'\\ns=open(p).read().replace('green','purple')\\nopen(p,'w').write(s)\\nopen('/Users/fixture/.phren/\(memory)/FINDINGS.md','a').write('- Accent is purple now\\\\n')\\nEOF\"}"]]])
             // Phren Hook attaches what the command changed on disk to its output row.
             entries.append(["line": entries.count, "raw": ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "edit-py", "output": "{\"output\":\"\",\"exit_code\":0}"],
                 "phren_changes": ["edit-py": [
-                    ["root": "/work/phone", "path": "Theme.swift", "status": "M", "added": 1, "removed": 1, "patch": "diff --git a/Theme.swift b/Theme.swift\nindex 1..2 100644\n--- a/Theme.swift\n+++ b/Theme.swift\n@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12\n"],
-                    ["root": "/Users/fixture/.phren", "path": "phone/FINDINGS.md", "status": "M", "added": 3, "removed": 2, "patch": "diff --git a/phone/FINDINGS.md b/phone/FINDINGS.md\n--- a/phone/FINDINGS.md\n+++ b/phone/FINDINGS.md\n@@ -2,3 +2,5 @@\n - Tiles are one sprite\n-- Offline first\n-- Old note\n+- Accent is purple now\n+- Offline first, always\n+- Geocoder batches at 8/s\n"]]]]])
+                    ["root": root, "path": "Theme.swift", "status": "M", "added": 1, "removed": 1, "patch": "diff --git a/Theme.swift b/Theme.swift\nindex 1..2 100644\n--- a/Theme.swift\n+++ b/Theme.swift\n@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12\n"],
+                    ["root": "/Users/fixture/.phren", "path": "\(memory)/FINDINGS.md", "status": "M", "added": 3, "removed": 2, "patch": "diff --git a/\(memory)/FINDINGS.md b/\(memory)/FINDINGS.md\n--- a/\(memory)/FINDINGS.md\n+++ b/\(memory)/FINDINGS.md\n@@ -2,3 +2,5 @@\n - Tiles are one sprite\n-- Offline first\n-- Old note\n+- Accent is purple now\n+- Offline first, always\n+- Geocoder batches at 8/s\n"]]]]])
         }
         if flag("--chat-phren-tools") {
+            let project = tour ? "phren" : "phone"
+            let saved = tour ? "XCUITest: reading UIPasteboard from the runner raises the paste prompt and hangs the run — verify copies through an in-app signal instead."
+                : String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)
             let calls: [(String, String, [String: Any], [String: Any])] = [
-                ("finding", "add_finding", ["project": "phone", "findingType": "pitfall", "finding": String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)], ["ok": true]),
-                ("task", "add_task", ["project": "phone", "task": "Verify pasted images in chat"], ["ok": true]),
-                ("complete", "manage_task", ["project": "phone", "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),
-                ("search", "search_knowledge", ["project": "phone", "query": "chat navigation"], ["ok": true, "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
+                ("finding", "add_finding", ["project": project, "findingType": "pitfall", "finding": saved], ["ok": true]),
+                ("task", "add_task", ["project": project, "task": "Verify pasted images in chat"], ["ok": true]),
+                ("complete", "manage_task", ["project": project, "action": "complete", "item": "Pin curated font downloads"], ["ok": true]),
+                ("search", "search_knowledge", ["project": project, "query": "chat navigation"], ["ok": true, "data": ["count": 4, "results": [["title": "Interactive back"], ["title": "Stable chat scroll"], ["title": "One image bubble"], ["title": "Fourth match"]]]]),
             ]
             for (id, tool, input, result) in calls {
                 let arguments = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
@@ -358,12 +387,12 @@ import UIKit
             // the person sent two pictures from the phone — which Claude Code
             // records as text markers naming the uploads, not as image blocks.
             entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [
-                ["type": "tool_use", "id": "read-shot", "name": "Read", "input": ["file_path": "/work/phone/shots/shot.png"]]]]]])
+                ["type": "tool_use", "id": "read-shot", "name": "Read", "input": ["file_path": root + (tour ? "/shots/onboarding.png" : "/shots/shot.png")]]]]]])
             let frame: [String: Any] = ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": ""]]
             entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
                 ["type": "tool_result", "tool_use_id": "read-shot", "content": [frame, frame]]]]]])
             entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
-                ["type": "text", "text": "Look at these [Image: source: /work/phone/uploads/a.png] [Image: source: /work/phone/uploads/b.png]"]]]]])
+                ["type": "text", "text": "Look at these [Image: source: \(root)/uploads/a.png] [Image: source: \(root)/uploads/b.png]"]]]]])
         }
         if flag("--chat-paragraphs") {
             append("assistant", "Alpha paragraph opens the reply with a summary of what changed on the project screen.\n\nBravo paragraph explains why `ChatRichText` renders blocks, each copying on its own.\n\nCharlie paragraph closes with what to try next on the phone.\n\n```swift\nlet copied = true\n```")
