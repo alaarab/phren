@@ -40,7 +40,7 @@ describe("webServers", () => {
   let server: Server;
   let port = 0;
   beforeEach(async () => {
-    server = createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<html><title>Alastack</title></html>"); });
+    server = createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<html><title>Alastack &amp; Co</title></html>"); });
     // A port below the ephemeral range, so the ordering test is deterministic.
     port = await listenBelowEphemeral(server);
   });
@@ -52,7 +52,7 @@ describe("webServers", () => {
   it("reads listeners from ss when lsof is not installed", async () => {
     answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
     const found = await webServers();
-    expect(found).toEqual([{ name: "Alastack", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
+    expect(found).toEqual([{ name: "Alastack & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
   it("falls back to lsof when ss is missing", async () => {

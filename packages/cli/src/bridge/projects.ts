@@ -117,6 +117,18 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
   return value;
 }
 
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+/** Page titles arrive HTML-escaped ("Safety &amp; Quality"); show them as text. */
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+    if (entity[0] === "#") {
+      const code = entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    return ENTITIES[entity.toLowerCase()] ?? match;
+  });
+}
+
 export interface LocalServer { name: string; port: number; origin: string; process?: string; pid?: number }
 function probe(port: number, host: string): Promise<string | null> {
   return new Promise(resolve => {
@@ -125,7 +137,7 @@ function probe(port: number, host: string): Promise<string | null> {
     const req = request({ hostname: host, port, path: "/", method: "GET", timeout: 1200, headers: { Host: `localhost:${port}` } }, res => {
       let body = "";
       res.on("data", data => { body += data.toString(); if (body.length > 32_768) res.destroy(); });
-      const end = () => finish(/<title[^>]*>([^<]{1,300})<\/title>/i.exec(body)?.[1]?.trim() || `Web server on port ${port}`);
+      const end = () => finish(decodeEntities(/<title[^>]*>([^<]{1,300})<\/title>/i.exec(body)?.[1] ?? "").trim() || `Web server on port ${port}`);
       res.on("end", end); res.on("close", end); res.on("error", () => finish(null));
     });
     req.on("error", () => finish(null)); req.on("timeout", () => { req.destroy(); finish(null); }); req.end();
