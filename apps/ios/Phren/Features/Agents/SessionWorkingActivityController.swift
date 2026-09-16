@@ -1,4 +1,5 @@
 import ActivityKit
+import WidgetKit
 import Foundation
 import PhrenKit
 
@@ -19,6 +20,19 @@ final class SessionWorkingActivityController {
     private var quietSince: Date?
 
     private init() {}
+
+    /// The Control Center switch (and Settings) — off ends the activity now
+    /// and keeps it off until switched back on.
+    private(set) var enabled = WorkingActivityPreference.load().enabled
+    func setEnabled(_ value: Bool) async {
+        enabled = value
+        if #available(iOS 18.0, *) { ControlCenter.shared.reloadControls(ofKind: "com.phren.ios.widgets.working-activity") }
+        if !value {
+            updateTask?.cancel(); endTask?.cancel(); quietSince = nil
+            for activity in Activity<SessionWorkingActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+            AppRuntime.defaults.removeObject(forKey: Self.routeKey)
+        } else { scheduleUpdate() }
+    }
 
     func observe(session: LiveAgentSession, project: String?, provider: String?, branch: String?,
                  activity state: String?, toolName: String?, now: Date = .now) async {
@@ -97,6 +111,7 @@ final class SessionWorkingActivityController {
         }
     }
     private func publish(now: Date = .now) async {
+        guard enabled else { return }
         var inputs = sessionsByHost.values.flatMap { $0 }
         // The next overview owns state again if the chat has stopped reporting.
         if let chat, now.timeIntervalSince(chat.at) < 6 { inputs.append(chat.session) }

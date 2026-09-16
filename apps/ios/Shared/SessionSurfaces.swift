@@ -40,6 +40,47 @@ struct OpenAttentionSessionIntent: AppIntent {
     }
 }
 
+/// Whether the agents Live Activity is wanted at all. Written by the app,
+/// read by the Control Center toggle from the app group.
+struct WorkingActivityPreference: Codable, Equatable, Sendable {
+    static let filename = "working-activity.json"
+    static let appGroupID = "group.com.phren.ios"
+    var enabled: Bool
+
+    static func load() -> WorkingActivityPreference {
+        guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?.appendingPathComponent(filename),
+              let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(Self.self, from: data) else { return .init(enabled: true) }
+        return value
+    }
+    func save() throws {
+        guard let url = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID)?.appendingPathComponent(Self.filename) else { return }
+        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+    }
+}
+
+/// Control Center toggle: show or hide the agents Live Activity. Runs in the
+/// app so the activity itself is started and ended by its owner.
+struct ToggleWorkingActivityIntent: SetValueIntent {
+    static var title: LocalizedStringResource = "Agents Live Activity"
+    static var description = IntentDescription("Shows or hides the Live Activity that counts your working agents.")
+    static var authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
+
+    @Parameter(title: "Shown")
+    var value: Bool
+
+    init() {}
+    init(value: Bool) { self.value = value }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        try WorkingActivityPreference(enabled: value).save()
+        #if PHREN_APP
+        await SessionWorkingActivityController.shared.setEnabled(value)
+        #endif
+        return .result()
+    }
+}
+
 struct SessionWorkingActivityAttributes: ActivityAttributes {
     struct Entry: Codable, Hashable, Identifiable {
         let id: String

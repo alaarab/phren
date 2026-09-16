@@ -92,7 +92,9 @@ enum AgentLaunch {
     static let pendingKey = "agents.pendingChat.v1"
     static let pendingProjectKey = "projects.pendingOpen.v1"
     static let pendingContentKey = "agents.pendingChatContent.v1"
-    enum Destination: String, Codable { case chat, terminal }
+    /// `dictate` is the chat with the microphone already listening — the
+    /// Action button's "talk to the last session".
+    enum Destination: String, Codable { case chat, terminal, dictate }
     struct Pending: Codable {
         var hostID: UUID, workspaceID: String, tabID: String, label: String, agent: String, cwd: String
         var muxID: String? = nil

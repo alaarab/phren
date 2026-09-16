@@ -10,6 +10,10 @@ number counts up on its own.
 
 ### New
 
+- "Talk to Phren" — an Action button shortcut that opens the session you
+  used last with dictation already listening; a Control Center toggle shows
+  or hides the agents Live Activity. (Pin Session keeps its Shortcuts action
+  but no longer takes one of the ten Siri phrases.)
 - One compact Live Activity counts working agents across your computers;
   expand it for project and tool details, or pin a session to the first row.
 - Write, Edit, and Patch cards show their changed files without opening the

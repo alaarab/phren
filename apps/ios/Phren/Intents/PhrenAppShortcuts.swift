@@ -2,6 +2,8 @@ import AppIntents
 import PhrenKit
 
 /// The phrases Siri answers to out of the box — no setup in the Shortcuts app.
+/// iOS allows ten; Pin Session lost its phrase to Dictate (the intent is
+/// still in the Shortcuts app, and pinning only orders the activity's rows).
 ///
 /// Every phrase has to contain `\(.applicationName)`; Siri keys on the app
 /// name to route the utterance, and a phrase without it is rejected at build
@@ -108,13 +110,14 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             systemImageName: "person.crop.circle.badge.questionmark"
         )
         AppShortcut(
-            intent: PinSessionActivityIntent(),
+            intent: DictateToSessionIntent(),
             phrases: [
-                "Pin \(\.$session) in \(.applicationName)",
-                "Track \(\.$session) in \(.applicationName)",
+                "Talk to \(.applicationName)",
+                "Dictate to \(.applicationName)",
+                "Dictate to \(\.$session) in \(.applicationName)",
             ],
-            shortTitle: "Pin Session",
-            systemImageName: "pin.circle"
+            shortTitle: "Dictate to Session",
+            systemImageName: "mic.circle"
         )
         AppShortcut(
             intent: AskAboutImageIntent(),

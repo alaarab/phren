@@ -9,6 +9,7 @@ struct PhrenWidgetsBundle: WidgetBundle {
         SessionWorkingActivityWidget()
         if #available(iOS 18.0, *) {
             SessionAttentionControl()
+            WorkingActivityControl()
         }
     }
 }

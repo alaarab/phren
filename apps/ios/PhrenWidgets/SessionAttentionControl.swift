@@ -23,6 +23,29 @@ struct SessionAttentionControl: ControlWidget {
     }
 }
 
+/// The agents Live Activity as a switch: off when you want a quiet island.
+@available(iOS 18.0, *)
+struct WorkingActivityControl: ControlWidget {
+    static let kind = "com.phren.ios.widgets.working-activity"
+
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: Self.kind, provider: WorkingActivityProvider()) { enabled in
+            ControlWidgetToggle("Agents activity", isOn: enabled, action: ToggleWorkingActivityIntent()) { on in
+                Label(on ? "Shown" : "Hidden", systemImage: on ? "waveform.path" : "waveform.path.badge.minus")
+            }
+            .tint(WidgetTheme.accent)
+        }
+        .displayName("Agents Live Activity")
+        .description("Show or hide the Live Activity that counts your working agents.")
+    }
+}
+
+@available(iOS 18.0, *)
+private struct WorkingActivityProvider: ControlValueProvider {
+    var previewValue: Bool { true }
+    func currentValue() async throws -> Bool { WorkingActivityPreference.load().enabled }
+}
+
 @available(iOS 18.0, *)
 private struct SessionAttentionProvider: ControlValueProvider {
     var previewValue: SessionControlSnapshot? {

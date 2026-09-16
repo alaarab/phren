@@ -38,18 +38,21 @@ struct AgentChatSheet: View {
     @State private var incomingDraft: String
     private let initialSessionID: LiveAgentSession.ID
     private let initialPane: AgentChatPanes.Pane?
+    private let startsDictation: Bool
     init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
-         attachments: [AgentAttachment] = [], draft: String = "") {
+         attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false) {
         _session = State(initialValue: session)
         _incomingAttachments = State(initialValue: attachments)
         _incomingDraft = State(initialValue: draft)
         initialSessionID = session.id
         self.initialPane = initialPane
+        self.startsDictation = startsDictation
     }
     var body: some View {
         AgentChatView(session: session, switchSession: { session = $0 },
                       initialPane: session.id == initialSessionID ? initialPane : nil,
-                      incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft).id(session.id)
+                      incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
+                      startsDictation: startsDictation && session.id == initialSessionID).id(session.id)
     }
 }
 
@@ -59,6 +62,8 @@ struct AgentChatView: View {
     let initialPane: AgentChatPanes.Pane?
     @Binding var incomingAttachments: [AgentAttachment]
     @Binding var incomingDraft: String
+    /// Opened by the Action button: start listening as soon as the chat is up.
+    var startsDictation = false
     @State private var initialized = false
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
@@ -419,6 +424,11 @@ struct AgentChatView: View {
             if !initialized {
                 initialized = true
                 if let initialPane { model.choose(initialPane, session: session) }
+                if startsDictation {
+                    // Let the push finish first; the microphone prompt and the
+                    // keyboard both fight a screen that is still sliding in.
+                    Task { try? await Task.sleep(for: .milliseconds(450)); if !dictating { startDictation() } }
+                }
             }
             visible = true
         }

@@ -139,7 +139,9 @@ struct LiveSessionsView: View {
         }
         .navigationDestination(item: $sessionOpen) { open in
             switch open.destination {
-            case .chat: AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft).id(open.id)
+            case .chat, .dictate:
+                AgentChatSheet(session: open.session, attachments: open.attachments, draft: open.draft,
+                               startsDictation: open.destination == .dictate).id(open.id)
             case .terminal: HerdrTerminalView(host: open.session.host, session: open.session).id(open.id)
             }
         }
