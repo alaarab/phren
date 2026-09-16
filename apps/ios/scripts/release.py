@@ -51,7 +51,7 @@ if archive.exists():
     parser.error(f"Archive already exists: {archive}. Choose another build number or output directory.")
 output.mkdir(parents=True, exist_ok=True)
 run(base + ["archive", "-destination", "generic/platform=iOS", "-archivePath", str(archive),
-            "-allowProvisioningUpdates"] + settings)
+            "-allowProvisioningUpdates", "-skipPackagePluginValidation"] + settings)
 print(f"Signed archive: {archive}")
 if args.export or args.upload:
     options = output / "ExportOptions.plist"
@@ -60,6 +60,17 @@ if args.export or args.upload:
         "destination": "upload" if args.upload else "export", "manageAppVersionAndBuildNumber": False,
         "uploadSymbols": True,
     }))
+    # An App Store Connect API key (~/.config/ios-release.json: key_id,
+    # issuer_id, key_path) lets the export and upload run without an Apple ID
+    # signed into Xcode — the same file mina's release script reads.
+    authentication = []
+    credentials = Path.home() / ".config/ios-release.json"
+    if credentials.exists():
+        saved = json.loads(credentials.read_text())
+        key_path = Path(saved.get("key_path", "")).expanduser()
+        if saved.get("key_id") and saved.get("issuer_id") and key_path.exists():
+            authentication = ["-authenticationKeyPath", str(key_path), "-authenticationKeyID", saved["key_id"],
+                              "-authenticationKeyIssuerID", saved["issuer_id"]]
     run(["xcodebuild", "-exportArchive", "-archivePath", str(archive), "-exportPath", str(output / "export"),
-         "-exportOptionsPlist", str(options), "-allowProvisioningUpdates"])
+         "-exportOptionsPlist", str(options), "-allowProvisioningUpdates"] + authentication)
     print("Uploaded to App Store Connect; wait for processing in TestFlight." if args.upload else f"Exported IPA: {output / 'export'}")
