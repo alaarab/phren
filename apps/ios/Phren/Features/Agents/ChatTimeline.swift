@@ -116,6 +116,19 @@ struct ChatToolActivity: View, Equatable {
         ChatPerformance.measure("tool row") { content }
     }
     @ViewBuilder private var content: some View {
+        // A fetch or search folds into a read run like a Read does, so it
+        // can reach this row from an expanded run: it keeps its card there.
+        // Skills and other MCP servers never fold; they are dispatched here
+        // too so the card shows wherever the activity row is drawn.
+        if let web = WebToolCard.presentation(messages) {
+            WebToolCard(presentation: web, messages: messages)
+        } else if let skill = SkillChip.presentation(messages) {
+            SkillChip(presentation: skill, messages: messages)
+        } else if let mcp = MCPToolCard.presentation(messages) {
+            MCPToolCard(presentation: mcp, messages: messages)
+        } else { pill }
+    }
+    @ViewBuilder private var pill: some View {
         let summary = ChatToolSummary(messages)
         #if DEBUG
         let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()

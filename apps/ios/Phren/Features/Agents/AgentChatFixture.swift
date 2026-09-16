@@ -25,6 +25,17 @@ import UIKit
     static var stopped = false
     static var answered = false
     static var denied = false
+    /// What the chat copied and has selected, for tests: reading the
+    /// pasteboard from the runner hangs on iOS's paste prompt.
+    @Observable final class Report {
+        var copied: [String] = []
+        var selected = ""
+        var json: String {
+            let report: [String: Any] = ["copied": copied, "selected": selected]
+            return String(decoding: (try? JSONSerialization.data(withJSONObject: report, options: .sortedKeys)) ?? Data(), as: UTF8.self)
+        }
+    }
+    static let report = Report()
     /// The `updatedInput` an AskUserQuestion approval was answered with; the
     /// fixture echoes its answers into the transcript for tests to read.
     static var answeredInput: [String: Any]?
@@ -37,11 +48,20 @@ import UIKit
         ["question": "Which screens should change?", "header": "Scope", "multiSelect": true,
          "options": [["label": "Chat", "description": "The conversation"], ["label": "Agents", "description": "The overview"], ["label": "Settings"]]],
     ]]
+    /// The plan Claude wrote in plan mode: more than a screenful, so the card
+    /// cuts it and offers the rest.
+    static let planMarkdown = "# Plan: subagent and todo cards\n\n## Steps\n\n1. Parse the Task tool in PhrenKit\n2. Draw the agent card\n3. Fold superseded todo lists\n4. Add fixture flags\n5. Write the UI tests\n6. Run the suite on the simulator\n7. Check the cards at accessibility sizes\n8. Verify the plan approval path\n9. Update the changelog\n10. Ask for review\n\n## Notes\n\n- Keep every card in the phren card family\n- No raw JSON on any card\n- Final step marker: run the full suite once more"
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard !answered else { return nil }
         if flag("--chat-approval-question") {
             let message = String(decoding: try JSONSerialization.data(withJSONObject: questionInput, options: .prettyPrinted), as: UTF8.self)
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-question-action", "toolName": "AskUserQuestion", "title": "Allow AskUserQuestion?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
+        }
+        if flag("--chat-plan-mode") {
+            // Claude Code's plan review: a permission request for ExitPlanMode
+            // whose input carries the plan.
+            let message = String(decoding: try JSONSerialization.data(withJSONObject: ["plan": planMarkdown]), as: UTF8.self)
+            return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-plan-action", "toolName": "ExitPlanMode", "title": "Allow ExitPlanMode?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
         guard flag("--chat-approval") else { return nil }
         return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": "Run project tests", "message": "npm test", "expiresAt": approvalExpiry]]]), target: target)?.approval
@@ -78,9 +98,9 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question")) ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -230,6 +250,96 @@ import UIKit
                 }
             }
         }
+        // Claude Code's bookkeeping tools, each with a card of its own.
+        func claudeCall(_ id: String, _ name: String, _ input: [String: Any]) {
+            entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": id, "name": name, "input": input]]]]])
+        }
+        func claudeResult(_ id: String, _ text: String, error: Bool = false) {
+            var block: [String: Any] = ["type": "tool_result", "tool_use_id": id, "content": text]
+            if error { block["is_error"] = true }
+            entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [block]]]])
+        }
+        if flag("--chat-agent-card") {
+            // One agent back with a report longer than the card shows; one
+            // sent to the background and still out there.
+            claudeCall("agent-audit", "Task", ["description": "Audit the chat timeline", "subagent_type": "Explore", "model": "haiku",
+                                               "prompt": "Read ChatTimelineModels.swift and report which calls fold into a run.\nList every guard that keeps a call out of a run.\nKeep the report under two hundred words."])
+            claudeResult("agent-audit", "# Timeline audit\n\n- Reads, greps and lists fold once three are in a row\n- A change row splits the run\n- Phren calls keep their card\n- Background jobs stay out\n- Failed calls stay out\n- Pictured results stay out\n- Card kinds stay out\n- Runs re-group when expanded\n- Nothing else folds\n\nFinal audit marker: no gaps found.\n\nagentId: fixture-audit (for resuming)")
+            claudeCall("agent-tests", "Task", ["description": "Run the full test suite", "subagent_type": "general-purpose", "name": "tester", "run_in_background": true,
+                                               "prompt": "Run swift test in PhrenKit and the simulator suite; report failures only."])
+            claudeResult("agent-tests", "Async agent launched successfully.\nagentId: fixture-tests (for resuming)\noutput_file: /tmp/phren-fixture/tester.txt")
+        }
+        if flag("--chat-todos") {
+            // The first list has an item the second dropped, so a test can
+            // tell the folded list's rows from the latest list's.
+            let first: [[String: Any]] = [["content": "Sketch the card", "status": "pending", "activeForm": "Sketching the card"],
+                                          ["content": "Draw the checklist", "status": "pending", "activeForm": "Drawing the checklist"],
+                                          ["content": "Fold superseded lists", "status": "pending", "activeForm": "Folding superseded lists"]]
+            claudeCall("todo-1", "TodoWrite", ["todos": first])
+            claudeResult("todo-1", "Todos have been modified successfully.")
+            append("assistant", "Working through the list.")
+            let second: [[String: Any]] = [["content": "Parse the todo tool", "status": "completed", "activeForm": "Parsing the todo tool"],
+                                           ["content": "Draw the checklist", "status": "completed", "activeForm": "Drawing the checklist"],
+                                           ["content": "Fold superseded lists", "status": "completed", "activeForm": "Folding superseded lists"],
+                                           ["content": "Write the UI test", "status": "in_progress", "activeForm": "Writing the UI test"],
+                                           ["content": "Update the changelog", "status": "pending", "activeForm": "Updating the changelog"]]
+            claudeCall("todo-2", "TodoWrite", ["todos": second])
+            claudeResult("todo-2", "Todos have been modified successfully.")
+            claudeCall("task-1", "TaskCreate", ["subject": "Verify the cards on a device", "description": "Open a real Claude session and read the cards."])
+            claudeResult("task-1", "Task #1 created successfully")
+        }
+        if flag("--chat-plan-mode") {
+            claudeCall("plan-enter", "EnterPlanMode", [:])
+            claudeResult("plan-enter", "Entered plan mode. Explore and design before writing code.")
+            claudeCall("plan-exit", "ExitPlanMode", ["plan": planMarkdown])
+            // Claude Code writes the call before asking; the answer arrives
+            // as its result.
+            if answered, denied { claudeResult("plan-exit", "The user doesn't want to proceed with this tool use. The tool use was rejected.", error: true) }
+            else if answered { claudeResult("plan-exit", "User has approved your plan. You can now start coding.") }
+        }
+        if flag("--chat-web-tools") {
+            // A fetch and a search, done; a reply between them and the next
+            // fetch (still out) so the pair does not fold into a read run.
+            claudeCall("web-fetch", "WebFetch", ["url": "https://developer.apple.com/documentation/swiftui/scrollview?language=swift",
+                                                 "prompt": "Summarize how nested scroll views hand off scrolling."])
+            claudeResult("web-fetch", "# ScrollView\n\nA scrollable view.\n\n" + (1...14).map { "Fetched line \($0): nested scroll views hand the gesture to the inner view first." }.joined(separator: "\n")
+                + "\n\nSee [ScrollViewReader](https://developer.apple.com/documentation/swiftui/scrollviewreader).\n\nFinal fetched marker line.")
+            let links = String(decoding: try JSONSerialization.data(withJSONObject: [
+                ["title": "ScrollView | Apple Developer Documentation", "url": "https://developer.apple.com/documentation/swiftui/scrollview"],
+                ["title": "Nested ScrollViews in SwiftUI", "url": "https://example.org/nested-scrollviews"]]), as: UTF8.self)
+            claudeCall("web-search", "WebSearch", ["query": "SwiftUI nested ScrollView gesture"])
+            claudeResult("web-search", "Web search results for query: \"SwiftUI nested ScrollView gesture\"\n\nLinks: \(links)\n\nSwiftUI hands a nested scroll to the inner view until it reaches its edge.")
+            append("assistant", "Here is what the documentation says.")
+            claudeCall("web-pending", "WebFetch", ["url": "https://example.org/still/loading", "prompt": "Read the changelog."])
+        }
+        if flag("--chat-skill-chip") {
+            // A skill call between two rounds of looking: the reads fold
+            // either side of it, the chip sits between the runs.
+            for index in 0..<3 {
+                claudeCall("skill-read-\(index)", "Read", ["file_path": "/work/phone/Sources/File\(index).swift"])
+                claudeResult("skill-read-\(index)", "let value = \(index)")
+            }
+            claudeCall("skill-design", "Skill", ["skill": "design", "args": "the chat cards, tighter"])
+            claudeResult("skill-design", "Launching skill: design\n\n# Design pass\n\nTake the screenshot, fix hierarchy and spacing against phren's own conventions.\n\nFinal skill marker line.")
+            for index in 0..<3 {
+                claudeCall("skill-grep-\(index)", "Grep", ["pattern": "phrenCard\(index)", "path": "/work/phone"])
+                claudeResult("skill-grep-\(index)", "PhrenTheme.swift: func phrenCard()")
+            }
+            append("assistant", "Running the design pass now.")
+        }
+        if flag("--chat-mcp-card") {
+            // Three calls to other servers in a row: cards, never a run.
+            claudeCall("mcp-pr", "mcp__github__get_pull_request", ["owner": "alaarab", "repo": "phren", "pull_number": 42,
+                                                                   "filters": ["state": "open", "draft": false], "labels": ["ios", "chat"]])
+            let pull = String(decoding: try JSONSerialization.data(withJSONObject: [
+                "number": 42, "title": "Chat: cards for web, skills and MCP", "state": "open", "user": ["login": "alaarab", "id": 7],
+                "labels": [["name": "ios"], ["name": "chat"]], "additions": 812, "deletions": 40, "mergeable": true, "draft": false]), as: UTF8.self)
+            claudeResult("mcp-pr", pull)
+            claudeCall("mcp-panes", "mcp__herdr__list_panes", ["workspace": "phone"])
+            claudeResult("mcp-panes", "3 panes in phone\n1: codex — Polish the phone app\n2: claude — Review the changes\n3: shell")
+            claudeCall("mcp-merge", "mcp__github__merge_pull_request", ["owner": "alaarab", "repo": "phren", "pull_number": 42])
+            claudeResult("mcp-merge", "Pull request is not mergeable: checks are still running.", error: true)
+        }
         if flag("--chat-secure-links") {
             append("assistant", "[Approve](shortcuts://x)\n\n[Docs](https://example.com)")
         }
@@ -254,6 +364,9 @@ import UIKit
                 ["type": "tool_result", "tool_use_id": "read-shot", "content": [frame, frame]]]]]])
             entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
                 ["type": "text", "text": "Look at these [Image: source: /work/phone/uploads/a.png] [Image: source: /work/phone/uploads/b.png]"]]]]])
+        }
+        if flag("--chat-paragraphs") {
+            append("assistant", "Alpha paragraph opens the reply with a summary of what changed on the project screen.\n\nBravo paragraph explains why `ChatRichText` renders blocks, each copying on its own.\n\nCharlie paragraph closes with what to try next on the phone.\n\n```swift\nlet copied = true\n```")
         }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix in `packages/cli/src/bridge/projects.ts`, using `lsof -Fpcn`:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }

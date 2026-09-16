@@ -375,6 +375,71 @@ final class ChatTimelineTests: XCTestCase {
 
     /// Rows as the Hook writes them, so a `phren_changes` attachment can ride
     /// next to its payload.
+    // MARK: Tool cards (ToolCardKind)
+
+    /// A subagent, a todo list and a plan each get a card, never fold into a
+    /// read run, and a later todo list supersedes the earlier one — settled in
+    /// the grouping pass.
+    func testBookkeepingCallsGetCardsAndTodoListsSupersede() throws {
+        func call(_ id: String, _ name: String, _ input: [String: Any]) throws -> [String: Any] {
+            ["type": "function_call", "call_id": id, "name": name, "arguments": String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)]
+        }
+        func result(_ id: String, _ output: String) -> [String: Any] { ["type": "function_call_output", "call_id": id, "output": output] }
+        var payloads: [[String: Any]] = []
+        for index in 0..<2 {
+            payloads.append(["type": "function_call", "call_id": "r\(index)", "name": "Read", "arguments": "{\"file_path\":\"/a/\(index).swift\"}"])
+            payloads.append(result("r\(index)", "ok"))
+        }
+        payloads.append(try call("t1", "TodoWrite", ["todos": [["content": "A", "status": "pending"]]]))
+        payloads.append(result("t1", "Todos have been modified successfully."))
+        // Two reads, the list, a third read: without the card guard the four
+        // would fold into one run.
+        payloads.append(["type": "function_call", "call_id": "r2", "name": "Read", "arguments": "{\"file_path\":\"/a/2.swift\"}"])
+        payloads.append(result("r2", "ok"))
+        payloads.append(try call("agent", "Task", ["description": "Audit", "prompt": "Look around", "subagent_type": "Explore"]))
+        payloads.append(["type": "message", "role": "assistant", "content": "Waiting for the agent"])
+        payloads.append(result("agent", "# Report\n- fine"))
+        payloads.append(try call("t2", "TodoWrite", ["todos": [["content": "A", "status": "completed"]]]))
+        payloads.append(result("t2", "Todos have been modified successfully."))
+        payloads.append(try call("plan-in", "EnterPlanMode", [:]))
+        payloads.append(result("plan-in", "Entered plan mode."))
+        payloads.append(try call("plan", "ExitPlanMode", ["plan": "# Plan\n1. Do it"]))
+        payloads.append(result("plan", "User has approved your plan."))
+        let entries = ChatTimelineEntry.group(try read(payloads))
+        XCTAssertFalse(entries.contains(where: \.isReadRun), "Cards break a would-be run")
+        let cards = entries.compactMap(\.card)
+        guard cards.count == 5 else { return XCTFail("Expected five cards, got \(cards)") }
+        guard case .todos(let first) = cards[0], case .agent(let agent) = cards[1], case .todos(let second) = cards[2],
+              case .planMode = cards[3], case .plan(let plan) = cards[4] else { return XCTFail("Unexpected card order: \(cards)") }
+        XCTAssertEqual(first.summary, "0 of 1 done"); XCTAssertEqual(second.summary, "1 of 1 done")
+        XCTAssertEqual(entries.filter { $0.card != nil }.map(\.cardSuperseded), [true, false, false, false, false])
+        // The agent's result came after an assistant line and still joined its call.
+        XCTAssertEqual(agent.state, .done); XCTAssertEqual(agent.report, "# Report\n- fine")
+        XCTAssertEqual(entries.first(where: { $0.callID == "agent" })?.messages.count, 2)
+        XCTAssertEqual(plan.state, .approved)
+        XCTAssertNotNil(entries.first(where: { $0.callID == "agent" })?.card?.markdownPreview)
+        XCTAssertNil(entries.first(where: { $0.callID == "t2" })?.card?.markdownPreview)
+    }
+
+    func testBackgroundAgentFinishesOnItsTaskNotification() throws {
+        let launched = "Async agent launched successfully.\nagentId: a1 (for resuming)\noutput_file: /tmp/a1.txt"
+        let notice = "<task-notification>\n<tool-use-id>bg-agent</tool-use-id>\n<status>completed</status>\n<summary>Agent \"tester\" completed</summary>\n</task-notification>"
+        var entries: [[String: Any]] = [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-agent", "name": "Task", "input": ["description": "Run tests", "prompt": "swift test", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-agent", "content": launched]]]]],
+        ]
+        func card(_ entries: [[String: Any]]) throws -> AgentSubagentPresentation? {
+            let messages = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude", "entries": entries]), source: "claude").messages
+            guard case .agent(let agent)? = ChatTimelineEntry.group(messages).first?.card else { return nil }
+            return agent
+        }
+        let running = try XCTUnwrap(card(entries))
+        XCTAssertEqual(running.state, .running); XCTAssertTrue(running.background)
+        entries.append(["line": 2, "raw": ["type": "system", "phrenBackground": true, "message": ["role": "user", "content": notice]]])
+        let done = try XCTUnwrap(card(entries))
+        XCTAssertEqual(done.state, .done); XCTAssertEqual(done.summary, "Agent \"tester\" completed")
+    }
+
     private func readRaw(_ raws: [[String: Any]]) throws -> [AgentChatMessage] {
         try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "totalLines": raws.count,
             "entries": raws.enumerated().map { ["line": $0.offset, "raw": $0.element] }]), source: "codex").messages

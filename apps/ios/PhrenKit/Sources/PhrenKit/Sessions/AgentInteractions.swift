@@ -19,7 +19,7 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
     public var explanation: String? {
         guard let message, !message.isEmpty else { return nil }
         if let input = try? JSONSerialization.jsonObject(with: Data(message.utf8)) as? [String: Any] {
-            for key in ["justification", "description", "command", "cmd"] {
+            for key in ["justification", "description", "command", "cmd", "plan"] {
                 if let text = input[key] as? String, !text.isEmpty { return text }
             }
         }

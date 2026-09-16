@@ -49,6 +49,8 @@ private struct ChatTranscriptRow: View, Equatable {
         #endif
         if let phren = entry.phren {
             PhrenToolCard(presentation: phren, messages: entry.messages)
+        } else if entry.card != nil {
+            ChatToolCard(entry: entry)
         } else if entry.isReadRun {
             ChatReadRun(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
         } else if entry.isActivity {
@@ -120,7 +122,9 @@ private struct ChatMessageRow<Historical: View>: View {
                 let text = displayText
                 if !text.isEmpty && !(text == "[Image attachment]" && inlineImages) {
                     let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
-                    ChatRichText(text: preview.text, cacheKey: "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)").equatable()
+                    ChatRichText(text: preview.text, reply: text, messageID: message.id,
+                                 replyLabel: message.role == .user ? "Copy message" : "Copy reply",
+                                 cacheKey: "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)").equatable()
                     if preview.truncated {
                         Button("Read full message") { openOutput(.init(title: message.role == .user ? "Your message" : "Agent reply", text: text)) }
                             .font(.caption).accessibilityIdentifier("chat-message-full:\(message.id)")
@@ -145,6 +149,8 @@ private struct ChatMessageRow<Historical: View>: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
         .accessibilityIdentifier("chat-message:\(message.id)")
+        // The bubble's menu: pictures, padding, anything that is not a
+        // block. Each block of text has its own, nearer menu that wins.
         .contextMenu {
             Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(message.text) }
             ShareLink(item: message.text)

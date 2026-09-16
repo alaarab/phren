@@ -4,6 +4,11 @@ import SwiftUI
 enum ChatClipboard {
     static func copy(_ text: String) {
         UIPasteboard.general.setItems([["public.utf8-plain-text": text]], options: [.localOnly: true])
+        #if DEBUG && targetEnvironment(simulator)
+        // Tests cannot read the pasteboard (the runner hangs on the paste
+        // prompt); the fixture keeps what was copied instead.
+        if AppRuntime.isUITesting { MainActor.assumeIsolated { AgentChatFixture.report.copied.append(text) } }
+        #endif
     }
 }
 

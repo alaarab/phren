@@ -136,6 +136,7 @@ struct ToolPresentation {
         if ["exec", "parallel"].contains(name) { return "Tools" }
         if name == "LS" { return "List" }
         if name == "WebFetch" { return "Fetch" }
+        if name == "WebSearch" { return "Search" }
         if name == "TodoWrite" { return "Todos" }
         if ["Task", "Agent"].contains(name) { return "Agent" }
         if name.contains("search") || name.contains("web") { return "Browse" }

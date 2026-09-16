@@ -1,5 +1,7 @@
 import Foundation
 
+/// A message as blocks: prose paragraphs (a blank line ends one, so each
+/// is copied and selected on its own), headings, fenced code, pipe tables.
 struct ChatRichTextDocument {
     let blocks: [Block]
     init(_ text: String) { blocks = Self.parse(text) }
@@ -41,6 +43,8 @@ struct ChatRichTextDocument {
             let line = source[index]
             if line.hasPrefix("```") {
                 flush(); language = language == nil ? String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) : nil
+            } else if language == nil, line.allSatisfy(\.isWhitespace) {
+                flush()
             } else if language == nil && line.range(of: #"^#{1,6} "#, options: .regularExpression) != nil {
                 flush()
                 result.append(.init(id: result.count, text: String(line.drop(while: { $0 == "#" || $0 == " " })), language: nil, heading: true))

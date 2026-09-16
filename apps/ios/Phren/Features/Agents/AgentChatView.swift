@@ -112,6 +112,8 @@ struct AgentChatView: View {
     @State private var scrollHeight: CGFloat = 0
     @ScaledMetric(relativeTo: .body) private var composerTextSize = 14.0
     @FocusState private var composing: Bool
+    /// The one paragraph showing native text selection, if any.
+    @State private var textSelection = ChatTextSelection()
     // Recalculate when the keyboard changes the viewport as well as when the
     // transcript moves; either measurement can arrive first during layout.
 
@@ -306,7 +308,7 @@ struct AgentChatView: View {
                 }
                 .accessibilityIdentifier("chat-transcript")
                 .contentShape(Rectangle())
-                .simultaneousGesture(TapGesture().onEnded { composing = false })
+                .simultaneousGesture(TapGesture().onEnded { composing = false; textSelection.transcriptTapped() })
                 .modifier(ChatHistoryScrollObserver { near in
                     if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
                     if near != nearHistoryTop { historyChain = 0 }
@@ -343,6 +345,7 @@ struct AgentChatView: View {
                 .onPreferenceChange(ChatBottomPosition.self) { position in
                     let near = position <= scrollHeight + 60
                     if near != atBottom { atBottom = near }
+                    textSelection.scrolled(to: position)
                 }
                 .overlay {
                     if (model.loading && model.messages.isEmpty) || (model.timeline.isEmpty && !model.messages.isEmpty) {
@@ -367,6 +370,7 @@ struct AgentChatView: View {
                 }
                 .onChange(of: model.target?.id) { _, _ in
                     historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
+                    textSelection.end()
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
                 .onChange(of: model.timeline.last?.id) { _, _ in
@@ -384,6 +388,14 @@ struct AgentChatView: View {
                                  skip: { sendTask = Task { await model.answer(session, approval: approval, approve: false) } }) { answers in
                     guard let updated = try? prompt.answeredInput(input, answers: answers) else { return }
                     sendTask = Task { await model.answer(session, approval: approval, approve: true, updatedInput: updated) }
+                }
+                .id(approval.id)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            } else if let approval = model.approval, let plan = approval.plan {
+                // Claude Code's plan review is a permission request for
+                // ExitPlanMode: Approve plan builds it, Keep planning denies.
+                ChatPlanApprovalCard(plan: plan, id: approval.id, busy: model.answering || !active || !model.interactionConnected) { approve in
+                    sendTask = Task { await model.answer(session, approval: approval, approve: approve) }
                 }
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
@@ -434,6 +446,10 @@ struct AgentChatView: View {
         .confirmsWebLinks()
         .environment(\.openChatDiff) { fullDiff = $0 }
         .environment(\.openToolOutput) { fullToolOutput = $0 }
+        .environment(textSelection)
+        #if DEBUG && targetEnvironment(simulator)
+        .overlay(alignment: .topLeading) { if AgentChatFixture.enabled { ChatFixtureReport() } }
+        #endif
         .overlay {
             if showingAgentSwitcher {
                 ZStack(alignment: .leading) {
@@ -968,6 +984,16 @@ private struct ChatDismissButton: View {
         }.accessibilityLabel("Back").accessibilityIdentifier("chat-close")
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+/// What the chat copied and selected, as a text tests can read.
+private struct ChatFixtureReport: View {
+    var body: some View {
+        Text(AgentChatFixture.report.json).font(.system(size: 1)).frame(width: 1, height: 1)
+            .accessibilityIdentifier("chat-fixture-copied")
+    }
+}
+#endif
 
 private struct ChatHistoryScrollObserver: ViewModifier {
     let changed: (Bool) -> Void

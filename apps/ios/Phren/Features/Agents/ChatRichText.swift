@@ -2,15 +2,29 @@ import PhrenKit
 import SwiftUI
 
 /// Native Markdown paragraphs, fenced code and pipe tables; no remote web content is loaded.
+/// Each prose block has its own hold menu (that paragraph, or the whole
+/// reply) and swaps in native text selection on a double-tap.
 struct ChatRichText: View, Equatable {
     let text: String
-    static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text }
+    /// The whole message the blocks came from, for "Copy reply": `text` may
+    /// be the cut-short preview.
+    let reply: String
+    let messageID: String?
+    let replyLabel: String
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.text == rhs.text && lhs.reply == rhs.reply && lhs.messageID == rhs.messageID }
     @ScaledMetric(relativeTo: .body) private var textSize = 14.5
     @ScaledMetric(relativeTo: .headline) private var headingSize = 15.5
     private let document: ChatRichTextDocument
-    init(text: String, cacheKey: String? = nil) {
+    /// Keys this message's selection state; the message id when there is one.
+    private let owner: String
+    init(text: String, reply: String? = nil, messageID: String? = nil, replyLabel: String = "Copy reply", cacheKey: String? = nil) {
         self.text = text
-        document = ChatRichTextDocumentCache.value(text, key: cacheKey ?? "text:\(text.hashValue)")
+        self.reply = reply ?? text
+        self.messageID = messageID
+        self.replyLabel = replyLabel
+        let key = cacheKey ?? "text:\(text.hashValue)"
+        owner = messageID ?? key
+        document = ChatRichTextDocumentCache.value(text, key: key)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -35,16 +49,87 @@ struct ChatRichText: View, Equatable {
                     }
                     .padding(12).background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(PhrenTheme.border, lineWidth: 1))
+                    .contextMenu {
+                        Button("Copy table", systemImage: "tablecells") {
+                            ChatClipboard.copy(block.rows.map { $0.joined(separator: " | ") }.joined(separator: "\n"))
+                        }
+                        Button(replyLabel, systemImage: "doc.on.doc") { ChatClipboard.copy(reply) }
+                        ShareLink(item: reply)
+                    }
                 } else {
-                    Text(ChatInlineCode.tinted(block.attributed))
-                        .font(.system(size: block.heading ? headingSize : textSize, weight: block.heading ? .semibold : .regular, design: .monospaced))
-                        .foregroundStyle(PhrenTheme.chatText)
-                        .lineSpacing(3).tint(PhrenTheme.link)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    ChatParagraph(block: block, owner: owner, messageID: messageID, reply: reply, replyLabel: replyLabel,
+                                  size: block.heading ? headingSize : textSize)
                 }
             }
         }
     }
+}
+
+/// One prose block. Hold for its own menu; double-tap for native selection:
+/// `ChatSelectableText` lies over this Text at the same frame, the word
+/// under the finger already selected, until a tap anywhere else, a scroll,
+/// or Done. The Text stays in the layout, invisible, so nothing moves.
+private struct ChatParagraph: View {
+    let block: ChatRichTextDocument.Block
+    let owner: String
+    let messageID: String?
+    let reply: String
+    let replyLabel: String
+    let size: CGFloat
+    @Environment(ChatTextSelection.self) private var selection: ChatTextSelection?
+    var body: some View {
+        let selecting = selection?.target(owner, block.id)
+        Text(ChatInlineCode.tinted(block.attributed))
+            .font(.system(size: size, weight: block.heading ? .semibold : .regular, design: .monospaced))
+            .foregroundStyle(PhrenTheme.chatText)
+            .lineSpacing(3).tint(PhrenTheme.link)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .opacity(selecting == nil ? 1 : 0)
+            .accessibilityHidden(selecting != nil)
+            // A double-tap alone: single taps on links inside keep their speed.
+            .onTapGesture(count: 2) { point in selection?.begin(owner: owner, block: block.id, at: point) }
+            .contextMenu {
+                Button("Copy paragraph", systemImage: "text.quote") { ChatClipboard.copy(block.text) }
+                Button("Select text", systemImage: "character.cursor.ibeam") { selection?.begin(owner: owner, block: block.id, at: nil) }
+                Button(replyLabel, systemImage: "doc.on.doc") { ChatClipboard.copy(reply) }
+                ShareLink(item: reply)
+            }
+            .overlay {
+                if let selecting {
+                    ChatSelectableText(attributed: ChatInlineCode.tinted(block.attributed), heading: block.heading, size: size,
+                                       point: selecting.point, identifier: "chat-selectable:\(messageID ?? owner):\(block.id)",
+                                       touched: { selection?.noteTouchInside() },
+                                       resigned: { selection?.end(owner: owner, block: block.id) })
+                }
+            }
+            // Done sits in the paragraph's own bottom-right corner, the
+            // one spot that is usually blank (a last line rarely fills).
+            .overlay(alignment: .bottomTrailing) {
+                if selecting != nil {
+                    Button("Done") { selection?.end() }
+                        .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.chatText)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(PhrenTheme.surfaceRaised, in: Capsule())
+                        .overlay(Capsule().strokeBorder(PhrenTheme.border, lineWidth: 1))
+                        .accessibilityIdentifier("chat-selectable-done")
+                }
+            }
+            // Tests find a paragraph by this marker, not by an identifier on
+            // the Text (which would hide the links inside it). It sits a few
+            // points in from the corner, on the first word, where a press
+            // lands inside the paragraph at every text size; VoiceOver never
+            // meets it.
+            .overlay(alignment: .topLeading) {
+                if let messageID, Self.testing {
+                    Color.clear.frame(width: 1, height: 1).padding(4).allowsHitTesting(false)
+                        .accessibilityElement()
+                        .accessibilityLabel(block.heading ? "Heading" : "Paragraph")
+                        .accessibilityIdentifier("chat-paragraph:\(messageID):\(block.id)")
+                }
+            }
+    }
+    private static let testing = AppRuntime.isUITesting
 }
 
 /// A fenced block is just the code: no title bar. Press and hold copies it

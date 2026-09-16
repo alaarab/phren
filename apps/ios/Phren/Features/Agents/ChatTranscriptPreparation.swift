@@ -29,6 +29,10 @@ struct ChatTranscriptPreparation {
             let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
             _ = ChatRichTextDocumentCache.value(preview.text, key: "\(message.renderKey)|\(inline)|[]|-1")
         }
+        // A card's markdown — an agent's report, a plan — parsed here, off-main.
+        for entry in entries {
+            if let preview = entry.card?.markdownPreview { _ = ChatRichTextDocumentCache.value(preview.text, key: entry.cardMarkdownKey) }
+        }
         jobs = ChatBackgroundJobs.parse(messages, firstSeen: firstSeen, finishedSeen: finishedSeen,
                                         now: now, includeExpired: true)
         for job in jobs {

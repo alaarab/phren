@@ -7,6 +7,11 @@ struct ChatTimelineEntry: Identifiable, Equatable {
     var messages: [AgentChatMessage]
     var kind: Kind = .message
     var phren: PhrenToolPresentation? = nil
+    /// A card of its own for the agent's bookkeeping calls; nil for the pill.
+    var card: ToolCardKind? = nil
+    /// A whole-list card (todos) that a later call replaced: shown folded
+    /// to one line. Settled once in the grouping pass, never per row.
+    var cardSuperseded = false
     var id: String { messages[0].id }
     var isActivity: Bool { kind != .message }
     var isReadRun: Bool { kind == .readRun }
@@ -15,17 +20,23 @@ struct ChatTimelineEntry: Identifiable, Equatable {
         var entries: [Self] = []
         var previousMessageID: String?
         var calls: [String: Int] = [:], ambiguous: Set<String> = []
+        // A background agent's completion, by the call it answers.
+        var notifications: [String: String] = [:]
         for message in messages {
             // Completion metadata feeds the pinned Background panel. It is
             // transport state, not another conversation card.
-            if message.role == .tool, message.title == "Background notification" { continue }
+            if message.role == .tool, message.title == "Background notification" {
+                if let id = ChatBackgroundJobs.notificationCallID(message.text) { notifications[id] = message.text }
+                continue
+            }
             guard message.role == .tool else {
                 entries.append(.init(messages: [message], kind: .message))
                 // Phren's result may follow an assistant progress line. Keep
                 // only its unanswered calls; ordinary tool grouping retains
                 // the existing conversation barriers.
                 calls = calls.filter { _, index in
-                    PhrenToolPresentation.recognizes(entries[index].messages.first?.title)
+                    let title = entries[index].messages.first?.title
+                    return (PhrenToolPresentation.recognizes(title) || ToolCardKind.recognizes(title))
                         && !entries[index].messages.contains(where: \.isToolResult)
                 }
                 ambiguous.formIntersection(calls.keys)
@@ -57,9 +68,20 @@ struct ChatTimelineEntry: Identifiable, Equatable {
             previousMessageID = message.id
         }
         for index in entries.indices {
-            guard let call = entries[index].messages.first, PhrenToolPresentation.recognizes(call.title) else { continue }
+            guard let call = entries[index].messages.first, call.role == .tool, !call.isToolResult else { continue }
             let result = entries[index].messages.first(where: \.isToolResult)
-            entries[index].phren = PhrenToolPresentation(name: call.title ?? "", input: call.text, result: result?.text, isError: result?.isToolError == true)
+            if PhrenToolPresentation.recognizes(call.title) {
+                entries[index].phren = PhrenToolPresentation(name: call.title ?? "", input: call.text, result: result?.text, isError: result?.isToolError == true)
+            } else if ToolCardKind.recognizes(call.title) {
+                entries[index].card = ToolCardKind(call: call, result: result, notification: call.toolCallID.flatMap { notifications[$0] })
+            }
+        }
+        // Which todo lists a later call replaced — once, for the whole timeline.
+        let lists = entries.map { entry -> AgentTodoPresentation? in
+            if case .todos(let list) = entry.card { return list } else { return nil }
+        }
+        for (index, superseded) in AgentTodoPresentation.superseded(lists).enumerated() where superseded {
+            entries[index].cardSuperseded = true
         }
         return foldingReads ? foldReadRuns(entries) : entries
     }
@@ -94,7 +116,9 @@ enum ReadOnlyToolCall {
         guard !messages.contains(where: \.isChange), let result = messages.first(where: \.isToolResult),
               !failed(result), result.resultImages.isEmpty,
               let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
-        guard !PhrenToolPresentation.recognizes(call.title), !ChatBackgroundJobs.isBackground(call) else { return false }
+        guard !PhrenToolPresentation.recognizes(call.title), !ToolCardKind.interruptsRun(call.title), !ChatBackgroundJobs.isBackground(call) else { return false }
+        // A web fetch or search is looking around too: three in a row fold.
+        if WebToolPresentation.recognizes(call.title) { return true }
         let presentation = ToolPresentationCache.value(call)
         switch presentation.title {
         case "Read", "Browse", "List": return true
@@ -130,6 +154,75 @@ enum ReadOnlyToolCall {
             if first == "git" { return words.count > 1 && ["diff", "log", "status", "show"].contains(words[1].lowercased()) }
             if first == "sed" { return words.dropFirst().contains { $0 == "-n" || ($0.hasPrefix("-") && $0.contains("n") && !$0.contains("i")) } }
             return ["cat", "head", "tail", "grep", "rg", "ls", "find", "wc", "echo", "pwd", "which", "type"].contains(first)
+        }
+    }
+}
+
+/// The agent's own bookkeeping calls, each with a card of its own instead of
+/// the generic pill. One case per card family; `ChatToolCard` draws them.
+/// To add a card: a PhrenKit presentation, a case here (recognized, built
+/// in `init`), and a view in the `ChatToolCard` switch.
+enum ToolCardKind: Equatable {
+    /// A subagent: Claude Code's Task/Agent, Codex's spawn_agent.
+    case agent(AgentSubagentPresentation)
+    /// A checklist: TodoWrite, TaskCreate/TaskUpdate/TaskList, update_plan.
+    case todos(AgentTodoPresentation)
+    /// ExitPlanMode: the plan, awaiting review or answered.
+    case plan(AgentPlanPresentation)
+    /// EnterPlanMode: a one-line mode change.
+    case planMode
+    /// WebFetch / WebSearch: where the agent went, the result as Markdown.
+    case web(WebToolPresentation)
+    /// Claude Code's Skill tool: an inline chip, what it loaded behind a tap.
+    case skill(SkillCallPresentation)
+    /// `mcp__<server>__<tool>` for any server but phren.
+    case mcp(MCPToolPresentation)
+
+    static func recognizes(_ name: String?) -> Bool {
+        AgentSubagentPresentation.recognizes(name) || AgentTodoPresentation.recognizes(name)
+            || AgentPlanPresentation.recognizes(name) || AgentPlanPresentation.isPlanMode(name)
+            || WebToolPresentation.recognizes(name) || SkillCallPresentation.recognizes(name) || MCPToolPresentation.recognizes(name)
+    }
+
+    /// A card that is a visible event — a skill, an MCP call, an agent —
+    /// ends a read run. A fetch or search is still the agent looking
+    /// around: it folds with reads when three are in a row, and keeps its
+    /// card inside the expanded run.
+    static func interruptsRun(_ name: String?) -> Bool {
+        recognizes(name) && !WebToolPresentation.recognizes(name)
+    }
+
+    /// `notification`: a background agent's `<task-notification>`, when one
+    /// has arrived for this call.
+    init?(call: AgentChatMessage, result: AgentChatMessage?, notification: String? = nil) {
+        let name = call.title ?? "", failed = result?.isToolError == true
+        if let agent = AgentSubagentPresentation(name: name, input: call.text, result: result?.text, isError: failed, notification: notification) {
+            self = .agent(agent)
+        } else if let todos = AgentTodoPresentation(name: name, input: call.text, result: result?.text) {
+            self = .todos(todos)
+        } else if let plan = AgentPlanPresentation(name: name, input: call.text, result: result?.text, isError: failed) {
+            self = .plan(plan)
+        } else if AgentPlanPresentation.isPlanMode(name) {
+            self = .planMode
+        } else if let web = WebToolPresentation(name: name, input: call.text, result: result?.text, isError: failed) {
+            self = .web(web)
+        } else if let skill = SkillCallPresentation(name: name, input: call.text, result: result?.text, isError: failed) {
+            self = .skill(skill)
+        } else if let mcp = MCPToolPresentation(name: name, input: call.text, result: result?.text, isError: failed) {
+            self = .mcp(mcp)
+        } else { return nil }
+    }
+
+    /// The markdown a card renders, cut to what the row shows — the agent's
+    /// report, the plan — so the preparation pass can parse it ahead of the
+    /// row under `ChatTimelineEntry.cardMarkdownKey`. The full text opens in
+    /// the reader.
+    var markdownPreview: ToolOutputPreview? {
+        switch self {
+        case .agent(let agent): return agent.report.isEmpty ? nil : ToolOutputPreview(agent.report, lines: 8, characters: 1_000)
+        case .plan(let plan): return plan.plan.isEmpty ? nil : ToolOutputPreview(plan.plan, lines: 14, characters: 2_000)
+        case .web(let web): return web.resultMarkdown.map { ToolOutputPreview($0, lines: WebToolPresentation.previewLines, characters: 4_000) }
+        default: return nil
         }
     }
 }
@@ -240,6 +333,8 @@ enum ChatBackgroundJobs {
             || text.range(of: #"[\"']?yield_time-ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
             || text.range(of: #"[\"']?yield_time_ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
     }
+    /// The call a `<task-notification>` answers.
+    static func notificationCallID(_ text: String) -> String? { tag("tool-use-id", in: text) }
     private static func tag(_ name: String, in text: String) -> String? {
         guard let open = text.range(of: "<\(name)>"), let close = text.range(of: "</\(name)>", range: open.upperBound..<text.endIndex) else { return nil }
         return String(text[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)

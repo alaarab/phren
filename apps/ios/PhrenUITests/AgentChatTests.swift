@@ -51,6 +51,204 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testWebFetchAndSearchCardsShowWhereTheAgentWentAndOpenTheResult() {
+        let app = launch(extra: ["--chat-web-tools"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let fetch = app.buttons["chat-web-card:web-fetch"], search = app.buttons["chat-web-card:web-search"], pending = app.buttons["chat-web-card:web-pending"]
+        for card in [pending, search, fetch] {
+            for _ in 0..<8 where !card.isHittable { transcript.swipeDown() }
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+        }
+        XCTAssertTrue(fetch.label.contains("developer.apple.com/documentation/swiftui/scrollview"), fetch.label)
+        XCTAssertFalse(fetch.label.contains("?language="), "Host and path only while folded")
+        XCTAssertTrue(search.label.contains("“SwiftUI nested ScrollView gesture”"), search.label)
+        XCTAssertTrue(pending.label.contains("example.org/still/loading"), pending.label)
+        for card in [fetch, search, pending] { XCTAssertFalse(card.label.contains("{"), "No raw JSON on a folded card") }
+        XCTAssertEqual(fetch.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists, "A reply between the web calls: no run")
+        XCTAssertFalse(app.staticTexts["chat-web-prompt:web-fetch"].exists)
+        capture(app, "Web fetch and search cards folded")
+        fetch.tap()
+        XCTAssertEqual(fetch.value as? String, "Expanded")
+        XCTAssertTrue(app.staticTexts["chat-web-prompt:web-fetch"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Fetched line 1:")).firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Final fetched marker line")).firstMatch.exists, "Twelve lines, then Read all")
+        capture(app, "Web fetch card expanded")
+        let readAll = app.buttons["chat-web-read-all:web-fetch"]
+        for _ in 0..<4 where !readAll.isHittable { transcript.swipeUp() }
+        XCTAssertTrue(readAll.waitForExistence(timeout: 5)); XCTAssertEqual(readAll.label, "Read all")
+        readAll.tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final fetched marker line")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+        // The search's sources read as links, not as Claude Code's JSON line.
+        for _ in 0..<8 where !search.isHittable { transcript.swipeDown() }
+        search.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Nested ScrollViews in SwiftUI")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Links: [")).firstMatch.exists)
+        capture(app, "Web search card expanded")
+    }
+
+    @MainActor
+    func testSkillCallsAreChipsBetweenRunsAndOpenWhatTheyLoaded() {
+        let app = launch(extra: ["--chat-skill-chip"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let chip = app.buttons["chat-skill-chip:skill-design"]
+        for _ in 0..<8 where !chip.isHittable { transcript.swipeDown() }
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertTrue(chip.label.contains("/design"), chip.label); XCTAssertTrue(chip.label.contains("the chat cards, tighter"), chip.label)
+        XCTAssertFalse(chip.label.contains("{"))
+        XCTAssertLessThanOrEqual(chip.frame.height, 44, "A chip, not a card")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Design pass")).firstMatch.exists, "What the skill loaded stays behind the tap")
+        // Three reads before it and three greps after it: the skill is the
+        // visible event between two folded runs.
+        let runs = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:"))
+        XCTAssertTrue(runs.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(runs.count, 2, "A skill call ends the run")
+        XCTAssertGreaterThan(chip.frame.minY, runs.element(boundBy: 0).frame.minY)
+        XCTAssertLessThan(chip.frame.minY, runs.element(boundBy: 1).frame.minY)
+        capture(app, "Skill chip between two read runs")
+        chip.tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final skill marker line")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+    }
+
+    @MainActor
+    func testOtherMCPServersGetCardsWithServerVerbRowsAndResult() {
+        let app = launch(extra: ["--chat-mcp-card"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let pull = app.buttons["chat-mcp-card:mcp-pr"], panes = app.buttons["chat-mcp-card:mcp-panes"], merge = app.buttons["chat-mcp-card:mcp-merge"]
+        for card in [merge, panes, pull] {
+            for _ in 0..<8 where !card.isHittable { transcript.swipeDown() }
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+        }
+        for text in ["GitHub", "Get pull request", "alaarab", "pull number", "42", "2 items", "{2 fields}", "title: Chat: cards for web, skills and MCP", "state: open"] {
+            XCTAssertTrue(pull.label.contains(text), "\(text) missing from \(pull.label)")
+        }
+        for text in ["Herdr", "List panes", "workspace", "3 panes in phone", "2: claude — Review the changes"] {
+            XCTAssertTrue(panes.label.contains(text), "\(text) missing from \(panes.label)")
+        }
+        XCTAssertTrue(merge.label.contains("Merge pull request")); XCTAssertTrue(merge.label.contains("not mergeable"), merge.label)
+        // Nested values read as their size, never as JSON.
+        for card in [pull, panes, merge] { XCTAssertFalse(card.label.contains("{\""), card.label); XCTAssertFalse(card.label.contains("\":"), card.label) }
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists, "MCP calls never fold")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-tool-group:")).firstMatch.exists, "Cards, not pills")
+        capture(app, "Cards for other MCP servers")
+        pull.tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "pull_number")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+    }
+
+    // MARK: Tool cards — subagents, todos, plan mode
+
+    @MainActor
+    func testSubagentCardShowsReportStateAndPrompt() {
+        let app = launch(extra: ["--chat-agent-card"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 8))
+        let audit = app.descendants(matching: .any).matching(identifier: "chat-agent-card:agent-audit").firstMatch
+        XCTAssertTrue(audit.waitForExistence(timeout: 8))
+        XCTAssertTrue(audit.label.contains("Explore")); XCTAssertTrue(audit.label.contains("Audit the chat timeline")); XCTAssertTrue(audit.label.contains("done"))
+        XCTAssertTrue(app.staticTexts["haiku"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Reads, greps and lists fold")).firstMatch.exists)
+        let tests = app.descendants(matching: .any).matching(identifier: "chat-agent-card:agent-tests").firstMatch
+        XCTAssertTrue(tests.exists); XCTAssertTrue(tests.label.contains("tester")); XCTAssertTrue(tests.label.contains("running"))
+        XCTAssertTrue(app.staticTexts["background"].exists)
+        XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON on a card")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "subagent_type")).firstMatch.exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-read-run:")).firstMatch.exists)
+        capture(app, "Subagent cards")
+        // The report is cut to a screenful; the reader has the rest.
+        let full = app.buttons["chat-agent-report:agent-audit"]
+        XCTAssertTrue(full.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final audit marker")).firstMatch.exists)
+        full.tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final audit marker")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+        // The prompt stays behind a tap.
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Read ChatTimelineModels.swift")).firstMatch.exists)
+        app.buttons["chat-agent-prompt:agent-audit"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Read ChatTimelineModels.swift")).firstMatch.waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    func testTodoCardsFoldTheEarlierListAndShowTheLatest() {
+        let app = launch(extra: ["--chat-todos"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.scrollViews["chat-transcript"].waitForExistence(timeout: 8))
+        let latest = app.descendants(matching: .any).matching(identifier: "chat-todo-card:todo-2").firstMatch
+        XCTAssertTrue(latest.waitForExistence(timeout: 8))
+        XCTAssertTrue(latest.label.contains("Todos, 3 of 5 done")); XCTAssertFalse(latest.label.contains("replaced"))
+        XCTAssertTrue(app.staticTexts["Write the UI test"].exists)
+        XCTAssertTrue(app.staticTexts["Update the changelog"].exists)
+        let earlier = app.descendants(matching: .any).matching(identifier: "chat-todo-card:todo-1").firstMatch
+        XCTAssertTrue(earlier.exists); XCTAssertTrue(earlier.label.contains("Todos, 0 of 3 done, replaced by a later list"))
+        // The earlier list is one line until tapped: its items are not laid out.
+        XCTAssertFalse(app.staticTexts["Sketch the card"].exists)
+        let task = app.descendants(matching: .any).matching(identifier: "chat-todo-card:task-1").firstMatch
+        XCTAssertTrue(task.exists); XCTAssertTrue(task.label.contains("Tasks, 0 of 1 done"))
+        XCTAssertTrue(app.staticTexts["Verify the cards on a device"].exists)
+        XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON on a card")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "activeForm")).firstMatch.exists)
+        capture(app, "Todo cards")
+        let folded = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Todos, 0 of 3 done")).firstMatch
+        for _ in 0..<6 where !folded.isHittable { app.scrollViews["chat-transcript"].swipeDown() }
+        XCTAssertTrue(folded.waitForExistence(timeout: 5))
+        folded.tap()
+        XCTAssertTrue(app.staticTexts["Sketch the card"].waitForExistence(timeout: 3))
+    }
+
+    /// Plan mode: EnterPlanMode is a one-line chip, ExitPlanMode a card with
+    /// the plan, and the pending review a card whose Approve plan answers the
+    /// permission request.
+    @MainActor
+    func testPlanReviewCardApprovesFromTheChat() {
+        let app = launch(extra: ["--chat-plan-mode"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let approve = app.buttons["chat-plan-approve"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["chat-plan-keep"].exists)
+        XCTAssertTrue(app.staticTexts["Plan ready for review"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Parse the Task tool in PhrenKit")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Approve"].exists); XCTAssertFalse(app.staticTexts["Permission needed"].exists)
+        XCTAssertEqual(rawJSONTexts(app).count, 0, "No raw JSON on a card")
+        let chip = app.descendants(matching: .any).matching(identifier: "chat-plan-mode:plan-enter").firstMatch
+        XCTAssertTrue(chip.exists); XCTAssertTrue(chip.label.contains("Entered plan mode"))
+        let timeline = app.descendants(matching: .any).matching(identifier: "chat-plan-card:plan-exit").firstMatch
+        XCTAssertTrue(timeline.exists); XCTAssertTrue(timeline.label.contains("Awaiting your answer"))
+        // The timeline card is folded while the review card carries the plan.
+        XCTAssertFalse(app.buttons["chat-plan-full:plan-exit"].exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Parse the Task tool in PhrenKit")).count, 1)
+        capture(app, "Plan review card")
+        // The plan is cut to a screenful; the reader has the rest.
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final step marker")).firstMatch.exists)
+        app.buttons["chat-plan-full:fixture-plan-action"].tap()
+        XCTAssertTrue(app.buttons["chat-tool-output-done"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final step marker")).firstMatch.exists)
+        app.buttons["chat-tool-output-done"].tap()
+        XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        approve.tap()
+        XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
+        XCTAssertFalse(approve.exists)
+        XCTAssertFalse(app.staticTexts["Permission denied in this conversation."].exists, "Approve plan approves")
+        let approved = app.descendants(matching: .any).matching(identifier: "chat-plan-card:plan-exit").firstMatch
+        XCTAssertTrue(approved.waitForExistence(timeout: 5)); XCTAssertTrue(approved.label.contains("Approved"))
+        // Answered, the timeline card shows the plan itself.
+        XCTAssertTrue(app.buttons["chat-plan-full:plan-exit"].waitForExistence(timeout: 5))
+        capture(app, "Plan approved")
+    }
+
+    @MainActor
     func testClaudePastedImageReplacesPendingTwinAndHidesImageTokens() {
         let app = launch(extra: ["--chat-claude-image", "--chat-working"])
         app.buttons["live-chat:w7:w7:t9"].tap()
@@ -971,6 +1169,79 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Native code card and stopped turn")
     }
 
+    /// Holding a paragraph offers that paragraph, not the bubble's whole
+    /// message; a double-tap swaps in native selection with the word under
+    /// the finger, and a tap elsewhere puts the paragraph back.
+    @MainActor
+    func testParagraphMenuCopiesOneParagraphAndDoubleTapSelectsItsWord() {
+        let app = launch(extra: ["--chat-paragraphs"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let any = app.descendants(matching: .any)
+        let first = any["chat-paragraph:2:0:0"], second = any["chat-paragraph:2:0:1"], third = any["chat-paragraph:2:0:2"]
+        XCTAssertTrue(third.waitForExistence(timeout: 8), "Blank lines split the reply into paragraphs")
+        XCTAssertTrue(any["chat-code-block"].firstMatch.exists, "The code block keeps its own hold-to-copy")
+        let report = app.staticTexts["chat-fixture-copied"]
+        func reported() -> [String: Any] {
+            (try? JSONSerialization.jsonObject(with: Data(report.label.utf8)) as? [String: Any]) ?? [:]
+        }
+        // A few points in from a paragraph's top-left corner is its first
+        // word, at every text size: where the hold and the double-tap land.
+        func start(_ paragraph: XCUIElement) -> XCUICoordinate {
+            paragraph.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 5, dy: 5))
+        }
+        start(second).press(forDuration: 1.0)
+        let copyParagraph = app.buttons["Copy paragraph"]
+        XCTAssertTrue(copyParagraph.waitForExistence(timeout: 5), "The paragraph's menu, above the bubble's")
+        XCTAssertTrue(app.buttons["Select text"].exists)
+        XCTAssertTrue(app.buttons["Copy reply"].exists)
+        XCTAssertFalse(app.buttons["Copy message"].exists, "The bubble's menu does not show for a paragraph")
+        capture(app, "Paragraph menu")
+        copyParagraph.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (reported()["copied"] as? [String])?.isEmpty == false
+        }, object: report)], timeout: 5), .completed)
+        XCTAssertEqual(reported()["copied"] as? [String], ["Bravo paragraph explains why `ChatRichText` renders blocks, each copying on its own."],
+                       "Only the held paragraph, as plain Markdown")
+
+        start(third).doubleTap()
+        let selectable = any["chat-selectable:2:0:2"]
+        XCTAssertTrue(selectable.waitForExistence(timeout: 5), "The double-tapped paragraph becomes native text")
+        XCTAssertFalse(any["chat-selectable:2:0:1"].exists, "Only one paragraph is selectable")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            reported()["selected"] as? String == "Charlie"
+        }, object: report)], timeout: 5), .completed, "The word under the double-tap starts selected: \(reported())")
+        XCTAssertTrue((selectable.value as? String ?? "").hasPrefix("Charlie paragraph"), "The native view carries the paragraph's text")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Selecting never raises the keyboard")
+        XCTAssertTrue(app.buttons["chat-selectable-done"].exists)
+        capture(app, "Word selected in place")
+        // Holding the native text gives the system's own menu, not the
+        // paragraph's.
+        selectable.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).press(forDuration: 1.0)
+        XCTAssertFalse(app.buttons["Copy paragraph"].waitForExistence(timeout: 1.5), "The selectable text keeps its native menu")
+
+        start(first).tap()
+        // The system menu, when it is up, takes the first tap for itself.
+        if !selectable.waitForNonExistence(timeout: 2) { start(first).tap() }
+        XCTAssertTrue(selectable.waitForNonExistence(timeout: 5), "A tap elsewhere puts the paragraph back")
+        XCTAssertTrue(third.exists)
+        XCTAssertFalse(app.buttons["chat-selectable-done"].exists)
+
+        // The menu's "Select text" starts from the whole paragraph; Done ends it.
+        start(first).press(forDuration: 1.0)
+        let select = app.buttons["Select text"]
+        XCTAssertTrue(select.waitForExistence(timeout: 5)); select.tap()
+        let whole = any["chat-selectable:2:0:0"]
+        XCTAssertTrue(whole.waitForExistence(timeout: 5))
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (reported()["selected"] as? String)?.hasPrefix("Alpha paragraph opens") == true
+        }, object: report)], timeout: 5), .completed, "Select text starts with the whole paragraph: \(reported())")
+        let done = app.buttons["chat-selectable-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 3))
+        done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        if !whole.waitForNonExistence(timeout: 2) { done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        XCTAssertTrue(whole.waitForNonExistence(timeout: 5), "Done puts the paragraph back")
+    }
+
     @MainActor private func attachImage(_ app: XCUIApplication) {
         app.buttons["Add attachment"].tap()
         XCTAssertTrue(app.buttons["Add test image"].waitForExistence(timeout: 5))
@@ -1215,6 +1486,11 @@ final class AgentChatTests: XCTestCase {
         host.tap()
         XCTAssertTrue(app.buttons["live-chat:w7:w7:t9"].waitForExistence(timeout: 10))
         return app
+    }
+    /// Texts showing a brace — tool JSON leaking onto a card. The fixture's
+    /// own 1-point report of what was copied is JSON by design.
+    @MainActor private func rawJSONTexts(_ app: XCUIApplication) -> XCUIElementQuery {
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND identifier != %@", "{", "chat-fixture-copied"))
     }
     @MainActor private func capture(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)

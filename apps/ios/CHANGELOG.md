@@ -10,6 +10,28 @@ number counts up on its own.
 
 ### New
 
+- Hold a paragraph to copy only it, or the whole reply; double-tap a word to
+  select it with native handles and copy exactly as much as you want.
+- The agent's own bookkeeping has cards of its own in the chat. A subagent
+  (Claude Code's Task tool) shows who it was, what it was asked, its model,
+  whether it is still out there, and its report — the first screenful, the
+  rest a tap away; its prompt stays behind Show prompt. Todo lists (TodoWrite,
+  TaskCreate, Codex's update_plan) are a checklist with the active item lit
+  and done items struck through; an earlier list a later call replaced folds
+  to one line, "Todos · 3 of 5 done". Plan mode shows "Entered plan mode" as
+  a system line, and a plan ready for review as a card with the plan itself
+  and Approve plan / Keep planning where Claude waits for the answer.
+- Web fetches and searches, skills, and other MCP servers read as
+  themselves in the chat. A fetch or search is a globe card with the page
+  (host and path) or the query; open it for the prompt and the first dozen
+  lines of what came back as Markdown — a search's sources as tappable
+  links — and Read all for the rest. Three in a row still fold into a read
+  run like Reads do. A Skill call is a small "/design" chip with its
+  arguments dimmed; what it loaded opens with a tap, and the chip ends the
+  run either side of it. A call to any other MCP server (GitHub, Herdr…)
+  gets the phren card's shape: the server as a chip, the tool as a verb
+  ("Get pull request"), the input as rows, and the result's first lines
+  with its keys and without the braces; phren's own card is unchanged.
 - Claude Code's questions are answered from the phone. When Claude asks
   (its AskUserQuestion tool), the chat shows the questions as phren's own
   choice cards — header, question, options with their descriptions,
