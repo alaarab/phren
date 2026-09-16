@@ -10,6 +10,12 @@ number counts up on its own.
 
 ### New
 
+- The queued-steer strip is exactly as tall as its rows and sits on the
+  composer, instead of a tall box with the message floating in the middle.
+- A steer that is only a picture clears itself once the picture lands in the
+  conversation, and its row no longer keeps a blank line above "1 attachment".
+- Claude's shortcut tab carries the Shift+Tab permission-mode key, so
+  auto-accept and plan mode are one tap away from the terminal.
 - Code blocks in chat lose their title bar: press and hold copies the block
   (a brief "Copied" flash), a cut-short preview opens with a tap, and the
   language sits faintly in the corner. Inline code — paths, commands,

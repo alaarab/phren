@@ -974,6 +974,13 @@ final class AgentChatTests: XCTestCase {
         let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
         composer.tap(); composer.typeText("First follow-up")
         app.buttons["chat-queue"].tap()
+        // One short steer is one short strip, sitting on the composer — not a
+        // 190pt box with the row floating in the middle of it.
+        let strip = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND elementType != %d", "chat-queue", XCUIElement.ElementType.button.rawValue)).firstMatch
+        XCTAssertTrue(strip.waitForExistence(timeout: 3))
+        XCTAssertLessThan(strip.frame.height, 90, "One queued row must not stretch to the cap")
+        XCTAssertLessThan(composer.frame.minY - strip.frame.maxY, 40, "The queue strip hugs the composer")
         composer.tap(); composer.typeText("Second follow-up")
         app.buttons["chat-queue"].tap()
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "chat-queued-remove:"))

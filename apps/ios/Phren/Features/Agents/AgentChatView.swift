@@ -65,6 +65,11 @@ struct AgentChatView: View {
     /// Opened by the Action button: start listening as soon as the chat is up.
     var startsDictation = false
     @State private var initialized = false
+    @State private var queueHeight: CGFloat = 0
+    private struct ChatQueueHeight: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    }
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -386,13 +391,20 @@ struct AgentChatView: View {
             // Between the transcript and the input, where Claude Code keeps
             // its queue; outside the lazy stack so the rows are always laid out.
             if !model.queue.isEmpty {
-                // As tall as its rows; a scroller only once they pass the cap —
-                // a bare ScrollView would take the whole cap and leave a hole.
-                ViewThatFits(in: .vertical) {
-                    queuedMessages.padding(.horizontal, 12)
-                    ScrollView { queuedMessages.padding(.horizontal, 12) }
+                // Exactly as tall as its rows, and a scroller only once they
+                // pass the cap. (`frame(maxHeight:)` around a ViewThatFits
+                // stretched to the cap and centred the rows in it — the hole
+                // above the steer; a ScrollView that is always there clips
+                // rows the measurement has not caught up with.)
+                let rows = queuedMessages.padding(.horizontal, 12)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: ChatQueueHeight.self, value: geometry.size.height)
+                    })
+                Group {
+                    if queueHeight > 190 { ScrollView { rows }.frame(height: 190) } else { rows }
                 }
-                .frame(maxHeight: 190).padding(.bottom, 2)
+                .onPreferenceChange(ChatQueueHeight.self) { queueHeight = $0 }
+                .padding(.bottom, 2)
             }
             if let preview = dictationPreview {
                 DictationCleanupPreviewCard(
@@ -876,7 +888,9 @@ struct AgentChatView: View {
             ForEach(model.queue) { item in
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
+                        if !item.text.isEmpty {
+                            Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
+                        }
                         if !item.attachments.isEmpty {
                             Text("\(item.attachments.count) attachment\(item.attachments.count == 1 ? "" : "s")")
                                 .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim)

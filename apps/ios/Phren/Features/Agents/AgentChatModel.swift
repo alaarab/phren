@@ -414,8 +414,17 @@ final class AgentChatModel {
         var observed = messages.filter { $0.role == .user && $0.localCommand == nil
             && !reconciledQueueRows.contains($0.id) && !reconciledQueueRows.contains(history.acknowledgementID(for: $0.id)) }
         queue.removeAll { item in
-            guard let after = item.submittedAfterLine, let text = item.submittedText,
-                  let index = observed.firstIndex(where: { $0.line > after && ($0.text == text || (!AgentQueuedMessages.normalizedText(text).isEmpty && AgentQueuedMessages.normalizedText($0.text) == AgentQueuedMessages.normalizedText(text))) }) else { return false }
+            guard let after = item.submittedAfterLine, let text = item.submittedText else { return false }
+            let wanted = AgentQueuedMessages.normalizedText(text)
+            guard let index = observed.firstIndex(where: { row in
+                guard row.line > after else { return false }
+                if row.text == text { return true }
+                let have = AgentQueuedMessages.normalizedText(row.text)
+                if !wanted.isEmpty { return have == wanted }
+                // Pictures with no words of their own: the landed turn is the
+                // image blocks (or the placeholder the parser gives them).
+                return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || row.text == "[Image attachment]")
+            }) else { return false }
             let id = observed.remove(at: index).id
             reconciledQueueRows.insert(id)
             reconciledQueueRows.insert(history.acknowledgementID(for: id))

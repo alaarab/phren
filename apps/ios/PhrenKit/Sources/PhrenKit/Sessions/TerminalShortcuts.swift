@@ -199,15 +199,15 @@ public struct TerminalShortcutPanel: Codable, Equatable, Sendable, Identifiable 
 
 public struct TerminalShortcutPreferences: Codable, Equatable, Sendable {
     public static let storageKey = "terminal.shortcut-panels.v1"
-    public let version: Int
+    public private(set) var version: Int
     public var panels: [TerminalShortcutPanel]
     public var visiblePanels: [TerminalShortcutPanel] { panels.filter(\.enabled) }
-    public init(panels: [TerminalShortcutPanel]) { version = 1; self.panels = panels }
+    public init(panels: [TerminalShortcutPanel]) { version = 2; self.panels = panels }
     public static func defaults(favorites: String = "codex:/model,claude:/compact,copilot:/help") -> Self {
         let providers: [TerminalShortcutPanel] = [.codex, .claude, .copilot].map { id in
             TerminalShortcutPanel(id: id, shortcuts: AgentSlashCommand.menu(source: id.rawValue).map {
                 TerminalShortcut(id: id.rawValue + ":" + $0.name, label: $0.name, hint: $0.detail, kind: .text, value: $0.name + " ")
-            })
+            } + (id == .claude ? [Self.permissionModeShortcut] : []))
         }
         let all = providers.flatMap(\.shortcuts)
         let saved = favorites.split(separator: ",").map(String.init)
@@ -233,10 +233,24 @@ public struct TerminalShortcutPreferences: Codable, Equatable, Sendable {
             TerminalShortcutPanel(id: .tmux, enabled: false, shortcuts: [binding("New window", "Ctrl+b, c"), binding("Next window", "Ctrl+b, n"), binding("Previous window", "Ctrl+b, p"), binding("Choose window", "Ctrl+b, w"), binding("Split vertically", "Ctrl+b, %"), binding("Split horizontally", "Ctrl+b, \""), binding("Zoom pane", "Ctrl+b, z"), binding("Detach", "Ctrl+b, d")])
         ])
     }
+    /// Claude Code cycles its permission mode (default → auto-accept → plan)
+    /// on Shift+Tab; it belongs beside Claude's slash commands, not only in
+    /// the generic keys.
+    public static let permissionModeShortcut = TerminalShortcut(id: "claude:key:permission-mode", label: "⇧ Tab · mode", hint: "Cycle permission mode: auto-accept edits, plan", symbol: "keyboard", kind: .binding, value: "Shift+Tab")
     public static func read(_ data: Data, favorites: String = "codex:/model,claude:/compact,copilot:/help") throws -> Self {
         if data.isEmpty { return defaults(favorites: favorites) }
         guard data.count <= 524_288 else { throw TerminalShortcut.invalid("Saved shortcuts are too large.") }
-        let value = try JSONDecoder().decode(Self.self, from: data); try value.validate(); return value
+        var value = try JSONDecoder().decode(Self.self, from: data)
+        // Layouts saved before the Claude tab carried the mode key get it once;
+        // a later removal by the person stays removed.
+        if value.version == 1 {
+            if let index = value.panels.firstIndex(where: { $0.id == .claude }),
+               !value.panels[index].shortcuts.contains(where: { $0.id == permissionModeShortcut.id }), value.panels[index].shortcuts.count < 64 {
+                value.panels[index].shortcuts.append(permissionModeShortcut)
+            }
+            value.version = 2
+        }
+        try value.validate(); return value
     }
     public func encoded() throws -> Data {
         try validate()
@@ -245,7 +259,7 @@ public struct TerminalShortcutPreferences: Codable, Equatable, Sendable {
         return data
     }
     public func validate() throws {
-        guard version == 1, Set(panels.map(\.id)) == Set(TerminalShortcutPanelID.allCases),
+        guard (1...2).contains(version), Set(panels.map(\.id)) == Set(TerminalShortcutPanelID.allCases),
               panels.count == TerminalShortcutPanelID.allCases.count, !visiblePanels.isEmpty else {
             throw TerminalShortcut.invalid("Keep at least one shortcut panel enabled.")
         }

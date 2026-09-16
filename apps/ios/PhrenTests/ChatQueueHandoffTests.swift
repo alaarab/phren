@@ -23,6 +23,18 @@ final class ChatQueueHandoffTests: XCTestCase {
         XCTAssertEqual(model.queue.map(\.id), [second.id])
     }
 
+    func testAttachmentOnlySteerIsAcknowledgedByItsImageTurn() throws {
+        let model = AgentChatModel()
+        let picture = QueuedMessage(text: "", attachments: [.init(attachment: AgentChatFixture.image)], submittedAfterLine: 0, submittedText: "")
+        let words = QueuedMessage(text: "Look", attachments: [], submittedAfterLine: 0, submittedText: "Look")
+        model.queue = [picture, words]
+        let png = AgentChatFixture.image.data.base64EncodedString()
+        model.accept(try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude",
+            "totalLines": 2, "entries": [["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [
+                ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": png]]]]]]]]), source: "claude"))
+        XCTAssertEqual(model.queue.map(\.id), [words.id], "A picture with no words is matched by the landed image turn, and only that")
+    }
+
     private func frame(line: Int) throws -> AgentChatTranscript {
         try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude",
             "totalLines": line + 1, "entries": [["line": line, "raw": ["type": "user", "phrenQueued": true,
