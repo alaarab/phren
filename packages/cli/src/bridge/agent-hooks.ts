@@ -17,7 +17,34 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; message: string; expiresAt: string; timer: NodeJS.Timeout }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; expiresAt: string; timer: NodeJS.Timeout }
+
+/** Claude Code's AskUserQuestion is answered by allowing the call with its own
+ * input plus `answers` keyed by question text (a label, or labels when the
+ * question is multiSelect; any other string is a typed "Other"). The phone may
+ * add answers and a free-text `response`; it may not rewrite the questions. */
+const questionAnswers = z.looseObject({
+  answers: z.record(z.string().min(1).max(4000), z.union([z.string().max(4000), z.array(z.string().max(4000)).min(1).max(24)])).refine(a => Object.keys(a).length > 0),
+  response: z.string().max(4000).optional(),
+});
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value !== null && typeof value === "object") return "{" + Object.keys(value as Json).sort().map(k => JSON.stringify(k) + ":" + canonical((value as Json)[k])).join(",") + "}";
+  return JSON.stringify(value) ?? "null";
+}
+export function answeredQuestionInput(tool: string, input: unknown, updatedInput: unknown): Json {
+  if (tool !== "AskUserQuestion") throw new BridgeError(400, "Only a question can be answered with input.");
+  if (updatedInput === null || typeof updatedInput !== "object" || Array.isArray(updatedInput)) throw new BridgeError(400, "The answer is not an object.");
+  const raw = JSON.stringify(updatedInput);
+  if (Buffer.byteLength(raw) > 32_768) throw new BridgeError(400, "The answer is too large.");
+  const parsed = questionAnswers.safeParse(updatedInput);
+  if (!parsed.success) throw new BridgeError(400, "The answer must add an answers object.");
+  const { answers, response, ...rest } = parsed.data;
+  if (canonical(rest) !== canonical(object(input))) throw new BridgeError(400, "The answer must keep the original questions.");
+  const asked = new Set(objects(object(input).questions).map(q => q.question).filter(q => typeof q === "string"));
+  if (Object.keys(answers).some(q => !asked.has(q))) throw new BridgeError(400, "The answer names a question that was not asked.");
+  return { ...object(input), answers, ...(response === undefined ? {} : { response }) };
+}
 
 /** An explicit foreground overview poll renews interest for a bounded interval.
  * A disconnected phone never leaves future terminal prompts waiting forever. */
@@ -55,14 +82,17 @@ export class AgentHooks {
       return reported.kind !== "id" || (reported.agent === p.target.source && reported.value === p.target.session);
     })).map(p => p.target.pane));
   }
-  async answer(target: Target, id: string, decision: unknown) {
+  async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
     const entry = this.pending.get(id);
     if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target) || !["approve", "deny"].includes(String(decision))) throw new BridgeError(409, "This approval is no longer pending.");
+    if (updatedInput !== undefined && decision !== "approve") throw new BridgeError(400, "Answers go with an approval.");
+    const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
     await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     this.pending.delete(id); clearTimeout(entry.timer);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
       behavior: decision === "approve" ? "allow" : "deny", ...(decision === "deny" ? { message: "Declined in Phren." } : {}),
+      ...(answered ? { updatedInput: answered } : {}),
     } } }));
   }
   async start() {
@@ -106,7 +136,7 @@ export class AgentHooks {
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
         const timer = setTimeout(() => { this.pending.delete(action); res.end("{}"); }, 55_000);
-        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200),
+        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt: new Date(Date.now() + 55_000).toISOString(), timer });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); });
       } catch { if (!res.headersSent) res.statusCode = 400; res.end("{}"); }

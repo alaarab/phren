@@ -736,6 +736,59 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve" })).status).toBe(409);
     socket.close(); await once(socket, "close");
   });
+  it("answers Claude's AskUserQuestion by allowing the call with the phone's answers added to its own input", async () => {
+    const questions = [
+      { question: "Which accent?", header: "Design", options: [{ label: "Cyan", description: "Keep it" }, { label: "Lavender", description: "Softer" }] },
+      { question: "Which screens?", header: "Scope", multiSelect: true, options: [{ label: "Chat" }, { label: "Agents" }, { label: "Settings" }] },
+    ];
+    const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+    const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+    await once(socket, "open");
+    for (let i = 0; i < 60 && !frames.length; i++) await sleep(25);
+    const callback = (tool: string, input: unknown) => new Promise<any>((resolve, reject) => {
+      const payload = JSON.stringify({ target, event: "PermissionRequest", tool, input });
+      const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+        headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+        let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+      }); req.on("error", reject); req.end(payload);
+    });
+    const pendingApproval = async (after: number) => {
+      for (let i = 0; i < 100 && !frames.slice(after).some(f => f.agentStatus.pendingApproval); i++) await sleep(25);
+      return frames.slice(after).find(f => f.agentStatus.pendingApproval)?.agentStatus.pendingApproval;
+    };
+    // A shell approval never takes answers.
+    let seen = frames.length;
+    const bash = callback("Bash", { command: "fixture-command" });
+    let approval = await pendingApproval(seen);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { command: "fixture-command", answers: { "Which accent?": "Cyan" } } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "deny" })).status).toBe(200);
+    expect((await bash).hookSpecificOutput.decision.behavior).toBe("deny");
+    // A question whose questions were rewritten, dropped, or answered with an
+    // unasked key is refused and stays pending; a denial carries no answers.
+    seen = frames.length;
+    const asked = callback("AskUserQuestion", { questions });
+    approval = await pendingApproval(seen);
+    expect(approval.toolName).toBe("AskUserQuestion");
+    expect(JSON.parse(approval.message).questions).toEqual(questions);
+    const answers = { "Which accent?": "Cyan", "Which screens?": ["Chat", "Settings"] };
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions: [questions[0]], answers } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions: [{ ...questions[0], question: "Which colour?" }, questions[1]], answers } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { answers } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions, answers: { "Which font?": "Mono" } } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "deny", updatedInput: { questions, answers } })).status).toBe(400);
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions, answers: {}, response: "x".repeat(4001) } })).status).toBe(400);
+    // The same questions in another key order, plus answers and a typed
+    // "Other", allow the call with exactly that input.
+    const reordered = questions.map(q => ({ options: q.options.map(o => ({ ...o })), ...q })).reverse();
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve",
+      updatedInput: { questions: reordered.reverse(), answers: { ...answers, "Which accent?": "Something warmer" }, response: "Keep it subtle" } })).status).toBe(200);
+    const decision = (await asked).hookSpecificOutput.decision;
+    expect(decision.behavior).toBe("allow");
+    expect(decision.updatedInput).toEqual({ questions, answers: { "Which accent?": "Something warmer", "Which screens?": ["Chat", "Settings"] }, response: "Keep it subtle" });
+    expect((await api("/v1/approvals/answer", { target, actionId: approval.actionId, decision: "approve", updatedInput: { questions, answers } })).status).toBe(409);
+    socket.close(); await once(socket, "close");
+  });
   it("holds overview requests only with an explicit watch and lets the phone approve", async () => {
     const callback = () => new Promise<any>((resolve, reject) => {
       const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "fixture-command" } });
