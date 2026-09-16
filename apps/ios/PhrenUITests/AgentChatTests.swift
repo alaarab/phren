@@ -669,6 +669,32 @@ final class AgentChatTests: XCTestCase {
         capture(app, "Image and text in one bubble")
     }
 
+    /// Every picture the agent read shows under its tool pill without opening
+    /// the card, and the pictures sent from the phone — which the transcript
+    /// names only by path — sit in the bubble in place of their markers.
+    @MainActor
+    func testReadImagesShowUnderThePillAndUploadedPicturesInTheBubble() {
+        let app = launch(extra: ["--chat-read-images"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let pictures = app.buttons.matching(NSPredicate(format: "label == %@", "View conversation image"))
+        XCTAssertTrue(pictures.firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Look at these"].waitForExistence(timeout: 5))
+        XCTAssertEqual(pictures.count, 4, "Two frames of the read, two pictures from the phone")
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "chat-tool-group:", "Read")).firstMatch
+        XCTAssertTrue(card.exists)
+        XCTAssertEqual(card.value as? String, "Collapsed", "The frames show without opening the card")
+        let bubble = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "chat-message:", "Your message"))
+            .allElementsBoundByIndex.first { $0.staticTexts["Look at these"].exists }
+        XCTAssertNotNil(bubble, "The markers are gone from the words")
+        XCTAssertEqual(bubble?.buttons.matching(NSPredicate(format: "label == %@", "View conversation image")).count, 2, "Both pictures are inside the bubble")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "[Image: source:")).firstMatch.exists)
+        capture(app, "Read frames under the pill, uploaded pictures in the bubble")
+        pictures.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Conversation image.jpg"].waitForExistence(timeout: 5))
+        app.navigationBars["Conversation image.jpg"].buttons["Done"].tap()
+        XCTAssertEqual(card.value as? String, "Collapsed")
+    }
+
     /// A slash command or `!` shell line typed at Claude Code's own prompt
     /// reads as one system line with its output, not a bubble of tags.
     @MainActor

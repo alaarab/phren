@@ -132,6 +132,10 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     /// Images inside a tool result — a Read of a screenshot, say — as the
     /// transcript's `blob` route addresses them.
     public var resultImages: [ImageRef] = []
+    /// Pictures the phone sent that Claude Code recorded only by path — a
+    /// `[Image: source: …]` marker per picture, no image block — as the
+    /// Hook's uploads route serves them back. Stripped from `text`.
+    public var uploadImages: [String] = []
     public var toolCallID: String? = nil
     /// When the transcript row was written, where the source stamps one.
     public var timestamp: Date? = nil
@@ -140,12 +144,13 @@ public struct AgentChatMessage: Equatable, Sendable, Identifiable {
     public var queueKey: String? = nil
     public var isToolError = false
     init(id: String, line: Int, role: Role, title: String?, text: String,
-         imageBlocks: [Int] = [], resultImages: [ImageRef] = [], toolCallID: String? = nil) {
+         imageBlocks: [Int] = [], resultImages: [ImageRef] = [], uploadImages: [String] = [], toolCallID: String? = nil) {
         self.id = id; self.line = line; self.role = role; self.title = title; self.text = text
-        self.imageBlocks = imageBlocks; self.resultImages = resultImages; self.toolCallID = toolCallID
+        self.imageBlocks = imageBlocks; self.resultImages = resultImages; self.uploadImages = uploadImages; self.toolCallID = toolCallID
         localCommand = role == .user ? LocalCommand(text) : nil
         textByteCount = text.utf8.count
         renderKey = "\(id)|\(role.rawValue)|\(title ?? "")|\(textByteCount)|\(text.hashValue)"
+            + (uploadImages.isEmpty ? "" : "|u\(uploadImages.count):\(uploadImages.hashValue)")
     }
     public struct ImageRef: Hashable, Sendable {
         /// The message content block (Claude/phren: the tool_result; Codex: the output item).
@@ -246,7 +251,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
             var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
-            parts = mergedUserParts(parts)
+            parts = mergedUserParts(withUploadImages(parts))
             parts += changes(raw, after: parts)
             questionEvents += AgentQuestionEvent.read(raw, source: source)
             if let event = AgentChatProgressEvent.read(raw, source: source, line: line) { progressEvents.append(event) }
@@ -255,7 +260,8 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 guard (!part.text.isEmpty || part.role == .tool), seen.insert(id).inserted else { continue }
                 let toolCallID = part.toolCallID.flatMap { !$0.isEmpty && $0.utf8.count <= 512 ? $0 : nil }
                 var message = AgentChatMessage(id: id, line: line, role: part.role, title: part.title,
-                                               text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages, toolCallID: toolCallID)
+                                               text: String(part.text.prefix(64_000)), imageBlocks: part.imageBlocks, resultImages: part.resultImages,
+                                               uploadImages: part.uploadImages, toolCallID: toolCallID)
                 message.timestamp = Self.timestamp(raw)
                 message.isToolError = part.isToolError
                 if part.role == .user {
@@ -277,12 +283,53 @@ public struct AgentChatTranscript: Equatable, Sendable {
     struct Part {
         let role: AgentChatMessage.Role
         var title: String? = nil
-        let text: String
+        var text: String
         var imageBlocks: [Int] = []
         var resultImages: [AgentChatMessage.ImageRef] = []
+        var uploadImages: [String] = []
         var toolCallID: String? = nil
         var idIndex: Int? = nil
         var isToolError = false
+    }
+    /// At most this many pictures are drawn for one turn from the phone.
+    static let maximumUploadImages = 8
+    private static let uploadImageMarker = try! NSRegularExpression(pattern: #"\[Image: source: ([^\]\n]+)\]"#)
+    private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp"]
+    /// A picture the phone sent lands in Claude Code's transcript as the text
+    /// `[Image: source: /path/to/it.png]` — no image block — so the words
+    /// would show the marker and no picture. Record the paths that name an
+    /// image (the Hook only ever serves those) and take the markers out of
+    /// the words; a marker naming anything else stays as it was written.
+    static func uploadImageMarkers(in text: String) -> (text: String, paths: [String]) {
+        guard text.contains("[Image: source: ") else { return (text, []) }
+        var paths: [String] = []
+        var stripped = "", cursor = text.startIndex
+        for match in uploadImageMarker.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
+            let path = text[inner].trimmingCharacters(in: .whitespaces)
+            let ext = (path as NSString).pathExtension.lowercased()
+            guard path.hasPrefix("/"), path.utf8.count <= 4_096, imageExtensions.contains(ext),
+                  !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { continue }
+            if paths.count < maximumUploadImages { paths.append(path) }
+            stripped += text[cursor..<whole.lowerBound]; cursor = whole.upperBound
+        }
+        guard !paths.isEmpty else { return (text, []) }
+        stripped += text[cursor...]
+        return (stripped.trimmingCharacters(in: .whitespacesAndNewlines), paths)
+    }
+    /// The person's parts with their upload markers turned into pictures; a
+    /// part that was nothing but markers keeps the placeholder the image
+    /// blocks use, so the turn still has a bubble to draw them in.
+    static func withUploadImages(_ parts: [Part]) -> [Part] {
+        parts.map { part in
+            guard part.role == .user else { return part }
+            let (text, paths) = uploadImageMarkers(in: part.text)
+            guard !paths.isEmpty else { return part }
+            var updated = part
+            updated.text = text.isEmpty ? "[Image attachment]" : text
+            updated.uploadImages = paths
+            return updated
+        }
     }
     /// One turn from the person is one bubble: a row's text and image blocks
     /// arrive as separate parts, and drawn apart the picture floats under
@@ -293,14 +340,16 @@ public struct AgentChatTranscript: Equatable, Sendable {
         guard users.count > 1, let first = users.first else { return parts }
         var merged = parts[first]
         var texts: [String] = []
-        var imageBlocks: [Int] = []
+        var imageBlocks: [Int] = [], uploadImages: [String] = []
         for index in users {
             let part = parts[index]
             imageBlocks += part.imageBlocks
+            uploadImages += part.uploadImages
             if part.text != "[Image attachment]", !part.text.isEmpty { texts.append(part.text) }
         }
         merged = Part(role: .user, title: merged.title, text: texts.isEmpty ? "[Image attachment]" : texts.joined(separator: "\n\n"),
-                      imageBlocks: imageBlocks, resultImages: merged.resultImages, toolCallID: merged.toolCallID, idIndex: merged.idIndex)
+                      imageBlocks: imageBlocks, resultImages: merged.resultImages, uploadImages: Array(uploadImages.prefix(maximumUploadImages)),
+                      toolCallID: merged.toolCallID, idIndex: merged.idIndex)
         var result: [Part] = []
         for (index, part) in parts.enumerated() {
             if index == first { result.append(merged) } else if part.role != .user { result.append(part) }

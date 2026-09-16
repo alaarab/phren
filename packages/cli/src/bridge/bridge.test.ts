@@ -300,6 +300,15 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
       req.on("error", reject); req.end(payload);
     });
   }
+  /** A GET whose body is bytes, not JSON. */
+  function blob(url: string): Promise<{ status: number; bytes: Buffer }> {
+    return new Promise((resolve, reject) => {
+      const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: url, method: "GET" }, res => {
+        const chunks: Buffer[] = []; res.on("data", bytes => chunks.push(bytes)); res.on("end", () => resolve({ status: res.statusCode!, bytes: Buffer.concat(chunks) }));
+      });
+      req.on("error", reject); req.end();
+    });
+  }
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-hook-"));
     // Darwin's Unix socket paths are limited to 104 bytes.
@@ -394,6 +403,31 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(permissions.mode & 0o777).toBe(0o600);
     expect(await stat(path.join(root, "bridge/changes/expired.jsonl")).catch(() => undefined)).toBeUndefined();
     expect((await stat(path.join(root, "bridge/computer-id"))).mode & 0o777).toBe(0o600);
+  });
+  it("serves the phone's own uploaded images by path and nothing outside the uploads folder", async () => {
+    // A picture the phone sent lands in a Claude transcript as the text
+    // "[Image: source: <path>]"; the chat fetches its bytes back by that path.
+    const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.from("fixture pixels")]);
+    const upload = await api("/v1/files", { name: "shot.png", data: png.toString("base64") });
+    expect(upload.status, JSON.stringify(upload.data)).toBe(200);
+    const served = await blob("/v1/uploads/image?path=" + encodeURIComponent(upload.data.path));
+    expect(served.status).toBe(200); expect(served.bytes.equals(png)).toBe(true);
+    // An image somewhere else on the computer, a traversal that lands on
+    // it, and a link inside uploads that points at it are all unknown.
+    const outside = path.join(root, "outside.png"); await writeFile(outside, png);
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(outside))).status).toBe(404);
+    const traversal = path.join(root, "bridge/uploads/files/../../../outside.png");
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(traversal))).status).toBe(404);
+    const link = path.join(root, "bridge/uploads/files/link.png"); await symlink(outside, link);
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(link))).status).toBe(404);
+    // Only images: a note the phone kept is not served through this route,
+    // and neither is a relative path, a folder, or a file that is not there.
+    const note = await api("/v1/files", { name: "notes.md", data: Buffer.from("# hi\n").toString("base64") });
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(note.data.path))).status).toBe(404);
+    expect((await api("/v1/uploads/image?path=uploads/files/shot.png")).status).toBe(404);
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(path.join(root, "bridge/uploads/files")))).status).toBe(404);
+    expect((await api("/v1/uploads/image?path=" + encodeURIComponent(path.join(root, "bridge/uploads/files/missing.png")))).status).toBe(404);
+    expect((await api("/v1/uploads/image")).status).toBe(404);
   });
   it("exports starting panes and sends a first prompt only to their verified terminal", async () => {
     reportIdentity = false;

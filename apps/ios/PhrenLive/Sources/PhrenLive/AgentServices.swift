@@ -60,6 +60,23 @@ extension PhrenConnection {
             path: GatewayRequest.path("/v1/transcripts/blob", GatewayRequest.targetQuery(target).merging(query) { _, new in new }), maximumResponseBytes: 8_388_608))
     }
 
+    /// A picture the phone uploaded, by the absolute path a Claude transcript
+    /// names it with (`[Image: source: …]`). The computer serves it only from
+    /// Phren Hook's own uploads folder; the same size cap as transcript images.
+    public static func uploadImage(host: LiveHost, privateKey: Data, path: String) async throws -> Data {
+        guard path.hasPrefix("/"), path.utf8.count <= 4_096, !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw PhrenKitError.validation("Invalid image reference.")
+        }
+        return try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .init(
+            path: uploadImageRoute(path), maximumResponseBytes: 8_388_608))
+    }
+    /// Strict escaping: the computer decodes `+` as a space, so only unreserved
+    /// characters and `/` travel as they are.
+    static func uploadImageRoute(_ path: String) -> String {
+        var allowed = CharacterSet.alphanumerics; allowed.insert(charactersIn: "-._~/")
+        return "/v1/uploads/image?path=" + (path.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
+    }
+
     /// `paths` are files a command named; the computer adds their repositories
     /// (and a commit a hook already made) to the pane's own working tree.
     public static func repositoryDiff(host: LiveHost, privateKey: Data, target: AgentChatTarget, paths: [String] = []) async throws -> AgentRepositoryDiff {

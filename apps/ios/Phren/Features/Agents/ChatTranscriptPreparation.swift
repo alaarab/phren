@@ -24,7 +24,7 @@ struct ChatTranscriptPreparation {
         keys = incoming; revision += 1
         entries = ChatTimelineEntry.group(messages)
         for message in messages where message.role != .tool {
-            let inline = !message.imageBlocks.isEmpty
+            let inline = !message.imageBlocks.isEmpty || !message.uploadImages.isEmpty
             let text = ChatMessageDisplayCache.text(for: message, imagePaths: [], hasImages: false, inlineImages: inline)
             let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
             _ = ChatRichTextDocumentCache.value(preview.text, key: "\(message.renderKey)|\(inline)|[]|-1")

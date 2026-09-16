@@ -160,6 +160,19 @@ struct ChatToolActivity: View, Equatable {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 10)
             }
+            // The pictures a result carries — a Read of a screenshot, every
+            // frame of it — under the pill without opening the card, side by
+            // side and scrolling sideways when there are more than fit.
+            let pictured = messages.filter { $0.isToolResult && !$0.resultImages.isEmpty }
+            if !expanded, !pictured.isEmpty, let resultImages {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(pictured) { resultImages($0) }
+                    }.padding(.horizontal, 10)
+                }
+                .environment(\.chatImageLayout, .thumbnail)
+                .padding(.bottom, 10)
+            }
             if !expanded, changed.isEmpty {
                 // Older Hooks and non-Git folders still provide Edit/Write inputs.
                 // Use the already cached presentation; defer the diff's body until tapped.

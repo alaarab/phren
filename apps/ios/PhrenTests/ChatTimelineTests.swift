@@ -107,6 +107,26 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertFalse(ReadOnlyToolCall.looksAround(errored))
     }
 
+    /// A Read whose result carries pictures keeps its own card — they show
+    /// under it — so it splits the looking around either side of it.
+    func testAResultCarryingImagesBreaksTheReadRun() throws {
+        func raws(pictured: Bool) -> [[String: Any]] {
+            (0..<7).flatMap { index -> [[String: Any]] in
+                let output: Any = pictured && index == 3 ? [["type": "input_image", "image_url": "data:image/png;base64,"], ["type": "input_image", "image_url": "data:image/png;base64,"]] : "ok"
+                return [["type": "response_item", "payload": ["type": "function_call", "call_id": "read\(index)", "name": "Read", "arguments": "{\"file_path\":\"/work/\(index).png\"}"]],
+                        ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "read\(index)", "output": output]]]
+            }
+        }
+        let plain = ChatTimelineEntry.group(try readRaw(raws(pictured: false)))
+        XCTAssertEqual(plain.map(\.isReadRun), [true])
+        let split = ChatTimelineEntry.group(try readRaw(raws(pictured: true)))
+        XCTAssertEqual(split.map(\.isReadRun), [true, false, true], "The pictured read keeps its card")
+        XCTAssertEqual(split[1].messages.map(\.toolCallID), ["read3", "read3"])
+        XCTAssertEqual(split[1].messages.last?.resultImages.count, 2)
+        XCTAssertFalse(ReadOnlyToolCall.looksAround(split[1].messages))
+        XCTAssertTrue(ReadOnlyToolCall.looksAround(split[0].messages.prefix(2).map { $0 }))
+    }
+
     func testBackgroundJobsPairPendingCallAndTaskNotification() throws {
         let content = "<task-notification>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Background tests completed (exit code 2)</summary>\n</task-notification>"
         let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [

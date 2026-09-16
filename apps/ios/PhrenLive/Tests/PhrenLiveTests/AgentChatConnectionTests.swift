@@ -22,6 +22,15 @@ final class AgentChatConnectionTests: XCTestCase {
         XCTAssertEqual(URLComponents(string: scoped.path)?.queryItems?.first { $0.name == "mux" }?.value, "herdr:work")
     }
 
+    func testUploadImageRejectsAnythingButAnAbsolutePathBeforeConnecting() async throws {
+        let host = try LiveHost(name: "Fixture", address: "fixture.invalid", username: "fixture")
+        for path in ["uploads/shot.png", "", "/work/shot\u{0}.png", String(repeating: "/a", count: 2_100)] {
+            do { _ = try await PhrenConnection.uploadImage(host: host, privateKey: Data(), path: path); XCTFail("Must reject \(path.prefix(20))") }
+            catch { XCTAssertTrue(error.localizedDescription.contains("Invalid image reference"), error.localizedDescription) }
+        }
+        XCTAssertEqual(PhrenConnection.uploadImageRoute("/work/a b+c&d.png"), "/v1/uploads/image?path=/work/a%20b%2Bc%26d.png")
+    }
+
 
     func testDifferentComputerRejectsBeforeConnectingOrUsingItsKey() async throws {
         let host = try LiveHost(name: "Other computer", address: "fixture.invalid", username: "fixture")

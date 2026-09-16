@@ -10,6 +10,10 @@ number counts up on its own.
 
 ### New
 
+- Every picture the agent reads shows in the chat: a Read of a screenshot
+  puts its frames under the tool pill without opening the card, several side
+  by side, each a tap from full screen. Pictures sent from the phone show in
+  your bubble too, where Claude Code used to leave only a path.
 - The terminal toolbar has a Chat control wearing the pane's agent mark:
   it pops back to the chat the terminal came from, or opens this pane's
   chat when the terminal was opened on its own. The phren mark now draws

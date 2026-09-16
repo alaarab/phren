@@ -87,11 +87,13 @@ struct ChatTimelineEntry: Identifiable, Equatable {
 /// Conservative classification: a call that was only looking around — it came
 /// back, changed nothing on disk and did not fail. A call carrying a
 /// filesystem-change attachment can never be folded, and neither can one that
-/// is still running, failed, or went to the background.
+/// is still running, failed, or went to the background — or one whose result
+/// carries pictures, which show under its own card.
 enum ReadOnlyToolCall {
     static func looksAround(_ messages: [AgentChatMessage]) -> Bool {
         guard !messages.contains(where: \.isChange), let result = messages.first(where: \.isToolResult),
-              !failed(result), let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
+              !failed(result), result.resultImages.isEmpty,
+              let call = messages.first(where: { $0.role == .tool && !$0.isToolResult }) else { return false }
         guard !PhrenToolPresentation.recognizes(call.title), !ChatBackgroundJobs.isBackground(call) else { return false }
         let presentation = ToolPresentationCache.value(call)
         switch presentation.title {

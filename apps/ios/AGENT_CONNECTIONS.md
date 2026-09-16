@@ -104,6 +104,9 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `POST /v1/prompt`, `/v1/keys`, `/v1/upload`, `/v1/diff`
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
+- `GET /v1/uploads/image?path=`: the bytes of an image the phone uploaded, which a
+  Claude transcript names only by path (`[Image: source: …]`); the Hook serves it
+  only from inside its own uploads folder.
 - `POST /v1/workspaces/{create,rename,focus,close}` with an explicit server.
 - `POST /v1/workspaces/launch`: `{cwd, label, kind, workspaceId?, name?, timeoutMs?}`
   creates a workspace (or a tab in `workspaceId`) in `cwd`, starts `kind`

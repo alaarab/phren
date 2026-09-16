@@ -37,6 +37,13 @@ import UIKit
         }
         return try! AgentAttachment(name: "Screenshot.png", data: data, isImage: true)
     }
+    /// What the computer would send back for a picture in the conversation:
+    /// the fixture picture for any transcript block, and for an upload only
+    /// when the path is one the fixture's own turns name.
+    static func imageBytes(_ reference: ChatImageReference) throws -> Data {
+        if case .upload(let path) = reference, !path.hasPrefix("/work/phone/uploads/") { throw LiveConnectionError.response(404) }
+        return image.data
+    }
     static func upload(_ attachment: AgentAttachment) throws -> String {
         uploads += 1
         if flag("--chat-upload-fails") { throw LiveConnectionError.disconnected }
@@ -55,7 +62,7 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image")) ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
         if flag("--starting-session-fixture") {
@@ -219,6 +226,18 @@ import UIKit
                     ["type": "text", "text": text],
                     ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": image.data.base64EncodedString()]]]]]])
             }
+        }
+        if flag("--chat-read-images") {
+            // The agent read a screenshot whose result carries two frames, and
+            // the person sent two pictures from the phone — which Claude Code
+            // records as text markers naming the uploads, not as image blocks.
+            entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [
+                ["type": "tool_use", "id": "read-shot", "name": "Read", "input": ["file_path": "/work/phone/shots/shot.png"]]]]]])
+            let frame: [String: Any] = ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": ""]]
+            entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
+                ["type": "tool_result", "tool_use_id": "read-shot", "content": [frame, frame]]]]]])
+            entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [
+                ["type": "text", "text": "Look at these [Image: source: /work/phone/uploads/a.png] [Image: source: /work/phone/uploads/b.png]"]]]]])
         }
         if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix in `packages/cli/src/bridge/projects.ts`, using `lsof -Fpcn`:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }

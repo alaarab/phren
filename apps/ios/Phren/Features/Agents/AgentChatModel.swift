@@ -423,7 +423,7 @@ final class AgentChatModel {
                 if !wanted.isEmpty { return have == wanted }
                 // Pictures with no words of their own: the landed turn is the
                 // image blocks (or the placeholder the parser gives them).
-                return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || row.text == "[Image attachment]")
+                return !item.attachments.isEmpty && have.isEmpty && (!row.imageBlocks.isEmpty || !row.uploadImages.isEmpty || row.text == "[Image attachment]")
             }) else { return false }
             let id = observed.remove(at: index).id
             reconciledQueueRows.insert(id)

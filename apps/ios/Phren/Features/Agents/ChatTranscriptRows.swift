@@ -59,6 +59,11 @@ private struct ChatTranscriptRow: View, Equatable {
                     ForEach(message.imageBlocks, id: \.self) { block in
                         ChatHistoricalImage(session: session, target: target, line: message.line, block: block, active: active, preview: preview)
                     }
+                    // Pictures sent from the phone, which the transcript
+                    // names by path: the same bubble, the same way.
+                    ForEach(Array(message.uploadImages.enumerated()), id: \.offset) { _, path in
+                        ChatHistoricalImage(session: session, target: target, upload: path, active: active, preview: preview)
+                    }
                 }
             }
         }
@@ -84,7 +89,7 @@ private struct ChatMessageRow<Historical: View>: View {
     @ViewBuilder let historical: () -> Historical
     /// The pictures the transcript itself carries. When there are any, the
     /// local previews of the same send would only draw them twice.
-    private var inlineImages: Bool { !message.imageBlocks.isEmpty }
+    private var inlineImages: Bool { !message.imageBlocks.isEmpty || !message.uploadImages.isEmpty }
     private var displayText: String {
         if let revealedText { return revealedText }
         return ChatMessageDisplayCache.text(for: message, imagePaths: images.compactMap(\.path), hasImages: !images.isEmpty, inlineImages: inlineImages)
@@ -113,7 +118,7 @@ private struct ChatMessageRow<Historical: View>: View {
                 }
                 historical()
                 let text = displayText
-                if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) {
+                if !text.isEmpty && !(text == "[Image attachment]" && inlineImages) {
                     let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
                     ChatRichText(text: preview.text, cacheKey: "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)").equatable()
                     if preview.truncated {
