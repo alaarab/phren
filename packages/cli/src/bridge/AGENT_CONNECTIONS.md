@@ -71,6 +71,7 @@ WebSockets on the same socket.
 | `POST /v1/prompt`, `/v1/keys` | Send text or Escape after validating the live destination. |
 | `POST /v1/upload` | Bounded file/image upload under the selected conversation. |
 | `GET, POST /v1/files` | List/store files sent by the phone outside any conversation. |
+| `GET /v1/uploads/image` | Bytes of one image the phone uploaded, by absolute `path`; only a real file inside the Hook's own uploads folder whose bytes are an image, at most 8 MiB. |
 | `POST /v1/diff` | Pane repository diff and authorized optional `paths`, grouped by repository. |
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
