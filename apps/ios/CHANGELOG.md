@@ -10,6 +10,10 @@ number counts up on its own.
 
 ### New
 
+- Dictation in chat survives pauses: every segment's words are banked before
+  the recognizer restarts, a restart that fails ends dictation visibly, and
+  the transcript stays pinned to its end when the keyboard goes away
+  instead of leaving a blank band under the last bubble.
 - "Talk to Phren" — an Action button shortcut that opens the session you
   used last with dictation already listening; a Control Center toggle shows
   or hides the agents Live Activity. (Pin Session keeps its Shortcuts action

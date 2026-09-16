@@ -79,7 +79,7 @@ struct AgentChatView: View {
     @State private var showingAttachments = false
     /// Dictation writes straight into the composer: the words land in the
     /// message as they are recognised, no separate box to review.
-    @State private var dictation = SpeechTranscriber()
+    @State private var dictation = { let t = SpeechTranscriber(); t.keepsSessionBetweenSegments = true; return t }()
     @State private var dictationPrefix = ""
     @State private var dictationBase = ""
     @State private var dictationTask: Task<Void, Never>?
@@ -128,7 +128,7 @@ struct AgentChatView: View {
     private func stopDictation() {
         guard dictating else { return }
         dictating = false
-        let spoken = SpeechSettings.apply(dictation.transcript)
+        let spoken = SpeechSettings.apply(dictation.bestTranscript)
         dictation.stop()
         if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
         model.draft = model.draft.trimmingCharacters(in: .whitespaces)
@@ -322,7 +322,15 @@ struct AgentChatView: View {
                 .background(GeometryReader { geometry in
                     Color.clear.onAppear { scrollHeight = geometry.size.height }
                         .onChange(of: geometry.size.height) { _, height in
-                            if abs(height - scrollHeight) > 0.5 { scrollHeight = height }
+                            guard abs(height - scrollHeight) > 0.5 else { return }
+                            let grew = height > scrollHeight
+                            scrollHeight = height
+                            // The keyboard leaving makes the viewport taller; the
+                            // content keeps its old offset and a blank band opens
+                            // under the last bubble. Stay pinned to the end.
+                            if grew && atBottom && !model.loadingHistory {
+                                DispatchQueue.main.async { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                            }
                         }
                 })
                 .onPreferenceChange(ChatBottomPosition.self) { position in
@@ -480,11 +488,20 @@ struct AgentChatView: View {
             if dictating, !value.isEmpty { model.draft = dictationPrefix + value }
         }
         .onChange(of: dictation.isRecording) { _, recording in
-            // A segment ended by itself: keep what it heard and listen on.
+            // A segment ended by itself (a pause, the recognizer's own limit):
+            // bank the best text it produced — never the possibly empty final
+            // result — and listen on. A restart that fails ends dictation
+            // visibly instead of leaving a live mic button over a dead engine.
             guard dictating, !recording else { return }
-            let spoken = SpeechSettings.apply(dictation.transcript)
-            if !spoken.isEmpty { dictationPrefix += spoken + " "; model.draft = dictationPrefix }
-            if scenePhase == .active { try? dictation.start() } else { dictating = false }
+            let spoken = SpeechSettings.apply(dictation.bestTranscript)
+            if !spoken.isEmpty { dictationPrefix += spoken + " " }
+            model.draft = dictationPrefix
+            guard scenePhase == .active else { dictating = false; dictation.stop(); return }
+            do { try dictation.start() } catch {
+                dictating = false; dictation.stop()
+                model.draft = dictationPrefix.trimmingCharacters(in: .whitespaces)
+                model.deliveryError = error.localizedDescription
+            }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
         .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
