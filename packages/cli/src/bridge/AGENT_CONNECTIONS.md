@@ -76,7 +76,7 @@ WebSockets on the same socket.
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
-| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. |
+| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). |
 | `POST /v1/questions/answer` | Existing unsupported-question response; answer in the terminal. |
 
 Creation resolves `cwd` with `realpath`, requires an existing directory under the
