@@ -204,7 +204,7 @@ import UIKit
                     ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": image.data.base64EncodedString()]]]]]])
             }
         }
-        if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
+        if flag("--chat-markdown") { append("assistant", "# Changes\nHere is the fix in `packages/cli/src/bridge/projects.ts`, using `lsof -Fpcn`:\n```swift\nlet color = \"cyan\"\n```\nReady to test.") }
         if flag("--chat-link") { append("assistant", "[Open linked page](https://example.org/phren-fixture)") }
         // Real transcripts retain the tool call after it is answered. Keep its
         // line stable so the reply appends instead of reusing a tool message ID.

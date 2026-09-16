@@ -29,6 +29,7 @@ enum PhrenTheme {
     static var phrenCardBorder: Color { Color(hex: palette.resolvedPhrenCardBorder) }
     static var phrenCardAccent: Color { Color(hex: palette.resolvedPhrenCardAccent) }
     static var link: Color { Color(hex: palette.link ?? palette.action) }
+    static var chatInlineCode: Color { Color(hex: palette.chatInlineCode ?? palette.link ?? palette.action) }
 
     static var text: Color { Color(hex: palette.text) }
     static var textSecondary: Color { Color(hex: palette.secondary) }

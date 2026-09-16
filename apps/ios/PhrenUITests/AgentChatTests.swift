@@ -251,8 +251,11 @@ final class AgentChatTests: XCTestCase {
         XCTAssertLessThanOrEqual(box.frame.minY - lastLine.frame.maxY, 18)
         composer.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        app.buttons["Copy code"].tap()
+        // A code block has no title bar: tapping it (like any transcript
+        // surface) still hands the keyboard away without touching the draft.
+        app.descendants(matching: .any)["chat-code-block"].firstMatch.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.keyboards.firstMatch)], timeout: 5), .completed)
+        XCTAssertEqual(composer.value as? String, "Keep this draft")
         capture(app, "Chat keyboard dismissed without losing the draft")
     }
 
@@ -862,7 +865,14 @@ final class AgentChatTests: XCTestCase {
         app.buttons["live-chat:w7:w7:t9"].tap()
         XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["chat-send"].exists, "Stop occupies the send control")
-        app.buttons["Copy code"].tap()
+        let code = app.descendants(matching: .any)["chat-code-block"].firstMatch
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Copy code"].exists, "No title bar above the code")
+        code.press(forDuration: 0.6)
+        // Reading the app's pasteboard from the runner raises iOS's paste
+        // permission alert, so the flash (held longer under UI testing) is
+        // the evidence.
+        XCTAssertTrue(app.descendants(matching: .any)["chat-code-copied"].waitForExistence(timeout: 4), "Holding the block copies it")
         app.buttons["chat-stop"].tap()
         XCTAssertTrue(app.staticTexts["Turn stopped in the selected pane."].waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["chat-send"].exists)

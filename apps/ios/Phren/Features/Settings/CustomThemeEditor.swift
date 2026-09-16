@@ -97,6 +97,7 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
     case sessionProject = "Session project", sessionTitle = "Session title", sessionMeta = "Session metadata"
     case stateWorking = "Working state", stateWaiting = "Waiting state", stateDone = "Done state"
     case phrenCardSurface = "Phren card surface", phrenCardBorder = "Phren card border", phrenCardAccent = "Phren card accent"
+    case chatInlineCode = "Inline code"
     var id: String { rawValue.lowercased() }
     func value(in p: PhrenPalette) -> UInt32 {
         switch self {
@@ -114,6 +115,7 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
         case .phrenCardSurface: return p.resolvedPhrenCardSurface
         case .phrenCardBorder: return p.resolvedPhrenCardBorder
         case .phrenCardAccent: return p.resolvedPhrenCardAccent
+        case .chatInlineCode: return p.chatInlineCode ?? p.link ?? p.action
         }
     }
     func apply(_ color: UInt32, to p: inout PhrenPalette) {
@@ -139,6 +141,7 @@ enum ThemeColorField: String, CaseIterable, Identifiable {
         case .phrenCardSurface: p.phrenCardSurface = color
         case .phrenCardBorder: p.phrenCardBorder = color
         case .phrenCardAccent: p.phrenCardAccent = color
+        case .chatInlineCode: p.chatInlineCode = color
         }
     }
     private static func mix(_ a: UInt32, _ b: UInt32, _ fraction: Double) -> UInt32 {

@@ -10,6 +10,10 @@ number counts up on its own.
 
 ### New
 
+- Code blocks in chat lose their title bar: press and hold copies the block
+  (a brief "Copied" flash), a cut-short preview opens with a tap, and the
+  language sits faintly in the corner. Inline code — paths, commands,
+  identifiers — is coloured like links, with its own theme slot.
 - Dictation in chat survives pauses: every segment's words are banked before
   the recognizer restarts, a restart that fails ends dictation visibly, and
   the transcript stays pinned to its end when the keyboard goes away

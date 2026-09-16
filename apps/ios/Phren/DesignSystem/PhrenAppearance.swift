@@ -63,6 +63,8 @@ struct PhrenPalette: Codable, Equatable {
     var phrenCardSurface: UInt32? = nil
     var phrenCardBorder: UInt32? = nil
     var phrenCardAccent: UInt32? = nil
+    /// Inline code in chat (paths, commands, identifiers) — link-coloured by default.
+    var chatInlineCode: UInt32? = nil
 
     // Blend with this theme's own panel, including light custom themes.
     var resolvedPhrenCardAccent: UInt32 { phrenCardAccent ?? action }
