@@ -4,10 +4,10 @@ import SwiftUI
 extension LiveWorkspaces.Tab.Activity {
     var color: Color {
         switch self {
-        case .working: PhrenTheme.cyan
-        case .waiting: PhrenTheme.warning
+        case .working: PhrenTheme.stateWorking
+        case .waiting: PhrenTheme.stateWaiting
         case .error: PhrenTheme.danger
-        case .done: PhrenTheme.success
+        case .done: PhrenTheme.stateDone
         case .idle, .unknown: PhrenTheme.textMuted
         }
     }
@@ -31,7 +31,7 @@ extension LiveWorkspaces.Tab.Activity {
 /// sits inside a ring that carries the state — cyan and spinning while it
 /// works, amber when it needs you, green when done, grey when idle — with the
 /// context used drawn as the ring's fill and a small state badge at its foot.
-struct SessionCardContent: View {
+struct SessionCardContent: View, Equatable {
     @Environment(\.dynamicTypeSize) private var textSize
     let session: LiveAgentSession
     let fresh: Bool
@@ -45,16 +45,32 @@ struct SessionCardContent: View {
     /// Tapping the ring opens the session's details; nil makes it inert.
     var onDetails: (() -> Void)? = nil
 
-    private var headline: String { project ?? session.workspaceName }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.session == rhs.session && lhs.fresh == rhs.fresh && lhs.project == rhs.project
+            && lhs.computer == rhs.computer && lhs.subtitle == rhs.subtitle
+            && lhs.identifierPrefix == rhs.identifierPrefix && (lhs.onDetails == nil) == (rhs.onDetails == nil)
+    }
+
+    private var headline: String { session.projectDisplayName(project) }
+    /// The quiet last line. The list is already sectioned by state, so the
+    /// state itself is only the dot's colour here; words are for what the
+    /// section can't say — a permission waiting, a stale computer — and the
+    /// computer's name when the list spans several.
+    /// Only what the section can't say: a permission waiting, a stale
+    /// computer. The computer's name rides the first line, next to the branch.
     private var state: String {
-        var parts = [session.tab.status + (fresh ? "" : " · stale")]
-        if let computer { parts.append(computer) }
+        var parts: [String] = []
+        if session.tab.approvalPending == true { parts.append("Permission needed") }
+        if !fresh { parts.append("Stale") }
         return parts.joined(separator: " · ")
     }
     private var stateColor: Color { fresh ? session.tab.activity.color : PhrenTheme.textMuted }
 
     var body: some View {
-        HStack(spacing: 10) {
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
+        HStack(spacing: PhrenTheme.Space.small) {
             Button { onDetails?() } label: {
                 SessionActivityIndicator(tab: session.tab, fresh: fresh)
                     .accessibilityIdentifier("\(identifierPrefix)-context:\(session.accessibilityKey)")
@@ -67,27 +83,50 @@ struct SessionCardContent: View {
             .accessibilityIdentifier(identifierPrefix == "live" ? "live-detail:\(session.workspaceID):\(session.tab.id)" : "\(identifierPrefix)-detail:\(session.accessibilityKey)")
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.text).lineLimit(1)
+                    if session.usesFolderFallback(mappedProject: project) {
+                        Image(systemName: "folder").font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                            .accessibilityLabel("Folder")
+                    }
+                    Text(headline).font(.subheadline.weight(.semibold)).foregroundStyle(PhrenTheme.sessionProject).lineLimit(1)
+                    // Where in the code, then where it runs — one quiet line.
                     if let branch = session.tab.branch, !branch.isEmpty {
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.triangle.branch").font(.system(size: 9, weight: .semibold))
                             Text(branch).lineLimit(1).truncationMode(.middle)
                         }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
+                            .layoutPriority(-1)
+                    }
+                    if let computer {
+                        HStack(spacing: 3) {
+                            Image(systemName: "desktopcomputer").font(.system(size: 9, weight: .semibold))
+                            Text(computer).lineLimit(1)
+                        }.font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.sessionMeta)
+                            .accessibilityLabel("on \(computer)")
+                    }
+                    if let changedAt = session.tab.lastChangedAt {
+                        SessionRelativeTimeLabel(changedAt: changedAt)
+                            .accessibilityIdentifier("\(identifierPrefix)-changed:\(session.accessibilityKey)")
                     }
                 }
                 if session.tab.displayTitle != headline {
-                    Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.textSecondary)
+                    Text(session.tab.displayTitle).font(.footnote).foregroundStyle(PhrenTheme.sessionTitle)
                         .lineLimit(textSize.isAccessibilitySize ? 3 : 1)
                 }
-                HStack(spacing: 5) {
-                    Circle().fill(stateColor).frame(width: 6, height: 6)
-                    Text(state).font(.caption2.weight(.medium)).foregroundStyle(stateColor)
-                    if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.textMuted).lineLimit(1) }
+                if !state.isEmpty || !subtitle.isEmpty {
+                    HStack(spacing: 5) {
+                        Circle().fill(stateColor).frame(width: 6, height: 6)
+                            .accessibilityLabel(session.tab.status)
+                        if !state.isEmpty {
+                            Text(state).font(.caption2.weight(.medium))
+                                .foregroundStyle(session.tab.approvalPending == true || !fresh ? stateColor : PhrenTheme.sessionMeta)
+                        }
+                        if !subtitle.isEmpty, project == nil { Text("· " + subtitle).font(.caption2).foregroundStyle(PhrenTheme.sessionMeta).lineLimit(1) }
+                    }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 8)
-        .frame(minHeight: 64)
+        .padding(.leading, PhrenTheme.Space.medium).padding(.trailing, PhrenTheme.Space.xs).padding(.vertical, PhrenTheme.Space.xs)
+        .frame(minHeight: 56)
         .overlay(alignment: .leading) {
             // A bar on the edge for the states that want a glance: working, and needs you.
             if fresh, session.tab.activity == .working || session.tab.activity == .waiting {
@@ -193,13 +232,37 @@ extension LiveAgentSession {
 }
 
 extension View {
+    /// One rectangle per session, the way Moshi draws them: a flat rounded
+    /// fill, no border, and (`separatedSessionRow`) nothing grouping the
+    /// section's cards or drawn between them.
     func sessionCard() -> some View {
-        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(PhrenTheme.border, lineWidth: 1))
+        self.background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.medium, style: .continuous))
     }
 
+    /// A row below the sessions (a computer, a setup link) in the same plain
+    /// list: its own small card, the same margins as the session cards.
+    func plainListCardRow() -> some View {
+        self.padding(.horizontal, 12).padding(.vertical, 8)
+            .listRowInsets(EdgeInsets(top: 3, leading: 14, bottom: 3, trailing: 14))
+            .listRowSeparator(.hidden, edges: .all)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: 14, style: .continuous).fill(PhrenTheme.surface)
+                    .padding(.horizontal, 14).padding(.vertical, 3))
+    }
+
+    /// A small upper-case section label for the plain sessions list.
+    func plainListSectionLabel() -> some View {
+        self.font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.textMuted).textCase(.uppercase).tracking(0.6)
+            .padding(.leading, 14).padding(.top, 8)
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 2, trailing: 0))
+    }
+
+    /// In a plain list the row insets are the card's margins: a short gap
+    /// between cards and nearly the full width across.
     func separatedSessionRow() -> some View {
-        self.listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            .listRowSeparator(.hidden).listRowBackground(PhrenTheme.bg)
+        self.listRowInsets(EdgeInsets(top: 4, leading: 14, bottom: 4, trailing: 14))
+            .listRowSeparator(.hidden, edges: .all)
+            .listSectionSeparator(.hidden, edges: .all)
+            .listRowBackground(Color.clear)
     }
 }

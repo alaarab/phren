@@ -6,6 +6,12 @@ import PhrenKit
 /// build isolated stores; AppModel remains responsible for installing state.
 @MainActor
 enum UITestFixtures {
+    static let sessionActivityDate = Date.now.addingTimeInterval(-125)
+    #if DEBUG && targetEnvironment(simulator)
+    /// Tabs a UI test closed from the list; the all-sessions fixture leaves
+    /// them out of later snapshots the way Herdr would.
+    @MainActor static var closedTabs: Set<String> = []
+    #endif
     enum Bootstrap {
         case agentsOnly
         case memory([StoreContext])
@@ -20,12 +26,22 @@ enum UITestFixtures {
     static func bootstrap() async throws -> Bootstrap {
         let arguments = ProcessInfo.processInfo.arguments
         let defaults = AppRuntime.defaults
+        defaults.removeObject(forKey: AgentLaunch.pendingKey)
+        defaults.removeObject(forKey: AgentLaunch.pendingProjectKey)
+        defaults.removeObject(forKey: AgentFocusFilterStore.key)
         if arguments.contains("--session-pins-reset"), let saved = defaults.data(forKey: preferencesKey) {
             var data = saved
             for id in try LiveSessionPreferences.read(saved).pinnedSessions {
                 data = try LiveSessionPreferences.setPinned(false, for: id, in: data)
             }
             defaults.set(data, forKey: preferencesKey)
+        }
+        if arguments.contains("--toolbar-with-room"), (defaults.data(forKey: TerminalToolbarPreferences.storageKey) ?? Data()).isEmpty {
+            // The defaults fill every slot; leave one free for a test to add
+            // to. Only on a clean slate, so a relaunch keeps what the test added.
+            var layout = TerminalToolbarPreferences.defaults
+            layout.items.removeAll { $0 == .paste }
+            defaults.set(try JSONEncoder().encode(layout), forKey: TerminalToolbarPreferences.storageKey)
         }
         if arguments.contains("--agents-without-github") {
             defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
@@ -85,6 +101,17 @@ enum UITestFixtures {
             // A fresh tokenless client refuses before making any request.
             let engine = SyncEngine(client: GitHubClient(), store: store, stateDirectory: directory)
             contexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: "brain", branch: "main", canPush: true), store: store, engine: engine))
+        }
+        // Exercise the same persisted pending target a Spotlight intent leaves,
+        // including an open arriving before the model finishes bootstrapping.
+        if arguments.contains("--spotlight-session-open") || arguments.contains("--spotlight-terminal-open") {
+            let host = try mac()
+            let snapshot = try await LiveHostMonitor.fetch(host)
+            if let session = snapshot.sessions(on: host).first {
+                AgentLaunch.setPending(session, destination: arguments.contains("--spotlight-terminal-open") ? .terminal : .chat)
+            }
+        } else if arguments.contains("--spotlight-project-open") {
+            AgentLaunch.setPendingProject(storeID: "team/brain", project: "demo")
         }
         return .memory(contexts)
     }

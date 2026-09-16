@@ -147,11 +147,11 @@ struct MediumMemoryView: View {
                 .tracking(1.0)
                 .foregroundStyle(isFullColor ? WidgetTheme.cyan : .secondary)
             if let topTask = snapshot.topTask {
-                Text(topTask.text)
+                Text(topTask.text).privacySensitive()
                     .font(.caption.weight(.medium))
                     .foregroundStyle(isFullColor ? WidgetTheme.text : .primary)
                     .lineLimit(2)
-                Text(topTask.project)
+                Text(topTask.project).privacySensitive()
                     .font(.caption2)
                     .foregroundStyle(isFullColor ? WidgetTheme.textMuted : .secondary)
                     .lineLimit(1)
@@ -210,7 +210,7 @@ struct RectangularMemoryView: View {
                     .font(.headline)
                     .widgetAccentable()
                     .lineLimit(1)
-                Text(snapshot.topTask?.text ?? "Nothing active")
+                Text(snapshot.topTask?.text ?? "Nothing active").privacySensitive()
                     .font(.caption)
                     .lineLimit(1)
             } else {

@@ -164,6 +164,7 @@ struct SimulatorScreenView: View {
         }
         .navigationTitle(simulator.name).navigationBarTitleDisplayMode(.inline)
         .phrenScreen()
+        .disablesPanToGoBack()
         .task {
             #if DEBUG && targetEnvironment(simulator)
             if AgentChatFixture.enabled { apps = [SimulatorApp(bundleId: "com.phren.ios", name: "Phren")]; return }

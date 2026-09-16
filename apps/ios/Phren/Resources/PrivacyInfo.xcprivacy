@@ -26,12 +26,18 @@
 		PhrenKit or the app target and never touches UserDefaults itself.
 		CA92.1 (information accessible only to the app itself) is correct.
 
-		No other required-reason category applies: nothing in Phren or
-		PhrenKit calls a file-timestamp API (creationDate/modificationDate/
-		contentModificationDateKey/getattrlist/stat — the one resourceValues(
-		forKeys:) call site reads only .isRegularFileKey, not a timestamp
-		key), reads system boot time, checks disk space, or enumerates active
-		keyboards.
+		NSPrivacyAccessedAPICategoryFileTimestamp — C617.1 and 0A2A.1.
+
+		PhrenKit's LocalStore reads .contentModificationDateKey to tell a
+		changed store file from an unchanged one before re-parsing it (C617.1:
+		timestamps of files inside the app's own container). SwiftTerm, a
+		linked package without a manifest of its own, calls stat/fstat on
+		files it is handed (0A2A.1: a third-party SDK's declared reason,
+		listed here because the SDK does not ship a manifest).
+
+		No other required-reason category applies: nothing reads the system
+		boot time (the terminal's reconnect clock is ContinuousClock), checks
+		disk space, or enumerates active keyboards.
 		-->
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
@@ -39,6 +45,15 @@
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>0A2A.1</string>
 			</array>
 		</dict>
 	</array>

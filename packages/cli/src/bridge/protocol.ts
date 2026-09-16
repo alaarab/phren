@@ -6,7 +6,7 @@ import { z } from "zod";
 export const PROTOCOL = 1;
 export const MAX_FRAME = 8 * 1024 * 1024;
 export const id = z.string().regex(/^[A-Za-z0-9_%:.-]{1,200}$/);
-export const serverName = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/);
+export const serverName = z.string().regex(/^(?!\.\.?$)[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/);
 export const provider = z.enum(["codex", "claude", "copilot", "phren"]);
 export type Provider = z.infer<typeof provider>;
 export const targetSchema = z.object({
@@ -18,6 +18,12 @@ export const targetSchema = z.object({
   session: z.string().uuid(),
 });
 export type Target = z.infer<typeof targetSchema>;
+// Only /v1/prompt accepts a transcript-less target. All transcript, image,
+// approval and diff routes retain the UUID-bound schema above.
+export const startingTargetSchema = targetSchema.omit({ session: true }).extend({
+  starting: z.literal(true), startingToken: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type StartingTarget = z.infer<typeof startingTargetSchema>;
 export type Json = Record<string, unknown>;
 export function object(value: unknown): Json {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : {};

@@ -1,0 +1,186 @@
+import PhrenKit
+import SwiftUI
+
+/// Plain values isolate transcript layout from connection, composer, usage,
+/// and scroll-position changes in the observable chat model.
+struct ChatTranscriptRows: View, Equatable {
+    let revision: Int
+    let entries: [ChatTimelineEntry]
+    let revealed: [String: String]
+    let revealRevision: Int
+    let images: [String: [ChatAttachmentDraft]]
+    let session: LiveAgentSession
+    let target: AgentChatTarget?
+    let active: Bool
+    let preview: (ChatAttachmentDraft) -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.revision == rhs.revision && lhs.revealRevision == rhs.revealRevision
+            && lhs.images == rhs.images && lhs.session.id == rhs.session.id
+            && lhs.target == rhs.target && lhs.active == rhs.active
+    }
+    var body: some View {
+        ChatPerformance.measure("transcript rows") {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                ForEach(entries) { entry in
+                    ChatTranscriptRow(entry: entry, revealedText: revealed[entry.id], images: images[entry.id] ?? [],
+                                      session: session, target: target, active: active, preview: preview)
+                        .equatable().id(entry.id)
+                }
+            }
+        }
+    }
+}
+
+private struct ChatTranscriptRow: View, Equatable {
+    let entry: ChatTimelineEntry
+    let revealedText: String?
+    let images: [ChatAttachmentDraft]
+    let session: LiveAgentSession
+    let target: AgentChatTarget?
+    let active: Bool
+    let preview: (ChatAttachmentDraft) -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.entry == rhs.entry && lhs.revealedText == rhs.revealedText && lhs.images == rhs.images
+            && lhs.session.id == rhs.session.id && lhs.target == rhs.target && lhs.active == rhs.active
+    }
+    var body: some View {
+        #if DEBUG
+        let _ = ChatPerformance.enabled ? Self._printChanges() : ()
+        #endif
+        if let phren = entry.phren {
+            PhrenToolCard(presentation: phren, messages: entry.messages)
+        } else if entry.isReadRun {
+            ChatReadRun(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
+        } else if entry.isActivity {
+            ChatToolActivity(messages: entry.messages, resultImages: resultImages, imageContext: "\(target?.id ?? "")|\(active)")
+        } else if let message = entry.messages.first {
+            ChatMessageRow(message: message, revealedText: revealedText, images: images, preview: preview) {
+                if let target {
+                    ForEach(message.imageBlocks, id: \.self) { block in
+                        ChatHistoricalImage(session: session, target: target, line: message.line, block: block, active: active, preview: preview)
+                    }
+                }
+            }
+        }
+    }
+    private func resultImages(_ message: AgentChatMessage) -> AnyView {
+        AnyView(Group {
+            if let target {
+                ForEach(message.resultImages, id: \.self) { ref in
+                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner,
+                                        active: active, preview: preview)
+                }
+            }
+        })
+    }
+}
+
+private struct ChatMessageRow<Historical: View>: View {
+    @Environment(\.openToolOutput) private var openOutput
+    let message: AgentChatMessage
+    var revealedText: String? = nil
+    let images: [ChatAttachmentDraft]
+    let preview: (ChatAttachmentDraft) -> Void
+    @ViewBuilder let historical: () -> Historical
+    /// The pictures the transcript itself carries. When there are any, the
+    /// local previews of the same send would only draw them twice.
+    private var inlineImages: Bool { !message.imageBlocks.isEmpty }
+    private var displayText: String {
+        if let revealedText { return revealedText }
+        return ChatMessageDisplayCache.text(for: message, imagePaths: images.compactMap(\.path), hasImages: !images.isEmpty, inlineImages: inlineImages)
+    }
+    var body: some View { ChatPerformance.measure("message row") { content } }
+    @ViewBuilder private var content: some View {
+        #if DEBUG
+        let _ = ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" ? Self._printChanges() : ()
+        #endif
+        if let command = message.localCommand {
+            LocalCommandRow(command: command, id: message.id)
+        } else {
+            bubble
+        }
+    }
+    private var bubble: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if message.role == .user { Spacer(minLength: 30) }
+            VStack(alignment: .leading, spacing: 8) {
+                if !inlineImages {
+                    ForEach(images) { item in
+                        Button { preview(item) } label: {
+                            ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
+                        }.accessibilityLabel("View attached \(item.attachment.name)")
+                    }
+                }
+                historical()
+                let text = displayText
+                if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) {
+                    let preview = ToolOutputPreview(text, lines: 40, characters: 6_000)
+                    ChatRichText(text: preview.text, cacheKey: "\(message.renderKey)|\(inlineImages)|\(images.map(\.id))|\(revealedText?.utf8.count ?? -1)").equatable()
+                    if preview.truncated {
+                        Button("Read full message") { openOutput(.init(title: message.role == .user ? "Your message" : "Agent reply", text: text)) }
+                            .font(.caption).accessibilityIdentifier("chat-message-full:\(message.id)")
+                    }
+                }
+                if revealedText != nil {
+                    Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if message.isQueued {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityLabel("Pending message")
+                        .accessibilityIdentifier("chat-queued-tag:\(message.id)")
+                }
+            }
+            .padding(message.role == .user ? 14 : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .opacity(message.isQueued ? 0.5 : 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
+        .accessibilityIdentifier("chat-message:\(message.id)")
+        .contextMenu {
+            Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(message.text) }
+            ShareLink(item: message.text)
+        }
+    }
+}
+
+/// A slash command or `!` shell line typed at the agent's own prompt, and
+/// what it printed: system text inline, not a bubble of angle brackets.
+private struct LocalCommandRow: View {
+    let command: AgentChatMessage.LocalCommand
+    let id: String
+    @Environment(\.openToolOutput) private var openOutput
+    var body: some View {
+        if command.kind == .output && command.text.isEmpty {
+            EmptyView()
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Group {
+                    switch command.kind {
+                    case .command: Image(systemName: "command")
+                    case .shell: Image(systemName: "terminal")
+                    case .output: Image(systemName: "arrow.turn.down.right")
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(PhrenTheme.chatNeutralDim).frame(width: 14)
+                .accessibilityHidden(true)
+                Text(ToolOutputPreview(command.text, lines: 12, characters: 2_000).text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(command.kind == .output ? PhrenTheme.textMuted : PhrenTheme.textSecondary)
+                    .lineLimit(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(command.kind == .output ? "Command output: \(command.text)" : "Command: \(command.text)")
+            .accessibilityIdentifier("chat-command:\(id)")
+            .contextMenu {
+                Button("View full output") { openOutput(.init(title: "Command output", text: command.text)) }
+                Button("Copy", systemImage: "doc.on.doc") { ChatClipboard.copy(command.text) }
+            }
+        }
+    }
+}

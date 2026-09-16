@@ -7,38 +7,52 @@ struct AgentConversationLink<LabelContent: View>: View {
     let session: LiveAgentSession
     var onOpenInPhren: (() -> Void)? = nil
     @ViewBuilder var label: LabelContent
-    @State private var showingChat = false
 
     var body: some View {
-        Button {
-            if let onOpenInPhren { onOpenInPhren() }
-            else { showingChat = true }
-        } label: { label }
-        .sheet(isPresented: $showingChat) {
-            // Settings → Chat decides which of the two views a session opens in.
-            if ChatSettings.opensInTerminal { NavigationStack { HerdrTerminalView(host: session.host, session: session) } }
-            else { AgentChatSheet(session: session) }
+        Group {
+            if let onOpenInPhren {
+                Button {
+                    PhrenAppShortcuts.donateOpen(session)
+                    onOpenInPhren()
+                } label: { label }
+            } else {
+                NavigationLink {
+                    AgentSessionDestination(session: session).onAppear { PhrenAppShortcuts.donateOpen(session) }
+                } label: { label }
+            }
         }
+    }
+}
+
+struct AgentSessionDestination: View {
+    let session: LiveAgentSession
+    var body: some View {
+        if ChatSettings.opensInTerminal { HerdrTerminalView(host: session.host, session: session) }
+        else { AgentChatSheet(session: session) }
     }
 }
 
 struct AgentChatSheet: View {
     @State private var session: LiveAgentSession
     @State private var incomingAttachments: [AgentAttachment]
+    @State private var incomingDraft: String
     private let initialSessionID: LiveAgentSession.ID
     private let initialPane: AgentChatPanes.Pane?
-    init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil, attachments: [AgentAttachment] = []) {
+    private let startsDictation: Bool
+    init(session: LiveAgentSession, initialPane: AgentChatPanes.Pane? = nil,
+         attachments: [AgentAttachment] = [], draft: String = "", startsDictation: Bool = false) {
         _session = State(initialValue: session)
         _incomingAttachments = State(initialValue: attachments)
+        _incomingDraft = State(initialValue: draft)
         initialSessionID = session.id
         self.initialPane = initialPane
+        self.startsDictation = startsDictation
     }
     var body: some View {
-        NavigationStack {
-            AgentChatView(session: session, switchSession: { session = $0 },
-                          initialPane: session.id == initialSessionID ? initialPane : nil,
-                          incomingAttachments: $incomingAttachments).id(session.id)
-        }
+        AgentChatView(session: session, switchSession: { session = $0 },
+                      initialPane: session.id == initialSessionID ? initialPane : nil,
+                      incomingAttachments: $incomingAttachments, incomingDraft: $incomingDraft,
+                      startsDictation: startsDictation && session.id == initialSessionID).id(session.id)
     }
 }
 
@@ -47,6 +61,9 @@ struct AgentChatView: View {
     let switchSession: (LiveAgentSession) -> Void
     let initialPane: AgentChatPanes.Pane?
     @Binding var incomingAttachments: [AgentAttachment]
+    @Binding var incomingDraft: String
+    /// Opened by the Action button: start listening as soon as the chat is up.
+    var startsDictation = false
     @State private var initialized = false
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
@@ -64,7 +81,10 @@ struct AgentChatView: View {
     /// message as they are recognised, no separate box to review.
     @State private var dictation = SpeechTranscriber()
     @State private var dictationPrefix = ""
+    @State private var dictationBase = ""
     @State private var dictationTask: Task<Void, Never>?
+    @State private var cleanupTask: Task<Void, Never>?
+    @State private var dictationPreview: DictationCleanupPreview?
     /// The mic is on as far as the person is concerned. The recogniser ends
     /// a segment on its own after a pause; while this is set, each finished
     /// segment is folded into the message and a new one starts.
@@ -72,9 +92,14 @@ struct AgentChatView: View {
     @State private var showingAgentSwitcher = false
     @State private var showingUsage = false
     @State private var previewImage: ChatAttachmentDraft?
+    @State private var assigningProject = false
+    @State private var fullDiff: ChatFullDiff?
+    @State private var fullToolOutput: FullToolOutput?
     @State private var historyTask: Task<Void, Never>?
-    @State private var bottomPosition: CGFloat = 0
+    @State private var atBottom = true
     @State private var nearHistoryTop = false
+    /// Older pages pulled in without a scroll in between; a scroll resets it.
+    @State private var historyChain = 0
     @State private var paginationReady = false
     @State private var requestedHistoryLine: Int?
     @State private var scrollHeight: CGFloat = 0
@@ -82,21 +107,24 @@ struct AgentChatView: View {
     @FocusState private var composing: Bool
     // Recalculate when the keyboard changes the viewport as well as when the
     // transcript moves; either measurement can arrive first during layout.
-    private var atBottom: Bool { bottomPosition <= scrollHeight + 60 }
 
     /// Starts recognising into the composer after whatever is already typed.
     private func startDictation() {
         dictationTask?.cancel()
+        cleanupTask?.cancel()
+        dictationPreview = nil
         dictationTask = Task {
             guard await SpeechTranscriber.requestPermissions() == .authorized else {
                 model.deliveryError = "Allow microphone and speech recognition in iPhone Settings to dictate."; return
             }
             guard !Task.isCancelled, scenePhase == .active else { return }
-            dictationPrefix = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
+            dictationBase = model.draft + (model.draft.isEmpty || model.draft.hasSuffix(" ") || model.draft.hasSuffix("\n") ? "" : " ")
+            dictationPrefix = dictationBase
             do { dictating = true; try dictation.start(); model.deliveryError = nil } catch { dictating = false; model.deliveryError = error.localizedDescription }
         }
     }
-    /// Stops, applies the word replacements to what was said, and sends when Settings say so.
+    /// Stops and preserves the raw words in the draft. When opted in, Apple
+    /// Intelligence prepares a candidate that remains separate until chosen.
     private func stopDictation() {
         guard dictating else { return }
         dictating = false
@@ -104,14 +132,56 @@ struct AgentChatView: View {
         dictation.stop()
         if !spoken.isEmpty { model.draft = dictationPrefix + spoken }
         model.draft = model.draft.trimmingCharacters(in: .whitespaces)
-        if ChatSettings.autoSendsDictation, !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Task { await model.send(session) } }
+        let rawDraft = model.draft
+        let rawInstruction = rawDraft.hasPrefix(dictationBase)
+            ? String(rawDraft.dropFirst(dictationBase.count)) : rawDraft
+        guard SpeechSettings.cleanupEnabled(in: AppRuntime.defaults), !rawInstruction.isEmpty else {
+            sendDictationIfRequested()
+            return
+        }
+        cleanupTask?.cancel()
+        cleanupTask = Task {
+            do {
+                let tightened = try await DictationCleanupService.clean(rawInstruction)
+                guard !Task.isCancelled, model.draft == rawDraft else { return }
+                guard let tightened else { sendDictationIfRequested(); return }
+                dictationPreview = DictationCleanupPreview(
+                    rawDraft: rawDraft, rawInstruction: rawInstruction,
+                    tightenedDraft: dictationBase.trimmingCharacters(in: .whitespaces).isEmpty
+                        ? tightened : dictationBase + tightened,
+                    tightenedInstruction: tightened
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                sendDictationIfRequested()
+            }
+        }
+    }
+
+    private func resolveDictationPreview(useTightened: Bool) {
+        guard let preview = dictationPreview else { return }
+        if model.draft == preview.rawDraft {
+            model.draft = useTightened ? preview.tightenedDraft : preview.rawDraft
+        }
+        dictationPreview = nil
+        sendDictationIfRequested()
+    }
+
+    private func sendDictationIfRequested() {
+        if ChatSettings.autoSendsDictation,
+           !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { await model.send(session) }
+        }
     }
 
     private func acceptIncomingAttachments() {
-        guard !incomingAttachments.isEmpty, !model.restoringDraft, let initialPane,
-              let expected = try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID,
-                                                    tabID: session.tab.id, muxID: session.host.muxID),
-              model.target == expected else { return }
+        guard !incomingAttachments.isEmpty || !incomingDraft.isEmpty,
+              !model.restoringDraft, let target = model.target else { return }
+        if let initialPane {
+            guard let expected = try? initialPane.target(hostID: session.host.id, workspaceID: session.workspaceID,
+                                                         tabID: session.tab.id, muxID: session.host.muxID),
+                  target == expected else { return }
+        }
         guard model.attachments.count + incomingAttachments.count <= ChatAttachmentLimit.maximum else {
             model.deliveryError = "Make room for \(incomingAttachments.count) attachment(s). Each message can include four."
             return
@@ -119,6 +189,11 @@ struct AgentChatView: View {
         let items = incomingAttachments
         incomingAttachments = []
         for item in items { model.add(item) }
+        let text = incomingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        incomingDraft = ""
+        if !text.isEmpty {
+            model.draft += (model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n") + text
+        }
     }
 
     private var currentHost: LiveHost? {
@@ -131,15 +206,29 @@ struct AgentChatView: View {
     }
     private var active: Bool { visible && scenePhase == .active && currentHost == session.host }
     private var selectedPane: AgentChatPanes.Pane? { model.panes.first { $0.id == model.target?.paneID } }
+    private struct WorkingActivityObservation: Equatable {
+        let project: String?
+        let provider: String?
+        let branch: String?
+        let activity: String?
+        let toolName: String?
+    }
+    private var workingActivityObservation: WorkingActivityObservation {
+        WorkingActivityObservation(project: project?.name, provider: model.target?.source ?? session.tab.agent,
+                                   branch: model.branch ?? session.tab.branch,
+                                   activity: model.activityPhase == .working ? "working" : model.liveActivity ?? session.tab.agentStatus,
+                                   toolName: model.currentToolName)
+    }
 
-    var body: some View {
+    var body: some View { ChatPerformance.measure("chat container") { content } }
+    private var content: some View {
         VStack(spacing: 0) {
             chatHeader
 
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        LazyVStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 12) {
                             if model.target == nil && !model.loading {
                                 Text("Choose an agent").font(.title2.weight(.semibold))
                                 ForEach(model.panes) { pane in
@@ -183,35 +272,22 @@ struct AgentChatView: View {
                                 })
                                 .accessibilityIdentifier("chat-history")
                             }
-                            ForEach(model.timeline) { entry in
-                                if entry.isActivity {
-                                    ChatToolActivity(messages: entry.messages, resultImages: { message in
-                                        AnyView(Group {
-                                            if let target = model.target {
-                                                ForEach(message.resultImages, id: \.self) { ref in
-                                                    ChatHistoricalImage(session: session, target: target, line: message.line, block: ref.block, inner: ref.inner, active: active, preview: { previewImage = $0 })
-                                                }
-                                            }
-                                        })
-                                    }).equatable().id(entry.id)
-                                } else if let message = entry.messages.first {
-                                    ChatMessageRow(message: message, revealedText: model.reveal.visible[message.id], images: model.sentImages.filter { item in
-                                        message.role == .user && item.path.map { message.text.contains($0) } == true
-                                    }, preview: { previewImage = $0 }, historical: {
-                                        if let target = model.target {
-                                            ForEach(message.imageBlocks, id: \.self) { block in
-                                                ChatHistoricalImage(session: session, target: target, line: message.line, block: block, active: active, preview: { previewImage = $0 })
-                                            }
-                                        }
-                                    }).id(message.id)
-                                }
-                            }
+                            ChatTranscriptRows(revision: model.timelineRevision, entries: model.timeline,
+                                               revealed: model.reveal.visible, revealRevision: model.reveal.revision,
+                                               images: model.imagesByMessage, session: session, target: model.target,
+                                               active: active, preview: { previewImage = $0 }).equatable()
                             if let prompt = model.question, model.needsAnswer, model.questionsSupported {
                                 ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { selections in
                                     sendTask = Task { await model.answer(session, question: prompt, selections: selections) }
                                 }.id(prompt.id)
                             }
-                            if model.connected && model.messages.isEmpty { Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40) }
+                            if model.target?.isStarting == true {
+                                Text("Starting \(model.target?.providerName ?? "agent") in \(session.projectDisplayName(project?.name))…")
+                                    .foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                                    .accessibilityIdentifier("chat-starting")
+                            } else if model.connected && model.messages.isEmpty {
+                                Text("Ready for your message.").foregroundStyle(PhrenTheme.textMuted).padding(.top, 40)
+                            }
                         }
                         // The scroll marker is not a message: it must not add
                         // another inter-message gap below the final reply.
@@ -226,6 +302,7 @@ struct AgentChatView: View {
                 .simultaneousGesture(TapGesture().onEnded { composing = false })
                 .modifier(ChatHistoryScrollObserver { near in
                     if near && !nearHistoryTop && model.historyError != nil { requestedHistoryLine = nil }
+                    if near != nearHistoryTop { historyChain = 0 }
                     nearHistoryTop = near
                     loadHistoryIfNeeded(proxy)
                 })
@@ -238,7 +315,7 @@ struct AgentChatView: View {
                     paginationReady = true
                     loadHistoryIfNeeded(proxy)
                 }
-                .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy) }
+                .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
                 .scrollDismissesKeyboard(.interactively)
                 .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: "chat-scroll")
@@ -249,10 +326,11 @@ struct AgentChatView: View {
                         }
                 })
                 .onPreferenceChange(ChatBottomPosition.self) { position in
-                    if abs(position - bottomPosition) > 0.5 { bottomPosition = position }
+                    let near = position <= scrollHeight + 60
+                    if near != atBottom { atBottom = near }
                 }
                 .overlay {
-                    if model.loading && model.messages.isEmpty {
+                    if (model.loading && model.messages.isEmpty) || (model.timeline.isEmpty && !model.messages.isEmpty) {
                         ProgressView()
                             .tint(PhrenTheme.chatNeutral)
                             .accessibilityLabel("Opening conversation")
@@ -276,7 +354,7 @@ struct AgentChatView: View {
                     historyTask?.cancel(); historyTask = nil; requestedHistoryLine = nil
                     proxy.scrollTo("chat-bottom", anchor: .bottom)
                 }
-                .onChange(of: model.messages.last?.id) { _, _ in
+                .onChange(of: model.timeline.last?.id) { _, _ in
                     if atBottom && !model.loadingHistory { withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
                 }
                 .onChange(of: model.reveal.revision) { _, _ in
@@ -294,6 +372,9 @@ struct AgentChatView: View {
                 .id(approval.id)
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
+            if !model.backgroundJobs.isEmpty {
+                ChatBackgroundJobsView(jobs: model.backgroundJobs)
+            }
             // Between the transcript and the input, where Claude Code keeps
             // its queue; outside the lazy stack so the rows are always laid out.
             if !model.queue.isEmpty {
@@ -305,25 +386,64 @@ struct AgentChatView: View {
                 }
                 .frame(maxHeight: 190).padding(.bottom, 2)
             }
+            if let preview = dictationPreview {
+                DictationCleanupPreviewCard(
+                    preview: preview,
+                    useTightened: { resolveDictationPreview(useTightened: true) },
+                    keepOriginal: { resolveDictationPreview(useTightened: false) }
+                )
+                .padding(.horizontal, 12).padding(.top, 6)
+            }
             composer
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .background(PhrenTheme.chatCanvas)
+        .confirmsWebLinks()
+        .environment(\.openChatDiff) { fullDiff = $0 }
+        .environment(\.openToolOutput) { fullToolOutput = $0 }
+        .overlay {
+            if showingAgentSwitcher {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgentDrawer() }
+                    AgentDrawer(current: session, panes: model.panes, selectedPaneID: model.target?.paneID,
+                                choosePane: { pane in model.choose(pane, session: session); refresh = UUID() },
+                                chooseSession: switchSession, close: closeAgentDrawer)
+                }.zIndex(20)
+            }
+        }
         .interactiveDismissDisabled(model.hasMore || model.loadingHistory)
         .navigationTitle("Agent chat")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        // Pushed inside a tab, the chat is a full-height screen: the tab bar
+        // would otherwise sit under the composer.
+        .toolbar(.hidden, for: .tabBar)
+        .keepsInteractivePop(hidesNavigationBar: true)
+        .navigationDestination(item: $fullDiff) { FileDiffView(file: $0.file, section: $0.section) }
+        .navigationDestination(item: $fullToolOutput) { FullToolOutputView(output: $0) }
         .onAppear {
             if !initialized {
                 initialized = true
                 if let initialPane { model.choose(initialPane, session: session) }
+                if startsDictation {
+                    // Let the push finish first; the microphone prompt and the
+                    // keyboard both fight a screen that is still sliding in.
+                    Task { try? await Task.sleep(for: .milliseconds(450)); if !dictating { startDictation() } }
+                }
             }
             visible = true
         }
         .onChange(of: model.restoringDraft) { _, _ in acceptIncomingAttachments() }
         .onChange(of: model.approval?.id) { _, id in if id != nil { composing = false } }
         .onChange(of: model.attachments.count) { _, _ in acceptIncomingAttachments() }
-        .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() }
+        .onChange(of: workingActivityObservation, initial: true) { _, value in
+            Task {
+                await SessionWorkingActivityController.shared.observe(
+                    session: session, project: value.project, provider: value.provider,
+                    branch: value.branch, activity: value.activity, toolName: value.toolName
+                )
+            }
+        }
+        .onDisappear { visible = false; sendTask?.cancel(); historyTask?.cancel(); cleanupTask?.cancel(); model.flushDrafts() }
         .onChange(of: scenePhase) { _, phase in if phase != .active { sendTask?.cancel(); historyTask?.cancel(); model.flushDrafts() } }
         .onChange(of: currentHost) { _, _ in sendTask?.cancel(); historyTask?.cancel() }
         .onChange(of: reduceMotion || voiceOver, initial: true) { _, instant in
@@ -367,15 +487,7 @@ struct AgentChatView: View {
             if scenePhase == .active { try? dictation.start() } else { dictating = false }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { stopDictation() } }
-        .onDisappear { dictationTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
-        .sheet(isPresented: $showingAgentSwitcher) {
-            NavigationStack {
-                ChatAgentSwitcher(session: session, panes: model.panes, selectedPaneID: model.target?.paneID,
-                                  choosePane: { pane in
-                    model.choose(pane, session: session); refresh = UUID()
-                }, chooseSession: switchSession)
-            }
-        }
+        .onDisappear { dictationTask?.cancel(); cleanupTask?.cancel(); dictating = false; if dictation.isRecording { dictation.stop() } }
         .sheet(isPresented: $showingUsage) {
             if let usage = model.progress.usage {
                 VStack(alignment: .leading, spacing: 16) {
@@ -420,18 +532,38 @@ struct AgentChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $assigningProject) {
+            NavigationStack {
+                LiveProjectPicker(hostID: session.host.id, cwd: session.tab.cwd ?? "",
+                                  existing: (try? LiveSessionPreferences.read(hostData))?.mapping(hostID: session.host.id, cwd: session.tab.cwd))
+            }
+        }
         .task(id: RunIdentity(active: active, refresh: refresh)) {
             guard active else { return }
             await model.run(session)
         }
     }
 
-    private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy) {
+    private func openAgentDrawer() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { showingAgentSwitcher = true }
+    }
+    private func closeAgentDrawer() {
+        withAnimation(reduceMotion ? nil : .easeIn(duration: 0.18)) { showingAgentSwitcher = false }
+    }
+
+    /// Pages loaded back to back without a scroll in between. A page of
+    /// nothing but lifecycle rows may need a second, but a chain past a few
+    /// means the anchor scroll isn't taking and the top stays "near" — left
+    /// alone that pulls the whole history and hangs the phone.
+    private static let automaticHistoryPages = 3
+
+    private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
         guard active, paginationReady, model.connected, model.hasMore, !model.loadingHistory,
-              historyTask == nil, nearHistoryTop,
+              historyTask == nil, nearHistoryTop, !automatic || historyChain < Self.automaticHistoryPages,
               let line = model.history.startLine, line > 0, requestedHistoryLine != line else { return }
+        if automatic { historyChain += 1 } else { historyChain = 0 }
         requestedHistoryLine = line
-        let anchor = ChatTimelineEntry.group(model.messages).first?.id
+        let anchor = model.timeline.first?.id
         let target = model.target
         historyTask = Task {
             await model.loadOlder(session)
@@ -441,8 +573,12 @@ struct AgentChatView: View {
             }
             await Task.yield()
             if let anchor {
+                // Older rows can fold the anchor into a read run under another
+                // id; scroll to whichever entry holds that message now.
+                let entries = model.timeline
+                let row = entries.first { $0.id == anchor || $0.messages.contains { $0.id == anchor } }?.id ?? anchor
                 var transaction = Transaction(); transaction.disablesAnimations = true
-                withTransaction(transaction) { proxy.scrollTo(anchor, anchor: .top) }
+                withTransaction(transaction) { proxy.scrollTo(row, anchor: .top) }
             }
             // A page may contain only lifecycle events. Recheck after layout
             // settles so it can continue without another scroll gesture.
@@ -452,7 +588,7 @@ struct AgentChatView: View {
             }
             guard model.target == target else { return }
             historyTask = nil
-            loadHistoryIfNeeded(proxy)
+            loadHistoryIfNeeded(proxy, automatic: true)
         }
     }
 
@@ -463,7 +599,9 @@ struct AgentChatView: View {
         let modelName = model.modelName.map { name in
             name.hasPrefix("claude-") ? String(name.dropFirst("claude-".count)) : name
         }
-        return [project?.name ?? session.workspaceName, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
+        let location = session.usesFolderFallback(mappedProject: project?.name)
+            ? "~/\(session.projectDisplayName(nil))" : session.projectDisplayName(project?.name)
+        return [location, modelName, model.branch].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// The computer and workspace left the visible line; VoiceOver still
@@ -490,11 +628,18 @@ struct AgentChatView: View {
                 }
                 .accessibilityElement(children: .contain)
             VStack(alignment: .leading, spacing: 3) {
-                Text(selectedPane?.displayTitle ?? session.workspaceName)
+                Text(selectedPane?.displayTitle ?? session.projectDisplayName(project?.name))
                     .font(.system(.subheadline, design: .monospaced).weight(.semibold)).lineLimit(1)
-                Text(chatLocation)
+                HStack(spacing: 4) {
+                    if session.usesFolderFallback(mappedProject: project?.name) { Image(systemName: "folder").font(.caption2) }
+                    Text(chatLocation).lineLimit(1)
+                    if project == nil, session.tab.cwd != nil {
+                        Button("Link to project", systemImage: "link") { assigningProject = true }
+                            .labelStyle(.iconOnly).frame(width: 28, height: 24)
+                            .accessibilityIdentifier("chat-link-project")
+                    }
+                }
                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(PhrenTheme.chatNeutral)
-                    .lineLimit(1)
                     .accessibilityLabel(chatLocationSpoken).accessibilityIdentifier("chat-location")
             }.frame(maxWidth: .infinity, alignment: .leading)
             if let target = model.target {
@@ -502,7 +647,7 @@ struct AgentChatView: View {
                     // Besides the pane's tree: whatever the session's commands
                     // wrote elsewhere — the phren store, a sibling checkout.
                     AgentDiffView(session: session, target: target, paths: Array(Set(model.messages.filter { $0.role == .tool && !$0.isToolResult && !$0.isChange }
-                        .flatMap { ToolPresentation(title: $0.title ?? "", text: $0.text).editedPaths }).sorted().prefix(24)))
+                        .flatMap { ToolPresentationCache.value($0).editedPaths }).sorted().prefix(24)))
                 } label: {
                     Image(systemName: "arrow.triangle.branch").font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle())
                         .foregroundStyle(PhrenTheme.chatText)
@@ -512,8 +657,7 @@ struct AgentChatView: View {
         }
         .buttonStyle(.plain).foregroundStyle(PhrenTheme.chatText)
         .padding(.horizontal, 8).padding(.vertical, 8)
-        .background(PhrenTheme.chatPanel, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(PhrenTheme.borderStrong, lineWidth: 1))
+        .phrenPanel(radius: PhrenTheme.Radius.large)
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain).accessibilityIdentifier("chat-header")
@@ -653,6 +797,7 @@ struct AgentChatView: View {
                             let isCommand = AgentSlashCommand.isCommand(model.draft), pane = model.target?.paneID
                             sendTask = Task {
                                 await model.send(session)
+                                if model.deliveryError == nil, !isCommand { PhrenAppShortcuts.donateMessage(to: session) }
                                 if isCommand, model.deliveryError == nil, let pane {
                                     commandDestination = .init(paneID: pane, menu: false)
                                     // /new, /clear and /resume may change the session ID.
@@ -699,7 +844,7 @@ struct AgentChatView: View {
     }
     private struct RunIdentity: Equatable { let active: Bool; let refresh: UUID }
     private var showsStop: Bool {
-        model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
+        model.target?.isStarting != true && model.isBusy && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty
     }
     /// A message typed while the agent is busy joins the queue instead of
     /// interrupting; the control says so.
@@ -707,15 +852,12 @@ struct AgentChatView: View {
         model.isBusy && !showsStop && !AgentSlashCommand.isCommand(model.draft)
     }
 
-    /// Claude Code's queue, on a phone: each waiting message with Send now
-    /// (steer), Edit (back into the composer), and remove.
+    /// Optimistic bubbles stay muted until echoed by the transcript. Only
+    /// unsent drafts have local edit/remove controls; Claude owns sent items.
     private var queuedMessages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Queued · \(model.queue.count)").font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.chatNeutral)
-                .padding(.leading, 4)
             ForEach(model.queue) { item in
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(PhrenTheme.chatNeutralDim).padding(.top, 3)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
                         if !item.attachments.isEmpty {
@@ -724,6 +866,7 @@ struct AgentChatView: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 0) {
+                        if item.submittedAfterLine == nil {
                         Button { sendTask = Task { await model.sendNow(item, session) } } label: {
                             Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
@@ -734,11 +877,17 @@ struct AgentChatView: View {
                         Button { model.remove(item) } label: {
                             Image(systemName: "xmark").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Remove from queue").accessibilityIdentifier("chat-queued-remove:\(item.id)")
+                        }
                     }.font(.system(size: 15)).foregroundStyle(PhrenTheme.chatNeutral).buttonStyle(.plain)
                 }
                 .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)
                 .background(PhrenTheme.chatUserBubble, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(PhrenTheme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                .opacity(0.5)
+                .overlay(alignment: .topLeading) {
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityLabel("Pending message").accessibilityIdentifier("chat-queued-tag:\(item.id)")
+                }
+                .padding(.leading, 30)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("chat-queued:\(item.id)")
             }
@@ -759,51 +908,6 @@ private struct ChatBottomPosition: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-private struct ChatMessageRow<Historical: View>: View {
-    let message: AgentChatMessage
-    var revealedText: String? = nil
-    let images: [ChatAttachmentDraft]
-    let preview: (ChatAttachmentDraft) -> Void
-    @ViewBuilder let historical: () -> Historical
-    private var displayText: String {
-        if let revealedText { return revealedText }
-        let marker = "\n\nAttached files on this computer:\n"
-        guard !images.isEmpty, let section = message.text.range(of: marker, options: .backwards) else { return message.text }
-        let paths = message.text[section.upperBound...].components(separatedBy: "\n")
-        let previewPaths = Set(images.compactMap(\.path))
-        // Hide only our complete image attachment suffix when previews replace it.
-        guard paths.allSatisfy({ previewPaths.contains($0) }) else { return message.text }
-        return String(message.text[..<section.lowerBound])
-    }
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if message.role == .user { Spacer(minLength: 30) }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(images) { item in
-                        Button { preview(item) } label: {
-                            ChatAttachmentImage(attachment: item.attachment).frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
-                        }.accessibilityLabel("View attached \(item.attachment.name)")
-                }
-                historical()
-                let text = displayText
-                if !text.isEmpty && !(text == "[Image attachment]" && !message.imageBlocks.isEmpty) { ChatRichText(text: text).equatable() }
-                if revealedText != nil {
-                    Capsule().fill(PhrenTheme.chatText).frame(width: 4, height: 13).accessibilityHidden(true)
-                }
-            }
-            .padding(message.role == .user ? 14 : 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(message.role == .user ? PhrenTheme.chatUserBubble : .clear, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(message.role == .user ? "Your message" : "Agent reply")
-        .accessibilityIdentifier("chat-message:\(message.id)")
-        .contextMenu {
-            Button("Copy message", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text }
-            ShareLink(item: message.text)
-        }
-    }
-}
 
 private struct ChatHistoryPosition: PreferenceKey {
     static var defaultValue: CGFloat = -CGFloat.greatestFiniteMagnitude

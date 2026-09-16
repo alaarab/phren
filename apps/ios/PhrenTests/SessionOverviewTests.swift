@@ -5,6 +5,58 @@ import PhrenLive
 
 @MainActor
 final class SessionOverviewTests: XCTestCase {
+    func testEmptyHostsCompleteTheSharedDrawerLoad() async throws {
+        let model = SessionOverviewMonitor()
+        model.ensureRunning(hosts: [])
+        await eventually { model.ready }
+        XCTAssertTrue(model.screen.groups.isEmpty)
+        XCTAssertTrue(model.screen.computers.isEmpty)
+        model.stopRunning()
+    }
+
+    func testTimeoutRevealStaysLatchedAcrossRestartWithUnansweredHost() async throws {
+        let computer = try host("Offline")
+        let model = SessionOverviewMonitor(initialWait: .milliseconds(30)) {
+            LiveHostMonitor { _, _ in try await Task.sleep(for: .seconds(30)); throw LiveConnectionError.disconnected }
+        }
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.ready }
+        let shown = model.screen
+        run.cancel(); await run.value
+        let again = Task { await model.run(hosts: [computer]) }
+        await eventually { model.computers.first?.monitor.polling == true }
+        XCTAssertTrue(model.ready)
+        XCTAssertEqual(model.screen, shown)
+        again.cancel(); await again.value
+    }
+
+    func testScreenRevealsResolvedProjectsPinsAndComputersTogetherAndSkipsUnchangedPolls() async throws {
+        let computer = try host("Mac"), work = try snapshot("working")
+        let model = SessionOverviewMonitor {
+            LiveHostMonitor(pollInterval: .milliseconds(250)) { _, _ in work }
+        }
+        model.configure(.init(metadataReady: false))
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.computers.first?.monitor.snapshot != nil }
+        XCTAssertFalse(model.ready, "Wait for the first local project metadata as well as the computers")
+        XCTAssertTrue(model.screen.computers.isEmpty)
+        let session = work.sessions(on: computer)[0]
+        var data = try LiveSessionPreferences.saving(computer, in: Data())
+        data = try LiveSessionPreferences.setPinned(true, for: session.id, in: data)
+        data = try LiveSessionPreferences.assigning(hostID: computer.id, directory: "/work/phone",
+                                                   storeID: "work/brain", project: "phone", in: data)
+        model.configure(.init(preferences: try LiveSessionPreferences.read(data),
+                              projects: [.init(storeID: "work/brain", name: "phone")]))
+        XCTAssertTrue(model.ready)
+        XCTAssertEqual(model.screen.computers.map(\.id), [computer.id])
+        XCTAssertEqual(model.screen.groups.map(\.id), ["pinned"])
+        XCTAssertEqual(model.screen.pinned, [session.id])
+        XCTAssertEqual(model.screen.projects[session.id], "phone")
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertEqual(model.listRelayoutsAfterReady, 0, "Unchanged host polls must not publish a new layout")
+        run.cancel(); await run.value
+    }
+
     func testInitialRefreshAppearsTogetherWithoutWaitingForeverForAnOfflineComputer() async throws {
         let fast = try host("Fast"), slow = try host("Slow")
         let snapshot = try snapshot("working")
@@ -23,8 +75,8 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertEqual(model.connectedCount(at: .now), 1)
         XCTAssertEqual(groups(model).flatMap(\.sessions).map(\.host.id), [fast.id])
         run.cancel(); await run.value
-        XCTAssertEqual(model.connectedCount(at: .now), 0)
-        XCTAssertEqual(groups(model).map(\.title), ["Last seen"])
+        XCTAssertEqual(model.connectedCount(at: .now), 1, "Backgrounding preserves a recent successful snapshot")
+        XCTAssertEqual(groups(model).map(\.title), ["Working"])
     }
 
     func testFirstRefreshRevealsAllHostsAtOnceAndCachedReturnDoesNotFlashLoading() async throws {
@@ -50,6 +102,20 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertTrue(model.ready)
         XCTAssertEqual(groups(model).flatMap(\.sessions).count, 2)
         next.cancel(); await next.value
+    }
+
+    func testGroupComputationIsMemoizedAcrossClockTicks() async throws {
+        let computer = try host("Mac"), snapshot = try snapshot("working")
+        let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in snapshot } }
+        let run = Task { await model.run(hosts: [computer]) }
+        await eventually { model.ready }
+        _ = model.groups(at: .now, query: "", preferences: nil, projects: [])
+        let firstCount = model.groupComputationCount
+        _ = model.groups(at: .now.addingTimeInterval(1), query: "", preferences: nil, projects: [])
+        XCTAssertEqual(model.groupComputationCount, firstCount, "The one-second freshness clock must reuse snapshot grouping")
+        _ = model.groups(at: .now, query: "working", preferences: nil, projects: [])
+        XCTAssertEqual(model.groupComputationCount, firstCount + 1, "A query change must invalidate grouping")
+        run.cancel(); await run.value
     }
 
     func testCancelledBatchCannotRevealAReplacementBatch() async throws {
@@ -81,6 +147,31 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertEqual(Set(result.flatMap(\.sessions).map(\.id)).count, 2)
         XCTAssertEqual(groups(model, query: "Linux Project").flatMap(\.sessions).map(\.host.id), [second.id])
         run.cancel(); await run.value
+    }
+
+    func testFocusFilterScopesGroupsToItsComputer() async throws {
+        let first = try host("Mac"), second = try host("Work")
+        let working = try snapshot("working")
+        let model = SessionOverviewMonitor { LiveHostMonitor { _, _ in working } }
+        let run = Task { await model.run(hosts: [first, second]) }
+        await eventually { model.connectedCount(at: .now) == 2 }
+        let filter = AgentFocusFilter(computerID: second.id, storeID: nil, label: "Work")
+        let result = model.groups(at: .now, query: "", preferences: nil, projects: [], focusFilter: filter)
+        XCTAssertEqual(result.flatMap(\.sessions).map(\.host.id), [second.id])
+        run.cancel(); await run.value
+    }
+
+    func testFocusFilterUsesTheMappedStoreWhenRequested() throws {
+        let computer = try host("Work")
+        let snapshot = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w","label":"Workspace","children":[{"id":"t","label":"Agent","agent":"codex","cwd":"/work/phone"}]}]}"#.utf8))
+        let session = try XCTUnwrap(snapshot.sessions(on: computer).first)
+        var data = try LiveSessionPreferences.saving(computer, in: Data())
+        data = try LiveSessionPreferences.assigning(hostID: computer.id, directory: "/work/phone",
+                                                     storeID: "work/brain", project: "phone", in: data)
+        let preferences = try LiveSessionPreferences.read(data)
+        let projects = [SessionProject(storeID: "work/brain", name: "phone")]
+        XCTAssertTrue(AgentFocusFilter(computerID: nil, storeID: "work/brain", label: "Work").includes(session, preferences: preferences, projects: projects))
+        XCTAssertFalse(AgentFocusFilter(computerID: nil, storeID: "personal/brain", label: "Personal").includes(session, preferences: preferences, projects: projects))
     }
 
     func testDoneSitsAboveIdleAndNewestChangeComesFirstWithinAGroup() async throws {
@@ -153,6 +244,7 @@ final class SessionOverviewTests: XCTestCase {
         failSecond = true
         await eventually { model.computers.first { $0.id == second.id }?.monitor.message != nil }
 
+        model.computers.first { $0.id == second.id }?.monitor.lastUpdated = .now.addingTimeInterval(-91)
         let pinned = groups(model, preferences: preferences)
         XCTAssertEqual(pinned.map(\.title), ["Pinned"])
         XCTAssertEqual(Set(pinned.flatMap(\.sessions).map(\.id)), [liveSession.id, offlineSession.id])
@@ -183,6 +275,8 @@ final class SessionOverviewTests: XCTestCase {
         await eventually { model.connectedCount(at: .now) == 2 }
         failFirst = true
         await eventually { model.computers[0].monitor.message != nil }
+        XCTAssertEqual(model.connectedCount(at: .now), 2, "A transient failure has a grace period")
+        model.computers[0].monitor.lastUpdated = .now.addingTimeInterval(-91)
         XCTAssertEqual(groups(model).map(\.title), ["Working", "Last seen"])
         XCTAssertEqual(groups(model).last?.sessions.first?.host.id, first.id)
         XCTAssertEqual(model.connectedCount(at: .now), 1)
@@ -217,7 +311,7 @@ final class SessionOverviewTests: XCTestCase {
     private func host(_ name: String) throws -> LiveHost { try LiveHost(name: name, address: name.lowercased() + ".invalid", username: "fixture") }
     private func snapshot(_ status: String) throws -> LiveWorkspaces {
         try LiveWorkspaces.read(Data("""
-        {"kind":"herdr","groups":[{"id":"w1","label":"Project","children":[{"id":"w1:t1","label":"Build","agent":"codex","agentStatus":"\(status)"}]}]}
+        {"kind":"herdr","groups":[{"id":"w1","label":"Project","children":[{"id":"w1:t1","label":"Build","agent":"codex","agentStatus":"\(status)","cwd":"/work/phone"}]}]}
         """.utf8))
     }
     private func eventually(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {

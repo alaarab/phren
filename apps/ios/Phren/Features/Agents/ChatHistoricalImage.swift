@@ -4,8 +4,9 @@ import PhrenLive
 import SwiftUI
 
 @MainActor private enum TranscriptImageCache {
-    static let data: NSCache<NSString, NSData> = {
-        let cache = NSCache<NSString, NSData>(); cache.totalCostLimit = 16_777_216; cache.countLimit = 16; return cache
+    final class Prepared: NSObject { let attachment: AgentAttachment; init(_ attachment: AgentAttachment) { self.attachment = attachment } }
+    static let images: NSCache<NSString, Prepared> = {
+        let cache = NSCache<NSString, Prepared>(); cache.totalCostLimit = 16_777_216; cache.countLimit = 16; return cache
     }()
 }
 
@@ -36,28 +37,40 @@ struct ChatHistoricalImage: View {
             error = nil
             do {
                 let key = "\(target.id)/\(line)/\(block)/\(inner ?? -1)" as NSString
-                var bytes = TranscriptImageCache.data.object(forKey: key).map { $0 as Data }
-                if bytes == nil {
-                    #if DEBUG && targetEnvironment(simulator)
-                    if AgentChatFixture.enabled { bytes = AgentChatFixture.image.data }
-                    else { bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner) }
-                    #else
-                    bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner)
-                    #endif
+                if let cached = TranscriptImageCache.images.object(forKey: key) {
+                    attachment = cached.attachment
+                    ChatRenderCacheMetrics.record("historical-image", hit: true)
+                    return
                 }
+                ChatRenderCacheMetrics.record("historical-image", hit: false)
+                let bytes: Data
+                #if DEBUG && targetEnvironment(simulator)
+                if AgentChatFixture.enabled { bytes = AgentChatFixture.image.data }
+                else { bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner) }
+                #else
+                bytes = try await PhrenConnection.transcriptImage(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), target: target, line: line, block: block, inner: inner)
+                #endif
                 try Task.checkCancellation()
-                guard let bytes else { throw PhrenKitError.validation("The image is unavailable.") }
                 let prepared = try await Task.detached(priority: .userInitiated) {
+                    let started = CFAbsoluteTimeGetCurrent()
+                    defer {
+                        #if DEBUG
+                        if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                            print("[PhrenPerformance] historical image decode off-main=\(!ChatRenderCacheMetrics.isMainThread) max=1600px: \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+                        }
+                        #endif
+                    }
                     guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
                           let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                            kCGImageSourceThumbnailMaxPixelSize: 1_600, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
+                            kCGImageSourceThumbnailMaxPixelSize: 1_600, kCGImageSourceShouldCacheImmediately: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
                           let reduced = UIImage(cgImage: image).jpegData(compressionQuality: 0.9) else {
                         throw PhrenKitError.validation("The image is unavailable.")
                     }
                     return try AgentAttachment(name: "Conversation image.jpg", data: reduced, isImage: true)
                 }.value
                 try Task.checkCancellation()
-                TranscriptImageCache.data.setObject(bytes as NSData, forKey: key, cost: bytes.count)
+                TranscriptImageCache.images.setObject(.init(prepared), forKey: key, cost: prepared.data.count)
                 attachment = prepared
             } catch { if !Task.isCancelled { self.error = "Image unavailable · Retry" } }
         }

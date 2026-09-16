@@ -1,13 +1,14 @@
 import AppIntents
 import Foundation
 
-/// A writable phren project, as Siri and the Shortcuts app see it.
+/// A phren project. Capture queries suggest writable destinations; Spotlight
+/// can also resolve and open projects in read-only stores.
 ///
 /// Identity is the (store, project) pair, not the bare name: the app keys
 /// projects by store precisely because the same name can exist in two stores
 /// (AppModel's `StoreProject`), and a saved shortcut has to keep pointing at
 /// the one the user picked.
-struct ProjectEntity: AppEntity {
+struct ProjectEntity: AppEntity, Equatable, Codable {
     static var typeDisplayRepresentation: TypeDisplayRepresentation {
         TypeDisplayRepresentation(name: "Project")
     }
@@ -20,6 +21,8 @@ struct ProjectEntity: AppEntity {
     let storeName: String
     /// Whether the store has to be shown alongside the project name.
     let qualified: Bool
+    var sourceFolder: String?
+    var sessions: [AgentSessionEntity] = []
 
     init(target: PhrenCaptureTarget) {
         self.id = target.entityId
@@ -30,7 +33,7 @@ struct ProjectEntity: AppEntity {
     }
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(displayName)", synonyms: synonyms)
+        DisplayRepresentation(title: "\(displayName)", image: sessions.first?.spotlightImage ?? .init(systemName: "folder"), synonyms: synonyms)
     }
 
     private var displayName: String {
@@ -66,11 +69,9 @@ struct ProjectEntity: AppEntity {
 struct ProjectEntityQuery: EntityStringQuery {
     func entities(for identifiers: [ProjectEntity.ID]) async throws -> [ProjectEntity] {
         let wanted = Set(identifiers)
-        // A shortcut saved against a project that has since been removed
-        // simply resolves to nothing, and Siri re-asks.
-        return await PhrenCapture.targets()
-            .filter { wanted.contains($0.entityId) }
-            .map(ProjectEntity.init(target:))
+        // Opening is also available for read-only projects. Capture intents
+        // still validate against PhrenCapture's writable targets before writing.
+        return await SpotlightProjects.current().filter { wanted.contains($0.id) }
     }
 
     func suggestedEntities() async throws -> [ProjectEntity] {

@@ -2,6 +2,8 @@ import AppIntents
 import PhrenKit
 
 /// The phrases Siri answers to out of the box — no setup in the Shortcuts app.
+/// iOS allows ten; Pin Session lost its phrase to Dictate (the intent is
+/// still in the Shortcuts app, and pinning only orders the activity's rows).
 ///
 /// Every phrase has to contain `\(.applicationName)`; Siri keys on the app
 /// name to route the utterance, and a phrase without it is rejected at build
@@ -49,8 +51,23 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
                 "Message my agent in \(.applicationName)",
                 "Talk to my agent in \(.applicationName)",
             ],
-            shortTitle: "Message Agent",
-            systemImageName: "bubble.left.and.text.bubble.right"
+            shortTitle: "Message",
+            systemImageName: "bubble.left.and.text.bubble.right",
+            parameterPresentation: ParameterPresentation(for: \.$session, summary: Summary("Message \(\.$session)")) {
+                OptionsCollection(AgentSessionEntityQuery(), title: "Sessions", systemImageName: "terminal")
+            }
+        )
+        AppShortcut(
+            intent: OpenSessionTerminalIntent(),
+            phrases: [
+                "Open terminal for \(\.$session) in \(.applicationName)",
+                "Open terminal in \(.applicationName)",
+            ],
+            shortTitle: "Open terminal",
+            systemImageName: "terminal",
+            parameterPresentation: ParameterPresentation(for: \.$session, summary: Summary("Open terminal for \(\.$session)")) {
+                OptionsCollection(AgentSessionEntityQuery(), title: "Sessions", systemImageName: "terminal")
+            }
         )
         AppShortcut(
             intent: OpenProjectIntent(),
@@ -62,6 +79,57 @@ struct PhrenAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Open Session",
             systemImageName: "play.circle"
+        )
+        AppShortcut(
+            intent: StartSessionIntent(),
+            phrases: [
+                "Start an agent for \(\.$project) in \(.applicationName)",
+                "Start an agent in \(.applicationName)",
+            ],
+            shortTitle: "Start Agent",
+            systemImageName: "play.rectangle"
+        )
+        AppShortcut(
+            intent: SessionStatusIntent(),
+            phrases: [
+                "What is \(.applicationName) doing",
+                "What is happening in \(.applicationName)",
+                "Is \(\.$session) done in \(.applicationName)",
+                "What is \(\.$session) doing in \(.applicationName)",
+            ],
+            shortTitle: "Session Status",
+            systemImageName: "waveform.path.ecg"
+        )
+        AppShortcut(
+            intent: ListWaitingSessionsIntent(),
+            phrases: [
+                "Which sessions are waiting in \(.applicationName)",
+                "What needs me in \(.applicationName)",
+            ],
+            shortTitle: "Waiting Sessions",
+            systemImageName: "person.crop.circle.badge.questionmark"
+        )
+        AppShortcut(
+            intent: DictateToSessionIntent(),
+            phrases: [
+                "Talk to \(.applicationName)",
+                "Dictate to \(.applicationName)",
+                "Dictate to \(\.$session) in \(.applicationName)",
+            ],
+            shortTitle: "Dictate to Session",
+            systemImageName: "mic.circle"
+        )
+        AppShortcut(
+            intent: AskAboutImageIntent(),
+            phrases: [
+                "Ask \(.applicationName) about this",
+                "Ask \(.applicationName) about this image",
+                "Ask \(.applicationName) about a screenshot",
+                "Show this image to \(.applicationName)",
+                "Ask \(\.$session) about an image in \(.applicationName)",
+            ],
+            shortTitle: "Ask About Image",
+            systemImageName: "photo.badge.arrow.down"
         )
     }
 }
@@ -103,5 +171,22 @@ extension PhrenAppShortcuts {
         guard projects != donatedProjects else { return }
         donatedProjects = projects
         updateAppShortcutParameters()
+    }
+
+    @MainActor
+    static func donateOpen(_ session: LiveAgentSession) {
+        let entity = AgentSessionEntity(session)
+        Task {
+            guard await IntentDonationGate.shared.shouldDonate("open-chat|\(entity.id)") else { return }
+            _ = try? await OpenAgentSessionIntent(target: entity).donate()
+        }
+    }
+
+    static func donateMessage(to session: LiveAgentSession) {
+        let entity = AgentSessionEntity(session)
+        Task {
+            guard await IntentDonationGate.shared.shouldDonate("message|\(entity.id)") else { return }
+            _ = try? await MessageAgentIntent.suggestion(session: entity).donate()
+        }
     }
 }

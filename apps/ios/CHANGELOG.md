@@ -10,6 +10,119 @@ number counts up on its own.
 
 ### New
 
+- "Talk to Phren" — an Action button shortcut that opens the session you
+  used last with dictation already listening; a Control Center toggle shows
+  or hides the agents Live Activity. (Pin Session keeps its Shortcuts action
+  but no longer takes one of the ten Siri phrases.)
+- One compact Live Activity counts working agents across your computers;
+  expand it for project and tool details, or pin a session to the first row.
+- Write, Edit, and Patch cards show their changed files without opening the
+  card, with input previews available on older Hooks too.
+- New agent sessions open straight into chat. Send the first prompt from
+  your phone and the conversation attaches as soon as it is ready.
+- Phren memory and task calls have their own cards, with readable content,
+  project chips, search results, and customisable colours.
+- Sent messages stay softly muted until they land, without queued captions
+  or duplicate bubbles.
+- Pasted Claude Code images appear with their message; image placeholders
+  and attachment footers disappear once the pictures arrive.
+- Privacy and security hardening protects saved chat data, private links,
+  clipboard copies, terminal output, and downloaded fonts.
+- Account usage lists Claude's per-model weekly window (Fable) on its own
+  line, dated from Claude Code's own usage check; Codex's Spark lane is left
+  out of the report. The page shows each account once — computers sharing a
+  sign-in are merged, and every window is one short line.
+- The working Live Activity's island is trimmed: the elapsed timer no longer
+  stretches it across the screen and the phren mark is the sprite itself.
+- Privacy manifest declares the file-timestamp reads, the terminal's
+  reconnect clock no longer reads boot time, and the build answers the
+  export-compliance question (standard algorithms only).
+- Long chats keep tools compact while scrolling, with cached Markdown and
+  full messages, outputs, and patches available on demand.
+- Messages sent while Claude Code works appear as pending conversation bubbles;
+  they become fully visible when Claude Code consumes them.
+- Live sessions restore a recent complete screen or show one loading indicator,
+  and brief backgrounding no longer makes every computer look stale.
+- Denser project rows make more projects and navigation links visible at once.
+- Herdr terminals fill the available width and keep their size in sync through
+  connection, rotation, and keyboard changes.
+- Session cards show when an agent last changed, with times preserved across
+  Phren Hook restarts and a Recent view in the workspace drawer.
+- Agents, linked projects, pins, and computers appear together on first load;
+  unchanged refreshes keep the list still.
+- The agent drawer has Recent/List views, workspace search, and full-width
+  activity-tinted rows that highlight the current conversation.
+- Two usage rings on the Sessions toolbar open account usage. Cached
+  limits appear immediately when reopening usage pages.
+- Calmer borders, consistent corners and spacing, and subtle panel highlights
+  bring chat tools, background jobs, drawers, and settings together.
+- Returning to chat images reuses cached thumbnails; transcript rendering
+  and startup keep expensive work away from the main thread where possible.
+- Drill-in screens now push sideways with system edge-back, hold-and-swipe back
+  from the middle of the screen, and Escape or Command-[ keyboard navigation.
+- Live sessions reveal in one complete view after the computers answer, then
+  refresh in place without rebuilding every section each second.
+- Cached chat text, tool presentation, diffs, and display-sized image decoding
+  keep long agent transcripts responsive while scrolling.
+- Build richer Shortcuts with typed session status, bounded transcript text,
+  message-and-wait replies, and a Start Agent Session action.
+- Filter live sessions by computer or phren store from a Focus, with suggested
+  filters and a clear control on the Agents screen.
+- Session cards now expose project, title, metadata, working, waiting, and done
+  colors in custom themes while older saved themes keep their existing look.
+- Chat folds three or more consecutive file searches and other read-only
+  commands into one expandable row, while keeping every original tool card.
+- Background agent commands stay visible above the composer with their
+  running time, completion status, exit code, and available output.
+- Sessions outside a linked phren project use their folder name and offer a
+  direct Link to project action instead of showing a misleading workspace label.
+- Switch agents from a searchable workspace tree that slides in from the left
+  of chat, including with an edge swipe.
+- Open the same Agents drawer from the terminal's new default Agents control;
+  the control can be reordered or removed in Terminal toolbar settings.
+- Find live agent sessions and projects in Spotlight on iOS 18 and later. Open
+  a chat or project directly, message a session, or open its terminal.
+- Ask Siri what an agent is doing or which sessions need input. The answer is
+  spoken without opening Phren and includes a session card with Open and,
+  for pending permissions, Approve and Reject.
+- Open the session that needs you most from Control Center, the Lock Screen,
+  or the Action button using Phren's shortcuts.
+- Track working sessions on the Lock Screen and Dynamic Island with the Phren
+  icon, project, branch, elapsed time, current tool, and a tap back to chat.
+- Ask Siri to pin a named working session to its Live Activity.
+- Catch up after time away with an Apple Intelligence summary of a session's
+  recent work, state, blockers, and suggested next step, generated on-device.
+- Optionally tighten dictated agent messages with Apple Intelligence, then
+  preview and choose the clearer wording or the original before sending.
+- Send a terminal, error, or diff image from Shortcuts or Screenshots into
+  the live agent session that needs attention, then review it before sending.
+- Reviewed Apple's assistant schemas for session and project actions; the
+  published file, document, search, and visual-search domains do not describe
+  coding-agent sessions, so Phren keeps their precise App Intent contracts.
+
+- Slash commands and `!` shell lines typed at the agent's own prompt read as quiet system lines with their output, not bubbles of tags.
+- A picture sent with a message sits inside the same bubble as the words; the
+  path list and paste markers no longer show once the picture draws inline.
+- Session cards are one flat rounded rectangle each, under small upper-case
+  section labels — no box around a section, no border, no lines between
+  them. The computer's name sits beside the branch instead of on its own line.
+- Scrolling up in a chat loads a few earlier pages at a time again instead
+  of the whole history; a long conversation no longer hangs on open.
+- Background jobs read as running until the agent's own completion notice
+  arrives, keep their real start and finish times, and leave the row two
+  minutes after finishing; a completion notice never draws as a bubble.
+- The usage rings live on the Sessions tab, one ring per provider you use
+  (Claude and Codex both when both are), and open Account usage.
+- Messages sent while the agent is mid-turn show as your bubble right away
+  instead of vanishing until the turn picks them up (Phren Hook 0.2.15).
+- The agent drawer reads the same live overview as the Sessions tab, so it
+  opens on what is already known instead of re-fetching every computer.
+- A conversation opens on a light first page (Phren Hook 0.2.15) so a big
+  one no longer freezes; scrolling up fetches fuller pages.
+- Closing a session from the list closes that session and the card leaves at
+  once — swipe for a direct Close, hold for Close tab / Close workspace with a
+  confirmation. Cards drop the redundant state text (the section already says
+  it), keep the computer name, and colour the project name.
 - Simulators: every iOS simulator booted on a computer, with its live screen,
   from the Agents header or a computer's page (needs Phren Hook 0.2.15).
 - Files: put any file on a computer through Phren Hook and copy its path for

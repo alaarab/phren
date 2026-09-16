@@ -3,6 +3,136 @@ import PhrenKit
 @testable import Phren
 
 final class ChatTimelineTests: XCTestCase {
+    func testPhrenCallsStaySeparateAndUseTheirOwnDelayedResult() throws {
+        let messages = try read([
+            ["type": "function_call", "call_id": "a", "name": "mcp__phren__search_knowledge", "arguments": #"{"query":"navigation"}"#],
+            ["type": "message", "role": "assistant", "content": "Looking up the project"],
+            ["type": "function_call_output", "call_id": "a", "output": #"{"ok":true,"data":{"count":1,"results":[{"title":"Swipe back"}]}}"#],
+            ["type": "function_call", "call_id": "b", "name": "mcp__phren__get_tasks", "arguments": "{}"],
+            ["type": "function_call_output", "call_id": "b", "output": "[]"],
+            ["type": "function_call", "call_id": "c", "name": "mcp__phren__get_project_summary", "arguments": "{}"],
+            ["type": "function_call_output", "call_id": "c", "output": "Summary"],
+        ])
+        let entries = ChatTimelineEntry.group(messages)
+        XCTAssertEqual(entries.compactMap(\.phren).count, 3)
+        XCTAssertFalse(entries.contains(where: \.isReadRun))
+        XCTAssertEqual(entries.first?.phren?.titles, ["Swipe back"])
+        XCTAssertEqual(entries.first?.messages.last?.toolCallID, "a")
+    }
+
+    func testReadOnlyClassificationIsConservative() {
+        XCTAssertTrue(ReadOnlyToolCall.shell("cat README.md | rg Widget"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("sed -n '1,20p' App.swift"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("git diff --stat"))
+        XCTAssertTrue(ReadOnlyToolCall.shell("find Sources -name '*.swift' | wc -l"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("sed -i '' s/a/b/ App.swift"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("cat input > output"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("git checkout main"))
+        XCTAssertFalse(ReadOnlyToolCall.shell("rm -rf build"))
+    }
+
+    func testThreeConsecutiveReadsFoldAndWritesBreakTheRun() throws {
+        var payloads: [[String: Any]] = []
+        for (index, command) in ["cat One.swift", "rg TODO Sources", "git status"].enumerated() {
+            payloads.append(["type": "function_call", "call_id": "r\(index)", "name": "exec_command", "arguments": "{\"cmd\":\"\(command)\"}"])
+            payloads.append(["type": "function_call_output", "call_id": "r\(index)", "output": "ok"])
+        }
+        payloads.append(["type": "function_call", "call_id": "write", "name": "exec_command", "arguments": "{\"cmd\":\"echo changed > File.swift\"}"])
+        payloads.append(["type": "function_call_output", "call_id": "write", "output": "ok"])
+        let grouped = ChatTimelineEntry.group(try read(payloads))
+        XCTAssertEqual(grouped.count, 2)
+        XCTAssertTrue(grouped[0].isReadRun)
+        XCTAssertEqual(grouped[0].messages.count, 6)
+        XCTAssertFalse(grouped[1].isReadRun)
+    }
+
+    func testBackgroundJobsPairPendingCallAndTaskNotification() throws {
+        let content = "<task-notification>\n<tool-use-id>bg-1</tool-use-id>\n<status>completed</status>\n<summary>Background tests completed (exit code 2)</summary>\n</task-notification>"
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-1", "name": "Bash", "input": ["command": "swift test", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "system", "phrenBackground": true, "message": ["role": "user", "content": content]]]
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let jobs = ChatBackgroundJobs.parse(transcript.messages, firstSeen: ["bg-1": Date(timeIntervalSince1970: 10)], now: Date(timeIntervalSince1970: 20))
+        XCTAssertEqual(jobs.count, 1)
+        XCTAssertEqual(jobs[0].command, "swift test")
+        XCTAssertEqual(jobs[0].state, .finished(exitCode: 2))
+        XCTAssertTrue(jobs[0].title.contains("completed"))
+    }
+
+    /// A background call's tool result comes back at once and only says it
+    /// started; that must not read as finished.
+    func testBackgroundJobWithOnlyItsStartNoticeIsStillRunningAndFinishedJobsLeaveAfterLingering() throws {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-2", "name": "Bash", "input": ["command": "xcodebuild test", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-2", "content": "Command running in background with ID: b1p4. Output is being written to: /tmp/x.output"]]]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let started = Date(timeIntervalSince1970: 10)
+        let running = ChatBackgroundJobs.parse(transcript.messages, firstSeen: ["bg-2": started], now: Date(timeIntervalSince1970: 40))
+        XCTAssertEqual(running.map(\.state), [.running])
+        XCTAssertEqual(running.first?.startedAt, started)
+        XCTAssertTrue(ChatBackgroundJobs.finishedIDs(transcript.messages, firstSeen: ["bg-2": started]).isEmpty)
+        // A notification later: finished, and gone once it has lingered.
+        let done: [String: Any] = ["line": 2, "raw": ["type": "system", "phrenBackground": true, "message": ["role": "user", "content":
+            "<task-notification>\n<tool-use-id>bg-2</tool-use-id>\n<status>completed</status>\n<summary>Background command finished (exit code 0)</summary>\n</task-notification>"]]]
+        let later = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "claude", "entries": (frame["entries"] as! [[String: Any]]) + [done]]), source: "claude")
+        XCTAssertEqual(ChatBackgroundJobs.finishedIDs(later.messages, firstSeen: ["bg-2": started]), ["bg-2"])
+        let finishedAt = Date(timeIntervalSince1970: 100)
+        let justDone = ChatBackgroundJobs.parse(later.messages, firstSeen: ["bg-2": started], finishedSeen: ["bg-2": finishedAt], now: finishedAt.addingTimeInterval(30))
+        XCTAssertEqual(justDone.map(\.state), [.finished(exitCode: 0)])
+        XCTAssertEqual(justDone.first?.finishedAt, finishedAt)
+        let lingered = ChatBackgroundJobs.parse(later.messages, firstSeen: ["bg-2": started], finishedSeen: ["bg-2": finishedAt], now: finishedAt.addingTimeInterval(ChatBackgroundJobs.finishedLinger + 1))
+        XCTAssertTrue(lingered.isEmpty, "Finished jobs leave the row after lingering")
+    }
+
+    /// Claude Code also writes the completion as a user turn; that must feed
+    /// the jobs row, never draw as a bubble, and a job that finished long ago
+    /// (per the row's own timestamp) never appears at all.
+    func testNotificationUserTurnsFeedJobsNotBubblesAndOldJobsStayHidden() throws {
+        let notice = "<task-notification>\n<task-id>abc</task-id>\n<tool-use-id>bg-3</tool-use-id>\n<status>completed</status>\n<summary>Background command \"Watch deploy\" completed (exit code 0)</summary>\n</task-notification>"
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "timestamp": "2026-09-15T10:00:00.000Z", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-3", "name": "Bash", "input": ["command": "sleep 60", "run_in_background": true]]]]]],
+            ["line": 1, "raw": ["type": "user", "timestamp": "2026-09-15T10:00:01.000Z", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-3", "content": "Command running in background with ID: abc"]]]]],
+            ["line": 2, "raw": ["type": "user", "timestamp": "2026-09-15T10:01:00.000Z", "message": ["role": "user", "content": notice]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        XCTAssertFalse(transcript.messages.contains { $0.role == .user }, "The notification is not a user bubble")
+        XCTAssertEqual(transcript.messages.last?.title, "Background notification")
+        let finishedAt = Date(timeIntervalSince1970: 1_789_466_460) // 2026-09-15T10:01:00Z
+        let soon = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:], now: finishedAt.addingTimeInterval(30))
+        XCTAssertEqual(soon.map(\.state), [.finished(exitCode: 0)])
+        XCTAssertEqual(soon.first?.startedAt, Date(timeIntervalSince1970: 1_789_466_400))
+        XCTAssertEqual(soon.first?.finishedAt, finishedAt)
+        let muchLater = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:], now: finishedAt.addingTimeInterval(3_600))
+        XCTAssertTrue(muchLater.isEmpty, "An hour-old job does not reappear when the chat is opened")
+    }
+
+    /// A foreground command that merely prints a background notice (a task
+    /// log, a grep) is not a background job.
+    func testForegroundCommandQuotingABackgroundNoticeIsNotAJob() throws {
+        let frame: [String: Any] = ["type": "backlog", "source": "claude", "entries": [
+            ["line": 0, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "fg-1", "name": "Bash", "input": ["command": "tail -3 /tmp/tasks/b1.output"]]]]]],
+            ["line": 1, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "fg-1", "content": "TREE: ok\nCommand running in background with ID: b1p4ogscs. Output is being written to: /tmp/x\n** TEST SUCCEEDED **"]]]]],
+            ["line": 2, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": "bg-4", "name": "Bash", "input": ["command": "sleep 5"]]]]]],
+            ["line": 3, "raw": ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "bg-4", "content": "Command did not complete within its 600s timeout and was moved to the background (ID: b2). Output is being written to: /tmp/y"]]]]],
+        ]]
+        let transcript = try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: frame), source: "claude")
+        let jobs = ChatBackgroundJobs.parse(transcript.messages, firstSeen: [:])
+        XCTAssertEqual(jobs.map(\.id), ["bg-4"], "Only the call the agent actually moved to the background")
+        XCTAssertEqual(jobs.first?.state, .running)
+    }
+
+    func testBackgroundJobStaysRunningWithoutNewHookNotification() throws {
+        let messages = try read([["type": "function_call", "call_id": "bg-old", "name": "exec_command",
+                                  "arguments": "{\"cmd\":\"swift test\",\"run_in_background\":true}"]])
+        let started = Date(timeIntervalSince1970: 10)
+        let jobs = ChatBackgroundJobs.parse(messages, firstSeen: ["bg-old": started], now: Date(timeIntervalSince1970: 20))
+        XCTAssertEqual(jobs.count, 1)
+        XCTAssertEqual(jobs[0].state, .running)
+        XCTAssertEqual(jobs[0].startedAt, started)
+    }
+
     func testGroupingRetainsEveryMessageAndNeverCrossesAReply() throws {
         let messages = try read([
             ["type": "function_call_output", "output": "Older result"],

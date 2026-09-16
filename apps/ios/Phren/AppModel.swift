@@ -66,12 +66,14 @@ struct StoreProject: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
-struct StoreQueueEntry: Identifiable {
+struct StoreQueueEntry: Identifiable, Hashable {
     let storeId: String
     let storeName: String
     let entry: ProjectQueueItem
 
     var id: String { "\(storeId)/\(entry.id)" }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 struct FailedOpEntry: Identifiable {
@@ -129,10 +131,21 @@ final class AppModel {
     private(set) static weak var current: AppModel?
 
     struct Credentials {
-        var load: () -> KeychainStore.StoredToken?
+        var load: () async -> KeychainStore.StoredToken?
         var save: (KeychainStore.StoredToken) throws -> Void
         var delete: () -> Void
-        static let keychain = Self(load: KeychainStore.load, save: KeychainStore.save, delete: KeychainStore.delete)
+        static let keychain = Self(load: {
+            await Task.detached(priority: .userInitiated) {
+                let started = CFAbsoluteTimeGetCurrent()
+                let value = KeychainStore.load()
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["PHREN_PERFORMANCE_LOG"] == "1" {
+                    print("[PhrenPerformance] startup keychain off-main=\(!ChatRenderCacheMetrics.isMainThread): \(String(format: "%.3f", (CFAbsoluteTimeGetCurrent() - started) * 1_000)) ms")
+                }
+                #endif
+                return value
+            }.value
+        }, save: KeychainStore.save, delete: KeychainStore.delete)
     }
 
     init(client: GitHubClient = GitHubClient(), credentials: Credentials = .keychain,
@@ -187,6 +200,7 @@ final class AppModel {
     var selectedTab: AppTab = .projects
     /// Bumped by an intent that left a chat to open under `AgentLaunch.takePending()`.
     var pendingChatVersion = 0
+    var pendingProjectVersion = 0
     var showingMemoryMaintenance = false
     var showingMemoryConnection = false
 
@@ -506,7 +520,10 @@ final class AppModel {
             return
         }
         #endif
-        guard let stored = credentials.load() else {
+        let generation = authenticationGeneration
+        let stored = await credentials.load()
+        guard generation == authenticationGeneration else { return }
+        guard let stored else {
             selectedTab = .agents
             phase = .signedOut
             return
@@ -617,8 +634,8 @@ final class AppModel {
     /// intact; the existing sync loop retries when connectivity returns.
     @discardableResult
     private func refreshAccount() async -> Bool {
-        guard let stored = credentials.load() else { return false }
         let generation = authenticationGeneration
+        guard let stored = await credentials.load(), generation == authenticationGeneration else { return false }
         do {
             let verified = try await client.currentUser()
             guard generation == authenticationGeneration else { return false }
@@ -688,6 +705,7 @@ final class AppModel {
         StorageIssueLog.shared.removeAll()
         storageIssues = []
         lastSurfacedIssueId = nil
+        SpotlightIndex.shared.refreshProjects(from: self)
         phase = .signedOut
     }
 
@@ -829,6 +847,7 @@ final class AppModel {
         // Likewise for the project names Siri can resolve by voice — gated
         // on the project set changing, not on every poll.
         PhrenAppShortcuts.donateProjects(from: self)
+        SpotlightIndex.shared.refreshProjects(from: self)
     }
 
     /// The status-only counterpart of `refreshOnce`, for a `SyncEngine.Update`

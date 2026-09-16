@@ -59,15 +59,7 @@ struct HerdrWorkspacesView: View {
                             let open = !collapsed.contains(group.id)
                             Button {
                                 withAnimation(.easeInOut(duration: 0.15)) { if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) } }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold)).foregroundStyle(PhrenTheme.textMuted)
-                                        .rotationEffect(.degrees(open ? 0 : -90)).frame(width: 14)
-                                    Text(group.label).font(.title3.weight(.medium)).foregroundStyle(PhrenTheme.text).lineLimit(1)
-                                    Spacer()
-                                    if !open { Text("\(group.children.count)").font(.caption).foregroundStyle(PhrenTheme.textMuted) }
-                                }.frame(minHeight: 40).contentShape(Rectangle())
-                            }
+                            } label: { WorkspaceTreeDisclosure(label: group.label, count: group.children.count, open: open) }
                             .buttonStyle(.plain).listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                             .accessibilityLabel("\(group.label) workspace, \(open ? "expanded" : "collapsed")")
@@ -81,17 +73,8 @@ struct HerdrWorkspacesView: View {
                                 ForEach(group.children.filter { needle.isEmpty || $0.displayTitle.lowercased().contains(needle) || ($0.agent ?? "").contains(needle) || group.label.lowercased().contains(needle) }) { tab in
                                     let session = LiveAgentSession(host: host, workspaceID: group.id, workspaceName: group.label, tab: tab)
                                     let focused = snapshot.focus?.workspaceID == group.id && snapshot.focus?.tabID == tab.id
-                                    let color = tab.activity.color
                                     NavigationLink { HerdrPanesView(session: session) } label: {
-                                        HStack(spacing: 10) {
-                                            if tab.agent != nil { AgentProviderGlyph(source: tab.agent, size: 18) }
-                                            else { Image(systemName: "terminal").font(.system(size: 14)).foregroundStyle(PhrenTheme.textMuted).frame(width: 18) }
-                                            Text(tab.displayTitle).font(.body).foregroundStyle(PhrenTheme.text).lineLimit(1)
-                                            Spacer()
-                                            if tab.activity == .working || tab.activity == .waiting || tab.activity == .error {
-                                                Circle().fill(color).frame(width: 8, height: 8).accessibilityLabel(tab.status)
-                                            }
-                                        }.frame(minHeight: 40)
+                                        WorkspaceTreeAgentLabel(tab: tab, selected: focused)
                                     }
                                     .listRowBackground(focused ? PhrenTheme.success.opacity(0.14) : Color.clear)
                                     .listRowInsets(EdgeInsets(top: 2, leading: 44, bottom: 2, trailing: 16))

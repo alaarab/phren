@@ -3,7 +3,7 @@ import Foundation
 public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Sendable {
     case control, escape, tab, arrows, shortcuts, paste, keyboard
     case enter, interrupt, backspace, clearLine, up, down, left, right, home, end
-    case attachments, workspaces, webServers
+    case attachments, workspaces, agents, webServers
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -26,6 +26,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "Line end"
         case .attachments: return "Attach image"
         case .workspaces: return "Workspaces & panes"
+        case .agents: return "Agents"
         case .webServers: return "Web servers"
         }
     }
@@ -53,6 +54,7 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
         case .end: return "arrow.right.to.line"
         case .attachments: return "paperclip"
         case .workspaces: return "rectangle.split.3x1"
+        case .agents: return "person.2"
         case .webServers: return "globe"
         }
     }
@@ -78,12 +80,24 @@ public enum TerminalToolbarItem: String, Codable, CaseIterable, Identifiable, Se
 public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
     public static let storageKey = "terminal.toolbar.v1"
     public static let maximumItems = 8
-    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .keyboard])
+    public static let defaults = Self(items: [.control, .escape, .tab, .arrows, .shortcuts, .paste, .agents, .keyboard])
+    /// 1: the original layout. 2: has been offered the Agents control, so a
+    /// layout without it is a choice and stays that way.
     public let version: Int
     public var items: [TerminalToolbarItem]
-    public init(items: [TerminalToolbarItem]) { version = 1; self.items = items }
+    public init(items: [TerminalToolbarItem]) { version = 2; self.items = items }
     private var valid: Bool {
-        version == 1 && items.count <= Self.maximumItems && items.contains(.keyboard) && Set(items).count == items.count
+        (1...2).contains(version) && items.count <= Self.maximumItems && items.contains(.keyboard) && Set(items).count == items.count
+    }
+    /// A layout saved before the Agents control existed gains it once, in
+    /// the default's second-to-last slot, when there is room for it.
+    private var migrated: Self {
+        guard version < 2 else { return self }
+        var items = items
+        if !items.contains(.agents), items.count < Self.maximumItems {
+            items.insert(.agents, at: max(0, items.count - 1))
+        }
+        return Self(items: items)
     }
     private static let memo = DecodeMemo<Self>()
     public static func read(_ data: Data) throws -> Self {
@@ -94,7 +108,7 @@ public struct TerminalToolbarPreferences: Codable, Equatable, Sendable {
         guard data.count <= 8_192 else { throw PhrenKitError.validation("Saved terminal controls could not be read.") }
         let value = try JSONDecoder().decode(Self.self, from: data)
         guard value.valid else { throw PhrenKitError.validation("Saved terminal controls could not be read.") }
-        return value
+        return value.migrated
     }
     public func encoded() throws -> Data {
         guard valid else { throw PhrenKitError.validation("Choose up to eight different controls, including Keyboard.") }

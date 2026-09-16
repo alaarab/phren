@@ -164,8 +164,7 @@ struct ReviewView: View {
             .fullScreenCover(isPresented: $triaging) {
                 TriageView(entries: triageDeck)
             }
-            .sheet(item: $reading) { entry in
-                NavigationStack {
+            .navigationDestination(item: $reading) { entry in
                     PhrenList {
                         Text(.init(entry.entry.item.text)).textSelection(.enabled)
                         LabeledContent("Project", value: entry.entry.project)
@@ -174,9 +173,7 @@ struct ReviewView: View {
                     }
                     .navigationTitle("Memory entry")
                     .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { Button("Done") { reading = nil } }
                     .phrenScreen()
-                }
             }
             .onChange(of: flaggedOnly) { _, _ in selection.removeAll() }
             .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }

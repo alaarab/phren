@@ -7,28 +7,54 @@ struct ProjectSessionActions: View {
     let storeId: String
     let project: String
     var presentation: Presentation = .menu
-    @State private var chatting = false
-    @State private var terminal = false
+    private enum RouteKind: Hashable { case chat, terminal }
+    private struct Route: Identifiable, Hashable {
+        let id = UUID()
+        let kind: RouteKind
+    }
+    @State private var route: Route?
     @State private var launching = false
     var body: some View {
-        Group {
-            switch presentation {
-            case .menu:
-                Menu { actions } label: { Label("Project session", systemImage: "terminal") }
-                    .accessibilityLabel("Project session")
-            case .section: Section("Session") { actions }
+        switch presentation {
+        case .menu:
+            Menu { actions } label: { Label("Project session", systemImage: "terminal") }
+                .accessibilityLabel("Project session")
+                .modifier(Destinations(storeId: storeId, project: project, route: $route, launching: $launching))
+        case .section:
+            // The presentation modifiers ride on the rows, not the Section: a
+            // Section with modifiers of its own stops being a section to the
+            // list and draws its buttons as one stacked cell.
+            Section("Session") {
+                openButton
+                chatButton
+                terminalButton.modifier(Destinations(storeId: storeId, project: project, route: $route, launching: $launching))
             }
         }
-        .sheet(isPresented: $chatting) { ProjectSessionsView(storeID: storeId, project: project, openChat: true) }
-        .sheet(isPresented: $terminal) { ProjectSessionsView(storeID: storeId, project: project) }
-        .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeId, project: project) }
     }
     private var actions: some View {
-        Group {
-            Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
-                .accessibilityIdentifier("project-open-on-computer")
-            Button("Chat with agent", systemImage: "bubble.left.and.bubble.right") { chatting = true }
-            Button("Herdr terminal", systemImage: "terminal") { terminal = true }
+        Group { openButton; chatButton; terminalButton }
+    }
+    private var openButton: some View {
+        Button("Open on a computer…", systemImage: "desktopcomputer.and.arrow.down") { launching = true }
+            .accessibilityIdentifier("project-open-on-computer")
+    }
+    private var chatButton: some View {
+        Button("Chat with agent", systemImage: "bubble.left.and.bubble.right") { route = .init(kind: .chat) }
+    }
+    private var terminalButton: some View {
+        Button("Herdr terminal", systemImage: "terminal") { route = .init(kind: .terminal) }
+    }
+    private struct Destinations: ViewModifier {
+        let storeId: String
+        let project: String
+        @Binding var route: Route?
+        @Binding var launching: Bool
+        func body(content: Content) -> some View {
+            content
+                .navigationDestination(item: $route) { route in
+                    ProjectSessionsView(storeID: storeId, project: project, openChat: route.kind == .chat)
+                }
+                .sheet(isPresented: $launching) { LaunchSessionView(storeID: storeId, project: project) }
         }
     }
 }

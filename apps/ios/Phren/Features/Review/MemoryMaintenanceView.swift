@@ -4,7 +4,6 @@ import SwiftUI
 /// An optional project overview, not an inbox of required human decisions.
 struct MemoryMaintenanceView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
 
     private var groups: [MaintenanceProject] {
         Dictionary(grouping: model.mergedReviewQueue) { "\($0.storeId)/\($0.entry.project)" }
@@ -14,8 +13,7 @@ struct MemoryMaintenanceView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            PhrenList {
+        PhrenList {
                 Section {
                     Text("Your agents capture and use memory as you work. You can leave routine maintenance to an agent, or inspect a project here.")
                         .foregroundStyle(.secondary)
@@ -40,10 +38,8 @@ struct MemoryMaintenanceView: View {
             }
             .navigationTitle("Memory maintenance")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .refreshable { await model.pullToRefresh() }
             .phrenScreen()
-        }
     }
 }
 

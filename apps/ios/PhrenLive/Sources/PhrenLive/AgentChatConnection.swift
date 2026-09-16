@@ -10,7 +10,7 @@ extension PhrenConnection {
         AsyncThrowingStream(bufferingPolicy: .bufferingOldest(8)) { continuation in
             let worker = Task {
                 do {
-                    guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+                    guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
                     let request = GatewayRequest.transcript(target, streaming: true)
                     _ = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request) { data in
                         let frame = try AgentChatTranscript.read(data, source: target.source)
@@ -24,7 +24,7 @@ extension PhrenConnection {
     }
 
     public static func chatHistory(host: LiveHost, privateKey: Data, target: AgentChatTarget, beforeLine: Int) async throws -> AgentChatTranscript {
-        guard target.hostID == host.id && target.muxID == host.muxID, beforeLine > 0 else { throw PhrenKitError.validation("This history has no earlier destination.") }
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID, beforeLine > 0 else { throw PhrenKitError.validation("This history has no earlier destination.") }
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)
         let data: Data
         do {
@@ -50,13 +50,18 @@ extension PhrenConnection {
     public static func uploadChatAttachment(host: LiveHost, privateKey: Data, target: AgentChatTarget, attachment: AgentAttachment) async throws -> String {
         guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         _ = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target, sending: true)
+        if target.isStarting {
+            // Before there is a conversation directory, use the existing
+            // computer-file upload. Prompt delivery still revalidates the pane.
+            return try await uploadFile(host: host, privateKey: privateKey, name: attachment.uploadName, data: attachment.data)
+        }
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: .upload(attachment, target: target))
         return try AgentAttachment.uploadedPath(from: data)
     }
 
     /// Only Escape is exposed. The caller cannot supply terminal key sequences.
     public static func stopChatTurn(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws {
-        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         let pane = try await chatPanes(host: host, privateKey: privateKey, workspaceID: target.workspaceID, tabID: target.tabID).validate(target, sending: true)
         guard pane.agentStatus == "working" else { throw PhrenKitError.validation("This agent is no longer working.") }
         let request = try GatewayRequest.stop(target)
@@ -76,7 +81,7 @@ extension PhrenConnection {
     /// A bounded recent-history snapshot from the hook's WebSocket, then close.
     /// One-shot callers can use this without subscribing to live updates.
     public static func chatTranscript(host: LiveHost, privateKey: Data, target: AgentChatTarget) async throws -> AgentChatTranscript {
-        guard target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
+        guard !target.isStarting, target.hostID == host.id && target.muxID == host.muxID else { throw PhrenKitError.validation("The chat belongs to another computer.") }
         var request = GatewayRequest.transcript(target)
         request.streaming = false
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)
@@ -140,7 +145,13 @@ struct GatewayRequest: Sendable {
         Self(path: "/v1/keys", body: try targetBody(target, fields: ["keys": ["Escape"]]))
     }
     static func prompt(_ target: AgentChatTarget, text: String) throws -> Self {
-        Self(path: "/v1/prompt", body: try targetBody(target, fields: ["text": text]))
+        if target.isStarting {
+            var route: [String: Any] = targetQuery(target)
+            route.removeValue(forKey: "session")
+            route["starting"] = true; route["startingToken"] = target.startingToken
+            return Self(path: "/v1/prompt", body: try JSONSerialization.data(withJSONObject: ["target": route, "text": text], options: [.sortedKeys]))
+        }
+        return Self(path: "/v1/prompt", body: try targetBody(target, fields: ["text": text]))
     }
     func scoped(to host: LiveHost) -> Self {
         guard path.hasPrefix("/v1/workspaces") else { return self }

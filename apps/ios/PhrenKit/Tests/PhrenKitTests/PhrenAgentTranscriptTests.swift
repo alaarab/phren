@@ -50,8 +50,9 @@ final class PhrenAgentTranscriptTests: XCTestCase {
             event(1, "assistant/message", ["turn": 2, "stop_reason": "end_turn", "message": ["role": "assistant", "content": [["type": "text", "text": ""], ["type": "text", "text": "Done."]]]]),
             event(2, "user/message", ["source": "steer", "turn": 3, "message": ["role": "user", "content": [["type": "text", "text": "Also lint"], ["type": "image", "source": ["type": "base64"]]]]]),
         ])
-        XCTAssertEqual(value.messages.map(\.text), ["Done.", "Also lint", "[Image attachment]"])
-        XCTAssertEqual(value.messages[2].imageBlocks, [1])
+        // The steer's words and picture are one bubble.
+        XCTAssertEqual(value.messages.map(\.text), ["Done.", "Also lint"])
+        XCTAssertEqual(value.messages[1].imageBlocks, [1])
         if case .finished = value.progressEvents[0].value {} else { XCTFail("end_turn without usage still finishes the turn") }
     }
 

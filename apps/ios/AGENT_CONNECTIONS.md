@@ -15,8 +15,10 @@ The restricted SSH dispatcher accepts `phren-hook v1 pipe`,
 The pipe relays HTTP/WebSocket bytes to a mode-0600 Unix socket in a mode-0700
 directory. Terminal attaches an existing Herdr server through an SSH PTY.
 The web command relays bytes only to the literal loopback address `127.0.0.1`
-or `::1` and a decimal TCP port from 1 through 65535. Supplied commands are
-never executed as shell text. Device keys keep SSH's `restrict` option and
+or `::1` and a decimal TCP port from 1 through 65535 — that is any loopback TCP
+listener on the computer, not only web previews, so the device key is worth as
+much as a local login (the terminal command already grants one). Supplied
+commands are never executed as shell text. Device keys keep SSH's `restrict` option and
 explicit PTY permission; generic SSH forwarding stays disabled.
 
 Local web previews use a separate authenticated HTTP CONNECT proxy on a random
@@ -241,8 +243,15 @@ external-app preferences are ignored. Existing third-party helpers remain intact
 Uploads are private, validate common image headers, cap individual images at
 8 MiB and total retained storage at 256 MiB, and expire after 14 days when another
 image is uploaded. The local activity journal retains two files of roughly 2 MiB
-and contains status/provenance, not prompts or transcript text. Uninstall leaves
+and contains status/provenance (agent, state, directory), not prompts or
+transcript text; tab-activity signatures are stored hashed. Uninstall leaves
 local data and SSH backups available for manual recovery.
+
+The Hook's own reference — every route, what a transcript export carries and
+strips (Claude top-level allowlist, reduced task-notification envelopes,
+queue rows, `phren_changes` with secret-name redaction), the simulator
+helper's confinement, and the same-user trust boundary of `agent.sock` — is
+`packages/cli/src/bridge/AGENT_CONNECTIONS.md`.
 
 Chat drafts use an ordered actor repository. Immutable image digests are
 computed once; text edits avoid rescanning or rewriting unchanged image files.

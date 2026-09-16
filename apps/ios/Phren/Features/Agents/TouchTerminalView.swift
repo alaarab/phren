@@ -13,6 +13,21 @@ final class TouchTerminalView: TerminalView, UIGestureRecognizerDelegate, UIEdit
     var onOpenChat: (() -> Void)?
     var onDictate: (() -> Void)?
 
+    var onBoundsChanged: (() -> Void)?
+    private var lastTerminalSize = CGSize.zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = bounds.size
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0,
+              size != lastTerminalSize else { return }
+        lastTerminalSize = size
+        // super.layoutSubviews updates SwiftTerm's grid from the final bounds.
+        // Report even a viewport change smaller than a cell (no sizeChanged
+        // delegate callback) so the attached terminal always gets the latest size.
+        onBoundsChanged?()
+    }
+
     /// Hardware-keyboard shortcuts (Settings → Keyboard lists them).
     override var keyCommands: [UIKeyCommand]? {
         let commands = [

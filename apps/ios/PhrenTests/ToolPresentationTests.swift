@@ -29,6 +29,17 @@ final class ToolPresentationTests: XCTestCase {
         XCTAssertEqual(document.added, 2); XCTAssertEqual(document.removed, 3)
     }
 
+    func testNotebookAndStringReplaceHaveInputFallbackPatches() {
+        let notebook = ToolPresentation(title: "NotebookEdit", text: json(["notebook_path": "work.ipynb", "new_source": "print(1)"]))
+        XCTAssertEqual(notebook.path, "work.ipynb")
+        XCTAssertTrue(notebook.patch?.contains("+print(1)") == true)
+        let replace = ToolPresentation(title: "str_replace_editor", text: json(["path": "main.py", "old_str": "a = 1", "new_str": "a = 2"]))
+        XCTAssertTrue(replace.patch?.contains("-a = 1\n+a = 2") == true)
+        let patch = ToolPresentation(title: "apply_patch", text: "*** Begin Patch\n*** Update File: main.py\n@@\n-old\n+new\n*** End Patch")
+        XCTAssertEqual(patch.path, "main.py")
+        XCTAssertNotNil(patch.patch)
+    }
+
     func testClaudeCodeReadsSearchesAndTodosSummarize() {
         let read = ToolPresentation(title: "Read", text: json(["file_path": "/app/Sources/Theme.swift", "offset": 10, "limit": 40]))
         XCTAssertEqual(read.title, "Read")

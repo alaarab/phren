@@ -49,6 +49,20 @@ final class AgentChatConnectionTests: XCTestCase {
         } catch { XCTAssertTrue(error.localizedDescription.contains("another computer")) }
     }
 
+    func testFirstPromptCarriesPaneBindingWithoutInventingASessionID() throws {
+        let token = String(repeating: "a", count: 64)
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w", tabID: "w:t", paneID: "w:p", source: "claude", sessionID: "", startingToken: token)
+        let request = try GatewayRequest.prompt(target, text: "First prompt")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.body)) as? [String: Any])
+        let route = try XCTUnwrap(body["target"] as? [String: Any])
+        XCTAssertEqual(request.path, "/v1/prompt")
+        XCTAssertEqual(route["starting"] as? Bool, true)
+        XCTAssertEqual(route["startingToken"] as? String, token)
+        XCTAssertNil(route["session"])
+        XCTAssertEqual(route["pane"] as? String, "w:p")
+        XCTAssertEqual(body["text"] as? String, "First prompt")
+    }
+
     func testPromptEncodingKeepsTextOutOfTerminalCommands() throws {
         let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w7", tabID: "w7:t1", paneID: "w7:p2", source: "claude", sessionID: "fixture")
         let text = "Review `file.swift`\n$(not-a-command) \"quoted\""

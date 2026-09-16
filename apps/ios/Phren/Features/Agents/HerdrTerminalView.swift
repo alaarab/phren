@@ -11,6 +11,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     var connected = false
     var reconnecting = false
     var error: String?
+    var pendingLink: URL?
     var control = false
     #if DEBUG && targetEnvironment(simulator)
     var fixtureReport = ""
@@ -23,12 +24,16 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     private var commandMenuOpened = false
     private var socket: HerdrTerminalSocket?
     private var writes: Task<Void, Never>?
+    private let resize = TerminalResizeCoordinator()
     private var generation = UUID()
     private var connectionID = UUID()
     override init() {
         super.init()
         terminal.terminalDelegate = self
         terminal.configureTouchInput()
+        terminal.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        terminal.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        terminal.onBoundsChanged = { [weak self] in self?.updateTerminalSize() }
         let defaults = AppRuntime.defaults
         // Gesture fixtures always begin at a known size; production restores
         // the user's choice across terminals and app launches.
@@ -66,7 +71,7 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
         let run = UUID(); generation = run
         connected = false; reconnecting = false; error = nil
         defer {
-            if generation == run { connected = false; reconnecting = false; self.socket = nil; writes?.cancel(); _ = terminal.resignFirstResponder() }
+            if generation == run { resize.detach(); connected = false; reconnecting = false; self.socket = nil; writes?.cancel(); _ = terminal.resignFirstResponder() }
         }
         do {
             #if DEBUG && targetEnvironment(simulator)
@@ -134,6 +139,8 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             while !Task.isCancelled {
                 let socket = HerdrTerminalSocket(); self.socket = socket
                 connectionID = UUID()
+                terminal.layoutIfNeeded()
+                var graphicsFilter = TerminalGraphicsFilter()
                 var first = true
                 do {
                     for try await bytes in PhrenConnection.herdrTerminal(host: host, privateKey: key, socket: socket,
@@ -143,9 +150,11 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                         if first {
                             if receivedBefore { terminal.getTerminal().resetToInitialState() }
                             first = false; receivedBefore = true
-                            recovery.connected(at: ProcessInfo.processInfo.systemUptime)
+                            recovery.connected(at: HerdrTerminalRecovery.now())
+                            updateTerminalSize()
+                            resize.attach { size in try await socket.resize(columns: size.columns, rows: size.rows) }
                         }
-                        terminal.feed(byteArray: ArraySlice(bytes))
+                        terminal.feed(byteArray: ArraySlice(graphicsFilter.filter([UInt8](bytes))))
                         // @Observable notifies on every set, changed or not; the
                         // terminal paints itself, so don't re-render the chrome per packet.
                         if !connected { connected = true }
@@ -162,8 +171,9 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
                     throw LiveConnectionError.disconnected
                 } catch {
                     guard !Task.isCancelled, generation == run else { return }
+                    resize.detach()
                     connected = false; writes?.cancel(); writes = nil; self.socket = nil
-                    guard let delay = recovery.delay(after: error, now: ProcessInfo.processInfo.systemUptime) else { throw error }
+                    guard let delay = recovery.delay(after: error, now: HerdrTerminalRecovery.now()) else { throw error }
                     reconnecting = true
                     try await Task.sleep(for: .seconds(delay))
                     // Reattach the same server without refocusing a stale tab
@@ -203,8 +213,10 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
             return
         }
         #endif
-        guard connected, let socket else { return }
-        Task { try? await socket.resize(columns: newCols, rows: newRows) }
+        resize.update(columns: newCols, rows: newRows)
+    }
+    private func updateTerminalSize() {
+        sizeChanged(source: terminal, newCols: terminal.getTerminal().cols, newRows: terminal.getTerminal().rows)
     }
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         input(String(decoding: data, as: UTF8.self))
@@ -214,10 +226,15 @@ private final class HerdrTerminalModel: NSObject, @preconcurrency TerminalViewDe
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     func scrolled(source: TerminalView, position: Double) {}
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+        guard let url = URL(string: link), ExternalLinkPolicy.host(for: url) != nil else { return }
+        pendingLink = url
+    }
+    func openConfirmedLink(_ url: URL) {
+        guard ExternalLinkPolicy.host(for: url) != nil else { return }
         #if DEBUG && targetEnvironment(simulator)
-        if AgentChatFixture.enabled { fixtureLinks.append(link); return }
+        if AgentChatFixture.enabled { fixtureLinks.append(url.absoluteString); return }
         #endif
-        if let url = URL(string: link), ["http", "https"].contains(url.scheme?.lowercased() ?? "") { UIApplication.shared.open(url) }
+        UIApplication.shared.open(url)
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -260,6 +277,10 @@ private struct HerdrTerminalSurface: UIViewRepresentable {
     let model: HerdrTerminalModel
     func makeUIView(context: Context) -> TerminalView { model.terminal }
     func updateUIView(_ view: TerminalView, context: Context) { view.isUserInteractionEnabled = model.connected }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: TerminalView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height, width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: width, height: height)
+    }
 }
 
 struct HerdrTerminalView: View {
@@ -276,13 +297,22 @@ struct HerdrTerminalView: View {
     @State private var shortcuts = false
     @State private var reconnect = UUID()
     @State private var uploadRequest: TerminalUploadRequest?
-    @State private var showingChat = false
+    @State private var chatOpen: ChatOpen?
+    @State private var showingAgents = false
     @State private var showingDictation = false
     @State private var hardwareKeyboard = GCKeyboard.coalesced != nil
     /// Settings → Keyboard: the toolbar steps aside for a physical keyboard.
     private var toolbarHidden: Bool { hardwareKeyboard && IntegrationSettings.enabled(IntegrationSettings.autoHideToolbarKey, default: false) }
     private var currentHost: LiveHost? { (try? LiveSessionPreferences.read(hostData))?.hosts.first { $0.id == host.id } }
     private var active: Bool { visible && scenePhase == .active && currentHost == host }
+    private struct ChatOpen: Identifiable, Hashable {
+        let id = UUID()
+        let session: LiveAgentSession
+        var pane: AgentChatPanes.Pane? = nil
+        var attachments: [AgentAttachment] = []
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -290,12 +320,13 @@ struct HerdrTerminalView: View {
                 Label(error, systemImage: "wifi.exclamationmark").font(.caption).foregroundStyle(PhrenTheme.warning).padding(.horizontal, 12).padding(.bottom, 8)
             }
             if currentHost != host { Text("Connection settings changed. Reopen Herdr from the computer list.").font(.footnote).padding() }
-            HerdrTerminalSurface(model: model).padding(.horizontal, 4)
+            HerdrTerminalSurface(model: model).frame(maxWidth: .infinity, maxHeight: .infinity).padding(.horizontal, 4)
             if !toolbarHidden {
                 TerminalControls(terminal: model.terminal, hostID: host.id,
                                  source: target?.source ?? session?.tab.agent ?? "", enabled: model.connected && active, control: $model.control,
                                  shortcuts: $shortcuts, send: model.input,
-                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) })
+                                 attach: { uploadRequest = TerminalUploadRequest(attachments: $0) },
+                                 openAgents: { showingAgents = true })
                     .padding(.bottom, 6)
             }
         }
@@ -307,15 +338,31 @@ struct HerdrTerminalView: View {
             }
         }
         #endif
+        .confirmWebLink($model.pendingLink, open: model.openConfirmedLink)
         .background(PhrenTheme.bgSunken)
+        .overlay {
+            if showingAgents {
+                ZStack(alignment: .leading) {
+                    Color.black.opacity(0.34).ignoresSafeArea().onTapGesture { closeAgents() }
+                    AgentDrawer(current: session, chooseSession: { selected in
+                        chatOpen = .init(session: selected); closeAgents()
+                    }, close: closeAgents)
+                }.zIndex(20)
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .keepsInteractivePop()
         .onChange(of: PhrenAppearance.shared.palette) { _, _ in model.applyAppearance() }
         .toolbar(.hidden, for: .tabBar)
         .sheet(item: $uploadRequest) { request in
-            TerminalUploadFlow(host: host, attachments: request.attachments)
+            TerminalUploadFlow(host: host, attachments: request.attachments) { session, pane, attachments in
+                chatOpen = .init(session: session, pane: pane, attachments: attachments)
+            }
         }
-        .sheet(isPresented: $showingChat) { if let session { AgentChatSheet(session: session) } }
+        .navigationDestination(item: $chatOpen) {
+            AgentChatSheet(session: $0.session, initialPane: $0.pane, attachments: $0.attachments)
+        }
         .sheet(isPresented: $showingDictation) { ChatDictationView { text in model.input(text) } }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in hardwareKeyboard = true }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in hardwareKeyboard = GCKeyboard.coalesced != nil }
@@ -324,7 +371,7 @@ struct HerdrTerminalView: View {
             if TerminalSettings.keepsScreenOn { UIApplication.shared.isIdleTimerDisabled = true }
             visible = true
             model.terminal.onShortcutGesture = { shortcuts = true }
-            model.terminal.onOpenChat = { if session != nil { showingChat = true } }
+            model.terminal.onOpenChat = { if let session { chatOpen = .init(session: session) } }
             model.terminal.onDictate = { showingDictation = true }
         }.onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -338,6 +385,7 @@ struct HerdrTerminalView: View {
             if active { await model.run(host: host, session: session, target: target, paneID: paneID, commandMenu: commandMenu) }
         }
     }
+    private func closeAgents() { withAnimation(.easeInOut(duration: 0.18)) { showingAgents = false } }
     private var header: some View {
         HStack(spacing: 8) {
             Button { dismiss() } label: {

@@ -2,6 +2,19 @@ import SwiftUI
 
 /// Semantic colors follow the saved appearance without resetting view state.
 enum PhrenTheme {
+    enum Radius {
+        static let small: CGFloat = 10
+        static let medium: CGFloat = 14
+        static let large: CGFloat = 18
+        static let pill: CGFloat = 1_000
+    }
+    enum Space {
+        static let xs: CGFloat = 4
+        static let small: CGFloat = 8
+        static let medium: CGFloat = 12
+        static let large: CGFloat = 16
+        static let section: CGFloat = 24
+    }
     private static var palette: PhrenPalette { PhrenAppearance.shared.palette }
     static var bg: Color { Color(hex: palette.background) }
     static var bgSunken: Color { Color(hex: palette.sunken) }
@@ -12,6 +25,9 @@ enum PhrenTheme {
     static var chatCanvas: Color { Color(hex: palette.chatCanvas) }
     static var chatPanel: Color { Color(hex: palette.chatPanel) }
     static var toolPanel: Color { Color(hex: palette.toolPanel ?? palette.chatPanel) }
+    static var phrenCardSurface: Color { Color(hex: palette.resolvedPhrenCardSurface) }
+    static var phrenCardBorder: Color { Color(hex: palette.resolvedPhrenCardBorder) }
+    static var phrenCardAccent: Color { Color(hex: palette.resolvedPhrenCardAccent) }
     static var link: Color { Color(hex: palette.link ?? palette.action) }
 
     static var text: Color { Color(hex: palette.text) }
@@ -24,10 +40,25 @@ enum PhrenTheme {
     static var accentHover: Color { Color(hex: palette.hover) }
     static var accentSolid: Color { Color(hex: palette.solid) }
     static var cyan: Color { Color(hex: palette.action) }
+    static var sessionProject: Color { Color(hex: palette.sessionProject ?? palette.link ?? palette.action) }
+    static var sessionTitle: Color { Color(hex: palette.sessionTitle ?? palette.secondary) }
+    static var sessionMeta: Color { Color(hex: palette.sessionMeta ?? palette.muted) }
+    static var stateWorking: Color { Color(hex: palette.stateWorking ?? palette.action) }
+    static var stateWaiting: Color { Color(hex: palette.stateWaiting ?? 0xE0BC7F) }
+    static var stateDone: Color { Color(hex: palette.stateDone ?? 0x8AC8AC) }
     static var lavender: Color { accent }
 
     static let border = Color.white.opacity(0.07)
     static let borderStrong = Color.white.opacity(0.14)
+    static var cardNeedsBorder: Bool { similarValue(palette.surface, palette.background) }
+    static var toolNeedsBorder: Bool { similarValue(palette.toolPanel ?? palette.chatPanel, palette.chatCanvas) }
+    static var panelNeedsBorder: Bool { similarValue(palette.raised, palette.background) }
+    private static func similarValue(_ lhs: UInt32, _ rhs: UInt32) -> Bool {
+        func value(_ hex: UInt32) -> Double {
+            (Double((hex >> 16) & 255) * 0.2126 + Double((hex >> 8) & 255) * 0.7152 + Double(hex & 255) * 0.0722) / 255
+        }
+        return abs(value(lhs) - value(rhs)) < 0.025
+    }
 
     static let success = Color(hex: 0x8AC8AC)
     static let warning = Color(hex: 0xE0BC7F)
@@ -87,28 +118,53 @@ extension View {
             .background(PhrenTheme.bg)
     }
 
-    func phrenCard() -> some View {
+    func phrenCard(radius: CGFloat = PhrenTheme.Radius.large) -> some View {
         self
-            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(PhrenTheme.border, lineWidth: 1))
+            .background(PhrenTheme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(PhrenTheme.cardNeedsBorder ? PhrenTheme.border : .clear, lineWidth: 0.5))
+    }
+
+    /// Raised panels get a quiet inner top edge. Tool cards use their own
+    /// surface, with a hairline only when it meets a similarly valued canvas.
+    func phrenPanel(tool: Bool = false, radius: CGFloat = PhrenTheme.Radius.medium) -> some View {
+        self.background(tool ? PhrenTheme.toolPanel : PhrenTheme.surfaceRaised,
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder((tool ? PhrenTheme.toolNeedsBorder : PhrenTheme.panelNeedsBorder) ? PhrenTheme.border : .clear, lineWidth: 0.5))
+            .overlay(alignment: .top) {
+                if !tool { Rectangle().fill(PhrenTheme.border).frame(height: 0.5).padding(.horizontal, radius) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    }
+
+    func phrenElevation() -> some View {
+        shadow(color: .black.opacity(0.3), radius: PhrenTheme.Radius.large, x: 4, y: 4)
     }
 
     func phrenRow() -> some View {
         self.listRowBackground(PhrenTheme.surface)
-            .listRowSeparatorTint(PhrenTheme.borderStrong)
+            .listRowSeparatorTint(PhrenTheme.border)
     }
 }
 
 /// Apply row styling inside the builder: a background on List alone leaves
 /// the system gray cells in place. Keep native scrolling, selection and forms.
 struct PhrenList<Content: View>: View {
+    /// `plain` drops the grouped section chrome so rows can draw their own
+    /// standalone cards (the sessions list); the default keeps grouped boxes.
+    var plain = false
     @ViewBuilder var content: Content
 
     var body: some View {
-        List { content.phrenRow() }
-            .listStyle(.insetGrouped)
-            .phrenScreen()
+        Group {
+            if plain {
+                List { content.phrenRow() }.listStyle(.plain)
+            } else {
+                List { content.phrenRow() }.listStyle(.insetGrouped)
+            }
+        }
+        .phrenScreen()
     }
 }
 
@@ -127,14 +183,15 @@ struct PhrenMenuRow: View {
     var subtitle: String? = nil
     let icon: String
     var color: Color = PhrenTheme.textSecondary
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: PhrenTheme.Space.medium) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(color)
                 .frame(width: 40, height: 40)
-                .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.body.weight(.medium)).foregroundStyle(PhrenTheme.text)
@@ -144,7 +201,7 @@ struct PhrenMenuRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, compact ? 2 : 6)
     }
 }
 

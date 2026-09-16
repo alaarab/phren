@@ -14,12 +14,20 @@ enum WidgetDataStore {
     }()
 
     static func load() -> WidgetSnapshot? {
+        load(WidgetSnapshot.self, filename: filename)
+    }
+
+    static func loadControl() -> SessionControlSnapshot? {
+        load(SessionControlSnapshot.self, filename: SessionControlSnapshot.filename)
+    }
+
+    private static func load<Value: Decodable>(_ type: Value.Type, filename: String) -> Value? {
         guard
             let url = FileManager.default
                 .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
                 .appendingPathComponent(filename),
             let data = try? Data(contentsOf: url)
         else { return nil }
-        return try? decoder.decode(WidgetSnapshot.self, from: data)
+        return try? decoder.decode(Value.self, from: data)
     }
 }
