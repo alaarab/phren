@@ -117,6 +117,18 @@ export async function repositoryBranch(cwd: string): Promise<string | undefined>
   return value;
 }
 
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+/** Page titles arrive HTML-escaped ("Safety &amp; Quality"); show them as text. */
+function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+    if (entity[0] === "#") {
+      const code = entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    return ENTITIES[entity.toLowerCase()] ?? match;
+  });
+}
+
 export interface LocalServer { name: string; port: number; origin: string; process?: string; pid?: number }
 function probe(port: number, host: string): Promise<string | null> {
   return new Promise(resolve => {
@@ -125,27 +137,68 @@ function probe(port: number, host: string): Promise<string | null> {
     const req = request({ hostname: host, port, path: "/", method: "GET", timeout: 1200, headers: { Host: `localhost:${port}` } }, res => {
       let body = "";
       res.on("data", data => { body += data.toString(); if (body.length > 32_768) res.destroy(); });
-      const end = () => finish(/<title[^>]*>([^<]{1,300})<\/title>/i.exec(body)?.[1]?.trim() || `Web server on port ${port}`);
+      const end = () => finish(decodeEntities(/<title[^>]*>([^<]{1,300})<\/title>/i.exec(body)?.[1] ?? "").trim() || `Web server on port ${port}`);
       res.on("end", end); res.on("close", end); res.on("error", () => finish(null));
     });
     req.on("error", () => finish(null)); req.on("timeout", () => { req.destroy(); finish(null); }); req.end();
   });
 }
-export async function webServers(): Promise<LocalServer[]> {
+const LISTEN_HOST = /^(\*|127\.0\.0\.1|localhost|0\.0\.0\.0|\[::\]|\[::1\]|::|::1)$/;
+/** Linux ephemeral range starts here; ports below it are far more likely to be a
+ * dev server than a browser's devtools or IPC listener. */
+const EPHEMERAL_PORT = 32_768;
+
+function addListener(ports: Map<string, LocalServer>, address: string, port: number, processName?: string, pid?: number) {
+  if (!LISTEN_HOST.test(address) || !Number.isInteger(port) || port <= 0) return;
+  const host = address.includes(":") ? "[::1]" : "127.0.0.1";
+  ports.set(`${host}:${port}`, { name: "", port, origin: `http://${host}:${port}`, process: processName, pid });
+}
+
+/** Listening TCP sockets owned by this user, via lsof (always present on macOS). */
+async function listenersFromLsof(ports: Map<string, LocalServer>): Promise<void> {
   const result = await exec(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
-    ["-nP", "-a", "-u", userInfo().username, "-iTCP", "-sTCP:LISTEN", "-Fpcn"], { timeout: 4000, maxBuffer: 1_048_576 }).catch(() => ({ stdout: "" }));
+    ["-nP", "-a", "-u", userInfo().username, "-iTCP", "-sTCP:LISTEN", "-Fpcn"], { timeout: 4000, maxBuffer: 1_048_576 });
   let pid: number | undefined, processName: string | undefined;
-  const ports = new Map<string, LocalServer>();
   for (const line of result.stdout.split("\n")) {
     if (line.startsWith("p")) pid = Number(line.slice(1));
     if (line.startsWith("c")) processName = line.slice(1);
     if (!line.startsWith("n")) continue;
-    const match = /^(?:n)(\*|127\.0\.0\.1|localhost|0\.0\.0\.0|\[::\]|\[::1\]):(\d+)$/.exec(line);
-    if (!match) continue;
-    const port = Number(match[2]); const host = match[1].includes(":") ? "[::1]" : "127.0.0.1";
-    ports.set(`${host}:${port}`, { name: "", port, origin: `http://${host}:${port}`, process: processName, pid });
+    const split = line.lastIndexOf(":");
+    if (split < 0) continue;
+    addListener(ports, line.slice(1, split), Number(line.slice(split + 1)), processName, pid);
   }
-  const candidates = [...ports.values()].slice(0, 64);
+}
+
+/** Listening TCP sockets via iproute2's ss, which every Linux ships even when
+ * lsof is absent (Arch/Omarchy, minimal containers). Lines look like
+ * `LISTEN 0 512 *:3000 *:* users:(("bun",pid=123,fd=24))`. */
+async function listenersFromSs(ports: Map<string, LocalServer>): Promise<void> {
+  const result = await exec("ss", ["-ltnpH"], { timeout: 4000, maxBuffer: 1_048_576 });
+  for (const line of result.stdout.split("\n")) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 4) continue;
+    const local = columns[3];
+    const split = local.lastIndexOf(":");
+    if (split < 0) continue;
+    const owner = /users:\(\("([^"]*)",pid=(\d+)/.exec(line);
+    addListener(ports, local.slice(0, split), Number(local.slice(split + 1)), owner?.[1], owner ? Number(owner[2]) : undefined);
+  }
+}
+
+export async function webServers(): Promise<LocalServer[]> {
+  const ports = new Map<string, LocalServer>();
+  // Prefer ss on Linux and lsof elsewhere; try the other if the first is missing.
+  const readers = process.platform === "linux" ? [listenersFromSs, listenersFromLsof] : [listenersFromLsof, listenersFromSs];
+  let lastError: unknown;
+  for (const reader of readers) {
+    try { await reader(ports); lastError = undefined; break; } catch (error) { lastError = error; }
+  }
+  if (lastError && ports.size === 0) throw new BridgeError(503, "No socket listing tool found: install lsof (or iproute2's ss on Linux).");
+  // Probe well-known ports first so a browser's dozens of ephemeral listeners
+  // cannot push a dev server on :3000 past the cap.
+  const candidates = [...ports.values()]
+    .sort((a, b) => Number(a.port >= EPHEMERAL_PORT) - Number(b.port >= EPHEMERAL_PORT) || a.port - b.port)
+    .slice(0, 64);
   const found: LocalServer[] = [];
   for (let i = 0; i < candidates.length; i += 8) {
     await Promise.all(candidates.slice(i, i + 8).map(async server => {
