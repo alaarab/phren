@@ -492,6 +492,39 @@ final class AgentChatTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Answer received in this conversation."].waitForExistence(timeout: 8))
     }
 
+    /// Claude Code's AskUserQuestion arrives as a permission request. The phone
+    /// shows the questions as phren's own choices — no raw tool JSON, no blind
+    /// Approve — and sends the answers back inside the approval.
+    @MainActor
+    func testClaudeQuestionApprovalShowsChoicesAndSendsAnswers() {
+        let app = launch(extra: ["--chat-approval-question"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.staticTexts["Which accent should the project use?"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["Claude has a question"].exists)
+        XCTAssertTrue(app.staticTexts["Design"].exists)
+        XCTAssertTrue(app.staticTexts["Which screens should change?"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Keep the Phren accent")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Approve"].exists)
+        XCTAssertFalse(app.staticTexts["Permission needed"].exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "\"questions\"")).count, 0)
+        XCTAssertTrue(app.buttons["chat-question-skip"].exists)
+        capture(app, "Claude question card")
+        let send = app.buttons["Send answer"]
+        XCTAssertFalse(send.isEnabled)
+        // A typed "Other" answers the single choice; the multi-select takes two.
+        let other = app.descendants(matching: .any).matching(identifier: "chat-question-typed-0").firstMatch
+        other.tap(); other.typeText("Warm amber")
+        XCTAssertFalse(send.isEnabled)
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "The conversation")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "The overview")).firstMatch.tap()
+        capture(app, "Claude question in Phren")
+        XCTAssertTrue(send.isEnabled)
+        send.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Which accent should the project use? → Warm amber")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Which screens should change? → Chat, Agents")).firstMatch.exists)
+        XCTAssertFalse(send.exists)
+    }
+
     @MainActor
     func testApprovalStaysVisibleAboveHistoryAndCanBeDenied() {
         let app = launch(extra: ["--chat-approval", "--chat-long-history"])

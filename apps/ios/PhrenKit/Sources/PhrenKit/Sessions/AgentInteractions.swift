@@ -25,6 +25,19 @@ public struct AgentApproval: Decodable, Equatable, Sendable, Identifiable {
         }
         return message
     }
+
+    /// Claude Code asks its questions through a permission request: the tool
+    /// is `AskUserQuestion` and the input is the question set. The phone
+    /// answers by approving with that input plus `answers`.
+    public var isQuestion: Bool { toolName == "AskUserQuestion" }
+    public var questionInput: [String: Any]? {
+        guard isQuestion, let message, message.utf8.count <= 32_768 else { return nil }
+        return (try? JSONSerialization.jsonObject(with: Data(message.utf8))) as? [String: Any]
+    }
+    public var questionPrompt: AgentQuestionPrompt? {
+        guard let input = questionInput else { return nil }
+        return AgentQuestionPrompt.read(id: actionId, questions: input["questions"])
+    }
 }
 
 public struct AgentInteractionStatus: Equatable, Sendable {
@@ -68,10 +81,26 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
         public let question: String
         public let multiSelect: Bool?
         public let options: [Option]
+        /// Claude Code: `choice` (the default), or `text` / `number` for a
+        /// typed answer with no options.
+        public let kind: String?
+        public var isFreeText: Bool { kind == "text" || kind == "number" }
     }
     public let toolUseId: String
     public let questions: [Question]
     public var id: String { toolUseId }
+
+    /// A bounded, well-formed question set from a transcript block or a
+    /// permission request, or nothing.
+    static func read(id: String, questions: Any?) -> Self? {
+        guard !id.isEmpty, id.utf8.count <= 512, let questions,
+              let data = try? JSONSerialization.data(withJSONObject: ["toolUseId": id, "questions": questions]),
+              let prompt = try? JSONDecoder().decode(Self.self, from: data),
+              (1...8).contains(prompt.questions.count),
+              prompt.questions.allSatisfy({ !$0.question.isEmpty && $0.question.utf8.count <= 4_000
+                  && ($0.isFreeText ? (0...12) : (1...12)).contains($0.options.count) && $0.options.allSatisfy({ !$0.label.isEmpty }) }) else { return nil }
+        return prompt
+    }
 
     public func answerBody(target: AgentChatTarget, selections: [[Int]]) throws -> Data {
         guard selections.count == questions.count else { throw PhrenKitError.validation("Answer every question.") }
@@ -88,6 +117,53 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
                                                "multiSelect": q.multiSelect ?? false, "options": q.options.map(\.label)] as [String: Any] },
             "answers": zip(questions, selections).map { ["questionId": $0.0.id ?? "", "optionIndexes": $0.1] as [String: Any] }
         ])
+    }
+
+    /// Claude Code reads `answers[question text]`: one label, the labels of a
+    /// multiSelect, or any other string as a typed answer. The result is the
+    /// request's own input with only `answers` added.
+    public func answeredInput(_ original: [String: Any], answers: [AgentQuestionAnswer]) throws -> [String: Any] {
+        guard answers.count == questions.count, Set(questions.map(\.question)).count == questions.count else {
+            throw PhrenKitError.validation("Answer every question.")
+        }
+        var values: [String: Any] = [:]
+        for (question, answer) in zip(questions, answers) { values[question.question] = try answer.value(for: question) }
+        var input = original
+        input["answers"] = values
+        return input
+    }
+    public func isAnswered(_ answers: [AgentQuestionAnswer]) -> Bool { (try? answeredInput([:], answers: answers)) != nil }
+}
+
+/// What the person chose for one question: option indexes and/or typed text
+/// ("Other…", or the whole answer for a free-text question).
+public struct AgentQuestionAnswer: Equatable, Sendable {
+    public var selections: [Int]
+    public var text: String
+    public init(selections: [Int] = [], text: String = "") { self.selections = selections; self.text = text }
+    public var typed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    func value(for question: AgentQuestionPrompt.Question) throws -> Any {
+        let typed = typed
+        guard typed.utf8.count <= 4_000, selections.count == Set(selections).count,
+              selections.allSatisfy({ question.options.indices.contains($0) }) else {
+            throw PhrenKitError.validation("Choose an available answer for every question.")
+        }
+        let labels = selections.sorted().map { question.options[$0].label }
+        if question.isFreeText {
+            guard selections.isEmpty, !typed.isEmpty else { throw PhrenKitError.validation("Type an answer.") }
+            return typed
+        }
+        if question.multiSelect == true {
+            let all = labels + (typed.isEmpty ? [] : [typed])
+            guard !all.isEmpty else { throw PhrenKitError.validation("Choose at least one answer.") }
+            return all
+        }
+        switch (labels.first, typed.isEmpty) {
+        case (let label?, true) where labels.count == 1: return label
+        case (nil, false): return typed
+        default: throw PhrenKitError.validation("Choose one answer.")
+        }
     }
 }
 
@@ -108,11 +184,7 @@ public enum AgentQuestionEvent: Equatable, Sendable {
                   let id = (block["call_id"] ?? block["id"]) as? String, !id.isEmpty, id.utf8.count <= 512 else { return nil }
             var input = block["input"] as? [String: Any]
             if let arguments = block["arguments"] as? String { input = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] }
-            guard let questions = input?["questions"],
-                  let data = try? JSONSerialization.data(withJSONObject: ["toolUseId": id, "questions": questions]),
-                  let prompt = try? JSONDecoder().decode(AgentQuestionPrompt.self, from: data),
-                  (1...8).contains(prompt.questions.count),
-                  prompt.questions.allSatisfy({ !$0.question.isEmpty && (1...12).contains($0.options.count) && $0.options.allSatisfy({ !$0.label.isEmpty }) }) else { return nil }
+            guard let prompt = AgentQuestionPrompt.read(id: id, questions: input?["questions"]) else { return nil }
             return .question(prompt)
         }
     }

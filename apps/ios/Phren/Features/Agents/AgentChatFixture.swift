@@ -25,9 +25,25 @@ import UIKit
     static var stopped = false
     static var answered = false
     static var denied = false
+    /// The `updatedInput` an AskUserQuestion approval was answered with; the
+    /// fixture echoes its answers into the transcript for tests to read.
+    static var answeredInput: [String: Any]?
     static let approvalExpiry = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(Date().addingTimeInterval(55))
+    /// Claude Code's AskUserQuestion as the hook reports it: a permission
+    /// request whose input is the question set.
+    static let questionInput: [String: Any] = ["questions": [
+        ["question": "Which accent should the project use?", "header": "Design",
+         "options": [["label": "Cyan", "description": "Keep the Phren accent"], ["label": "Lavender", "description": "A softer accent"]]],
+        ["question": "Which screens should change?", "header": "Scope", "multiSelect": true,
+         "options": [["label": "Chat", "description": "The conversation"], ["label": "Agents", "description": "The overview"], ["label": "Settings"]]],
+    ]]
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
-        guard flag("--chat-approval"), !answered else { return nil }
+        guard !answered else { return nil }
+        if flag("--chat-approval-question") {
+            let message = String(decoding: try JSONSerialization.data(withJSONObject: questionInput, options: .prettyPrinted), as: UTF8.self)
+            return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-question-action", "toolName": "AskUserQuestion", "title": "Allow AskUserQuestion?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
+        }
+        guard flag("--chat-approval") else { return nil }
         return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": "Run project tests", "message": "npm test", "expiresAt": approvalExpiry]]]), target: target)?.approval
     }
     static var uploads = 0
@@ -62,9 +78,9 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images")) ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question")) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": "Polish the phone app", "agent": agent,
-                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
+                                     "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": "/work/phone"]]
         if flag("--starting-session-fixture") {
             panes[0]["startingToken"] = startingToken
             if startingAttachedAt == nil || Date.now < startingAttachedAt! {
@@ -264,7 +280,13 @@ import UIKit
             let raw: [String: Any] = ["type": "response_item", "payload": ["type": "message", "role": "user", "content": [["type": "input_image", "image_url": "fixture"]]]]
             entries.append(["line": entries.count, "raw": raw])
         }
-        if answered { append("assistant", "Answer received in this conversation.") }
+        if let answers = answeredInput?["answers"] as? [String: Any] {
+            // Answers as Claude Code would read them, label lists joined.
+            let lines = answers.keys.sorted().map { question in
+                "\(question) → " + ((answers[question] as? [String])?.joined(separator: ", ") ?? (answers[question] as? String ?? "?"))
+            }
+            append("assistant", "Answers received in this conversation.\n" + lines.joined(separator: "\n"))
+        } else if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
         if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
         for (id, text) in sent where id == target.id || flag("--starting-session-fixture") {

@@ -501,7 +501,9 @@ final class AgentChatModel {
         }
     }
 
-    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false,
+    /// `updatedInput` answers a Claude AskUserQuestion approval: its own input
+    /// plus the chosen answers, sent with the approval.
+    func answer(_ session: LiveAgentSession, approval expected: AgentApproval? = nil, approve: Bool = false, updatedInput: [String: Any]? = nil,
                 question prompt: AgentQuestionPrompt? = nil, selections: [[Int]] = []) async {
         guard !answering, !sending, let target else { return }
         guard (expected != nil && expected == approval && interactionConnected)
@@ -511,10 +513,12 @@ final class AgentChatModel {
         if let expected { await ApprovalActivityController.shared.answered(target: target, actionID: expected.id) }
         do {
             #if DEBUG && targetEnvironment(simulator)
-            if AgentChatFixture.enabled { AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve }
-            else { try await submitAnswer(session, target: target, approval: expected, approve: approve, question: prompt, selections: selections) }
+            if AgentChatFixture.enabled {
+                AgentChatFixture.answered = true; AgentChatFixture.denied = expected != nil && !approve
+                AgentChatFixture.answeredInput = updatedInput
+            } else { try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections) }
             #else
-            try await submitAnswer(session, target: target, approval: expected, approve: approve, question: prompt, selections: selections)
+            try await submitAnswer(session, target: target, approval: expected, approve: approve, updatedInput: updatedInput, question: prompt, selections: selections)
             #endif
             guard self.target == target else { return }
             if approval?.id == expected?.id { approval = nil }
@@ -527,10 +531,10 @@ final class AgentChatModel {
             deliveryError = "Answer wasn't confirmed. Refresh or open Herdr to check the current prompt. Your answer hasn't been retried."
         }
     }
-    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool,
+    private func submitAnswer(_ session: LiveAgentSession, target: AgentChatTarget, approval: AgentApproval?, approve: Bool, updatedInput: [String: Any]?,
                               question: AgentQuestionPrompt?, selections: [[Int]]) async throws {
         let key = try DeviceSSHKey.load(session.host.id)
-        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve) }
+        if let approval { try await PhrenConnection.answerApproval(host: session.host, privateKey: key, target: target, actionID: approval.actionId, approve: approve, updatedInput: updatedInput) }
         else if let question { try await PhrenConnection.answerQuestions(host: session.host, privateKey: key, target: target, prompt: question, selections: selections) }
     }
 

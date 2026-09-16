@@ -10,6 +10,14 @@ number counts up on its own.
 
 ### New
 
+- Claude Code's questions are answered from the phone. When Claude asks
+  (its AskUserQuestion tool), the chat shows the questions as phren's own
+  choice cards — header, question, options with their descriptions,
+  multi-select where Claude allows it, an "Other…" row for your own words —
+  instead of a permission card with the raw tool JSON. Send returns the
+  answers inside the approval; Skip declines. The Live Activity, Siri and
+  Spotlight say "Claude has a question" and offer Open rather than a blind
+  Approve.
 - Every picture the agent reads shows in the chat: a Read of a screenshot
   puts its frames under the tool pill without opening the card, several side
   by side, each a tap from full screen. Pictures sent from the phone show in

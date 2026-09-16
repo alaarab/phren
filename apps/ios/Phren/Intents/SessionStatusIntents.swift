@@ -35,6 +35,9 @@ struct SessionStatusReport: Equatable {
     let lastAssistantLine: String?
     let approvalRequestID: String?
     let approvalTitle: String?
+    /// Claude Code's AskUserQuestion: answered in the app, never approved
+    /// blind from Siri or Spotlight.
+    var approvalIsQuestion = false
     var awaySummary: AwaySummary? = nil
 
     var projectName: String { entity.project ?? entity.workspace }
@@ -57,7 +60,7 @@ enum SessionStatusText {
         let status: String
         switch report.state {
         case .working: status = "is working"
-        case .waiting: status = report.approvalRequestID == nil ? "is waiting for input" : "is waiting for your approval"
+        case .waiting: status = report.approvalRequestID == nil ? "is waiting for input" : report.approvalIsQuestion ? "has a question for you" : "is waiting for your approval"
         case .idle: status = "is idle"
         case .done: status = "is done"
         case .error: status = "needs attention"
@@ -161,18 +164,20 @@ enum SessionStatusService {
 
     static func report(_ base: SessionStatusReport, session: LiveAgentSession, detail: Detail) async -> SessionStatusReport {
         var requestID: String?
+        let question = detail.approval?.questionPrompt
         if let approval = detail.approval, let target = detail.target,
            let expires = approval.expiration, expires > .now {
             let record = try? await SessionApprovalAction.sharedStore.save(.init(
                 id: UUID().uuidString, actionID: approval.id, host: session.host,
-                target: target, expiresAt: min(expires, Date().addingTimeInterval(55))
+                target: target, expiresAt: min(expires, Date().addingTimeInterval(55)), question: question != nil
             ))
             requestID = record?.id
         }
         return SessionStatusReport(entity: base.entity, state: detail.approval == nil ? base.state : .waiting,
                                    lastAssistantLine: detail.lastAssistantLine,
                                    approvalRequestID: requestID,
-                                   approvalTitle: detail.approval?.explanation ?? detail.approval?.title)
+                                   approvalTitle: question?.questions.first?.question ?? detail.approval?.explanation ?? detail.approval?.title,
+                                   approvalIsQuestion: question != nil)
     }
 
     static func transcript(session: LiveAgentSession, target: AgentChatTarget) async throws -> AgentChatTranscript {
@@ -228,6 +233,10 @@ struct SessionApprovalIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let preferences = try LiveSessionPreferences.read(AppRuntime.defaults.data(forKey: "sessions.live.preferences.v1") ?? Data())
         try await SessionApprovalAction.answer(requestID: requestID, approve: approve, preferences: preferences) { record, decision in
+            // A question's answer is chosen in the app; only a skip goes through here.
+            guard record.question != true || !decision else {
+                throw PhrenKitError.validation("\(record.target.providerName) has a question. Open Phren to choose the answer.")
+            }
             await ApprovalActivityController.shared.answered(target: record.target, actionID: record.actionID)
             #if DEBUG && targetEnvironment(simulator)
             if await MainActor.run(body: { AgentChatFixture.enabled }) {
@@ -333,7 +342,8 @@ private struct SessionStatusSnippet: View {
                 Button("Open", intent: OpenAgentSessionIntent(target: report.entity))
                     .buttonStyle(.borderedProminent).tint(PhrenTheme.cyan)
                     .accessibilityIdentifier("session-status-open")
-                if let requestID = report.approvalRequestID {
+                // A question has no blind Approve: Open shows the choices.
+                if let requestID = report.approvalRequestID, !report.approvalIsQuestion {
                     Button("Approve", intent: SessionApprovalIntent(requestID: requestID, approve: true))
                         .buttonStyle(.borderedProminent).accessibilityIdentifier("session-status-approve")
                     Button("Reject", role: .destructive,

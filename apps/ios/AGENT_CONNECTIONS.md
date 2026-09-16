@@ -103,6 +103,11 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   with only their `model`.
 - `POST /v1/prompt`, `/v1/keys`, `/v1/upload`, `/v1/diff`
 - `POST /v1/approvals/answer`: one exact pending callback, with approve or deny.
+  When the pending tool is Claude Code's `AskUserQuestion`, approve with
+  `updatedInput` — the request's own input plus `answers` keyed by question
+  text (a label; labels for multiSelect; any other string is a typed "Other")
+  and an optional free-text `response` — and the hook allows the call with
+  that input. The questions themselves must be unchanged.
 - `GET /v1/transcripts/blob`: bounded images from an exact transcript row/block.
 - `GET /v1/uploads/image?path=`: the bytes of an image the phone uploaded, which a
   Claude transcript names only by path (`[Image: source: …]`); the Hook serves it

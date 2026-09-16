@@ -32,11 +32,20 @@ extension PhrenConnection {
         }
     }
 
-    public static func answerApproval(host: LiveHost, privateKey: Data, target: AgentChatTarget, actionID: String, approve: Bool) async throws {
+    /// `updatedInput` answers Claude Code's AskUserQuestion: the request's own
+    /// input plus `answers` (see `AgentQuestionPrompt.answeredInput`), sent
+    /// only with an approval.
+    public static func answerApproval(host: LiveHost, privateKey: Data, target: AgentChatTarget, actionID: String, approve: Bool,
+                                      updatedInput: [String: Any]? = nil) async throws {
         guard !actionID.isEmpty, actionID.utf8.count <= 512 else { throw PhrenKitError.validation("Refresh the approval.") }
-        let body = try JSONSerialization.data(withJSONObject: ["source": target.source, "sessionId": target.sessionID,
-                                                              "actionId": actionID, "decision": approve ? "approve" : "deny"])
-        try await answer(host: host, privateKey: privateKey, target: target, path: "/v1/approvals/answer", body: body)
+        var fields: [String: Any] = ["source": target.source, "sessionId": target.sessionID, "actionId": actionID, "decision": approve ? "approve" : "deny"]
+        if let updatedInput {
+            guard approve, updatedInput["answers"] is [String: Any] else { throw PhrenKitError.validation("Answer the question before sending.") }
+            let bytes = try JSONSerialization.data(withJSONObject: updatedInput)
+            guard bytes.count <= 32_768 else { throw PhrenKitError.validation("The answer is too long.") }
+            fields["updatedInput"] = updatedInput
+        }
+        try await answer(host: host, privateKey: privateKey, target: target, path: "/v1/approvals/answer", body: JSONSerialization.data(withJSONObject: fields))
     }
     public static func answerQuestions(host: LiveHost, privateKey: Data, target: AgentChatTarget, prompt: AgentQuestionPrompt, selections: [[Int]]) async throws {
         try await answer(host: host, privateKey: privateKey, target: target, path: "/v1/questions/answer",

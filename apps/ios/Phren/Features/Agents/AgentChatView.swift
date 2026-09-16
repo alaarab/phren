@@ -284,8 +284,8 @@ struct AgentChatView: View {
                                                images: model.imagesByMessage, session: session, target: model.target,
                                                active: active, preview: { previewImage = $0 }).equatable()
                             if let prompt = model.question, model.needsAnswer, model.questionsSupported {
-                                ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { selections in
-                                    sendTask = Task { await model.answer(session, question: prompt, selections: selections) }
+                                ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.connected) { answers in
+                                    sendTask = Task { await model.answer(session, question: prompt, selections: answers.map { $0.selections.sorted() }) }
                                 }.id(prompt.id)
                             }
                             if model.target?.isStarting == true {
@@ -376,7 +376,18 @@ struct AgentChatView: View {
                     if atBottom && !model.loadingHistory { proxy.scrollTo("chat-bottom", anchor: .bottom) }
                 }
             }
-            if let approval = model.approval {
+            if let approval = model.approval, let prompt = approval.questionPrompt, let input = approval.questionInput {
+                // Claude Code asks through a permission request: answer it with
+                // the request's own input plus the answers; Skip denies.
+                ChatQuestionCard(prompt: prompt, busy: model.answering || !active || !model.interactionConnected,
+                                 title: "\(model.target?.providerName ?? "Claude") has a question", allowsTyping: true,
+                                 skip: { sendTask = Task { await model.answer(session, approval: approval, approve: false) } }) { answers in
+                    guard let updated = try? prompt.answeredInput(input, answers: answers) else { return }
+                    sendTask = Task { await model.answer(session, approval: approval, approve: true, updatedInput: updated) }
+                }
+                .id(approval.id)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            } else if let approval = model.approval {
                 ChatApprovalCard(approval: approval, busy: model.answering || !active || !model.interactionConnected) {
                     NavigationLink { HerdrTerminalView(host: session.host, session: session, target: model.target) } label: {
                         Label("Open terminal", systemImage: "terminal").frame(maxWidth: .infinity, minHeight: 32)

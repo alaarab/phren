@@ -58,6 +58,10 @@ struct PhrenApp: App {
                         model.showingMemoryMaintenance = true
                     case "projects": model.selectedTab = .projects
                     case "agents": model.selectedTab = .agents
+                    case "approval":
+                        guard let requestID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first(where: { $0.name == "request" })?.value else { return }
+                        approvals.open(requestID: requestID)
                     case "session":
                         guard let routeID = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                             .queryItems?.first(where: { $0.name == "route" })?.value else { return }

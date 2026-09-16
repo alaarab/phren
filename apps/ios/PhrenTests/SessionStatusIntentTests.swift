@@ -38,6 +38,9 @@ final class SessionStatusIntentTests: XCTestCase {
                        "Codex on phren at Mini is waiting for input.")
         XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .waiting, approval: true)),
                        "Codex on phren at Mini is waiting for your approval.")
+        var question = try report(state: .waiting, agent: "claude", approval: true)
+        question.approvalIsQuestion = true
+        XCTAssertEqual(SessionStatusText.dialog(for: question), "Claude on phren at Mini has a question for you.")
         XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .idle)),
                        "Codex on phren at Mini is idle.")
         XCTAssertEqual(SessionStatusText.dialog(for: try report(state: .done)),
@@ -168,5 +171,10 @@ final class SessionStatusIntentTests: XCTestCase {
         let values = await decisions.values
         XCTAssertEqual(values.map(\.0), ["approve-action", "reject-action"])
         XCTAssertEqual(values.map(\.1), [true, false])
+        // A saved question survives the round trip through disk with its flag.
+        let id = UUID().uuidString
+        _ = try await store.save(.init(id: id, actionID: "ask-action", host: host, target: target, expiresAt: Date().addingTimeInterval(55), question: true))
+        let claimed = try await ApprovalRequestStore(url: root.appending(path: "requests.json")).claim(id, preferences: preferences)
+        XCTAssertEqual(claimed.question, true)
     }
 }

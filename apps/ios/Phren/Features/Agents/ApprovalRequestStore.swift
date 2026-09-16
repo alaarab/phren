@@ -11,6 +11,8 @@ actor ApprovalRequestStore {
         let host: LiveHost
         let target: AgentChatTarget
         let expiresAt: Date
+        /// Claude Code's AskUserQuestion: never approved from outside the app.
+        var question: Bool? = nil
     }
     private let url: URL
     init(url: URL = URL.applicationSupportDirectory.appending(path: "pending-approvals.json")) { self.url = url }
