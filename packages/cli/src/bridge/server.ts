@@ -353,6 +353,9 @@ async function launchSession(server: string, data: Json): Promise<Json> {
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
   const name = data.name === undefined ? label : plainText(200).parse(data.name);
+  const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
+  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
+  const args = model && modelFlag[kind] ? [modelFlag[kind], model] : undefined;
   const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   const timeout = Math.min(120_000, Math.max(3_000, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   const before = await snapshot(server);
@@ -375,7 +378,7 @@ async function launchSession(server: string, data: Json): Promise<Json> {
   }
   if (!created) throw new BridgeError(409, `Herdr created "${label}" but its pane did not appear. Check Herdr on the computer.`);
   try {
-    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout }, undefined, timeout + 5_000);
+    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout, ...(args ? { args } : {}) }, undefined, timeout + 5_000);
   } catch (error) {
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time" : "Herdr reported an error";
     throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);
