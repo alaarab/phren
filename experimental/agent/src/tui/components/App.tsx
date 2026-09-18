@@ -10,6 +10,7 @@ import { StatusBar } from "./StatusBar.js";
 import { ApprovalPanel, type ApprovalInfo } from "./ApprovalPanel.js";
 import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
 import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
+import { PlanReview } from "./PlanReview.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
@@ -111,6 +112,8 @@ export interface AppProps {
   toolDetail?: ToolDetailState | null;
   onToolDetailMove?: (delta: number) => void;
   onToolDetailClose?: () => void;
+  /** Plan text awaiting approve/revise while in plan mode. */
+  planReview?: string | null;
 }
 
 export function App({
@@ -148,6 +151,7 @@ export function App({
   toolDetail,
   onToolDetailMove,
   onToolDetailClose,
+  planReview,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -552,6 +556,7 @@ export function App({
         )}
 
         {/* Input + permissions */}
+        {planReview !== null && planReview !== undefined ? <PlanReview text={planReview} theme={theme} /> : null}
         {toolDetail ? (
           <ToolDetail
             detail={toolDetail}

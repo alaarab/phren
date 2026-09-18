@@ -166,6 +166,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let modelPickerResolve: ((result: PickerResult | null) => void) | null = null;
   const toolHistory: ToolCallProps[] = [];
   let toolDetailIndex: number | null = null;
+  let planReview: string | null = null;
+  let planReviewResolve: ((result: { approved: boolean; feedback?: string }) => void) | null = null;
 
   function nextId(): string {
     return `msg-${++msgCounter}`;
@@ -270,6 +272,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         toolDetail={toolDetailIndex !== null ? { call: toolHistory[toolDetailIndex], index: toolDetailIndex, total: toolHistory.length } : null}
         onToolDetailMove={moveToolDetail}
         onToolDetailClose={closeToolDetail}
+        planReview={planReview}
       />
     );
   }
@@ -370,6 +373,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       if (entry.timer) clearTimeout(entry.timer);
       entry.resolve(false);
     }
+    if (planReviewResolve) {
+      const resolve = planReviewResolve;
+      planReview = null;
+      planReviewResolve = null;
+      resolve({ approved: false });
+    }
     refreshApproval();
     update();
   }
@@ -428,6 +437,28 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   function handleSubmit(input: string) {
     let line = input.trim();
     if (!line) return;
+
+    // Plan review active — y approves, n aborts, anything else is feedback
+    if (planReview !== null) {
+      const key = line.toLowerCase();
+      const resolve = planReviewResolve;
+      planReview = null;
+      planReviewResolve = null;
+      if (key === "y" || key === "yes") {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[32m\u2713 plan approved\x1b[0m" });
+        update();
+        resolve?.({ approved: true });
+      } else if (key === "n" || key === "no") {
+        completedMessages.push({ id: nextId(), kind: "status", text: "\x1b[31m\u2717 plan rejected\x1b[0m" });
+        update();
+        resolve?.({ approved: false });
+      } else {
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[33m\u21ba revising: "${line}"\x1b[0m` });
+        update();
+        resolve?.({ approved: false, feedback: line });
+      }
+      return;
+    }
 
     // Permission prompt active — intercept y/n/a/s (process next in queue)
     if (permissionQueue.length > 0) {
@@ -646,10 +677,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       toolHistory.push(call);
       update();
     },
-    // In the TUI, plan approval is handled by per-tool permission prompts
-    // rather than a blocking readline prompt.  Auto-approve the plan gate
-    // and let the permission checker require approval on each tool call.
-    onPlanApproval: async () => ({ approved: true }),
+    // Plan mode review happens in the TUI: show the plan and let the person
+    // approve, abort, or type feedback to revise before tools re-enable.
+    onPlanApproval: () => new Promise((resolve) => {
+      planReview = streamingText.trim() || "(empty plan)";
+      planReviewResolve = resolve;
+      update();
+    }),
     getSteeringInput: () => {
       const result = (() => {
         if (steerQueueBuf.length > 0 && inputMode === "steering") {
@@ -927,6 +961,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       approval={null}
       modelPicker={null}
       toolDetail={null}
+      planReview={null}
     />,
     { exitOnCtrlC: false },
   );
