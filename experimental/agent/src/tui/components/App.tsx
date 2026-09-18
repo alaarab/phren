@@ -6,10 +6,13 @@ import { ToolSpinner } from "./ToolSpinner.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { SteerQueue } from "./SteerQueue.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
+import { StatusBar } from "./StatusBar.js";
+import { ApprovalPanel, type ApprovalInfo } from "./ApprovalPanel.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
 import { renderMarkdown } from "../../multi/markdown.js";
+import { getPlan } from "../../tools/update-plan.js";
 import { useSearch, highlightMatches } from "../hooks/useSearch.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
@@ -52,6 +55,7 @@ export interface AppState {
   version: string;
   model?: string;
   contextWindow?: number;
+  contextTokens?: number;
   reasoningEffort?: string;
 }
 
@@ -90,6 +94,8 @@ export interface AppProps {
   onSelectAgent?: (agentId: string | null) => void;
   /** Callback when user presses Esc to cancel agent work */
   onCancelAgent?: () => void;
+  /** Pending permission request to show as an approval panel. */
+  approval?: ApprovalInfo | null;
 }
 
 export function App({
@@ -117,6 +123,7 @@ export function App({
   selectedAgentId,
   onSelectAgent,
   onCancelAgent,
+  approval,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -440,13 +447,22 @@ export function App({
       {/* Steer queue display */}
       <SteerQueue items={steerQueue} theme={theme} />
 
-        {/* Task list (Ctrl+T) */}
-        {showTaskList && (
-          <Box flexDirection="column" marginTop={1}>
-            <Text dimColor>{"  "}Tasks: (ctrl+t to hide)</Text>
-            <Text dimColor>{"  "}No shared task list in this session.</Text>
-          </Box>
-        )}
+        {/* Plan (ctrl+t) */}
+        {showTaskList && (() => {
+          const plan = getPlan();
+          return (
+            <Box flexDirection="column" marginTop={1}>
+              <Text dimColor>{"  "}Plan (ctrl+t to hide)</Text>
+              {plan.length === 0
+                ? <Text dimColor>{"  "}No plan yet.</Text>
+                : plan.map((item, i) => (
+                    <Text key={i} color={item.status === "completed" ? "green" : item.status === "in_progress" ? "yellow" : undefined} dimColor={item.status === "completed"}>
+                      {"  "}{item.status === "completed" ? "\u2713" : item.status === "in_progress" ? "\u25cf" : "\u25cb"} {item.content}
+                    </Text>
+                  ))}
+            </Box>
+          );
+        })()}
 
         {/* Content search bar (Ctrl+F) */}
         {search.state.active && (
@@ -480,6 +496,18 @@ export function App({
         )}
 
         {/* Input + permissions */}
+        {approval ? <ApprovalPanel info={approval} theme={theme} /> : null}
+        <StatusBar
+          provider={state.provider}
+          model={state.model}
+          project={state.project}
+          turns={state.turns}
+          cost={state.cost}
+          contextTokens={state.contextTokens}
+          contextLimit={state.contextWindow}
+          reasoningEffort={state.reasoningEffort}
+          theme={theme}
+        />
         <InputArea
           value={inputValue}
           onChange={setInputValue}

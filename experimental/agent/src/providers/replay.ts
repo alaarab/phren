@@ -74,7 +74,7 @@ export class ReplayProvider implements LlmProvider {
     return this.script.length - this.cursor;
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     this.requests.push({ system, messages, toolCount: tools.length });
     if (this.cursor >= this.script.length) {
       throw new ReplayExhaustedError(this.requests.length, this.script.length);

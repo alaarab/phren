@@ -12,6 +12,20 @@ import type { TurnHooks } from "./types.js";
 
 const MAX_TOOL_CONCURRENCY = 5;
 
+/** Replay a first result already pulled from an iterator, then drain it. */
+export async function* prefetchFirst<T>(iterator: AsyncIterator<T>, first: IteratorResult<T>): AsyncGenerator<T> {
+  try {
+    if (!first.done) yield first.value;
+    while (true) {
+      const next = await iterator.next();
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    await iterator.return?.();
+  }
+}
+
 /** Default per-call budget when the tool declares none. */
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
@@ -32,6 +46,7 @@ type ToolExecResult = { block: ToolUseBlock; output: string; is_error: boolean; 
 export async function runToolsConcurrently(
   blocks: ToolUseBlock[],
   registry: ToolRegistry,
+  turnSignal?: AbortSignal,
 ): Promise<ToolExecResult[]> {
   // Dedupe identical calls within this message: first occurrence executes.
   const byKey = new Map<string, ToolUseBlock>();
@@ -49,13 +64,23 @@ export async function runToolsConcurrently(
     const batch = uniques.slice(i, i + MAX_TOOL_CONCURRENCY);
     const batchResults = await Promise.all(
       batch.map(async (block) => {
+        if (turnSignal?.aborted) return { block, output: "Cancelled by user.", is_error: true, durationMs: 0 };
         const timeoutMs = registry.get(block.name)?.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
         const start = Date.now();
         const abort = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let onTurnAbort: (() => void) | undefined;
+        let onRaceAbort: (() => void) | undefined;
         try {
-          let timer: ReturnType<typeof setTimeout> | undefined;
+          onTurnAbort = () => abort.abort(turnSignal?.reason);
+          turnSignal?.addEventListener("abort", onTurnAbort, { once: true });
+          const cancelled = new Promise<never>((_, reject) => {
+            onRaceAbort = () => reject(new Error("Cancelled by user."));
+            turnSignal?.addEventListener("abort", onRaceAbort, { once: true });
+          });
           const result = await Promise.race([
             registry.execute(block.name, block.input, abort.signal),
+            cancelled,
             new Promise<never>((_, reject) => {
               timer = setTimeout(() => {
                 abort.abort(new Error(`timeout after ${timeoutMs / 1000}s`));
@@ -63,7 +88,6 @@ export async function runToolsConcurrently(
               }, timeoutMs);
             }),
           ]);
-          clearTimeout(timer);
           return {
             block,
             output: result.output,
@@ -74,6 +98,10 @@ export async function runToolsConcurrently(
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           return { block, output: msg, is_error: true, durationMs: Date.now() - start };
+        } finally {
+          if (timer) clearTimeout(timer);
+          if (onTurnAbort) turnSignal?.removeEventListener("abort", onTurnAbort);
+          if (onRaceAbort) turnSignal?.removeEventListener("abort", onRaceAbort);
         }
       }),
     );
@@ -212,6 +240,8 @@ export interface ToolExecContext {
   verbose: boolean;
   hooks?: TurnHooks;
   status: (msg: string) => void;
+  /** Turn abort signal; aborts in-flight tools when the user cancels. */
+  signal?: AbortSignal;
   /** Repeat-call chain state (session-scoped); reminders append to results. */
   repeatChain?: RepeatChainState;
 }
@@ -221,7 +251,7 @@ export async function executeToolBlocks(
   toolUseBlocks: ToolUseBlock[],
   ctx: ToolExecContext,
 ): Promise<{ results: ContentBlock[]; toolCallCount: number }> {
-  const execResults = await runToolsConcurrently(toolUseBlocks, ctx.registry);
+  const execResults = await runToolsConcurrently(toolUseBlocks, ctx.registry, ctx.signal);
   const results: ContentBlock[] = [];
   let toolCallCount = 0;
 

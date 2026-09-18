@@ -224,7 +224,7 @@ export class CodexProvider implements LlmProvider {
     this.reasoningEffort = reasoningEffort;
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const { accessToken } = await getAccessToken();
 
     const body: Record<string, unknown> = {
@@ -244,10 +244,10 @@ export class CodexProvider implements LlmProvider {
       body.tools = toResponsesTools(tools);
       body.tool_choice = "auto";
     }
-    return parseResponsesOutput(await this.requestResponse(accessToken, body));
+    return parseResponsesOutput(await this.requestResponse(accessToken, body, signal));
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const { accessToken } = await getAccessToken();
 
     const body: Record<string, unknown> = {
@@ -269,9 +269,9 @@ export class CodexProvider implements LlmProvider {
     // OpenClaw treats transport as auto: try WebSocket first, then fall back to the
     // HTTP responses stream if the WS path is unavailable.
     try {
-      yield* this.chatStreamWs(accessToken, body);
+      yield* this.chatStreamWs(accessToken, body, signal);
     } catch {
-      const response = await this.requestResponse(accessToken, body);
+      const response = await this.requestResponse(accessToken, body, signal);
       const parsed = parseResponsesOutput(response);
       for (const block of parsed.content) {
         if (block.type === "reasoning") {
@@ -295,7 +295,7 @@ export class CodexProvider implements LlmProvider {
     }
   }
 
-  private async requestResponse(accessToken: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async requestResponse(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const res = await fetch(CODEX_API, {
       method: "POST",
       headers: {
@@ -303,6 +303,7 @@ export class CodexProvider implements LlmProvider {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -360,7 +361,7 @@ export class CodexProvider implements LlmProvider {
   }
 
   /** WebSocket streaming — sends request, yields deltas as they arrive. */
-  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>): AsyncIterable<StreamDelta> {
+  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const wsUrl = CODEX_API.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
 
     // Queue for events received from the WebSocket before the consumer pulls them
@@ -465,6 +466,14 @@ export class CodexProvider implements LlmProvider {
       }
     });
 
+    const onAbort = () => {
+      done = true;
+      try { ws.close(); } catch { /* ignore */ }
+      if (resolve) { resolve(); resolve = null; }
+    };
+    signal?.addEventListener("abort", onAbort);
+    if (signal?.aborted) onAbort();
+
     // Async iteration: drain the queue, wait for new events
     try {
       while (true) {
@@ -478,6 +487,7 @@ export class CodexProvider implements LlmProvider {
         await new Promise<void>((r) => { resolve = r; });
       }
     } finally {
+      signal?.removeEventListener("abort", onAbort);
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         try { ws.close(); } catch { /* ignore */ }
       }

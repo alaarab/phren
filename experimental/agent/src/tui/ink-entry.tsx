@@ -6,7 +6,7 @@ import React from "react";
 import { render } from "ink";
 import type { AgentConfig } from "../agent-loop.js";
 import { createSession, runTurn, type AgentSession, type TurnHooks } from "../agent-loop.js";
-import { emitHerdrHook } from "../herdr-hooks.js";
+import { emitHerdrHook, setHerdrHookSession } from "../herdr-hooks.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { resolveSkillGesture } from "../commands.js";
@@ -14,14 +14,20 @@ import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
 import * as os from "os";
+import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { loadInputMode, saveInputMode, savePermissionMode } from "../settings.js";
+import { estimateMessageTokens } from "../context/token-counter.js";
+import { READ_ONLY_TOOLS } from "../permissions/checker.js";
+import type { ApprovalInfo } from "./components/ApprovalPanel.js";
 import { nextPermissionMode } from "./ansi.js";
 import { App, type AppState, type ActiveToolInfo, type CompletedMessage } from "./components/App.js";
 import type { ToolCallProps } from "./components/ToolCall.js";
 import type { AgentTab } from "./components/InputArea.js";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
+import { persistFork } from "../session/persist.js";
 import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
 
 const _require = createRequire(import.meta.url);
@@ -48,27 +54,100 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     resolve: (allowed: boolean) => void;
     toolName: string;
     input: Record<string, unknown>;
+    info: Omit<ApprovalInfo, "queueDepth">;
+    timer?: ReturnType<typeof setTimeout>;
     addAllow: (t: string, i: Record<string, unknown>, s: "once" | "session" | "tool") => void;
   }
   const permissionQueue: PermissionEntry[] = [];
+  let approvalInfo: ApprovalInfo | null = null;
 
-  // Ink-compatible askUser: shows prompt in chat, queues for y/n in input
+  const PERMISSION_TIMEOUT_MS = (() => {
+    const raw = Number(process.env.PHREN_PERMISSION_TIMEOUT_MS);
+    return Number.isFinite(raw) && raw > 0 ? raw : 600_000;
+  })();
+
+  const READ_TOOLS = READ_ONLY_TOOLS;
+
+  function capLines(text: string, max: number): string {
+    const lines = text.split("\n");
+    return lines.length > max ? lines.slice(0, max).join("\n") + "\n\u2026" : text;
+  }
+
+  function previewDiff(toolName: string, input: Record<string, unknown>): string | undefined {
+    const filePath = input.path;
+    if (typeof filePath !== "string" || !filePath) return undefined;
+    const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+    let oldContent = "";
+    try {
+      const stat = fs.statSync(abs);
+      if (stat.size > 300_000) return "(file too large to preview)";
+      oldContent = fs.readFileSync(abs, "utf-8");
+    } catch { oldContent = ""; }
+    let newContent: string | undefined;
+    if (toolName === "write_file") {
+      newContent = (input.content as string) ?? "";
+    } else if (toolName === "edit_file") {
+      const oldString = (input.old_string as string) ?? "";
+      const newString = (input.new_string as string) ?? "";
+      if (!oldString) return undefined;
+      if (input.replace_all === true) newContent = oldContent.split(oldString).join(newString);
+      else {
+        const idx = oldContent.indexOf(oldString);
+        if (idx < 0) return "(old_string not found in the current file)";
+        newContent = oldContent.slice(0, idx) + newString + oldContent.slice(idx + oldString.length);
+      }
+    }
+    if (newContent === undefined) return undefined;
+    if (oldContent.split("\n").length > 3_000 || newContent.split("\n").length > 3_000) return "(diff too large to preview)";
+    try {
+      return capLines(renderInlineDiff(oldContent, newContent, abs, theme.diff), 24);
+    } catch { return undefined; }
+  }
+
+  function describeApproval(toolName: string, input: Record<string, unknown>, reason: string): Omit<ApprovalInfo, "queueDepth"> {
+    const risk: ApprovalInfo["risk"] = toolName === "shell" ? "dangerous" : READ_TOOLS.has(toolName) ? "read" : "write";
+    if (toolName === "shell") {
+      const command = String(input.command ?? "");
+      const first = command.split("\n")[0].slice(0, 200);
+      const detail = command.length > 200 || command.includes("\n") ? capLines(command, 20) : undefined;
+      return { toolName, risk, reason, summary: first, detail };
+    }
+    if (toolName === "write_file" || toolName === "edit_file") {
+      const target = String(input.path ?? "");
+      return { toolName, risk, reason, summary: `${toolName === "write_file" ? "Write" : "Edit"} ${target}`, diff: previewDiff(toolName, input) };
+    }
+    const json = JSON.stringify(input, null, 2);
+    return { toolName, risk, reason, summary: toolName, detail: json && json !== "{}" ? capLines(json, 20) : undefined };
+  }
+
+  function refreshApproval() {
+    for (const entry of permissionQueue) {
+      if (entry.timer) { clearTimeout(entry.timer); entry.timer = undefined; }
+    }
+    const front = permissionQueue[0];
+    if (front) {
+      front.timer = setTimeout(() => {
+        const idx = permissionQueue.indexOf(front);
+        if (idx < 0) return;
+        permissionQueue.splice(idx, 1);
+        completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[31m\u2717 ${front.toolName} (no answer, denied)\x1b[0m` });
+        refreshApproval();
+        front.resolve(false);
+        update();
+      }, PERMISSION_TIMEOUT_MS);
+    }
+    approvalInfo = front ? { ...front.info, queueDepth: permissionQueue.length - 1 } : null;
+  }
+
+  // Ink-compatible askUser: shows an approval panel, queues for y/n in input
   config.registry.askUser = async (toolName, input, reason) => {
     const { addAllow } = await import("../permissions/allowlist.js");
-    const summary = Object.keys(input).length > 0
-      ? `${toolName}(${Object.entries(input).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 40)}`).join(", ")})`
-      : toolName;
-
-    completedMessages.push({
-      id: nextId(),
-      kind: "status",
-      text: `\x1b[1m\x1b[33m◇ Allow ${toolName}?\x1b[0m ${summary}\n  \x1b[2m[y]es  [n]o  [a]llow  [s]ession  or type feedback to deny & redirect\x1b[0m`,
-    });
+    const entry: PermissionEntry = { resolve: () => {}, toolName, input, info: describeApproval(toolName, input, reason), addAllow };
+    const allowed = new Promise<boolean>((resolve) => { entry.resolve = resolve; });
+    permissionQueue.push(entry);
+    refreshApproval();
     update();
-
-    return new Promise<boolean>((resolve) => {
-      permissionQueue.push({ resolve, toolName, input, addAllow });
-    });
+    return allowed;
   };
 
   // Mutable render state — updated then pushed to React via rerender()
@@ -86,18 +165,34 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   }
 
   function getAppState(): AppState {
+    const tracker = config.costTracker;
+    const cost = tracker
+      ? tracker.metered
+        ? `$${tracker.totalCost < 0.01 ? tracker.totalCost.toFixed(4) : tracker.totalCost.toFixed(2)}`
+        : `${tracker.totalInputTokens + tracker.totalOutputTokens} tok`
+      : "";
     return {
       provider: config.provider.name,
       project: config.phrenCtx?.project ?? null,
       turns: session.turns,
-      cost: "",
+      cost,
       permMode: config.registry.permissionConfig.mode,
       agentCount: spawner?.listAgents().length ?? 0,
       version: AGENT_VERSION,
       model: (config.provider as { model?: string }).model,
-      contextWindow: config.provider.contextWindow,
+      contextWindow: contextLimit,
+      contextTokens: currentContextTokens(),
       reasoningEffort: config.provider.reasoningEffort as string | undefined,
     };
+  }
+
+  let contextMemo = { count: -1, tokens: 0 };
+  function currentContextTokens(): number {
+    const count = session.messages.length;
+    if (contextMemo.count !== count) {
+      contextMemo = { count, tokens: estimateMessageTokens(session.messages) };
+    }
+    return contextMemo.tokens;
   }
 
   // Re-render the Ink app with current state
@@ -158,6 +253,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         selectedAgentId={selectedAgentId ?? (agentTabs.length > 0 ? "__main__" : undefined)}
         onCancelAgent={handleCancelAgent}
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
+        approval={approvalInfo}
       />
     );
   }
@@ -184,6 +280,11 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
     pendingInput = null;
     steerQueueBuf.length = 0;
+    for (const entry of permissionQueue.splice(0)) {
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.resolve(false);
+    }
+    refreshApproval();
     update();
   }
 
@@ -193,6 +294,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       session,
       contextLimit,
       undoStack: [],
+      costTracker: config.costTracker,
       providerName: config.provider.name,
       currentModel: (config.provider as { model?: string }).model,
       currentReasoning: config.provider.reasoningEffort ?? null,
@@ -203,6 +305,19 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       startTime,
       phrenPath: config.phrenCtx?.phrenPath,
       phrenCtx: config.phrenCtx,
+      forkSession: () => {
+        if (!config.phrenCtx?.phrenPath || !config.sessionId) return { ok: false, message: "Fork needs a phren store." };
+        try {
+          const childId = randomUUID();
+          const child = persistFork(config.phrenCtx.phrenPath, session.log, childId);
+          session.log = child;
+          config.sessionId = childId;
+          setHerdrHookSession(childId);
+          return { ok: true, sessionId: childId, message: `Forked to ${childId.slice(0, 8)}` };
+        } catch (err) {
+          return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        }
+      },
       onModelChange: async (result) => {
         try {
           const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
@@ -230,6 +345,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     // Permission prompt active — intercept y/n/a/s (process next in queue)
     if (permissionQueue.length > 0) {
       const entry = permissionQueue.shift()!;
+      if (entry.timer) clearTimeout(entry.timer);
       const key = line.toLowerCase();
       if (key === "y" || key === "yes") {
         completedMessages.push({ id: nextId(), kind: "status", text: `\x1b[32m\u2713 ${entry.toolName}\x1b[0m` });
@@ -253,6 +369,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         }
         entry.resolve(false);
       }
+      refreshApproval();
       update();
       return;
     }
@@ -479,7 +596,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       await runTurn(userInput, session, config, { ...tuiHooks, signal: turnAbort?.signal });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      streamingText += `\nError: ${msg}`;
+      if (!/abort/i.test(msg)) streamingText += `\nError: ${msg}`;
     } finally {
       emitHerdrHook("Stop");
     }
@@ -714,6 +831,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       selectedAgentId={undefined}
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
+      approval={null}
     />,
     { exitOnCtrlC: false },
   );

@@ -60,48 +60,34 @@ function readTruths(phrenPath: string, project: string): string[] {
 const CLAUDE_MD_MAX_CHARS = 4000;
 
 /**
- * Collect CLAUDE.md files by walking up from cwd to the filesystem root,
- * then checking the user-level ~/.claude/CLAUDE.md.
+ * Collect project rule files (CLAUDE.md and AGENTS.md) by walking up from cwd
+ * to the filesystem root, then checking the user-level ~/.claude/CLAUDE.md.
  * Returns entries most-specific first (cwd → parent → ... → user-level).
  */
-function collectClaudeMdFiles(): { filePath: string; content: string }[] {
+function collectRuleFiles(): { filePath: string; content: string }[] {
   const seen = new Set<string>();
   const results: { filePath: string; content: string }[] = [];
+  const read = (resolved: string) => {
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    try {
+      if (fs.existsSync(resolved)) {
+        const content = fs.readFileSync(resolved, "utf-8").trim();
+        if (content) results.push({ filePath: resolved, content });
+      }
+    } catch { /* skip unreadable */ }
+  };
 
-  // Walk from cwd up to root
   let dir = process.cwd();
   while (true) {
-    const candidate = path.join(dir, "CLAUDE.md");
-    const resolved = path.resolve(candidate);
-    if (!seen.has(resolved)) {
-      seen.add(resolved);
-      try {
-        if (fs.existsSync(resolved)) {
-          const content = fs.readFileSync(resolved, "utf-8").trim();
-          if (content) {
-            results.push({ filePath: resolved, content });
-          }
-        }
-      } catch { /* skip unreadable */ }
-    }
+    read(path.resolve(dir, "CLAUDE.md"));
+    read(path.resolve(dir, "AGENTS.md"));
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached root
     dir = parent;
   }
 
-  // Check user-level ~/.claude/CLAUDE.md
-  const userLevel = path.resolve(os.homedir(), ".claude", "CLAUDE.md");
-  if (!seen.has(userLevel)) {
-    seen.add(userLevel);
-    try {
-      if (fs.existsSync(userLevel)) {
-        const content = fs.readFileSync(userLevel, "utf-8").trim();
-        if (content) {
-          results.push({ filePath: userLevel, content });
-        }
-      }
-    } catch { /* skip */ }
-  }
+  read(path.resolve(os.homedir(), ".claude", "CLAUDE.md"));
 
   return results;
 }
@@ -155,17 +141,17 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 4: CLAUDE.md hierarchy (cwd → parent dirs → ~/.claude/CLAUDE.md)
+  // Section 4: project rule files (CLAUDE.md / AGENTS.md), cwd → parents → ~/.claude/CLAUDE.md
   try {
-    const claudeFiles = collectClaudeMdFiles();
-    if (claudeFiles.length > 0) {
-      let combined = claudeFiles
+    const ruleFiles = collectRuleFiles();
+    if (ruleFiles.length > 0) {
+      let combined = ruleFiles
         .map((f) => `<!-- ${f.filePath} -->\n${f.content}`)
         .join("\n\n---\n\n");
       if (combined.length > CLAUDE_MD_MAX_CHARS) {
         combined = combined.slice(0, CLAUDE_MD_MAX_CHARS) + "\n\n<!-- truncated -->";
       }
-      sections.push(`## CLAUDE.md\n\n${combined}`);
+      sections.push(`## Project instructions\n\n${combined}`);
     }
   } catch { /* silent */ }
 

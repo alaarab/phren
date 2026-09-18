@@ -7,10 +7,11 @@ import type { AgentSpawner } from "./multi/spawner.js";
 import type { PickerResult } from "./multi/model-picker.js";
 import type { PhrenContext } from "./memory/context.js";
 import type { ReasoningEffort } from "./models.js";
+import type { CostTracker } from "./cost.js";
 
 // Sub-module handlers
 import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, costCommand, planCommand, undoCommand, contextCommand } from "./commands/info.js";
-import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand } from "./commands/session.js";
+import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand, rewindCommand } from "./commands/session.js";
 import { memCommand, askCommand } from "./commands/memory.js";
 import { reviewCommand } from "./commands/review.js";
 import { findSkill, getScopedSkills } from "@phren/cli/skill/registry";
@@ -24,7 +25,7 @@ const RESET = "\x1b[0m";
 
 export interface CommandContext {
   session: AgentSession;
-  costTracker?: { totalCost: number; inputTokens: number; outputTokens: number };
+  costTracker?: CostTracker | null;
   contextLimit: number;
   undoStack: LlmMessage[][];
   spawner?: AgentSpawner;
@@ -50,6 +51,8 @@ export interface CommandContext {
   phrenCtx?: PhrenContext | null;
   /** Tool registry for /permissions command */
   registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
+  /** Fork the session at the current point into a new durable log. */
+  forkSession?: () => { ok: boolean; sessionId?: string; message: string };
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -68,7 +71,7 @@ export const COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
-  "/mode", "/permissions", "/verbose", "/theme", "/agent",
+  "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork",
   "/exit", "/quit", "/q",
 ];
 
@@ -133,6 +136,17 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/resume":   return resumeCommand(parts, ctx);
     case "/review":   return reviewCommand(parts, ctx);
     case "/config":   return configCommand(parts, ctx);
+    case "/rewind":   return rewindCommand(parts, ctx);
+
+    case "/fork": {
+      const result = ctx.forkSession?.();
+      if (!result) {
+        process.stderr.write(`${DIM}Fork is not available here.${RESET}\n`);
+        return true;
+      }
+      process.stderr.write(`${result.ok ? "\x1b[32m" : "\x1b[31m"}${result.message}${RESET}\n`);
+      return true;
+    }
 
     case "/mode": {
       const current = loadInputMode();

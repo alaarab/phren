@@ -18,6 +18,7 @@ import { createPhrenSearchTool } from "./tools/phren-search.js";
 import { createPhrenFindingTool } from "./tools/phren-finding.js";
 import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/phren-tasks.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
+import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
@@ -244,6 +245,7 @@ export async function runAgentCli(raw: string[]) {
   registry.register(gitStatusTool);
   registry.register(gitDiffTool);
   registry.register(gitCommitTool);
+  registry.register(updatePlanTool);
   registry.register(listMcpResourcesTool);
   registry.register(readMcpResourceTool);
 

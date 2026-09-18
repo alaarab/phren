@@ -1,10 +1,12 @@
 /** Interactive REPL for the phren agent with steering/queue input modes. */
 
-import { emitHerdrHook } from "./herdr-hooks.js";
+import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import * as readline from "node:readline/promises";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { randomUUID } from "node:crypto";
+import { persistFork } from "./session/persist.js";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand, resolveSkillGesture } from "./commands.js";
@@ -67,7 +69,21 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     session,
     contextLimit,
     undoStack: [],
+    costTracker: config.costTracker,
     phrenCtx: config.phrenCtx,
+    forkSession: () => {
+      if (!config.phrenCtx?.phrenPath || !config.sessionId) return { ok: false, message: "Fork needs a phren store." };
+      try {
+        const childId = randomUUID();
+        const child = persistFork(config.phrenCtx.phrenPath, session.log, childId);
+        session.log = child;
+        config.sessionId = childId;
+        setHerdrHookSession(childId);
+        return { ok: true, sessionId: childId, message: `Forked to ${childId.slice(0, 8)}` };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
     providerName: config.provider.name,
     currentModel: (config.provider as { model?: string }).model,
     currentReasoning: config.provider.reasoningEffort ?? null,
