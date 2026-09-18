@@ -38,8 +38,13 @@ function extractRetryAfter(error: unknown): number | null {
   return match ? parseInt(match[1], 10) * 1000 : null;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error("Aborted")); return; }
+    const onAbort = () => { clearTimeout(timer); reject(new Error("Aborted")); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** Wrap an async function with exponential backoff retry. */
@@ -47,13 +52,16 @@ export async function withRetry<T>(
   fn: () => Promise<T>,
   config?: Partial<RetryConfig>,
   verbose?: boolean,
+  signal?: AbortSignal,
 ): Promise<T> {
   const cfg: RetryConfig = { ...DEFAULT_CONFIG, ...config };
 
   for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw new Error("Aborted");
     try {
       return await fn();
     } catch (error) {
+      if (signal?.aborted) throw error;
       const status = extractStatus(error);
       const isRetryable = (status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error);
 
@@ -74,7 +82,7 @@ export async function withRetry<T>(
         );
       }
 
-      await sleep(delayMs);
+      await sleep(delayMs, signal);
     }
   }
 }
