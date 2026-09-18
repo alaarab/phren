@@ -43,6 +43,9 @@ No extra request per iPhone row is needed.
   The experimental phren-agent is wired the same way (its `.runtime/sessions`
   event log is the transcript, and it reports SessionStart/UserPromptSubmit/Stop
   to the Hook itself) and switches on once Herdr reports the `phren` agent kind.
+  opencode is supported too: its session ids are `ses_…`, identity comes from
+  Herdr's opencode integration, and a Phren-installed opencode plugin mirrors the
+  session into the same `.runtime/sessions` event log.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
@@ -54,8 +57,8 @@ No extra request per iPhone row is needed.
 
 From a project, the iPhone can open a new session on a computer:
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
-the project's directory and starts the chosen agent — Codex, Claude Code, or
-Copilot — in its pane, returning once Herdr has detected it ready. Otherwise
+the project's directory and starts the chosen agent — Codex, Claude Code,
+Copilot, or opencode — in its pane, returning once Herdr has detected it ready. Otherwise
 the helper does not start coding agents for you. Text updates depend on when
 that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if

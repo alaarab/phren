@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { glob } from "glob";
 import { withTranscriptIndex } from "./transcript-index.js";
-import { BridgeError, object, objects, type Json, type Provider } from "./protocol.js";
+import { BridgeError, object, objects, sessionId, type Json, type Provider } from "./protocol.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 
 export interface Entry { line: number; raw: Json }
@@ -61,7 +61,7 @@ export function phrenStoreRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function chatFrame(raw: Json, source: Provider): Json {
-  if (source === "phren") {
+  if (source === "phren" || source === "opencode") {
     const data = object(raw.data), message = object(data.message);
     return Array.isArray(message.content)
       ? { ...raw, data: { ...data, message: { ...message, content: imageReferences(message.content, true) } } } : raw;
@@ -82,14 +82,14 @@ function chatFrame(raw: Json, source: Provider): Json {
     ? { ...raw, [key]: { ...message, content: imageReferences(message.content, source === "claude") } } : raw;
 }
 export async function transcriptPath(source: Provider, session: string): Promise<string> {
-  if (!/^[a-f0-9-]{36}$/i.test(session)) throw new BridgeError(400, "Invalid conversation identity.");
+  if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
   const base = source === "codex" ? path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")
     : source === "claude" ? path.join(process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude"), "projects")
-    : source === "phren" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
+    : source === "phren" || source === "opencode" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
     : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
   const root = await realpath(base);
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
-    : source === "phren" ? `session-${session}.events.jsonl` : `${session}/events.jsonl`;
+    : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;
   const matches = await glob(pattern, { cwd: root, absolute: true, follow: false });
   if (matches.length !== 1) throw new BridgeError(404, "The transcript is not available for this conversation.");
   const file = await realpath(matches[0]);
@@ -99,7 +99,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
 export function visibleEvent(raw: Json, source: Provider): Json | undefined {
-  if (source === "phren") {
+  if (source === "phren" || source === "opencode") {
     // phren-agent's event log (experimental/agent/src/session/log.ts): the
     // header and log/replace splices are bookkeeping; the three message
     // events are the conversation. Reasoning blocks stay on the computer.
@@ -236,7 +236,7 @@ export async function historicalImage(file: string, line: number, block: number,
   const page = await reader.read(line + 1);
   const row = page.entries.find(e => e.line === line)?.raw;
   if (!row) throw new BridgeError(404, "This image is no longer in the transcript.");
-  const payload = source === "codex" ? object(row.payload) : source === "phren" ? object(object(row.data).message) : object(row.message);
+  const payload = source === "codex" ? object(row.payload) : source === "phren" || source === "opencode" ? object(object(row.data).message) : object(row.message);
   const content = objects(source === "codex" && Array.isArray(payload.output) ? payload.output : payload.content);
   let image = content[block];
   if (inner !== undefined) image = objects(image?.content)[inner];
@@ -260,7 +260,7 @@ export async function conversationNamedPaths(file: string, source: Provider, cwd
         const payload = object(raw.payload), data = object(raw.data);
         const calls = source === "codex" ? (["function_call", "custom_tool_call"].includes(String(payload.type)) ? [payload] : [])
           : source === "copilot" ? (raw.type === "tool.execution_start" ? [data] : [])
-          : objects(object(source === "phren" ? data.message : raw.message).content).filter(b => b.type === "tool_use");
+          : objects(object(source === "phren" || source === "opencode" ? data.message : raw.message).content).filter(b => b.type === "tool_use");
         for (const call of calls) {
           if (!SHELL_TOOLS.has(String(call.name ?? call.toolName))) continue;
           const args = call.arguments ?? call.input;

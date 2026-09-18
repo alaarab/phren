@@ -128,6 +128,7 @@ export async function install(version: string, noService = false): Promise<void>
       if (!ready) throw new Error("The new Phren Hook did not become ready.");
     }
     await applyAgentHooks(hookEdits);
+    await applyOpencodePlugin();
     const keys = path.join(homedir(), ".ssh/authorized_keys");
     const keyStat = await lstat(keys).catch(() => null);
     if (keyStat && !keyStat.isSymbolicLink() && keyStat.isFile()) {
@@ -161,6 +162,7 @@ export async function uninstall() {
   if (process.platform === "darwin") await unlink(path.join(homedir(), "Library/LaunchAgents", `${label}.plist`)).catch(() => {});
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
+  await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone keys from authorized_keys to revoke iPhone access. Local data remains in " + bridgeRoot());
 }
@@ -226,6 +228,28 @@ export async function planAgentHooks(program: string, remove = false): Promise<S
     edits.push({ file, before, after });
   }
   return edits;
+}
+
+const opencodePluginsDir = () => path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "opencode", "plugins");
+async function opencodePluginSource(): Promise<string | undefined> {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    path.join(here, "..", "..", "plugins", "opencode", "phren-transcript.js"),
+    path.join(here, "..", "plugins", "opencode", "phren-transcript.js"),
+  ]) {
+    const source = await missingFile(readFile(candidate, "utf8"));
+    if (source !== undefined) return source;
+  }
+  return undefined;
+}
+async function applyOpencodePlugin(remove = false): Promise<void> {
+  const dir = opencodePluginsDir(), file = path.join(dir, "phren-transcript.js");
+  if (remove) { await unlink(file).catch(() => {}); return; }
+  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return;
+  const source = await opencodePluginSource();
+  if (source === undefined) return;
+  await mkdir(dir, { recursive: true });
+  await atomic(file, source, 0o644);
 }
 
 async function applyAgentHooks(edits: SettingsEdit[]) {
