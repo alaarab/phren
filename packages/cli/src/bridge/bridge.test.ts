@@ -497,6 +497,16 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     expect(launched.data).toMatchObject({ ok: true, agent: "opencode", agentStatus: "idle" });
     expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode" });
   });
+  it("passes a model to the harness on launch", async () => {
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "model", kind: "opencode", model: "openrouter/deepseek/deepseek-v4.1-flash" });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode", args: ["--model", "openrouter/deepseek/deepseek-v4.1-flash"] });
+  });
+  it("omits the model argument for a harness without one", async () => {
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "nomodel", kind: "copilot", model: "anything" });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).not.toHaveProperty("args");
+  });
   it("launches a tab inside an existing workspace when asked", async () => {
     const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "second", kind: "codex", workspaceId: "w1", name: "Codex here", timeoutMs: 1 });
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);
