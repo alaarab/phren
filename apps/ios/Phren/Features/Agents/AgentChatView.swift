@@ -910,23 +910,28 @@ struct AgentChatView: View {
         model.isBusy && !showsStop && !AgentSlashCommand.isCommand(model.draft)
     }
 
-    /// Optimistic bubbles stay muted until echoed by the transcript. Only
-    /// unsent drafts have local edit/remove controls; Claude owns sent items.
+    /// Only messages still waiting to go out — the steers typed while the
+    /// agent is mid-turn. A message that has been delivered leaves the strip:
+    /// the transcript carries it, first as its own greyed pending bubble and
+    /// then as a real turn, so it never appears in two places at once.
     private var queuedMessages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(model.queue) { item in
+            ForEach(model.queue.filter { $0.submittedAfterLine == nil }) { item in
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         if !item.text.isEmpty {
-                            Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText).lineLimit(3)
+                            Text(item.text).font(.system(size: 14, design: .monospaced)).foregroundStyle(PhrenTheme.chatText)
+                                .lineLimit(3).textSelection(.enabled)
                         }
                         if !item.attachments.isEmpty {
                             Text("\(item.attachments.count) attachment\(item.attachments.count == 1 ? "" : "s")")
                                 .font(.caption2).foregroundStyle(PhrenTheme.chatNeutralDim)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                    .contextMenu {
+                        if !item.text.isEmpty { Button("Copy message", systemImage: "doc.on.doc") { ChatClipboard.copy(item.text) } }
+                    }
                     HStack(spacing: 0) {
-                        if item.submittedAfterLine == nil {
                         Button { sendTask = Task { await model.sendNow(item, session) } } label: {
                             Image(systemName: "arrow.up.circle").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Send now").accessibilityIdentifier("chat-queued-send:\(item.id)")
@@ -937,7 +942,6 @@ struct AgentChatView: View {
                         Button { model.remove(item) } label: {
                             Image(systemName: "xmark").frame(width: 36, height: 36).contentShape(Rectangle())
                         }.accessibilityLabel("Remove from queue").accessibilityIdentifier("chat-queued-remove:\(item.id)")
-                        }
                     }.font(.system(size: 15)).foregroundStyle(PhrenTheme.chatNeutral).buttonStyle(.plain)
                 }
                 .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 6)

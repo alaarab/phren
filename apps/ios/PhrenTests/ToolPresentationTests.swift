@@ -57,6 +57,16 @@ final class ToolPresentationTests: XCTestCase {
         XCTAssertEqual(agent.title, "Agent"); XCTAssertEqual(agent.preview, "Audit the sync loop")
     }
 
+    func testUnknownJSONInputNeverPreviewsABareBrace() {
+        let send = ToolPresentation(title: "SendMessage", text: json(["to": "researcher", "summary": "Check the build", "message": "Long body…"]))
+        XCTAssertEqual(send.preview, "Check the build")
+        let list = ToolPresentation(title: "ListAgents", text: "{}")
+        XCTAssertEqual(list.preview, "")
+        let unknown = ToolPresentation(title: "Mystery", text: json(["alpha": "value", "beta": 2]))
+        XCTAssertFalse(unknown.preview.hasPrefix("{"))
+        XCTAssertTrue(unknown.preview.contains("alpha"))
+    }
+
     func testOutputPreviewBoundsAreConfigurable() {
         let output = (0..<100).map { "line \($0)" }.joined(separator: "\n")
         XCTAssertEqual(ToolOutputPreview(output).text.components(separatedBy: "\n").count, 6)

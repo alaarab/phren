@@ -192,7 +192,7 @@ extension PhrenConnection {
     /// `cwd` on the computer, with `kind` started in its pane. Blocks until
     /// Herdr reports the agent ready — up to `timeoutMs` plus a margin.
     public static func launchSession(host: LiveHost, privateKey: Data, cwd: String, label: String, kind: LaunchKind,
-                                     workspaceID: String? = nil, timeoutMs: Int = 45_000) async throws -> LaunchedSession {
+                                     workspaceID: String? = nil, timeoutMs: Int = 45_000, model: String? = nil) async throws -> LaunchedSession {
         guard cwd.hasPrefix("/"), cwd.utf8.count <= 4_096, !cwd.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
             throw PhrenKitError.validation("Enter the full folder path on this computer.")
         }
@@ -204,6 +204,13 @@ extension PhrenConnection {
         let timeout = min(120_000, max(3_000, timeoutMs))
         var body: [String: Any] = ["cwd": cwd, "label": name, "kind": kind.rawValue, "timeoutMs": timeout]
         body["workspaceId"] = workspaceID
+        if let model {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed.utf8.count <= 200, !trimmed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+                throw PhrenKitError.validation("Enter a model name.")
+            }
+            body["model"] = trimmed
+        }
         var request = GatewayRequest(path: "/v1/workspaces/launch", body: try JSONSerialization.data(withJSONObject: body))
         request.timeoutSeconds = timeout / 1_000 + 20
         let data = try await fetchData(host: host, key: .init(rawRepresentation: privateKey), request: request)

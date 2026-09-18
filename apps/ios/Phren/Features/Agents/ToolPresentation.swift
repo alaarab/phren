@@ -43,7 +43,16 @@ struct ToolPresentation {
         // read like VS Code's "folder/file" and leave room for the counts.
         if let path { return Self.short(path) + (note.map { " · " + $0 } ?? "") }
         let start = body.firstIndex(where: { !$0.isNewline }) ?? body.endIndex
-        return String(body[start...].prefix(180).prefix { !$0.isNewline })
+        let first = String(body[start...].prefix(180).prefix { !$0.isNewline })
+        // A tool whose input is a bare JSON object has no summary field we
+        // know: read its first real field rather than the opening brace.
+        if ["{", "[", "{}", "[]"].contains(first) {
+            return body.components(separatedBy: "\n")
+                .lazy.map { $0.trimmingCharacters(in: .whitespaces) }
+                .first { !$0.isEmpty && !["{", "}", "[", "]"].contains($0) }
+                .map { String($0.prefix(180)) } ?? ""
+        }
+        return first
     }
 
     init(title rawTitle: String, text: String) {
@@ -90,7 +99,7 @@ struct ToolPresentation {
                     return (status == "completed" ? "☑ " : status == "in_progress" ? "◐ " : "☐ ") + content
                 }.joined(separator: "\n")
             } else {
-                body = ["cmd", "command", "patch", "input", "query", "q", "url", "description", "prompt"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
+                body = ["cmd", "command", "patch", "input", "query", "q", "url", "description", "prompt", "summary", "message", "to", "recipient", "subject"].compactMap { fields[$0] as? String }.first ?? Self.pretty(fields)
             }
         } else if ["exec", "parallel"].contains(name) {
             // Extract only JSON string literals, without executing JavaScript.
