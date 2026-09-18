@@ -26,7 +26,12 @@ final class StartingSessionTests: XCTestCase {
         let attached = try XCTUnwrap(ready.attachedTarget(for: target))
         XCTAssertFalse(attached.isStarting); XCTAssertEqual(attached.paneID, target.paneID)
         XCTAssertThrowsError(try ready.validate(target), "A stale first-send target cannot send after attachment")
-        XCTAssertThrowsError(try panes(session: "other", token: String(repeating: "b", count: 64)).attachedTarget(for: target))
+        // A conversation that appears with a changed starting token still
+        // attaches: the agent restarted in the same pane (new PIDs). Without a
+        // conversation, a changed token is refused.
+        let restarted = try panes(session: "aaaaaaaa-1111-4111-8111-111111111111", token: String(repeating: "b", count: 64))
+        XCTAssertEqual(try restarted.attachedTarget(for: target)?.sessionID, "aaaaaaaa-1111-4111-8111-111111111111")
+        XCTAssertThrowsError(try panes(token: String(repeating: "b", count: 64)).attachedTarget(for: target))
     }
     func testWorkspacePreservesStartingFlagAndOlderHookStillDecodes() throws {
         for starting in [true, false] {

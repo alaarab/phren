@@ -101,12 +101,19 @@ public struct AgentChatPanes: Decodable, Equatable, Sendable {
     public func attachedTarget(for target: AgentChatTarget) throws -> AgentChatTarget? {
         guard target.isStarting else { return nil }
         guard groupId == target.workspaceID, childId == target.tabID,
-              let pane = panes.first(where: { $0.id == target.paneID }), pane.agent == target.source,
-              pane.startingToken == target.startingToken else {
+              let pane = panes.first(where: { $0.id == target.paneID }), pane.agent == target.source else {
             throw PhrenKitError.validation("The starting agent changed. Reopen chat before sending.")
         }
-        guard pane.sessionId != nil else { return nil }
-        return try pane.target(hostID: target.hostID, workspaceID: target.workspaceID, tabID: target.tabID, muxID: target.muxID)
+        // Once the pane reports a conversation, attach to it even if the
+        // starting token changed: the agent may have restarted in the same pane
+        // (new PIDs), which is still the conversation the person opened.
+        if pane.sessionId != nil {
+            return try pane.target(hostID: target.hostID, workspaceID: target.workspaceID, tabID: target.tabID, muxID: target.muxID)
+        }
+        guard pane.startingToken == target.startingToken else {
+            throw PhrenKitError.validation("The starting agent changed. Reopen chat before sending.")
+        }
+        return nil
     }
 
     public func validate(_ target: AgentChatTarget, sending: Bool = false) throws -> Pane {
