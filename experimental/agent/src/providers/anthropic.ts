@@ -67,7 +67,7 @@ export class AnthropicProvider implements LlmProvider {
     return budget >= MIN_THINKING_BUDGET ? budget : null;
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body = this.buildRequestBody(system, messages, tools);
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -78,6 +78,7 @@ export class AnthropicProvider implements LlmProvider {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -100,7 +101,7 @@ export class AnthropicProvider implements LlmProvider {
     };
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const body = this.buildRequestBody(system, messages, tools);
     body.stream = true;
 
@@ -112,6 +113,7 @@ export class AnthropicProvider implements LlmProvider {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {

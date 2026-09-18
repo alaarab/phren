@@ -18,7 +18,7 @@ export class OpenRouterProvider implements LlmProvider {
     this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
@@ -35,6 +35,7 @@ export class OpenRouterProvider implements LlmProvider {
         "X-Title": "phren-agent",
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -45,7 +46,7 @@ export class OpenRouterProvider implements LlmProvider {
     return parseOpenAiResponse(await res.json() as Record<string, unknown>, this.name);
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
@@ -64,6 +65,7 @@ export class OpenRouterProvider implements LlmProvider {
         "X-Title": "phren-agent",
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -93,7 +95,7 @@ export class OpenAiProvider implements LlmProvider {
     this.reasoningEffort = reasoningEffort;
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
@@ -106,6 +108,7 @@ export class OpenAiProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -116,7 +119,7 @@ export class OpenAiProvider implements LlmProvider {
     return parseOpenAiResponse(await res.json() as Record<string, unknown>, this.name);
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOpenAiMessages(system, messages, this.name, modelSupportsVision(this.name, this.model)),
@@ -131,6 +134,7 @@ export class OpenAiProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {

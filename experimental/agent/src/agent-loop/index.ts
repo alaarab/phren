@@ -12,7 +12,7 @@ import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
 import { createSession } from "./types.js";
-import { consumeStream, executeToolBlocks } from "./stream.js";
+import { consumeStream, executeToolBlocks, prefetchFirst } from "./stream.js";
 export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks };
 export { createSession };
 
@@ -121,17 +121,23 @@ export async function runTurn(
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
 
     if (useStream) {
-      // Streaming path — retry the initial connection (before consuming deltas)
-      const stream = await withRetry(
-        async () => provider.chatStream!(systemPrompt, session.messages, turnTools),
+      // Streaming path — retry the initial connection. The async generator does
+      // no work until first read, so the first next() runs inside withRetry.
+      const opening = await withRetry(
+        async () => {
+          const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
+          const first = await iterator.next();
+          return { iterator, first };
+        },
         undefined,
         verbose,
+        signal,
       );
       const onReasoningDelta =
         hooks?.onReasoningDelta ??
         (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
       const result = await consumeStream(
-        stream,
+        prefetchFirst(opening.iterator, opening.first),
         costTracker,
         { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
         signal,
@@ -142,9 +148,10 @@ export async function runTurn(
       // Batch path
       spinner.start("Thinking...");
       const response = await withRetry(
-        () => provider.chat(systemPrompt, session.messages, turnTools),
+        () => provider.chat(systemPrompt, session.messages, turnTools, signal),
         undefined,
         verbose,
+        signal,
       );
       spinner.stop();
 
@@ -248,7 +255,7 @@ export async function runTurn(
 
     if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
     const { results: toolResults, toolCallCount } = await executeToolBlocks(toolUseBlocks, {
-      registry, verbose, status, hooks,
+      registry, verbose, status, hooks, signal,
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
       phrenCtx: config.phrenCtx,

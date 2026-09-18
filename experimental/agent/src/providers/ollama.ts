@@ -63,7 +63,7 @@ export class OllamaProvider implements LlmProvider {
     return /deepseek-r1|qwen3|gpt-oss/i.test(this.model);
   }
 
-  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[]): Promise<LlmResponse> {
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
@@ -77,6 +77,7 @@ export class OllamaProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {
@@ -113,7 +114,7 @@ export class OllamaProvider implements LlmProvider {
     return { content, stop_reason };
   }
 
-  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[]): AsyncIterable<StreamDelta> {
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: toOllamaMessages(system, messages),
@@ -127,6 +128,7 @@ export class OllamaProvider implements LlmProvider {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!res.ok) {

@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process";
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -26,10 +27,24 @@ function isGitRepo(cwd: string): boolean {
   }
 }
 
-function storeFile(_cwd: string): string {
-  const dir = path.join(os.homedir(), ".phren-agent");
+function repoKey(cwd: string): string {
+  let root = cwd;
+  try {
+    root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim() || cwd;
+  } catch { /* not a repo yet; fall back to cwd */ }
+  try { root = fs.realpathSync(root); } catch { /* keep the path as given */ }
+  return createHash("sha256").update(root).digest("hex").slice(0, 16);
+}
+
+function storeFile(cwd: string): string {
+  const dir = path.join(os.homedir(), ".phren-agent", "checkpoints");
   fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, "checkpoints.json");
+  const file = path.join(dir, `${repoKey(cwd)}.json`);
+  const legacy = path.join(os.homedir(), ".phren-agent", "checkpoints.json");
+  if (!fs.existsSync(file) && fs.existsSync(legacy)) {
+    try { fs.renameSync(legacy, file); } catch { /* best effort migration */ }
+  }
+  return file;
 }
 
 function loadStore(cwd: string): CheckpointStore {
@@ -79,6 +94,30 @@ export function createCheckpoint(cwd: string, label?: string): string | null {
     return ref;
   } catch {
     return null;
+  }
+}
+
+/** Stored checkpoints, newest first. */
+export function listCheckpoints(): Checkpoint[] {
+  return loadStore(process.cwd()).checkpoints.slice().reverse();
+}
+
+/**
+ * Restore the working tree to a stored checkpoint. Takes a safety checkpoint
+ * of the current state first, then discards tracked changes and applies the
+ * checkpoint's stash ref.
+ */
+export function restoreCheckpoint(cwd: string, ref: string): { ok: boolean; message: string } {
+  if (!isGitRepo(cwd)) return { ok: false, message: "Not a git repository." };
+  const checkpoint = loadStore(cwd).checkpoints.find((c) => c.ref === ref || c.label === ref);
+  if (!checkpoint) return { ok: false, message: `No checkpoint "${ref}".` };
+  try {
+    createCheckpoint(cwd, "pre-restore");
+    execFileSync("git", ["checkout", "--", "."], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", ["stash", "apply", checkpoint.ref], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    return { ok: true, message: `Restored ${checkpoint.label} (${checkpoint.createdAt.slice(0, 19).replace("T", " ")}).` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
 
