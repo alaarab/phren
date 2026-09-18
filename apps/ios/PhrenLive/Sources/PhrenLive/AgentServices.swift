@@ -170,9 +170,9 @@ extension PhrenConnection {
     }
 
     public enum LaunchKind: String, Sendable, CaseIterable, Identifiable {
-        case codex, claude, copilot
+        case codex, claude, copilot, opencode
         public var id: String { rawValue }
-        public var title: String { self == .claude ? "Claude Code" : self == .copilot ? "Copilot" : "Codex" }
+        public var title: String { self == .claude ? "Claude Code" : self == .copilot ? "Copilot" : self == .opencode ? "opencode" : "Codex" }
     }
 
     /// What `POST /v1/workspaces/launch` hands back: the new pane with the
@@ -220,7 +220,7 @@ extension PhrenConnection {
             throw PhrenKitError.validation("The computer didn't confirm the new session. Check Herdr workspaces before trying again.")
         }
         let status = (response["agentStatus"] as? String).flatMap { $0.isEmpty ? nil : String($0.prefix(40)) }
-        let session = (response["sessionId"] as? String).flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
+        let session = (response["sessionId"] as? String).flatMap { AgentChatTarget.validSessionID($0) ? $0 : nil }
         return LaunchedSession(workspaceID: workspaceID, tabID: tabID, paneID: paneID, agent: kind.rawValue, agentStatus: status, sessionID: session)
     }
 

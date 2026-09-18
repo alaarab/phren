@@ -60,6 +60,22 @@ final class PhrenAgentTranscriptTests: XCTestCase {
         XCTAssertEqual(AgentSlashCommand.suggestions(source: "phren", draft: "/p"), ["/provider", "/plan", "/permissions"])
         XCTAssertEqual(AgentSlashCommand.menu(source: "phren").first { $0.name == "/cost" }?.detail, "See this session's cost")
     }
+
+    func testTargetAcceptsOpenCodeWithASesSession() throws {
+        let session = "ses_f4a6b5c11ffe6nZrRlGZbXXNli"
+        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "opencode", sessionID: session)
+        XCTAssertEqual(target.providerName, "opencode")
+        XCTAssertThrowsError(try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "w1:t1", paneID: "w1:p1", source: "opencode", sessionID: "not-a-session"))
+        XCTAssertTrue(AgentChatTarget.validSessionID(session))
+        XCTAssertFalse(AgentChatTarget.validSessionID("ses_has spaces"))
+    }
+
+    func testOpenCodeTranscriptReadsTheSharedEventShape() throws {
+        let entries = [["line": 1, "raw": event(1, "user/message", ["source": "user", "turn": 1, "message": ["role": "user", "content": "Hello"]])]]
+        let data = try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "opencode", "entries": entries, "totalLines": 2, "hasMore": false])
+        let value = try AgentChatTranscript.read(data, source: "opencode")
+        XCTAssertEqual(value.messages.map(\.text), ["Hello"])
+    }
 }
 
 /// Test-only view of how the timeline pairs tool calls with their results.

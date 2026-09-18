@@ -372,6 +372,21 @@ final class LiveHostMonitor {
             if remote && previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-offline") {
                 throw LiveConnectionError.disconnected
             }
+            if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                // The product video: two computers, all three harnesses, one
+                // session working on each and one that needs you.
+                let changed = ",\"lastChangedAt\":\"\(UITestFixtures.sessionActivityDate.ISO8601Format())\""
+                let closed = await UITestFixtures.closedTabs
+                let tabs = (remote
+                    ? [#"{"id":"w1:t1","label":"1","title":"Fix the queue strip","agent":"codex","agentStatus":"working","cwd":"/work/phren","branch":"ios/chat","contextUsedPercent":62\#(changed)}"#,
+                       #"{"id":"w1:t2","label":"2","title":"Write the changelog","agent":"claude","agentStatus":"idle","cwd":"/work/phren","branch":"ios/chat"}"#]
+                    : [#"{"id":"w1:t1","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/ledger","branch":"main","contextUsedPercent":37\#(changed)}"#,
+                       #"{"id":"w1:t2","label":"2","title":"Review release notes","agent":"copilot","agentStatus":"waiting","approvalPending":true,"cwd":"/work/hub","branch":"main"}"#])
+                    .enumerated().filter { !closed.contains("\(host.id):w1:t\($0.offset + 1)") }.map(\.element)
+                return try LiveWorkspaces.read(Data("""
+                {"kind":"herdr","groups":[{"id":"w1","label":"\(remote ? "phren" : "ledger")","children":[\(tabs.joined(separator: ","))]}]}
+                """.utf8))
+            }
             let tour = ProcessInfo.processInfo.arguments.contains("--store-tour-fixture")
             let title = tour ? (remote ? "Review the deployment" : "Ship the onboarding flow") : remote ? "Review Linux deployment" : "Build the iPhone overview"
             let finished = previousUpdate != nil && ProcessInfo.processInfo.arguments.contains("--all-sessions-change")
@@ -403,6 +418,9 @@ final class LiveHostMonitor {
                 }
                 if ProcessInfo.processInfo.arguments.contains("--terminal-uploads-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","focus":{"workspaceID":"w8","tabID":"w8:t1","paneID":"w8:p1"},"groups":[{"id":"w7","label":"Phone work","children":[{"id":"w7:t9","label":"1","title":"Original tab","agent":"codex"}]},{"id":"w8","label":"Other work","children":[{"id":"w8:t1","label":"1","title":"Current terminal tab","agent":"codex"}]}]}"#.utf8))
+                }
+                if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                    return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"ledger","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/ledger","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"hub","children":[{"id":"w8:t1","label":"1","title":"Review release notes","agent":"copilot","agentStatus":"waiting","cwd":"/work/hub","branch":"main"}]}]}"#.utf8))
                 }
                 if ProcessInfo.processInfo.arguments.contains("--store-tour-fixture") {
                     return try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"w7","label":"phren","children":[{"id":"w7:t9","label":"1","title":"Ship the onboarding flow","agent":"claude","agentStatus":"working","cwd":"/work/phren","branch":"main","agentPaneCount":2,"paneCount":3}]},{"id":"w8","label":"mina","children":[{"id":"w8:t1","label":"1","title":"Review the deployment","agent":"codex","agentStatus":"waiting","cwd":"/work/mina","branch":"main"}]}]}"#.utf8))

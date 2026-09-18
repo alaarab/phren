@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { BridgeError, id, object, objects, requestID, serverName, provider, type Json, type Target, type StartingTarget } from "./protocol.js";
+import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type Target, type StartingTarget } from "./protocol.js";
 import { recordedSession } from "./agent-hooks.js";
 import { tabActivityKey } from "./tab-activity.js";
 
@@ -113,7 +113,7 @@ const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }
 const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   const reported = object(pane.agent_session);
-  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && /^[a-f0-9-]{36}$/i.test(reported.value)) return reported.value;
+  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) return reported.value;
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);

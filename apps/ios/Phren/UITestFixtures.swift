@@ -64,12 +64,19 @@ enum UITestFixtures {
         }
 
         var contexts: [StoreContext] = []
-        // The App Store tour: one store with real-looking projects, named computers.
-        let tour = arguments.contains("--store-tour-fixture")
-        for owner in tour ? ["sample"] : ["sample", "team"] {
+        // The App Store tour and the product video: one store with
+        // real-looking projects, named computers. The video's store is the
+        // owner's own repo, and it syncs, so the status bar reads live.
+        let trailer = arguments.contains("--trailer-fixture")
+        let tour = arguments.contains("--store-tour-fixture") || trailer
+        let primary = trailer ? "alaarab" : "sample"
+        for owner in tour ? [primary] : ["sample", "team"] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ui-tests-\(UUID().uuidString)")
-            let store = try LocalStore(rootDirectory: directory, owner: owner, repo: "brain", branch: "main")
-            if tour {
+            let repo = trailer ? "memory" : "brain"
+            let store = try LocalStore(rootDirectory: directory, owner: owner, repo: repo, branch: "main")
+            if trailer {
+                try await populateTrailer(store)
+            } else if tour {
                 try await populateTour(store)
             } else {
             try await store.write("demo/FINDINGS.md", content: "# Findings\n\n- [pattern] Cache repeated requests for offline use\n- [decision] Connect the phone graph to desktop memory\n", blobSha: nil)
@@ -79,9 +86,14 @@ enum UITestFixtures {
                 try await store.write("global/skills/review-style.md", content: SkillFile.template(name: "review-style", description: "Review shared style", instructions: "Use clear names."), blobSha: nil)
                 try await store.write("other/skills/other-check.md", content: SkillFile.template(name: "other-check", description: "Review another project", instructions: "Check the other project."), blobSha: nil)
             }
-            if owner == "sample", arguments.contains("--automatic-sessions-fixture") {
+            if owner == primary, arguments.contains("--automatic-sessions-fixture") {
                 let savedPins = (try? LiveSessionPreferences.read(defaults.data(forKey: preferencesKey) ?? Data()))?.pinnedSessions ?? []
-                if tour {
+                if trailer {
+                    try await store.write("machines.yaml", content: "studio: studio\nlaptop: laptop\n", blobSha: nil)
+                    for profile in ["studio", "laptop"] {
+                        try await store.write("profiles/\(profile).yaml", content: "name: \(profile)\nprojects:\n  - phren\n  - ledger\n  - hub\n", blobSha: nil)
+                    }
+                } else if tour {
                     try await store.write("machines.yaml", content: "Mac mini: mac\nomarchy: omarchy\n", blobSha: nil)
                     for profile in ["mac", "omarchy"] {
                         try await store.write("profiles/\(profile).yaml", content: "name: \(profile)\nprojects:\n  - phren\n  - mina\n  - atlas\n", blobSha: nil)
@@ -95,8 +107,8 @@ enum UITestFixtures {
                 }
                 defaults.set(try LiveSessionPreferences.saving(mac(), in: Data()), forKey: preferencesKey)
                 if arguments.contains("--all-sessions-fixture") {
-                    let remote = try LiveHost(id: hostIDs[1], name: tour ? "omarchy" : "Test Linux",
-                                             address: tour ? "omarchy" : "remote.fixture.invalid", username: tour ? "ala" : "fixture",
+                    let remote = try LiveHost(id: hostIDs[1], name: trailer ? "laptop" : tour ? "omarchy" : "Test Linux",
+                                             address: trailer ? "laptop" : tour ? "omarchy" : "remote.fixture.invalid", username: tour ? "ala" : "fixture",
                                              fingerprint: "SHA256:" + String(repeating: "B", count: 43))
                     defaults.set(try LiveSessionPreferences.saving(remote, in: defaults.data(forKey: preferencesKey)!),
                                  forKey: preferencesKey)
@@ -111,9 +123,16 @@ enum UITestFixtures {
             if arguments.contains("--workflow-fixture") {
                 try await populateWorkflow(store, owner: owner)
             }
-            // A fresh tokenless client refuses before making any request.
-            let engine = SyncEngine(client: GitHubClient(), store: store, stateDirectory: directory)
-            contexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: "brain", branch: "main", canPush: true), store: store, engine: engine))
+            // A fresh tokenless client refuses before making any request. The
+            // video's store answers every poll with "nothing changed", so the
+            // status bar reads live and freshly updated the way a synced
+            // store does.
+            let engine = SyncEngine(client: trailer ? TrailerGitHubStub() : GitHubClient(), store: store, stateDirectory: directory)
+            if trailer {
+                await engine.pull()
+                await engine.startLive()
+            }
+            contexts.append(StoreContext(descriptor: StoreDescriptor(owner: owner, name: repo, branch: "main", canPush: true), store: store, engine: engine))
         }
         // Exercise the same persisted pending target a Spotlight intent leaves,
         // including an open arriving before the model finishes bootstrapping.
@@ -130,9 +149,118 @@ enum UITestFixtures {
     }
 
     private static func mac() throws -> LiveHost {
-        let tour = ProcessInfo.processInfo.arguments.contains("--store-tour-fixture")
-        return try LiveHost(id: hostIDs[0], name: tour ? "Mac mini" : "Test Mac", address: tour ? "mini" : "fixture.invalid",
+        let arguments = ProcessInfo.processInfo.arguments
+        let trailer = arguments.contains("--trailer-fixture")
+        let tour = arguments.contains("--store-tour-fixture") || trailer
+        return try LiveHost(id: hostIDs[0], name: trailer ? "studio" : tour ? "Mac mini" : "Test Mac", address: trailer ? "studio" : tour ? "mini" : "fixture.invalid",
                             username: tour ? "ala" : "fixture", fingerprint: "SHA256:" + String(repeating: "A", count: 43))
+    }
+
+    /// The finding Claude saves in the video's conversation, and the node the
+    /// memory graph opens: one text, so the viewer sees the same card twice.
+    static let trailerFinding = "Idempotency keys must be scoped per merchant: a retried POST /orders with a key reused across merchants returned the other merchant's order."
+
+    /// The product video's store: three projects a small team would keep —
+    /// the app itself, a payments service, the web app — with the dated
+    /// findings, tasks and skills phren writes for them.
+    private static func populateTrailer(_ store: LocalStore) async throws {
+        func finding(_ id: String, _ date: String, _ text: String) -> String { "- \(text) <!-- fid:\(id) --> <!-- created: \(date) --> <!-- phren:status \"active\" -->\n" }
+        try await store.write("phren/FINDINGS.md", content: "# phren Findings\n\n## 2026-09-16\n\n"
+            + finding("a1b2c3d4", "2026-09-16", "[pitfall] XCUITest: reading UIPasteboard from the runner raises the paste prompt and hangs the run — verify copies through an in-app signal instead.")
+            + finding("b2c3d4e5", "2026-09-16", "[decision] Session cards are one flat rounded rectangle under small upper-case section labels; the computer's name sits beside the branch.")
+            + "\n## 2026-09-15\n\n"
+            + finding("c3d4e5f6", "2026-09-15", "[pattern] Long chats keep tools compact while scrolling: cache the rendered Markdown per message and load older pages a few at a time.")
+            + finding("d4e5f6a7", "2026-09-15", "[bug] Two Live Activities: the island shows the highest relevanceScore, so the approval activity is 1.0 and the working summary 0.5.")
+            + finding("e5f6a7b8", "2026-09-15", "[pattern] Every chat card belongs to the phren card family — a chip for the server, a verb for the tool, rows for the input, never raw JSON.")
+            + "\n## 2026-09-12\n\n"
+            + finding("f6a7b8c9", "2026-09-12", "[pitfall] osascript from a launchd agent hangs forever: a background agent can't be prompted for Automation. Use the AX API from a pinned helper.")
+            + finding("a7b8c9d0", "2026-09-12", "[pattern] The overview reveals every computer together after the first response, with an eight-second ceiling for unreachable ones.")
+            + "\n## 2026-09-09\n\n"
+            + finding("b1c2d3e4", "2026-09-09", "[decision] Dictation types straight into the message as you speak; Send after dictation is a setting, not the default.")
+            + finding("c2d3e4f5", "2026-09-09", "[pattern] Reads, greps and read-only shell commands fold into one run once three are in a row; a call that changed a file keeps its card.")
+            + finding("d3e4f5a6", "2026-09-09", "[pattern] Controls stay at least 44 points; reduce padding and duplicate rows before text size."), blobSha: nil)
+        try await store.write("phren/tasks.md", content: """
+        # phren tasks
+
+        ## Active
+
+        - [ ] Fix the queue strip: one row per queued message, remove and send-now on each [high] <!-- bid:10a1b2c3 -->
+          Context: The strip sits on the composer; the transcript never moves when it changes.
+        - [ ] Ship the onboarding flow: first-run screens, GitHub sign-in, add a computer [high] <!-- bid:11a1b2c3 -->
+
+        ## Queue
+
+        - [ ] Widget: show the session that needs you most on the Lock Screen <!-- bid:20b2c3d4 -->
+        - [ ] Terminal: pinch to change the text size and the remote grid together <!-- bid:30c3d4e5 -->
+
+        ## Done
+
+        - [x] Inline approvals in chat, with Open terminal beside Deny and Approve <!-- bid:50e5f6a7 -->
+        - [x] Account usage rings on the Sessions toolbar <!-- bid:60f6a7b8 -->
+        """, blobSha: nil)
+        try await store.write("phren/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/phren\n", blobSha: nil)
+        try await store.write("phren/skills/design.md", content: SkillFile.template(name: "design", description: "Design pass on a named screen", instructions: "Fix hierarchy, spacing and density against phren's own conventions, then verify on the simulator."), blobSha: nil)
+        try await store.write("ledger/FINDINGS.md", content: "# ledger Findings\n\n## 2026-09-16\n\n"
+            + finding("1a2b3c4d", "2026-09-16", "[pitfall] " + trailerFinding)
+            + finding("2b3c4d5e", "2026-09-16", "[decision] Invoices are generated from the ledger, never from order totals; the two disagreed by tax adjustments until the ledger became the source of truth.")
+            + "\n## 2026-09-14\n\n"
+            + finding("3c4d5e6f", "2026-09-14", "[bug] A cart total drifting by one cent traced to TaxCalculator rounding per line instead of per order; totals are now rounded once at the end.")
+            + finding("4d5e6f7a", "2026-09-14", "[pattern] OrderRepository loaded line items with one query per row; batching them through LineItemLoader cut p95 checkout latency from 840ms to 210ms.")
+            + finding("5e6f7a8b", "2026-09-14", "[decision] Webhook signatures are verified with a constant-time compare; the previous string equality leaked timing and was flagged in the pentest.")
+            + "\n## 2026-09-11\n\n"
+            + finding("6f7a8b9c", "2026-09-11", "[decision] The ledger is append-only; corrections are new entries with a reversal reference, which keeps the monthly close reproducible.")
+            + finding("7a8b9c0d", "2026-09-11", "[pitfall] The orders table needs the (merchant_id, created_at) index or the merchant dashboard query does a full scan once a merchant passes ~50k orders.")
+            + finding("8b9c0d1e", "2026-09-11", "[pattern] Currency amounts are stored as integer minor units; the one float column left in refunds was the source of the July reconciliation gap.")
+            + "\n## 2026-09-08\n\n"
+            + finding("9c0d1e2f", "2026-09-08", "[pattern] Cursor pagination replaced offset pagination on GET /orders because offset pages shifted while new orders arrived during export.")
+            + finding("0d1e2f3a", "2026-09-08", "[decision] Contract tests against the billing sandbox run nightly, not on every push: the sandbox rate limit made the PR suite flaky."), blobSha: nil)
+        try await store.write("ledger/tasks.md", content: """
+        # ledger tasks
+
+        ## Active
+
+        - [ ] Ship the onboarding flow: merchant sign-up, first order, webhook secret [high] <!-- bid:70a7b8c9 -->
+          Context: Idempotency keys are merchant-scoped now; the sign-up form still needs the retry banner.
+        - [ ] Backfill merchant_id onto legacy idempotency rows [high] <!-- bid:71a7b8c9 -->
+
+        ## Queue
+
+        - [ ] Retire the offset pagination shim after the export clients migrate <!-- bid:80b8c9d0 -->
+        - [ ] Rotate per-merchant webhook secrets on a schedule <!-- bid:81b8c9d0 -->
+
+        ## Done
+
+        - [x] Batch line items through LineItemLoader <!-- bid:90c9d0e1 -->
+        """, blobSha: nil)
+        try await store.write("ledger/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/ledger\n", blobSha: nil)
+        try await store.write("hub/FINDINGS.md", content: "# hub Findings\n\n## 2026-09-15\n\n"
+            + finding("f1e2d3c4", "2026-09-15", "[bug] The checkout form re-rendered on every keystroke because the cart context held the whole order; splitting CartContext into totals and items fixed it.")
+            + finding("e2d3c4b5", "2026-09-15", "[pattern] SessionStore keeps the draft cart in IndexedDB so a refresh mid-checkout restores the cart instead of emptying it.")
+            + "\n## 2026-09-13\n\n"
+            + finding("d3c4b5a6", "2026-09-13", "[decision] Route-level code splitting took the initial bundle from 1.4MB to 410KB; the analytics SDK loads after first paint.")
+            + finding("c4b5a6f7", "2026-09-13", "[pitfall] A blank page on iOS 17 was a top-level await in the analytics bundle; Safari 17.0 does not support it in classic scripts.")
+            + finding("b5a6f7e8", "2026-09-13", "[decision] The session cookie is SameSite=Lax; the OAuth callback needed an explicit redirect page for Safari.")
+            + "\n## 2026-09-10\n\n"
+            + finding("a6f7e8d9", "2026-09-10", "[pattern] Playwright smoke tests run against the preview deploy on every PR; they cover sign-in, add to cart and checkout only.")
+            + finding("f7e8d9c0", "2026-09-10", "[pattern] Access tokens live for 10 minutes and refresh tokens for 30 days; refresh rotation revokes the old token on first use to detect replay.")
+            + finding("e8d9c0b1", "2026-09-10", "[pitfall] The dev server needs the proxy entry for /api or local sign-in loops forever on the callback."), blobSha: nil)
+        try await store.write("hub/tasks.md", content: """
+        # hub tasks
+
+        ## Active
+
+        - [ ] Review release notes for 2.4: cart drafts, code splitting, the Safari redirect [medium] <!-- bid:a0a7b8c9 -->
+
+        ## Queue
+
+        - [ ] Move cart totals to a server-computed field <!-- bid:b0b8c9d0 -->
+        - [ ] Add a visual regression check for the order summary <!-- bid:b1b8c9d0 -->
+
+        ## Done
+
+        - [x] Drop the legacy date picker <!-- bid:c0c9d0e1 -->
+        """, blobSha: nil)
+        try await store.write("hub/phren.project.yaml", content: "ownership: repo-managed\nsourcePath: /work/hub\n", blobSha: nil)
     }
 
     /// Three projects with the kind of memory phren keeps, for the App Store
@@ -144,16 +272,16 @@ enum UITestFixtures {
             + finding("b2c3d4e5", "[decision] Session cards are one flat rounded rectangle under small upper-case section labels; the computer's name sits beside the branch.")
             + "\n## 2026-09-15\n\n"
             + finding("c3d4e5f6", "[pattern] Long chats keep tools compact while scrolling: cache the rendered Markdown per message and load older pages a few at a time.")
-            + finding("d4e5f6a7", "[fix] Two Live Activities: the island shows the highest relevanceScore, so the approval activity is 1.0 and the working summary 0.5.")
-            + finding("e5f6a7b8", "[convention] Every chat card belongs to the phren card family — a chip for the server, a verb for the tool, rows for the input, never raw JSON.")
+            + finding("d4e5f6a7", "[bug] Two Live Activities: the island shows the highest relevanceScore, so the approval activity is 1.0 and the working summary 0.5.")
+            + finding("e5f6a7b8", "[pattern] Every chat card belongs to the phren card family — a chip for the server, a verb for the tool, rows for the input, never raw JSON.")
             + "\n## 2026-09-12\n\n"
             + finding("f6a7b8c9", "[pitfall] osascript from a launchd agent hangs forever: a background agent can't be prompted for Automation. Use the AX API from a pinned helper.")
             + finding("a7b8c9d0", "[pattern] The overview reveals every computer together after the first response, with an eight-second ceiling for unreachable ones.")
             + "\n## 2026-09-09\n\n"
             + finding("b1c2d3e4", "[decision] Dictation types straight into the message as you speak; Send after dictation is a setting, not the default.")
             + finding("c2d3e4f5", "[pattern] Reads, greps and read-only shell commands fold into one run once three are in a row; a call that changed a file keeps its card.")
-            + finding("d3e4f5a6", "[fix] The terminal owns its pan gesture: a finger swipe scrolls, a mouse-aware TUI gets wheel events, never cursor keys.")
-            + finding("e4f5a6b7", "[convention] Controls stay at least 44 points; reduce padding and duplicate rows before text size."), blobSha: nil)
+            + finding("d3e4f5a6", "[bug] The terminal owns its pan gesture: a finger swipe scrolls, a mouse-aware TUI gets wheel events, never cursor keys.")
+            + finding("e4f5a6b7", "[pattern] Controls stay at least 44 points; reduce padding and duplicate rows before text size."), blobSha: nil)
         try await store.write("phren/tasks.md", content: """
         # phren tasks
 
@@ -180,8 +308,8 @@ enum UITestFixtures {
             + finding("c9d0e1f2", "[pattern] Dynamic Type screenshots: content_size accessibility-extra-large, then launch with -seed-demo and the tab to open.")
             + finding("d0e1f2a3", "[decision] Control Center toggles set a state rather than flip one, so a stale widget can never invert the sleep timer.")
             + "\n## 2026-09-10\n\n"
-            + finding("e1f2a3b4", "[convention] Stat tiles, entry rows and the goals header switch to vertical stacks at accessibility sizes.")
-            + finding("f5a6b7c8", "[fix] A force-quit app keeps a stale feed alarm; the silent push re-arms it on the next launch.")
+            + finding("e1f2a3b4", "[pattern] Stat tiles, entry rows and the goals header switch to vertical stacks at accessibility sizes.")
+            + finding("f5a6b7c8", "[bug] A force-quit app keeps a stale feed alarm; the silent push re-arms it on the next launch.")
             + finding("a6b7c8d9", "[pattern] Seed the simulator with twenty days of demo data before any screenshot run."), blobSha: nil)
         try await store.write("mina/tasks.md", content: """
         # mina tasks
@@ -225,6 +353,20 @@ enum UITestFixtures {
         ## Stale
         - [2026-09-05] Recheck an older convention
         """, blobSha: nil)
+    }
+}
+
+/// GitHub for the product video's store: every poll answers "nothing
+/// changed", so the engine stamps a fresh sync time and never fetches.
+private struct TrailerGitHubStub: GitHubAPI {
+    func headSha(owner: String, repo: String, branch: String) async throws -> String? { nil }
+    func tree(owner: String, repo: String, sha: String) async throws -> GitTree { throw PhrenKitError.validation("The video's store never fetches.") }
+    func blob(owner: String, repo: String, sha: String) async throws -> Data { throw PhrenKitError.validation("The video's store never fetches.") }
+    func putFile(owner: String, repo: String, path: String, branch: String, content: Data, message: String, sha: String?) async throws -> ContentsPutResponse {
+        throw PhrenKitError.validation("The video's store never pushes.")
+    }
+    func deleteFile(owner: String, repo: String, path: String, branch: String, message: String, sha: String) async throws {
+        throw PhrenKitError.validation("The video's store never pushes.")
     }
 }
 #endif

@@ -127,6 +127,9 @@ struct GraphView: View {
             }
         }
         .task(id: refreshKey) { await rebuild() }
+        #if DEBUG && targetEnvironment(simulator)
+        .task(id: payloadJSON == nil) { await revealForRecording() }
+        #endif
         .task(id: PresentationKey(revision: payloadRevision, filter: filter, focus: focusedNodeID, steps: connectionSteps)) {
             guard let payload else { return }
             let filter = filter, focus = focusedNodeID, steps = connectionSteps
@@ -372,6 +375,23 @@ struct GraphView: View {
             savedViewData = try JSONEncoder().encode(views)
         } catch { notice = "Saved views couldn't be updated: \(error.localizedDescription)" }
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// A screen recording's rig: `--graph-reveal <text>` flies the camera to
+    /// the first node whose text contains it, `--graph-reveal-after <seconds>`
+    /// after the graph has content, so the recording can tap the node it
+    /// names where the layout put it.
+    private func revealForRecording() async {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard AppModel.isUITesting, payloadJSON != nil,
+              let index = arguments.firstIndex(of: "--graph-reveal"), index + 1 < arguments.count else { return }
+        let text = arguments[index + 1]
+        let delay = arguments.firstIndex(of: "--graph-reveal-after").flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil } ?? 8
+        try? await Task.sleep(for: .seconds(delay))
+        guard !Task.isCancelled, let node = visible?.nodes.first(where: { $0.fullLabel.localizedCaseInsensitiveContains(text) }) else { return }
+        command = GraphCommand(action: .reveal(node.id))
+    }
+    #endif
 
     private func rebuild() async {
         let request = refreshKey

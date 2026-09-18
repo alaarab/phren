@@ -22,7 +22,7 @@ import { TabActivityStore } from "./tab-activity.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
-  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot"],
+  approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, simulators: process.platform === "darwin" };
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
@@ -338,7 +338,7 @@ export async function serve(version: string): Promise<void> {
   await unlink(socketPath()).catch(() => {});
 }
 
-const launchKinds = ["codex", "claude", "copilot"] as const;
+const launchKinds = ["codex", "claude", "copilot", "opencode"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
 
 /**

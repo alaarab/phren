@@ -118,7 +118,7 @@ box or its icon row to dismiss the keyboard without sending or losing your draft
 where the project lives: the store's `machines.yaml` and profiles say which
 of your computers carry the project and its `phren.project.yaml` remembers
 the folder, so the computer is pre-selected and the folder filled in. Pick
-the harness (Codex, Claude Code, Copilot) and Open — Phren Hook creates a
+the harness (Codex, Claude Code, Copilot, opencode) and Open — Phren Hook creates a
 Herdr workspace in that folder, starts the agent in it, and the chat opens
 once the agent is ready. The folder is remembered for the project on that
 computer, so later sessions are found without asking.
@@ -435,7 +435,7 @@ Local history, images, settings, and backups are preserved. Remove the iPhone's
 
 ### Agent chat, terminal, and project context
 
-Codex, Claude Code, and GitHub Copilot sessions appear across connected machines.
+Codex, Claude Code, GitHub Copilot, and opencode sessions appear across connected machines.
 Select an agent to chat, or open its exact Herdr workspace and pane in the native
 terminal. **Project session** offers chat and terminal, with the project's skills,
 findings, tasks, and graph available alongside the conversation.

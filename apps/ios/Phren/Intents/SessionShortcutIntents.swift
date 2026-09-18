@@ -130,10 +130,10 @@ struct MessageAndWaitIntent: AppIntent {
 }
 
 enum SessionHarness: String, AppEnum {
-    case codex, claude, copilot
+    case codex, claude, copilot, opencode
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Agent harness")
     static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .codex: "Codex", .claude: "Claude Code", .copilot: "GitHub Copilot",
+        .codex: "Codex", .claude: "Claude Code", .copilot: "GitHub Copilot", .opencode: "opencode",
     ]
     var launchKind: PhrenConnection.LaunchKind { .init(rawValue: rawValue)! }
 }

@@ -513,6 +513,20 @@ final class AppModel {
                     selectedTab = .agents
                 case .memory(let contexts):
                     storeContexts = contexts
+                    // The product video's store polls; its status reaches
+                    // the status bar the way a real store's does.
+                    if ProcessInfo.processInfo.arguments.contains("--trailer-fixture") {
+                        for context in contexts {
+                            await context.engine.setOnUpdate { [weak self] update in
+                                Task { @MainActor [weak self] in
+                                    switch update {
+                                    case .content: await self?.refresh()
+                                    case .status: await self?.refreshStatus()
+                                    }
+                                }
+                            }
+                        }
+                    }
                     await refresh()
                     phase = .ready
                 }

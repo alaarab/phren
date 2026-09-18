@@ -9,6 +9,11 @@ vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal
 import { paneIdentity } from "./herdr.js";
 import { recordedSession } from "./agent-hooks.js";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+it("accepts an opencode ses_ session reported by Herdr", async () => {
+  const pane = { pane_id: "p1", terminal_id: "term", agent: "opencode",
+    agent_session: { kind: "id", agent: "opencode", source: "herdr:opencode", value: "ses_f4a6b5c11ffe6nZrRlGZbXXNli" } };
+  expect(await paneIdentity("default", pane)).toBe("ses_f4a6b5c11ffe6nZrRlGZbXXNli");
+});
 it("caches identity per server, pane, terminal and PID set for two seconds, with fresh bypass", async () => {
   const root = await mkdtemp("/tmp/phren-identity-");
   vi.stubEnv("PHREN_HERDR_HOME", root); vi.stubEnv("PHREN_BRIDGE_HOME", root + "/bridge");

@@ -9,7 +9,7 @@ configured computer's pinned SSH connection. Moshi on the iPhone is optional.
 
 | Capability | Phren behavior | Reference |
 | --- | --- | --- |
-| Existing agent conversation | Exact computer/workspace/tab/pane/provider/session selection; Codex and Claude Code | [Chat View](https://getmoshi.app/docs/chat-view) |
+| Existing agent conversation | Exact computer/workspace/tab/pane/provider/session selection; Codex, Claude Code, and opencode | [Chat View](https://getmoshi.app/docs/chat-view) |
 | Live replies | Foreground WebSocket updates; progressively reveal new words, show waiting/working/finished states, preserve scroll position and drafts on reconnect | [Gateway](https://getmoshi.app/docs/debug-gateway) |
 | Response token counts | Actual provider-reported input/output/cache counts through a restricted SSH reader; updated when recorded by the provider | Phren feature; [setup](README.md#live-token-counts) |
 | Earlier history | Load earlier numbered pages; keep loaded pages on reconnect, with memory bounds | [Chat debugging](https://getmoshi.app/docs/debug-chat-view) |

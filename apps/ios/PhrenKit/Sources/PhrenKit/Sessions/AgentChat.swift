@@ -19,8 +19,8 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public init(hostID: UUID, workspaceID: String, tabID: String, paneID: String, source: String, sessionID: String, muxID: String = "herdr:default", startingToken: String? = nil) throws {
         let starting = sessionID.isEmpty && startingToken?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
         guard [workspaceID, tabID, paneID, muxID].allSatisfy(Self.validID), muxID.hasPrefix("herdr:"), Self.sources.contains(source),
-              starting || (startingToken == nil && Self.validID(sessionID) && (!["copilot", "phren"].contains(source) || UUID(uuidString: sessionID) != nil)) else {
-            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, or Phren conversation in this pane.")
+              starting || (startingToken == nil && Self.validID(sessionID) && (!["copilot", "phren", "opencode"].contains(source) || Self.validSessionID(sessionID))) else {
+            throw PhrenKitError.validation("Native chat needs a recognized Codex, Claude Code, GitHub Copilot, Phren, or opencode conversation in this pane.")
         }
         self.hostID = hostID; self.workspaceID = workspaceID; self.tabID = tabID
         self.paneID = paneID; self.source = source; self.sessionID = sessionID
@@ -29,13 +29,14 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
 
     /// Agents the app can chat with natively. `phren` is the experimental
     /// phren-agent; its panes appear once Herdr reports that agent kind.
-    public static let sources = ["codex", "claude", "copilot", "phren"]
+    public static let sources = ["codex", "claude", "copilot", "phren", "opencode"]
 
     public var providerName: String {
         switch source {
         case "claude": return "Claude"
         case "copilot": return "Copilot"
         case "phren": return "Phren"
+        case "opencode": return "opencode"
         default: return "Codex"
         }
     }
@@ -52,6 +53,11 @@ public struct AgentChatTarget: Codable, Equatable, Hashable, Sendable, Identifia
     public static func validID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200
             && value.range(of: #"^[A-Za-z0-9_%:.-]+$"#, options: .regularExpression) != nil
+    }
+
+    public static func validSessionID(_ value: String) -> Bool {
+        UUID(uuidString: value) != nil
+            || value.range(of: #"^ses_[0-9A-Za-z]{1,64}$"#, options: .regularExpression) != nil
     }
 }
 
@@ -249,7 +255,7 @@ public struct AgentChatTranscript: Equatable, Sendable {
                 queueEvents.append(.init(line: line, key: key)); continue
             }
             context.merge(AgentSessionContext.read(raw, source: source, line: line))
-            var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" ? phren(raw)
+            var parts = try source == "codex" ? codex(raw) : source == "copilot" ? copilot(raw) : source == "phren" || source == "opencode" ? phren(raw)
                 : claude(raw, maximumParts: maximumMessages - messages.count)
             parts = mergedUserParts(withUploadImages(parts))
             parts += changes(raw, after: parts)

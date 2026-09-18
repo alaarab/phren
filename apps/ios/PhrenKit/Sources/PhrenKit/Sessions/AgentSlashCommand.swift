@@ -20,6 +20,7 @@ public enum AgentSlashCommand {
         case "copilot": names = ["/help", "/model", "/agent", "/context", "/usage", "/skills", "/compact", "/resume", "/clear", "/mcp"]
         // experimental/agent/src/commands.ts — the ones worth a tap on a phone.
         case "phren": names = ["/help", "/model", "/provider", "/plan", "/context", "/cost", "/diff", "/review", "/compact", "/resume", "/permissions", "/clear"]
+        case "opencode": names = ["/help", "/models", "/agents", "/new", "/sessions", "/status", "/diff", "/skills", "/mcps", "/editor", "/themes", "/exit"]
         default: names = []
         }
         return names.filter { $0.hasPrefix(draft.lowercased()) }

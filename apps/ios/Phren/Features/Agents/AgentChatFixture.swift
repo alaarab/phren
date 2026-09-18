@@ -64,15 +64,18 @@ import UIKit
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-plan-action", "toolName": "ExitPlanMode", "title": "Allow ExitPlanMode?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
         guard flag("--chat-approval") else { return nil }
-        let (title, message) = tour ? ("Push the release branch", "git push origin release/1.0") : ("Run project tests", "npm test")
+        let (title, message) = tour && !trailer ? ("Push the release branch", "git push origin release/1.0") : ("Run project tests", "npm test")
         return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-action", "title": title, "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
     }
     static var uploads = 0
     /// The App Store tour: named computers, real project names, a picture
     /// worth looking at where a test only needs some bytes.
-    static var tour: Bool { flag("--store-tour-fixture") }
+    static var tour: Bool { flag("--store-tour-fixture") || trailer }
+    /// The product video: the tour's names, and a Claude conversation on the
+    /// payments service that ends in a saved finding.
+    static var trailer: Bool { flag("--trailer-fixture") }
     /// Where the fixture's project lives on the computer.
-    static var root: String { tour ? "/work/phren" : "/work/phone" }
+    static var root: String { trailer ? "/work/ledger" : tour ? "/work/phren" : "/work/phone" }
     static var image: AgentAttachment { picture(0) }
     /// The tour's pictures are design stills — the app's canvas, a tinted
     /// card, the mascot — in a different tint per picture so four in one
@@ -120,7 +123,7 @@ import UIKit
         if flag("--chat-offline") && hasReadTranscript { throw LiveConnectionError.disconnected }
         // A session launched from a project runs the harness that was picked.
         let launchedKind = launches.last.map(\.kind).flatMap { session.workspaceID == "w9" ? $0 : nil }
-        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
+        let agent = launchedKind ?? (flag("--chat-copilot") ? "copilot" : (trailer || flag("--chat-claude-queue") || flag("--chat-claude-image") || flag("--chat-read-images") || flag("--chat-approval-question") || flag("--chat-agent-card") || flag("--chat-todos") || flag("--chat-plan-mode") || flag("--chat-web-tools") || flag("--chat-skill-chip") || flag("--chat-mcp-card") || (tour && flag("--chat-phren-tools"))) ? "claude" : "codex")
         var panes: [[String: Any]] = [["id": "\(session.workspaceID):p1", "label": "1", "title": tour ? "Ship the onboarding flow" : "Polish the phone app", "agent": agent,
                                      "agentStatus": ((flag("--chat-blocked") || flag("--chat-approval") || flag("--chat-approval-question") || flag("--chat-plan-mode") || flag("--chat-question")) && !answered) ? "blocked" : (flag("--chat-working") && !stopped ? "working" : "idle"), "sessionId": agent == "copilot" ? "00000000-0000-0000-0000-000000000023" : "fixture-\(agent)-session", "cwd": root]]
         if flag("--starting-session-fixture") {
@@ -155,7 +158,15 @@ import UIKit
                 : ["type": role, "message": ["role": role, "content": [["type": "text", "text": text]]]]
             entries.append(["line": (flag("--chat-history") ? 20 : 0) + entries.count, "raw": raw])
         }
-        if tour {
+        if trailer {
+            // The morning's round, then the one the video reads.
+            append("user", "Ship the onboarding flow: merchant sign-up first, then the first order.")
+            append("assistant", "Starting with sign-up. The form posts to /merchants, then the welcome screen asks for the first product.")
+            append("user", "Keep the sign-up to one screen.")
+            append("assistant", "One screen: name, country, payout account. The webhook secret is minted after the first order, not at sign-up.")
+            append("user", "Pick up the onboarding flow where we left off — the first order for a new merchant.")
+            append("assistant", "Picking it up. Sign-up is in; I'll wire the first order and run the checkout suite.")
+        } else if tour {
             append("user", "Pick up the onboarding flow where we left off.")
             append("assistant", "Picking it up. The welcome screen is done; GitHub sign-in and Add computer are next.")
         } else if !flag("--starting-session-fixture") {
@@ -256,7 +267,7 @@ import UIKit
                     ["root": root, "path": "Theme.swift", "status": "M", "added": 1, "removed": 1, "patch": "diff --git a/Theme.swift b/Theme.swift\nindex 1..2 100644\n--- a/Theme.swift\n+++ b/Theme.swift\n@@ -1,3 +1,3 @@\n import SwiftUI\n-let accent = green\n+let accent = purple\n let radius = 12\n"],
                     ["root": "/Users/fixture/.phren", "path": "\(memory)/FINDINGS.md", "status": "M", "added": 3, "removed": 2, "patch": "diff --git a/\(memory)/FINDINGS.md b/\(memory)/FINDINGS.md\n--- a/\(memory)/FINDINGS.md\n+++ b/\(memory)/FINDINGS.md\n@@ -2,3 +2,5 @@\n - Tiles are one sprite\n-- Offline first\n-- Old note\n+- Accent is purple now\n+- Offline first, always\n+- Geocoder batches at 8/s\n"]]]]])
         }
-        if flag("--chat-phren-tools") {
+        if flag("--chat-phren-tools"), !trailer {
             let project = tour ? "phren" : "phone"
             let saved = tour ? "XCUITest: reading UIPasteboard from the runner raises the paste prompt and hangs the run — verify copies through an in-app signal instead."
                 : String(repeating: "Keep queue identities when a real turn replaces its pending copy. ", count: 12)
@@ -279,14 +290,42 @@ import UIKit
                 }
             }
         }
-        // Claude Code's bookkeeping tools, each with a card of its own.
+        // Claude Code's bookkeeping tools, each with a card of its own. Lines
+        // count from the same start as `append`'s, so a history offset keeps
+        // calls and replies in order.
+        let firstLine = flag("--chat-history") ? 20 : 0
         func claudeCall(_ id: String, _ name: String, _ input: [String: Any]) {
-            entries.append(["line": entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": id, "name": name, "input": input]]]]])
+            entries.append(["line": firstLine + entries.count, "raw": ["type": "assistant", "message": ["role": "assistant", "content": [["type": "tool_use", "id": id, "name": name, "input": input]]]]])
         }
         func claudeResult(_ id: String, _ text: String, error: Bool = false) {
             var block: [String: Any] = ["type": "tool_result", "tool_use_id": id, "content": text]
             if error { block["is_error"] = true }
-            entries.append(["line": entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [block]]]])
+            entries.append(["line": firstLine + entries.count, "raw": ["type": "user", "message": ["role": "user", "content": [block]]]])
+        }
+        if trailer, flag("--chat-phren-tools") {
+            // The video's turn: Claude looks around (six commands, one row),
+            // fixes the bug it found (one patch), and keeps what it learned
+            // (one phren card) — then the person queues the next step.
+            let looks: [(String, String)] = [
+                ("git status --short", " M src/orders/create.ts\n M src/onboarding/signup.ts"),
+                ("npm test -- orders", "Tests: 1 failed, 41 passed, 42 total\n\n  ✕ a retried POST /orders with a reused key returns the caller's order (38 ms)"),
+                ("rg -n \"idempotency\" src/orders", "src/orders/create.ts:18:  const existing = await keys.find(idempotencyKey)\nsrc/orders/keys.ts:9:export async function find(key: string) {"),
+                ("cat src/orders/keys.ts", "export async function find(key: string) {\n  return db.idempotencyKeys.findUnique({ where: { key } })\n}\n\nexport function scope(merchantId: string, key: string) {\n  return `${merchantId}:${key}`\n}"),
+                ("sed -n '12,28p' src/orders/create.ts", "export async function createOrder(merchant: Merchant, input: OrderInput, idempotencyKey: string) {\n  const existing = await keys.find(idempotencyKey)\n  if (existing) return existing.order\n  const order = await orders.insert(merchant.id, input)\n  await keys.save(idempotencyKey, order.id)\n  return order\n}"),
+                ("git log --oneline -3", "3f2a1c9 onboarding: one-screen merchant sign-up\n8d41e07 orders: retry banner on the first order\nb77c2aa ledger: reversal references on corrections"),
+            ]
+            for (index, look) in looks.enumerated() {
+                claudeCall("trailer-look-\(index)", "Bash", ["command": look.0, "description": "Look at the orders code"])
+                claudeResult("trailer-look-\(index)", look.1)
+            }
+            claudeCall("trailer-edit", "Edit", ["file_path": root + "/src/orders/create.ts",
+                                              "old_string": "  const existing = await keys.find(idempotencyKey)\n  if (existing) return existing.order\n  const order = await orders.insert(merchant.id, input)\n  await keys.save(idempotencyKey, order.id)",
+                                              "new_string": "  const scoped = keys.scope(merchant.id, idempotencyKey)\n  const existing = await keys.find(scoped)\n  if (existing) return existing.order\n  const order = await orders.insert(merchant.id, input)\n  await keys.save(scoped, order.id)"])
+            claudeResult("trailer-edit", "The file \(root)/src/orders/create.ts has been updated.")
+            append("assistant", "Found it: the idempotency lookup ignored the merchant, so a key reused by two merchants returned the first merchant's order. Keys are scoped per merchant now.")
+            claudeCall("phren-finding", "mcp__phren__add_finding", ["project": "ledger", "findingType": "pitfall", "finding": UITestFixtures.trailerFinding])
+            claudeResult("phren-finding", "{\"ok\":true}")
+            append("assistant", "Saved that to phren so the next session starts with it. Running the checkout suite again now.")
         }
         if flag("--chat-agent-card") {
             // One agent back with a report longer than the card shows; one
@@ -428,13 +467,18 @@ import UIKit
                 "\(question) → " + ((answers[question] as? [String])?.joined(separator: ", ") ?? (answers[question] as? String ?? "?"))
             }
             append("assistant", "Answers received in this conversation.\n" + lines.joined(separator: "\n"))
+        } else if answered, trailer, !denied {
+            // The approved run, then what it found.
+            claudeCall("trailer-tests", "Bash", ["command": "npm test", "description": "Run the project tests"])
+            claudeResult("trailer-tests", "Tests: 128 passed, 128 total\nTime: 6.4 s")
+            append("assistant", "Answer received — all 128 tests pass. The onboarding flow is ready to ship.")
         } else if answered { append("assistant", "Answer received in this conversation.") }
         if denied { append("assistant", "Permission denied in this conversation.") }
         if !flag("--chat-claude-queue"), stopped { append("assistant", "Turn stopped in the selected pane.") }
         for (id, text) in sent where id == target.id || flag("--starting-session-fixture") {
             if flag("--chat-claude-queue") {
                 let key = String(repeating: "a", count: 64)
-                entries.append(["line": entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": key,
+                entries.append(["line": firstLine + entries.count, "raw": ["type": "user", "phrenQueued": true, "phrenQueueKey": key,
                     "message": ["role": "user", "content": text]]])
             } else {
                 append("user", text)
@@ -443,7 +487,7 @@ import UIKit
         }
         if flag("--chat-claude-queue"), stopped {
             for (id, _) in sent where id == target.id {
-                entries.append(["line": entries.count, "raw": ["type": "phren_queue_consumed", "key": String(repeating: "a", count: 64)]])
+                entries.append(["line": firstLine + entries.count, "raw": ["type": "phren_queue_consumed", "key": String(repeating: "a", count: 64)]])
             }
             append("assistant", "Queued instructions consumed.")
         }

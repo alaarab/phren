@@ -87,6 +87,7 @@ private struct ProviderActivityGlyph: View {
         case "claude": "ClaudeMark"
         case "codex": "CodexMark"
         case "copilot": "CopilotMark"
+        case "opencode": "OpenCodeMark"
         default: nil
         }
     }

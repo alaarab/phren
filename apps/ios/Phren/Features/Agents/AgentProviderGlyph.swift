@@ -21,6 +21,9 @@ struct AgentProviderGlyph: View {
             case "copilot":
                 Image("CopilotMark").resizable().scaledToFit().frame(width: size * 0.92, height: size * 0.92)
                     .foregroundStyle(PhrenTheme.text)
+            case "opencode":
+                Image("OpenCodeMark").resizable().scaledToFit().frame(width: size * 0.9, height: size * 0.9)
+                    .foregroundStyle(PhrenTheme.text)
             case "phren":
                 // phren-mascot.png keeps wide transparent margins — its ink
                 // fills 0.59 × 0.67 of the square — so at the shared size it
@@ -44,6 +47,7 @@ struct AgentProviderGlyph: View {
         case "claude": return "Claude"
         case "codex": return "Codex"
         case "copilot": return "Copilot"
+        case "opencode": return "opencode"
         case "phren": return "Phren"
         default: return "Agent"
         }

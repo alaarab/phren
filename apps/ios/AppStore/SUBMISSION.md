@@ -9,18 +9,18 @@
 - Screenshots (6.9", 1320×2868, the only iPhone size App Store Connect
   requires; it scales the rest) live outside the repo in
   `~/Projects/phren-appstore-screenshots/`. Suggested order:
-  1. Complete-overview-after-coordinated-loading — Live sessions
-  2. Custom-chat-with-compact-activity — native chat with tool cards
-  3. Phren-memory-and-task-cards — phren memory calls
-  4. Inline-approval-in-Phren — approve a tool call from the phone
-  5. Claude-and-Codex-account-usage — usage limits
-  6. Projects-design — memory projects
-  7. Saved-graph-connections — memory graph
-  8. Integrated-composer-with-keyboard — composer
+  1. Complete-overview-after-coordinated-loading: Live sessions
+  2. Custom-chat-with-compact-activity: native chat with tool cards
+  3. Phren-memory-and-task-cards: phren memory calls
+  4. Inline-approval-in-Phren: approve a tool call from the phone
+  5. Claude-and-Codex-account-usage: usage limits
+  6. Projects-design: memory projects
+  7. Saved-graph-connections: memory graph
+  8. Integrated-composer-with-keyboard: composer
   Regenerate with the UI tests named in each file's `capture(...)` call and
   `xcrun xcresulttool export attachments`.
 
-## Review notes (draft — paste into App Store Connect › App Review Information)
+## Review notes (draft: paste into App Store Connect › App Review Information)
 > phren is a companion for the phren memory store (a git repository) and for
 > coding agents (Claude Code, Codex, Copilot) running on the reviewer's own
 > computers. Memory features need a GitHub token for a repository that holds a
@@ -41,7 +41,7 @@
    `xcodebuild archive … && xcodebuild -exportArchive -exportOptionsPlist`
    with an App Store Connect API key. The export-compliance question is
    pre-answered by the plist key.
-3. **Connect metadata:** filled through the API on 2026-09-16 — see
+3. **Connect metadata:** filled through the API on 2026-09-16; see
    "Store record" below for what is set and what is still open.
 4. **Physical-device pass before submitting:** sign-in with the demo token,
    add a computer (QR / key copy), open a chat, approve a request from the
@@ -69,14 +69,14 @@ No build attached, nothing submitted.
   all false; kidsAgeBand null; override NONE. Computed rating: **4+**.
   (messagingAndChat and userGeneratedContent are answered "no" because the
   chat is with the user's own agents and store content lives in the user's
-  own GitHub repository — neither is user-to-user or hosted by us.)
+  own GitHub repository; neither is user-to-user or hosted by us.)
 - **Version localization (en-US):** description (2839 chars, from README /
   ios.html / CHANGELOG 1.0.0), keywords (96 chars:
   `claude code,codex,copilot,ai agent,coding agent,terminal,ssh,developer,memory,notes,tasks,github`),
   promotional text (144 chars), support URL
   `https://alaarab.github.io/phren/support.html`, marketing URL
   `https://alaarab.github.io/phren/ios.html`. **whatsNew is not editable on a
-  first version** (API 409 STATE_ERROR) — Apple only shows it for updates.
+  first version** (API 409 STATE_ERROR); Apple only shows it for updates.
 - **Screenshots:** set `ef6d70ca-7346-4bc5-8d51-4fc5044ff41f`, display type
   APP_IPHONE_67 (the API has no APP_IPHONE_69; 1320×2868 is accepted there).
   All eight uploaded in the order listed under "Ready", every asset
@@ -89,7 +89,7 @@ No build attached, nothing submitted.
   pre-release state.
 
 ### Still open (owner)
-1. **App Review Information — needs a real phone number.**
+1. **App Review Information: needs a real phone number.**
    `POST /v1/appStoreReviewDetails` requires `contactPhone` and validates it
    as a real number; `+10000000000` and `+1 555 010 0000` were both refused
    ("must be in a valid format"), so no review detail exists yet. Run, with

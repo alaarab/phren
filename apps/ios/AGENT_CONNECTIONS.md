@@ -93,9 +93,12 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   and stable line numbers. History requests include `beforeLine`.
 - `GET /v1/transcripts/history`: the same exact target tuple plus a positive
   `beforeLine`, returning one older page without first reading the latest page.
-- Provider `source` values: `codex`, `claude`, `copilot`, and `phren` (the
+- Provider `source` values: `codex`, `claude`, `copilot`, `phren` (the
   experimental phren-agent — its `session-<uuid>.events.jsonl` under the store's
-  `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`).
+  `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`),
+  and `opencode` — session ids are `ses_…`, and the Phren-installed opencode
+  plugin mirrors its session to `opencode-<session>.events.jsonl` in the same
+  event shape phren-agent uses.
 - `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
   and the pane's current git `branch` (read on the computer, cached ~10s).
   The model name comes from the transcript instead: Claude rows carry
@@ -115,7 +118,7 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
 - `POST /v1/workspaces/{create,rename,focus,close}` with an explicit server.
 - `POST /v1/workspaces/launch`: `{cwd, label, kind, workspaceId?, name?, timeoutMs?}`
   creates a workspace (or a tab in `workspaceId`) in `cwd`, starts `kind`
-  (codex/claude/copilot) in its pane and waits for Herdr to detect it; returns
+  (codex/claude/copilot/opencode) in its pane and waits for Herdr to detect it; returns
   `{workspaceId, tabId, paneId, agent, agentStatus?, sessionId?}`. The session
   id is normally still unknown at that point — poll `/v1/workspaces/panes`.
 - `GET /v1/web-servers`, `/v1/activity`

@@ -38,7 +38,9 @@ Targets contain `server`, `workspace`, `tab`, `pane`, `source`, and `session`.
 The full target must match a current Herdr pane. Identity comes from Herdr's
 explicit session ID, foreground processes' open transcript descriptors, or a
 lifecycle binding to the same terminal and foreground PIDs. A folder or recently
-modified transcript never selects the conversation.
+modified transcript never selects the conversation. opencode identity comes from
+Herdr's explicit session ID only (`ses_` plus a base62 token), which requires
+`herdr integration install opencode` on the computer.
 
 Descriptor-based identities are cached for about two seconds per server, pane,
 terminal ID, provider, and PID set; concurrent lookups share the same work.
@@ -118,6 +120,14 @@ Codex response-item user messages and Claude string-content user rows are
 excluded when their trimmed text starts with `<environment_context>`,
 `<user_instructions>`, `<permission_profile`, `<system-reminder>`, or
 `<turn_context>`. A mention later in ordinary text does not hide the turn.
+
+opencode has no per-session transcript file. A Phren-installed opencode plugin
+(`~/.config/opencode/plugins/phren-transcript.js`) mirrors each session to
+`<store>/.runtime/sessions/opencode-<session>.events.jsonl` in the same
+`user/message`, `assistant/message`, and `tool/results` shape phren-agent uses,
+with opencode's `stop`/`tool-calls` stop reasons mapped to `end_turn`/`tool_use`
+and reasoning parts excluded. `phren bridge install` writes the plugin and
+`phren bridge uninstall` removes it.
 
 Claude queue messages preserve these phone markers:
 

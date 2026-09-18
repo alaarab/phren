@@ -52,7 +52,7 @@ public struct AgentChatProgressEvent: Equatable, Sendable {
            let message = raw["message"] as? [String: Any], message["role"] as? String == "assistant" {
             return AgentTokenUsage.read(message["usage"] as? [String: Any], inputIncludesCache: false).map { .init(line: line, value: .usage($0)) }
         }
-        if source == "phren", let data = raw["data"] as? [String: Any] {
+        if source == "phren" || source == "opencode", let data = raw["data"] as? [String: Any] {
             // A user turn starts work; the assistant's final message (no tool
             // call pending) finishes it, and carries the response's counts.
             switch raw["type"] as? String {

@@ -3,7 +3,7 @@ import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:f
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BridgeError, bridgeRoot, object, objects, provider, serverName, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 
@@ -13,7 +13,7 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
   try {
     const value = object(JSON.parse(await readFile(bindingPath(server, String(pane.pane_id)), "utf8")));
     if (value.terminal !== pane.terminal_id || value.source !== pane.agent || !Array.isArray(value.pids) || !value.pids.some(p => pids.includes(Number(p)))) return undefined;
-    return z.string().uuid().parse(value.session);
+    return sessionId.parse(value.session);
   } catch { return undefined; }
 }
 
