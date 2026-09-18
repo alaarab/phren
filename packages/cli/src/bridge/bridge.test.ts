@@ -491,6 +491,12 @@ describe.skipIf(process.platform === "win32")("standalone Phren service", () => 
     const overview = await api("/v1/workspaces?mux=herdr:default");
     expect(overview.data.groups.some((g: any) => g.id === "w9" && g.children[0].agent === "claude")).toBe(true);
   });
+  it("launches opencode in a directory", async () => {
+    const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "oc", kind: "opencode" });
+    expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+    expect(launched.data).toMatchObject({ ok: true, agent: "opencode", agentStatus: "idle" });
+    expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode" });
+  });
   it("launches a tab inside an existing workspace when asked", async () => {
     const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "second", kind: "codex", workspaceId: "w1", name: "Codex here", timeoutMs: 1 });
     expect(launched.status, JSON.stringify(launched.data)).toBe(200);

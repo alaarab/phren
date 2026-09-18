@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- opencode joins Codex, Claude Code, and Copilot as a supported agent. Phren
+  Hook can launch it, and `phren bridge install` writes an opencode plugin that
+  mirrors sessions into the store's `.runtime/sessions` so the iOS app can read
+  them. Identity needs `herdr integration install opencode` on the computer.
+
 ### Changed
 
 - Swipe down on the chat message box, its icon row, or the Herdr shortcut row

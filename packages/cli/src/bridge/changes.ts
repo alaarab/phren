@@ -291,7 +291,7 @@ export function outputCallIds(raw: Json, source: string): string[] {
     return ["function_call_output", "custom_tool_call_output"].includes(String(p.type)) ? ids(p.call_id) : [];
   }
   if (source === "copilot") return raw.type === "tool.execution_complete" ? ids(((raw.data ?? {}) as Json).toolCallId) : [];
-  const message = (source === "phren" ? ((raw.data ?? {}) as Json).message : raw.message) as Json | undefined;
+  const message = (source === "phren" || source === "opencode" ? ((raw.data ?? {}) as Json).message : raw.message) as Json | undefined;
   const content = message?.content;
   if (!Array.isArray(content)) return [];
   return content.flatMap(block => block && typeof block === "object" && (block as Json).type === "tool_result" ? ids((block as Json).tool_use_id) : []);
