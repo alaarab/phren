@@ -40,6 +40,13 @@ export interface KeyboardShortcutOpts {
   onCycleAgent?: () => void;
   /** Ctrl+T toggles task list display */
   onToggleTaskList?: () => void;
+  /** Disable all shortcuts while an overlay (e.g. the model picker) is open. */
+  enabled?: boolean;
+  /** A completion menu is open; Up/Down move it and Tab accepts. */
+  completionOpen?: boolean;
+  completionCount?: number;
+  onCompletionMove?: (delta: number) => void;
+  onCompletionAccept?: () => void;
 }
 
 export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
@@ -47,6 +54,12 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
     // Reset Ctrl+C count on any non-Ctrl+C keypress
     if (!(input === "c" && key.ctrl)) {
       if (opts.ctrlCCount > 0) opts.onSetCtrlCCount(0);
+    }
+
+    if (opts.completionOpen && (opts.completionCount ?? 0) > 0) {
+      if (key.upArrow) { opts.onCompletionMove?.(-1); return; }
+      if (key.downArrow) { opts.onCompletionMove?.(1); return; }
+      if (key.tab && !key.shift) { opts.onCompletionAccept?.(); return; }
     }
 
     // ── Tab bar navigation ────────────────────────────────────
@@ -203,5 +216,5 @@ export function useKeyboardShortcuts(opts: KeyboardShortcutOpts) {
       }
       return;
     }
-  });
+  }, { isActive: opts.enabled !== false });
 }

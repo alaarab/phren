@@ -17,7 +17,7 @@ import * as os from "os";
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
-import { loadInputMode, saveInputMode, savePermissionMode } from "../settings.js";
+import { loadInputMode, saveInputMode, savePermissionMode, loadTheme, saveTheme, loadInputHistory, saveInputHistory } from "../settings.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { READ_ONLY_TOOLS } from "../permissions/checker.js";
 import type { ApprovalInfo } from "./components/ApprovalPanel.js";
@@ -29,6 +29,9 @@ import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { persistFork } from "../session/persist.js";
 import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
+import { getAvailableModels, type PickerResult } from "../multi/model-picker.js";
+import { REASONING_LEVELS } from "../models.js";
+import type { ModelPickerState } from "./components/ModelPicker.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -41,10 +44,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let inputMode: InputMode = loadInputMode();
   let pendingInput: string | null = null;
   const steerQueueBuf: string[] = [];
-  const inputHistory: string[] = [];
+  const inputHistory: string[] = loadInputHistory();
   let running = false;
   let verbose = false;
-  let theme: Theme = getTheme();
+  let theme: Theme = getTheme(loadTheme());
   let msgCounter = 0;
   // Autopilot (full-auto) requires --yolo flag to be cycleable via Shift+Tab
   const yoloEnabled = config.registry.permissionConfig.mode === "full-auto";
@@ -159,6 +162,10 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let thinkElapsed: string | null = null;
   let currentToolCalls: ToolCallProps[] = [];
   let activeTool: ActiveToolInfo | null = null;
+  let modelPicker: ModelPickerState | null = null;
+  let modelPickerResolve: ((result: PickerResult | null) => void) | null = null;
+  const toolHistory: ToolCallProps[] = [];
+  let toolDetailIndex: number | null = null;
 
   function nextId(): string {
     return `msg-${++msgCounter}`;
@@ -254,8 +261,87 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onCancelAgent={handleCancelAgent}
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
         approval={approvalInfo}
+        modelPicker={modelPicker}
+        onModelPickerMove={moveModelPicker}
+        onModelPickerReasoning={adjustModelReasoning}
+        onModelPickerSelect={selectModelPicker}
+        onModelPickerCancel={() => closeModelPicker(null)}
+        onInspectTool={openToolDetail}
+        toolDetail={toolDetailIndex !== null ? { call: toolHistory[toolDetailIndex], index: toolDetailIndex, total: toolHistory.length } : null}
+        onToolDetailMove={moveToolDetail}
+        onToolDetailClose={closeToolDetail}
       />
     );
+  }
+
+  function openModelPicker(): Promise<PickerResult | null> {
+    const providerName = config.provider.name;
+    if (!providerName) return Promise.resolve(null);
+    const currentModel = (config.provider as { model?: string }).model;
+    const models = getAvailableModels(providerName, currentModel);
+    if (models.length === 0) return Promise.resolve(null);
+    let cursor = models.findIndex((m) => m.id === currentModel);
+    if (cursor < 0) cursor = 0;
+    const reasoning = models.map((m) => m.id === currentModel ? (config.provider.reasoningEffort ?? m.reasoning) : m.reasoning);
+    modelPicker = { models, cursor, reasoning };
+    update();
+    return new Promise((resolve) => { modelPickerResolve = resolve; });
+  }
+
+  function closeModelPicker(result: PickerResult | null) {
+    modelPicker = null;
+    const resolve = modelPickerResolve;
+    modelPickerResolve = null;
+    update();
+    resolve?.(result);
+  }
+
+  function moveModelPicker(delta: number) {
+    if (!modelPicker) return;
+    const count = modelPicker.models.length;
+    modelPicker = { ...modelPicker, cursor: (modelPicker.cursor + delta + count) % count };
+    update();
+  }
+
+  function adjustModelReasoning(delta: number) {
+    if (!modelPicker) return;
+    const model = modelPicker.models[modelPicker.cursor];
+    if (model.reasoningRange.length === 0) return;
+    const current = modelPicker.reasoning[modelPicker.cursor];
+    const index = current ? REASONING_LEVELS.indexOf(current) : -1;
+    const rangeIndices = model.reasoningRange.map((level) => REASONING_LEVELS.indexOf(level!));
+    const candidate = delta > 0
+      ? rangeIndices.find((ri) => ri > index)
+      : [...rangeIndices].reverse().find((ri) => ri < index);
+    if (candidate === undefined) return;
+    const reasoning = [...modelPicker.reasoning];
+    reasoning[modelPicker.cursor] = REASONING_LEVELS[candidate];
+    modelPicker = { ...modelPicker, reasoning };
+    update();
+  }
+
+  function selectModelPicker() {
+    if (!modelPicker) return;
+    const model = modelPicker.models[modelPicker.cursor];
+    const result: PickerResult = { model: model.id, reasoning: modelPicker.reasoning[modelPicker.cursor] };
+    closeModelPicker(result);
+  }
+
+  function openToolDetail() {
+    if (toolHistory.length === 0) return;
+    toolDetailIndex = toolHistory.length - 1;
+    update();
+  }
+
+  function moveToolDetail(delta: number) {
+    if (toolDetailIndex === null) return;
+    toolDetailIndex = (toolDetailIndex + delta + toolHistory.length) % toolHistory.length;
+    update();
+  }
+
+  function closeToolDetail() {
+    toolDetailIndex = null;
+    update();
   }
 
   function handlePermissionCycle() {
@@ -332,6 +418,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
           update();
         } catch { /* keep current provider */ }
       },
+      pickModel: openModelPicker,
     },
     onOutput: (text) => {
       completedMessages.push({ id: nextId(), kind: "status", text });
@@ -377,6 +464,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     // Track input history (skip duplicates of the last entry)
     if (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== line) {
       inputHistory.push(line);
+      saveInputHistory(inputHistory);
     }
 
     // Bash mode: ! prefix
@@ -460,6 +548,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       const idx = THEME_NAMES.indexOf(theme.name);
       const next = THEME_NAMES[(idx + 1) % THEME_NAMES.length];
       theme = getTheme(next);
+      saveTheme(theme.name);
       completedMessages.push({ id: nextId(), kind: "status", text: `Theme: ${theme.name} (${THEME_NAMES.join(", ")})` });
       update();
       return;
@@ -552,7 +641,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
-      currentToolCalls.push({ name, input, output: cleanOutput, isError, durationMs: dur, diffRendered });
+      const call = { name, input, output: cleanOutput, isError, durationMs: dur, diffRendered };
+      currentToolCalls.push(call);
+      toolHistory.push(call);
       update();
     },
     // In the TUI, plan approval is handled by per-tool permission prompts
@@ -732,7 +823,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       const diffData = (toolName === "edit_file" || toolName === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       const diffRendered = diffData ? renderInlineDiff(diffData.oldContent, diffData.newContent, diffData.filePath, theme.diff) : undefined;
-      convo.toolCalls.push({ name: toolName, input, output: cleanOutput, isError, durationMs, diffRendered });
+      const call = { name: toolName, input, output: cleanOutput, isError, durationMs, diffRendered };
+      convo.toolCalls.push(call);
+      toolHistory.push(call);
       rebuildAgentTabs();
       if (selectedAgentId === agentId) update();
     });
@@ -832,6 +925,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       onCancelAgent={handleCancelAgent}
       onSelectAgent={handleSelectAgent}
       approval={null}
+      modelPicker={null}
+      toolDetail={null}
     />,
     { exitOnCtrlC: false },
   );

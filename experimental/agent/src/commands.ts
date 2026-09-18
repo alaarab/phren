@@ -37,6 +37,8 @@ export interface CommandContext {
   currentReasoning?: ReasoningEffort | null;
   /** Callback when model/reasoning changes */
   onModelChange?: (result: PickerResult) => void;
+  /** Open the host UI's interactive model picker. */
+  pickModel?: () => Promise<PickerResult | null>;
   /** LLM provider for /ask side-channel queries */
   provider?: LlmProvider;
   /** System prompt for /ask queries */
