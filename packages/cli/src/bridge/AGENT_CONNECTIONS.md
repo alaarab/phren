@@ -127,7 +127,9 @@ opencode has no per-session transcript file. A Phren-installed opencode plugin
 `user/message`, `assistant/message`, and `tool/results` shape phren-agent uses,
 with opencode's `stop`/`tool-calls` stop reasons mapped to `end_turn`/`tool_use`
 and reasoning parts excluded. `phren bridge install` writes the plugin and
-`phren bridge uninstall` removes it.
+`phren bridge uninstall` removes it. Plugins load at opencode startup, so an
+opencode session started before the install has no transcript and no reported
+session id; restart it (or launch a new one) before its chat can attach.
 
 Claude queue messages preserve these phone markers:
 
