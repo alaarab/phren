@@ -11,7 +11,8 @@ number counts up on its own.
 ### New
 
 - opencode sessions join the chat: pick it in **Open on a computer**, then read
-  and send in the conversation like any other agent.
+  and send in the conversation like any other agent. A session that restarts in
+  the same pane now attaches instead of staying on "Starting…".
 - Hold a paragraph to copy only it, or the whole reply; double-tap a word to
   select it with native handles and copy exactly as much as you want.
 - The agent's own bookkeeping has cards of its own in the chat. A subagent
