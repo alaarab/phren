@@ -98,7 +98,8 @@ Unbound or conflicting identities remain unavailable for chat and attachments.
   `.runtime/sessions` is the transcript; active once Herdr labels the pane `phren`),
   and `opencode` — session ids are `ses_…`, and the Phren-installed opencode
   plugin mirrors its session to `opencode-<session>.events.jsonl` in the same
-  event shape phren-agent uses.
+  event shape phren-agent uses. opencode loads plugins at startup, so a session
+  started before the install has no transcript or session id until restarted.
 - `WS /v1/status`: exact-conversation activity, pending approval, capabilities,
   and the pane's current git `branch` (read on the computer, cached ~10s).
   The model name comes from the transcript instead: Claude rows carry
