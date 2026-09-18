@@ -8,11 +8,15 @@ import { SteerQueue } from "./SteerQueue.js";
 import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
 import { StatusBar } from "./StatusBar.js";
 import { ApprovalPanel, type ApprovalInfo } from "./ApprovalPanel.js";
+import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
+import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
 import type { PermissionMode } from "../../permissions/types.js";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
 import type { Theme } from "../themes.js";
 import { renderMarkdown } from "../../multi/markdown.js";
 import { getPlan } from "../../tools/update-plan.js";
+import { COMMAND_NAMES } from "../../commands.js";
+import * as fs from "node:fs";
 import { useSearch, highlightMatches } from "../hooks/useSearch.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
@@ -96,6 +100,17 @@ export interface AppProps {
   onCancelAgent?: () => void;
   /** Pending permission request to show as an approval panel. */
   approval?: ApprovalInfo | null;
+  /** Open model picker overlay. */
+  modelPicker?: ModelPickerState | null;
+  onModelPickerMove?: (delta: number) => void;
+  onModelPickerReasoning?: (delta: number) => void;
+  onModelPickerSelect?: () => void;
+  onModelPickerCancel?: () => void;
+  /** Ctrl+O with no current-turn tool opens the tool detail overlay. */
+  onInspectTool?: () => void;
+  toolDetail?: ToolDetailState | null;
+  onToolDetailMove?: (delta: number) => void;
+  onToolDetailClose?: () => void;
 }
 
 export function App({
@@ -124,6 +139,15 @@ export function App({
   onSelectAgent,
   onCancelAgent,
   approval,
+  modelPicker,
+  onModelPickerMove,
+  onModelPickerReasoning,
+  onModelPickerSelect,
+  onModelPickerCancel,
+  onInspectTool,
+  toolDetail,
+  onToolDetailMove,
+  onToolDetailClose,
 }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
@@ -138,9 +162,29 @@ export function App({
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+  const [completionIndex, setCompletionIndex] = useState(0);
 
   // ── Ctrl+F content search ────────────────────────────────────────────────
   const search = useSearch();
+
+  // Slash-command and @file completion candidates for the current input.
+  const completions = (() => {
+    if (inputValue.startsWith("/") && !/\s/.test(inputValue)) {
+      return COMMAND_NAMES.filter((name) => name.startsWith(inputValue) && name !== inputValue).slice(0, 8);
+    }
+    const match = inputValue.match(/(?:^|\s)@([^\s@]*)$/);
+    if (!match) return [];
+    const partial = match[1];
+    const tokenStart = inputValue.length - partial.length - 1;
+    try {
+      return fs.readdirSync(process.cwd())
+        .filter((entry) => entry.startsWith(partial))
+        .slice(0, 8)
+        .map((entry) => `${inputValue.slice(0, tokenStart)}@${entry}`);
+    } catch { return []; }
+  })();
+
+  useEffect(() => { setCompletionIndex(0); }, [inputValue]);
 
   // When the query changes, recompute total match count across all completed messages
   useEffect(() => {
@@ -296,18 +340,21 @@ export function App({
       search.activate();
     },
     onExpandTool: () => {
-      const lastIndex = completedToolCalls.length - 1;
-      if (lastIndex < 0) return;
-      setExpandedTools((prev) => {
-        const next = new Set(prev);
-        if (next.has(lastIndex)) {
-          next.delete(lastIndex);
-        } else {
-          next.add(lastIndex);
-        }
-        return next;
-      });
-      onExpandTool?.();
+      if (completedToolCalls.length > 0) {
+        const lastIndex = completedToolCalls.length - 1;
+        setExpandedTools((prev) => {
+          const next = new Set(prev);
+          if (next.has(lastIndex)) {
+            next.delete(lastIndex);
+          } else {
+            next.add(lastIndex);
+          }
+          return next;
+        });
+        onExpandTool?.();
+        return;
+      }
+      onInspectTool?.();
     },
     onOpenEditor: () => {
       // Write input to temp file, open $EDITOR, read back
@@ -344,6 +391,15 @@ export function App({
       onSelectAgent?.(nextId === "__main__" ? null : nextId);
     } : undefined,
     onToggleTaskList: () => setShowTaskList(v => !v),
+    enabled: !modelPicker && !toolDetail,
+    completionOpen: completions.length > 0,
+    completionCount: completions.length,
+    onCompletionMove: (delta) => setCompletionIndex((i) => (i + delta + completions.length) % completions.length),
+    onCompletionAccept: () => {
+      if (completions.length === 0) return;
+      setInputValue(completions[completionIndex % completions.length]);
+      setCompletionIndex(0);
+    },
   });
 
   // Helper: apply search highlighting to a text string (ANSI only works in
@@ -496,6 +552,33 @@ export function App({
         )}
 
         {/* Input + permissions */}
+        {toolDetail ? (
+          <ToolDetail
+            detail={toolDetail}
+            theme={theme}
+            onMove={onToolDetailMove ?? (() => {})}
+            onClose={onToolDetailClose ?? (() => {})}
+          />
+        ) : null}
+        {modelPicker ? (
+          <ModelPicker
+            state={modelPicker}
+            theme={theme}
+            onMove={onModelPickerMove ?? (() => {})}
+            onReasoning={onModelPickerReasoning ?? (() => {})}
+            onSelect={onModelPickerSelect ?? (() => {})}
+            onCancel={onModelPickerCancel ?? (() => {})}
+          />
+        ) : null}
+        {completions.length > 0 && (
+          <Box flexDirection="column" paddingLeft={2}>
+            {completions.map((candidate, i) => (
+              <Text key={candidate} color={i === completionIndex ? theme.statusBar.accent : undefined} dimColor={i !== completionIndex}>
+                {i === completionIndex ? "\u25b8 " : "  "}{candidate}
+              </Text>
+            ))}
+          </Box>
+        )}
         {approval ? <ApprovalPanel info={approval} theme={theme} /> : null}
         <StatusBar
           provider={state.provider}
@@ -513,7 +596,8 @@ export function App({
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!isAnyModeActive}
+          focus={!isAnyModeActive && !modelPicker && !toolDetail}
+          completionOpen={completions.length > 0}
           separatorColor={theme.separator}
           theme={theme}
         />
