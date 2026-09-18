@@ -128,7 +128,9 @@ export async function install(version: string, noService = false): Promise<void>
       if (!ready) throw new Error("The new Phren Hook did not become ready.");
     }
     await applyAgentHooks(hookEdits);
-    await applyOpencodePlugin();
+    if (await applyOpencodePlugin()) {
+      console.log("opencode chat: restart any opencode session started before now so it loads the transcript plugin.");
+    }
     const keys = path.join(homedir(), ".ssh/authorized_keys");
     const keyStat = await lstat(keys).catch(() => null);
     if (keyStat && !keyStat.isSymbolicLink() && keyStat.isFile()) {
@@ -242,14 +244,15 @@ async function opencodePluginSource(): Promise<string | undefined> {
   }
   return undefined;
 }
-async function applyOpencodePlugin(remove = false): Promise<void> {
+async function applyOpencodePlugin(remove = false): Promise<boolean> {
   const dir = opencodePluginsDir(), file = path.join(dir, "phren-transcript.js");
-  if (remove) { await unlink(file).catch(() => {}); return; }
-  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return;
+  if (remove) { await unlink(file).catch(() => {}); return false; }
+  if (!(await lstat(path.dirname(dir)).catch(() => null))?.isDirectory()) return false;
   const source = await opencodePluginSource();
-  if (source === undefined) return;
+  if (source === undefined) return false;
   await mkdir(dir, { recursive: true });
   await atomic(file, source, 0o644);
+  return true;
 }
 
 async function applyAgentHooks(edits: SettingsEdit[]) {
