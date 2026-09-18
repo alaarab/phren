@@ -4,6 +4,7 @@
 import type { CommandContext } from "../commands.js";
 import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from "../multi/presets.js";
 import { showModelPicker } from "../multi/model-picker.js";
+import type { PickerResult } from "../multi/model-picker.js";
 import { formatProviderList, formatModelAddHelp, addCustomModel, removeCustomModel, type ReasoningLevel } from "../multi/provider-manager.js";
 import { normalizeReasoningEffort } from "../models.js";
 
@@ -11,7 +12,7 @@ const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const RESET = "\x1b[0m";
 
-export function modelCommand(parts: string[], ctx: CommandContext): boolean {
+export function modelCommand(parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
   const sub = parts[1]?.toLowerCase();
 
   // /model add <id> [provider=X] [context=N] [reasoning=X]
@@ -57,7 +58,7 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean {
     process.stderr.write(`${DIM}Provider not configured. Start with --provider to set one.${RESET}\n`);
     return true;
   }
-  showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then((result) => {
+  const applyResult = (result: PickerResult | null) => {
     if (result && ctx.onModelChange) {
       ctx.onModelChange(result);
       const reasoningLabel = result.reasoning ? ` (reasoning: ${result.reasoning})` : "";
@@ -65,7 +66,11 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean {
     } else if (result) {
       process.stderr.write(`${DIM}Model selected: ${result.model} -- restart to apply.${RESET}\n`);
     }
-  });
+  };
+  if (ctx.pickModel) {
+    return ctx.pickModel().then((result) => { applyResult(result); return true; });
+  }
+  showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then(applyResult);
   return true;
 }
 

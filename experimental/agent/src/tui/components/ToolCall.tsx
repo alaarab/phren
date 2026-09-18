@@ -39,12 +39,15 @@ export function ToolCall({ name, input, output, isError, durationMs, diffRendere
   );
 
   if (!verbose) {
+    const previewLine = output.split("\n").find((line) => line.trim())?.slice(0, 120);
     return (
       <Box flexDirection="column" paddingLeft={2}>
         {header}
-        {diffRendered && (
-          <Text>{"  \u23bf  "}{diffRendered}</Text>
-        )}
+        {diffRendered
+          ? <Text>{"  \u23bf  "}{diffRendered}</Text>
+          : previewLine
+            ? <Text color={outputColor} dimColor>{"  \u23bf  "}{previewLine}</Text>
+            : null}
       </Box>
     );
   }
