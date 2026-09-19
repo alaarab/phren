@@ -3,12 +3,26 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AccountUsageReader, claudeOAuthUsage, claudeScopedWindows, claudeUsage, codexUsage, fetchClaudeUsage, readClaudeToken, readCodexLimits, usageStatusLine } from "./usage.js";
+import {
+  AccountUsageReader,
+  claudeOAuthUsage,
+  claudeScopedWindows,
+  claudeUsage,
+  codexUsage,
+  fetchClaudeUsage,
+  fetchOpenRouterUsage,
+  openCodeUsage,
+  readClaudeToken,
+  readCodexLimits,
+  usageStatusLine,
+} from "./usage.js";
 
 const now = new Date("2026-09-12T08:00:00Z");
 const reset = now.getTime() / 1000 + 3600;
 const limits = { primary: { usedPercent: 23.5, windowDurationMins: 300, resetsAt: reset },
   secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: reset + 86400 } };
+const openCode = async (date: Date) => openCodeUsage("Total Cost  $0.00", date);
+const noOpenRouter = async () => undefined;
 
 describe("account usage", () => {
   it("keeps quota percentages and reset times separate from token counts", () => {
@@ -78,11 +92,31 @@ describe("account usage", () => {
   });
   it("shares in-flight Codex requests and caches account reads for a minute", async () => {
     let calls = 0, time = 0;
-    const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time, async () => undefined);
+    const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time,
+      async () => undefined, openCode, noOpenRouter);
     await Promise.all([reader.read(), reader.read()]);
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
     time = 60_000; await reader.read(); expect(calls).toBe(2);
+  });
+  it("reports OpenCode's rolling seven-day cost without session content", () => {
+    const output = "\u001b[32mTotal Cost\u001b[0m                                        $4.39\nprivate session title";
+    const value = openCodeUsage(output, now);
+    expect(value).toEqual({ source: "opencode", windows: [], spend: { amountUSD: 4.39, period: "rolling_7_days" }, updatedAt: now.toISOString() });
+    expect(JSON.stringify(value)).not.toContain("private session title");
+    expect(openCodeUsage("no cost here").message).toContain("opencode stats");
+  });
+  it("reads OpenRouter's current calendar-week spend without returning its key", async () => {
+    let authorization = "";
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      authorization = (init?.headers as Record<string, string>).authorization;
+      return { ok: true, status: 200, json: async () => ({ data: { usage_weekly: 5.077798384, byok_usage_weekly: 9 } }) } as Response;
+    }) as typeof fetch;
+    const value = await fetchOpenRouterUsage("sk-or-private-test-key", fetchImpl, now);
+    expect(authorization).toBe("Bearer sk-or-private-test-key");
+    expect(value.spend).toEqual({ amountUSD: 5.077798384, period: "calendar_week" });
+    expect(value.accountId).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(value)).not.toContain("private-test-key");
   });
   it("maps the OAuth usage endpoint's structured limits without leaking the token", () => {
     const value = claudeOAuthUsage({ limits: [
@@ -133,12 +167,13 @@ describe("account usage", () => {
 
     let claudeCalls = 0;
     const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
-      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); });
+      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter);
     const first = await reader.read();
     expect(first.accounts[1].windows[0].usedPercent).toBe(42);
     await reader.read(); expect(claudeCalls).toBe(1);
 
-    const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0, async () => undefined);
+    const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
+      async () => undefined, openCode, noOpenRouter);
     const empty = await mkdtemp(path.join(tmpdir(), "phren-empty-"));
     const previousBridge = process.env.PHREN_BRIDGE_HOME, previousConfig = process.env.CLAUDE_CONFIG_DIR;
     process.env.PHREN_BRIDGE_HOME = empty; process.env.CLAUDE_CONFIG_DIR = empty;

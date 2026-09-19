@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -9,11 +9,15 @@ import { bridgeRoot, type Json, object } from "./protocol.js";
 const exec = promisify(execFile);
 
 export interface UsageWindow { id: string; name: string; usedPercent: number; resetsAt?: string; asOf?: string }
+export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "calendar_week" }
 export interface AccountUsage {
-  source: "codex" | "claude";
+  source: "codex" | "claude" | "opencode" | "openrouter";
   windows: UsageWindow[];
   updatedAt?: string;
   message?: string;
+  spend?: UsageSpend;
+  /** Opaque key identity used only to avoid counting one OpenRouter key twice. */
+  accountId?: string;
 }
 const claudeFile = () => path.join(bridgeRoot(), "usage", "claude.json");
 const safeText = (v: unknown) => typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 100) : undefined;
@@ -47,6 +51,79 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
   }
   return { source: "codex", windows, updatedAt: now.toISOString(),
     ...(!windows.length ? { message: "Codex has not reported account limits. Sign in with your ChatGPT account in Codex on this computer." } : {}) };
+}
+
+/** Parse OpenCode's own cost ledger. `stats --days 7` is a rolling local view. */
+export function openCodeUsage(output: string, now = new Date()): AccountUsage {
+  const plain = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const match = /Total Cost\s+\$([0-9][0-9,]*(?:\.[0-9]+)?)/i.exec(plain);
+  const amountUSD = match ? Number(match[1].replace(/,/g, "")) : Number.NaN;
+  if (!Number.isFinite(amountUSD) || amountUSD < 0 || amountUSD > 1_000_000_000) {
+    return { source: "opencode", windows: [], message: "Could not read OpenCode's seven-day cost. Run opencode stats --days 7 on this computer." };
+  }
+  return { source: "opencode", windows: [], spend: { amountUSD, period: "rolling_7_days" }, updatedAt: now.toISOString() };
+}
+
+/** Read the authoritative cost that OpenCode records for its local sessions. */
+export async function readOpenCodeUsage(executable = "opencode", now = new Date()): Promise<AccountUsage> {
+  try {
+    const { stdout } = await exec(executable, ["stats", "--days", "7", "--pure"], { timeout: 12_000, maxBuffer: 1_048_576 });
+    return openCodeUsage(stdout, now);
+  } catch {
+    return { source: "opencode", windows: [], message: "Could not read OpenCode's seven-day cost. Run opencode stats --days 7 on this computer." };
+  }
+}
+
+const openCodeAuthFile = () => path.join(
+  process.env.OPENCODE_DATA_DIR || path.join(process.env.XDG_DATA_HOME || path.join(homedir(), ".local", "share"), "opencode"),
+  "auth.json",
+);
+
+/** OpenCode's OpenRouter key stays local and is used only with OpenRouter. */
+export async function readOpenRouterKey(): Promise<string | undefined> {
+  try {
+    const handle = await open(openCodeAuthFile(), "r");
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > 65_536) return undefined;
+      const key = object(object(JSON.parse(await handle.readFile("utf8"))).openrouter).key;
+      return typeof key === "string" && key.length >= 16 && key.length <= 4_096 && !/[\x00-\x1f\x7f]/.test(key) ? key : undefined;
+    } finally { await handle.close(); }
+  } catch { return undefined; }
+}
+
+/** OpenRouter reports the current UTC calendar week's charged usage per key. */
+export async function fetchOpenRouterUsage(key: string, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<AccountUsage> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetchImpl("https://openrouter.ai/api/v1/key", {
+      headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`OpenRouter usage endpoint returned ${response.status}.`);
+    const amountUSD = object(object(await response.json()).data).usage_weekly;
+    if (typeof amountUSD !== "number" || !Number.isFinite(amountUSD) || amountUSD < 0 || amountUSD > 1_000_000_000) {
+      throw new Error("OpenRouter returned invalid usage.");
+    }
+    return {
+      source: "openrouter",
+      accountId: createHash("sha256").update(key).digest("hex"),
+      windows: [],
+      spend: { amountUSD, period: "calendar_week" },
+      updatedAt: now.toISOString(),
+    };
+  } finally { clearTimeout(timer); }
+}
+
+async function liveOpenRouterUsage(now: Date): Promise<AccountUsage | undefined> {
+  if (typeof fetch !== "function") return undefined;
+  const key = await readOpenRouterKey();
+  if (!key) return undefined;
+  try { return await fetchOpenRouterUsage(key, fetch, now); } catch {
+    return { source: "openrouter", windows: [], message: "Could not read OpenRouter spend. Check its key in OpenCode." };
+  }
 }
 
 /** "seven_day_fable" → "7-day · Fable"; the two plain windows keep their names. */
@@ -238,14 +315,29 @@ export class AccountUsageReader {
   private pending?: Promise<AccountUsage>;
   private claudeCached?: { at: number; value?: AccountUsage };
   private claudePending?: Promise<AccountUsage | undefined>;
+  private spendingCached?: { at: number; value: AccountUsage[] };
+  private spendingPending?: Promise<AccountUsage[]>;
   constructor(private readCodex = readCodexLimits, private now = Date.now,
-              private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage) {}
+              private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage,
+              private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
+              private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage) {}
   async read(): Promise<{ accounts: AccountUsage[] }> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
     }
-    const codex = this.pending ? await this.pending : this.cached!.value;
-    return { accounts: [codex, await this.claude()] };
+    const codex = this.pending ?? Promise.resolve(this.cached!.value);
+    const [codexValue, claude, spending] = await Promise.all([codex, this.claude(), this.spending()]);
+    return { accounts: [codexValue, claude, ...spending] };
+  }
+  private async spending(): Promise<AccountUsage[]> {
+    if (!this.spendingCached || this.now() - this.spendingCached.at >= 60_000) {
+      const at = this.now();
+      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenRouter(new Date(at))])
+        .then(([openCode, openRouter]) => [openCode, ...(openRouter ? [openRouter] : [])])
+        .then(value => { this.spendingCached = { at, value }; return value; })
+        .finally(() => { this.spendingPending = undefined; });
+    }
+    return this.spendingPending ? await this.spendingPending : this.spendingCached!.value;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup. */
