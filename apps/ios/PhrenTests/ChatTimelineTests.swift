@@ -449,6 +449,39 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(done.state, .done); XCTAssertEqual(done.summary, "Agent \"tester\" completed")
     }
 
+    /// Child transcripts take the same grouping/rendering path as the main
+    /// chat. A patch arrives as JSON on the wire, but the UI must see one
+    /// collapsible tool activity with a formatted diff instead of a prose
+    /// bubble full of escaped JSON.
+    func testChildTranscriptPatchGroupsAsFormattedToolActivity() throws {
+        let arguments = #"{"patch":"*** Begin Patch\n*** Update File: Sources/App.swift\n@@\n-let old = true\n+let old = false\n*** End Patch"}"#
+        let patch = "diff --git a/Sources/App.swift b/Sources/App.swift\n--- a/Sources/App.swift\n+++ b/Sources/App.swift\n@@ -1 +1 @@\n-let old = true\n+let old = false\n"
+        let messages = try readRaw([
+            ["type": "response_item", "payload": ["type": "function_call", "call_id": "patch-1", "name": "apply_patch", "arguments": arguments]],
+            ["type": "response_item", "payload": ["type": "function_call_output", "call_id": "patch-1", "output": "Done!"],
+             "phren_changes": ["patch-1": [["root": "/work", "path": "Sources/App.swift", "status": "M", "patch": patch]]]],
+        ])
+        let entries = ChatTimelineEntry.group(messages)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertTrue(entries[0].isActivity)
+        XCTAssertEqual(entries[0].messages.count, 3)
+        XCTAssertTrue(entries[0].messages.contains(where: \.isToolResult))
+        XCTAssertTrue(entries[0].messages.contains(where: \.isChange))
+        let call = try XCTUnwrap(entries[0].messages.first)
+        let presentation = ToolPresentationCache.value(call)
+        XCTAssertEqual(presentation.title, "Patch")
+        XCTAssertNotEqual(presentation.preview, "{")
+    }
+
+    func testAgentTreeRowsPreserveHierarchyAndSiblingEnds() throws {
+        let data = Data(#"{"id":"parent","provider":"codex","path":"/root/a","callId":"one","state":"running","children":[{"id":"child","provider":"claude","path":"/root/a/review","callId":"two","state":"completed","children":[]}]}"#.utf8)
+        let parent = try JSONDecoder().decode(AgentChild.self, from: data)
+        let rows = AgentTreeRow.flatten([parent])
+        XCTAssertEqual(rows.map(\.agent.id), ["parent", "child"])
+        XCTAssertEqual(rows.map(\.depth), [0, 1])
+        XCTAssertEqual(rows.map(\.isLastSibling), [true, true])
+    }
+
     private func readRaw(_ raws: [[String: Any]]) throws -> [AgentChatMessage] {
         try AgentChatTranscript.read(JSONSerialization.data(withJSONObject: ["type": "backlog", "source": "codex", "totalLines": raws.count,
             "entries": raws.enumerated().map { ["line": $0.offset, "raw": $0.element] }]), source: "codex").messages
