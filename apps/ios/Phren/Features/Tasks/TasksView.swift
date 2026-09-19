@@ -126,8 +126,10 @@ struct TaskListView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
             }
-            PhrenList {
+            PhrenList(plain: true) {
                 if !visibleRows.isEmpty {
+                    Text(section == .queue ? "Backlog" : section.rawValue)
+                        .plainListSectionLabel()
                     taskRows(visibleRows)
                 } else if section == .active && !hasFilters {
                     Section {
@@ -355,7 +357,14 @@ struct TaskListView: View {
                 if isSelecting { select(row) }
                 else { move([row], using: row.task.checked ? .start : .done) }
             }
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .sessionCard()
+            .overlay(alignment: .leading) {
+                if let priority = row.task.priority {
+                    PhrenRail(color: priority.color).padding(.vertical, 10)
+                }
+            }
+            .separatedSessionRow()
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 if canWrite && !isSelecting {
                     if row.task.section != .active {
@@ -545,7 +554,7 @@ struct TaskRow: View {
                         TagChip(text: row.storeId, role: .store)
                     }
                     if let priority = row.task.priority {
-                        TagChip(text: priority.rawValue, color: priorityColor(priority))
+                        TagChip(text: priority.rawValue, color: priority.color)
                     }
                     if row.task.pinned == true {
                         Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
@@ -570,9 +579,11 @@ struct TaskRow: View {
     private var displayLine: String {
         TasksFile.stripPinnedTag(TasksFile.stripPriorityTag(row.task.line))
     }
+}
 
-    private func priorityColor(_ priority: PhrenTask.Priority) -> Color {
-        switch priority {
+extension PhrenTask.Priority {
+    var color: Color {
+        switch self {
         case .high: return PhrenTheme.red
         case .medium: return PhrenTheme.amber
         case .low: return PhrenTheme.textDim

@@ -1112,6 +1112,47 @@ final class AgentChatTests: XCTestCase {
     }
 
     @MainActor
+    func testLongTranscriptOpensAtTheLastMessage() {
+        let app = launch(extra: ["--chat-heavy"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let tail = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Heavy fixture reply 19.")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 15), "The end of a long transcript should be laid out on open")
+        let visible = NSPredicate { _, _ in tail.isHittable }
+        expectation(for: visible, evaluatedWith: tail)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(app.buttons["Latest messages"].exists, "A long transcript should open already pinned to the bottom")
+        capture(app, "Long transcript opens at the last message")
+    }
+
+    @MainActor
+    func testStreamingReplyStaysPinnedToTheBottom() {
+        let app = launch(extra: ["--chat-streaming", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 8))
+        composer.tap(); composer.typeText("Stream a long reply")
+        app.buttons["chat-send"].tap()
+        let reply = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "arriving word by word")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 15), "The streamed reply should arrive")
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertFalse(app.buttons["Latest messages"].exists, "Follow should stay engaged while the reply streams")
+        capture(app, "Streaming reply stays pinned")
+    }
+
+    @MainActor
+    func testUpwardDragReleasesFollowAndReturningReengages() {
+        let app = launch(extra: ["--chat-heavy"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let transcript = app.scrollViews["chat-transcript"]
+        XCTAssertTrue(transcript.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Latest messages"].exists)
+        transcript.swipeDown(velocity: .fast)
+        XCTAssertTrue(app.buttons["Latest messages"].waitForExistence(timeout: 5), "An upward drag should release follow")
+        app.buttons["Latest messages"].tap()
+        XCTAssertFalse(app.buttons["Latest messages"].waitForExistence(timeout: 2), "Returning to the bottom should re-engage follow")
+    }
+
+    @MainActor
     func testSwitchAgentAcrossComputersPreservesSeparateDrafts() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--session-relative-time-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]

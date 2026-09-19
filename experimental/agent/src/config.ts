@@ -1,5 +1,17 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import type { PermissionMode } from "./permissions/types.js";
 import { loadPermissionMode } from "./settings.js";
+
+export const AGENT_CONFIG_DIR = ".phren-agent";
+
+export function agentConfigDir(base: string): string {
+  return path.join(base, AGENT_CONFIG_DIR);
+}
+
+export function agentUserDir(home: string = os.homedir()): string {
+  return path.join(home, AGENT_CONFIG_DIR);
+}
 
 export interface CliArgs {
   task: string;

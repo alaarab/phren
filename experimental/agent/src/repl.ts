@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { persistFork } from "./session/persist.js";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
-import { handleCommand, resolveSkillGesture } from "./commands.js";
+import { handleCommand, resolveSkillGesture, resolveCustomCommand } from "./commands.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { loadInputMode } from "./settings.js";
 
@@ -109,8 +109,12 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     allHistory.push(trimmed);
 
     // /skill-name gesture: rewrite into a run_skill task before command dispatch
-    const skillTask = resolveSkillGesture(trimmed, config.phrenCtx);
-    if (skillTask) {
+    const customTask = resolveCustomCommand(trimmed);
+    const skillTask = customTask ? null : resolveSkillGesture(trimmed, config.phrenCtx);
+    if (customTask) {
+      process.stderr.write(`${DIM}↳ running custom command ${trimmed.split(/\s+/)[0]}${RESET}\n`);
+      trimmed = customTask;
+    } else if (skillTask) {
       process.stderr.write(`${DIM}↳ running skill via ${trimmed.split(/\s+/)[0]}${RESET}\n`);
       trimmed = skillTask;
     } else if (handleCommand(trimmed, buildCommandContext())) {

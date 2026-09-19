@@ -6,6 +6,7 @@ import { createCaptureState, type CaptureState } from "../memory/auto-capture.js
 import { AntiPatternTracker } from "../memory/anti-patterns.js";
 import { createFlushConfig, type FlushConfig } from "../memory/context-flush.js";
 import type { LintTestConfig } from "../tools/lint-test.js";
+import type { HooksConfig } from "../user-hooks.js";
 
 export interface AgentConfig {
   provider: LlmProvider;
@@ -18,6 +19,7 @@ export interface AgentConfig {
   plan?: boolean;
   lintTestConfig?: LintTestConfig;
   hooks?: TurnHooks;
+  hookConfig?: HooksConfig | null;
   /** Session ID for /session commands */
   sessionId?: string | null;
   /** Durable event log for the session (in-memory when absent). */

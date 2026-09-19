@@ -9,7 +9,7 @@ import { createSession, runTurn, type AgentSession, type TurnHooks } from "../ag
 import { emitHerdrHook, setHerdrHookSession } from "../herdr-hooks.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
-import { resolveSkillGesture } from "../commands.js";
+import { resolveSkillGesture, resolveCustomCommand } from "../commands.js";
 import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
@@ -608,8 +608,12 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     // Slash commands — capture stderr output and display as status message
     if (line.startsWith("/")) {
       // /skill-name gesture: rewrite into a run_skill task and fall through
-      const skillTask = resolveSkillGesture(line, config.phrenCtx);
-      if (skillTask) {
+      const customTask = resolveCustomCommand(line);
+      const skillTask = customTask ? null : resolveSkillGesture(line, config.phrenCtx);
+      if (customTask) {
+        completedMessages.push({ id: nextId(), kind: "status", text: `↳ running custom command ${line.split(/\s+/)[0]}` });
+        line = customTask;
+      } else if (skillTask) {
         completedMessages.push({ id: nextId(), kind: "status", text: `↳ running skill via ${line.split(/\s+/)[0]}` });
         line = skillTask;
       } else if (slashCommands.tryHandleCommand(line)) {

@@ -320,6 +320,7 @@ struct AgentChatView: View {
                         }.frame(height: 1).id("chat-bottom")
                     }
                     .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 6)
+                    .frame(minHeight: scrollHeight, alignment: .bottom)
                 }
                 .accessibilityIdentifier("chat-transcript")
                 .contentShape(Rectangle())
@@ -341,7 +342,6 @@ struct AgentChatView: View {
                 }
                 .onChange(of: model.history.startLine) { _, _ in loadHistoryIfNeeded(proxy, automatic: true) }
                 .scrollDismissesKeyboard(.interactively)
-                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: "chat-scroll")
                 .background(GeometryReader { geometry in
                     Color.clear.onAppear { scrollHeight = geometry.size.height }
@@ -352,15 +352,32 @@ struct AgentChatView: View {
                             // The keyboard leaving makes the viewport taller; the
                             // content keeps its old offset and a blank band opens
                             // under the last bubble. Stay pinned to the end.
-                            if grew && atBottom && !model.loadingHistory {
-                                DispatchQueue.main.async { proxy.scrollTo("chat-bottom", anchor: .bottom) }
-                            }
+                            if grew && atBottom && !model.loadingHistory { pinToBottom(proxy) }
                         }
                 })
-                .onPreferenceChange(ChatBottomPosition.self) { position in
-                    let near = position <= scrollHeight + 60
-                    if near != atBottom { atBottom = near }
-                    textSelection.scrolled(to: position)
+                .modifier(ChatFollowScroll(viewport: scrollHeight) { old, new, userDriven in
+                    textSelection.scrolled(to: new.offsetY)
+                    let near = new.distanceFromBottom <= ChatFollow.threshold
+                    if userDriven {
+                        if near != atBottom { atBottom = near }
+                    } else if near, !atBottom {
+                        atBottom = true
+                    }
+                    guard atBottom, !userDriven else { return }
+                    let grew = new.contentHeight > old.contentHeight + 0.5
+                    let viewportChanged = abs(new.viewportHeight - old.viewportHeight) > 0.5
+                    let scrollable = new.contentHeight > new.viewportHeight + 0.5
+                    let offBottom = new.distanceFromBottom > 1
+                    let overscrolled = scrollable && new.distanceFromBottom < -1
+                    if grew || viewportChanged || offBottom || overscrolled { pinToBottom(proxy) }
+                })
+                .task {
+                    pinToBottom(proxy)
+                    for delay in [60, 200, 500] {
+                        do { try await Task.sleep(for: .milliseconds(delay)) } catch { return }
+                        guard atBottom else { return }
+                        pinToBottom(proxy)
+                    }
                 }
                 .overlay {
                     if (model.loading && model.messages.isEmpty) || (model.timeline.isEmpty && !model.messages.isEmpty) {
@@ -393,6 +410,9 @@ struct AgentChatView: View {
                 }
                 .onChange(of: model.reveal.revision) { _, _ in
                     if atBottom && !model.loadingHistory { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+                }
+                .onChange(of: model.imagesByMessage) { _, _ in
+                    if atBottom && !model.loadingHistory { pinToBottom(proxy) }
                 }
             }
             if let approval = model.approval, let prompt = approval.questionPrompt, let input = approval.questionInput {
@@ -636,6 +656,10 @@ struct AgentChatView: View {
     /// means the anchor scroll isn't taking and the top stays "near" — left
     /// alone that pulls the whole history and hangs the phone.
     private static let automaticHistoryPages = 3
+
+    private func pinToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { proxy.scrollTo("chat-bottom", anchor: .bottom) }
+    }
 
     private func loadHistoryIfNeeded(_ proxy: ScrollViewProxy, automatic: Bool = false) {
         guard active, paginationReady, model.connected, model.hasMore, !model.loadingHistory,
@@ -1049,6 +1073,61 @@ private struct ChatHistoryScrollObserver: ViewModifier {
             } action: { _, near in changed(near) }
         } else {
             content.onPreferenceChange(ChatHistoryPosition.self) { position in changed(position >= -140) }
+        }
+    }
+}
+
+private enum ChatFollow {
+    static let threshold: CGFloat = 60
+}
+
+private struct ChatScrollMetrics: Equatable {
+    var distanceFromBottom: CGFloat = 0
+    var contentHeight: CGFloat = 0
+    var viewportHeight: CGFloat = 0
+    var offsetY: CGFloat = 0
+
+    @available(iOS 18.0, *)
+    init(_ geometry: ScrollGeometry) {
+        contentHeight = geometry.contentSize.height
+        viewportHeight = geometry.containerSize.height
+        offsetY = geometry.contentOffset.y
+        distanceFromBottom = contentHeight + geometry.contentInsets.bottom - viewportHeight - offsetY
+    }
+
+    init(position: CGFloat, viewportHeight: CGFloat) {
+        self.viewportHeight = viewportHeight
+        offsetY = position
+        distanceFromBottom = position - viewportHeight
+    }
+}
+
+private struct ChatFollowScroll: ViewModifier {
+    let viewport: CGFloat
+    let changed: (ChatScrollMetrics, ChatScrollMetrics, Bool) -> Void
+
+    @State private var userDriven = false
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content
+                .onScrollPhaseChange { _, phase in
+                    let driving = phase == .tracking || phase == .interacting || phase == .decelerating
+                    if driving != userDriven { userDriven = driving }
+                }
+                .onScrollGeometryChange(for: ChatScrollMetrics.self) { ChatScrollMetrics($0) } action: { old, new in
+                    changed(old, new, userDriven)
+                }
+        } else {
+            content
+                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in
+                    let driving = abs(value.translation.height) > 12
+                    if driving != userDriven { userDriven = driving }
+                }.onEnded { _ in userDriven = false })
+                .onPreferenceChange(ChatBottomPosition.self) { position in
+                    let metrics = ChatScrollMetrics(position: position, viewportHeight: viewport)
+                    changed(metrics, metrics, userDriven)
+                }
         }
     }
 }
