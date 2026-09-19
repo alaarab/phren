@@ -520,12 +520,10 @@ private struct LiveHostView: View {
                     } else {
                         switch mode {
                         case .workspaces:
-                            ForEach(monitor.snapshot?.groups ?? []) { group in
-                                let entries = unpinned.filter { $0.workspaceID == group.id }
-                                if !entries.isEmpty {
-                                    sectionHeading(group.label, count: entries.count)
-                                    sessionCards(entries)
-                                }
+                            ForEach(LiveAgentWorkspaceGrouping.sections(unpinned, preferences: preferences,
+                                                                        projects: model.sessionProjects)) { section in
+                                sectionHeading(section.title, count: section.sessions.count)
+                                sessionCards(section.sessions)
                             }
                         case .activity:
                             ForEach(LiveWorkspaces.Tab.Activity.allCases, id: \.self) { activity in

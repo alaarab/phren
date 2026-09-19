@@ -101,3 +101,62 @@ extension LiveWorkspaces {
         }
     }
 }
+
+/// A display section that can contain tabs from more than one Herdr
+/// workspace. The sessions retain their original workspace IDs so opening or
+/// closing one still targets the workspace the Hook reported.
+public struct LiveAgentWorkspaceSection: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let sessions: [LiveAgentSession]
+}
+
+public enum LiveAgentWorkspaceGrouping {
+    /// Groups the host screen by the Phren project when one can be resolved,
+    /// then by a normalized workspace label. Herdr creates a new workspace ID
+    /// each time a project is opened, so the ID is a destination rather than a
+    /// useful presentation key.
+    public static func sections(_ sessions: [LiveAgentSession], preferences: LiveSessionPreferences?,
+                                projects: [SessionProject]) -> [LiveAgentWorkspaceSection] {
+        struct Pending {
+            let title: String
+            var sessions: [LiveAgentSession]
+        }
+        var pending: [String: Pending] = [:]
+        var order: [String] = []
+        for session in sessions {
+            let match = preferences?.projectMatch(hostID: session.host.id, cwd: session.tab.cwd, projects: projects)
+            let title: String
+            let key: String
+            if let project = match?.project {
+                title = project.name
+                key = "project:\(project.storeID)\u{0}\(project.name)"
+            } else {
+                let label = session.workspaceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if label.isEmpty {
+                    title = session.projectDisplayName(nil)
+                    key = "workspace:\(session.workspaceID)"
+                } else {
+                    title = label
+                    key = "label:\(normalizedLabel(label))"
+                }
+            }
+            if var existing = pending[key] {
+                existing.sessions.append(session)
+                pending[key] = existing
+            } else {
+                pending[key] = Pending(title: title, sessions: [session])
+                order.append(key)
+            }
+        }
+        return order.compactMap { key in
+            pending[key].map { LiveAgentWorkspaceSection(id: key, title: $0.title, sessions: $0.sessions) }
+        }
+    }
+
+    private static func normalizedLabel(_ label: String) -> String {
+        label.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                     locale: Locale(identifier: "en_US_POSIX"))
+    }
+}

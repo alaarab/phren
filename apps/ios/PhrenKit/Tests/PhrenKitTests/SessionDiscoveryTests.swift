@@ -52,4 +52,39 @@ final class SessionDiscoveryTests: XCTestCase {
         XCTAssertNotEqual(local[0].id, remote[0].id)
         XCTAssertNotEqual(local[0].id, local[1].id)
     }
+
+    func testWorkspaceSectionsFoldRepeatedProjectLabelsWithoutReplacingDestinationIDs() throws {
+        let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
+        let snapshot = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"first","label":" Phren ","children":[{"id":"first:tab","label":"one"}]},{"id":"second","label":"phren","children":[{"id":"second:tab","label":"two"}]}]}"#.utf8))
+
+        let sections = LiveAgentWorkspaceGrouping.sections(snapshot.sessions(on: host), preferences: nil, projects: [])
+
+        XCTAssertEqual(sections.count, 1)
+        XCTAssertEqual(sections[0].title, "Phren", "The first visible label remains stable")
+        XCTAssertEqual(sections[0].sessions.map(\.workspaceID), ["first", "second"])
+        XCTAssertEqual(sections[0].sessions.map { $0.tab.id }, ["first:tab", "second:tab"])
+    }
+
+    func testWorkspaceSectionsUseResolvedProjectIdentityAndPreserveFirstSeenOrder() throws {
+        let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
+        let snapshot = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"other","label":"Other","children":[{"id":"other:tab","label":"other","cwd":"/work/other"}]},{"id":"first","label":"Planning","children":[{"id":"first:tab","label":"one","cwd":"/work/phren/apps/ios"}]},{"id":"second","label":"Release","children":[{"id":"second:tab","label":"two","cwd":"/work/phren"}]}]}"#.utf8))
+        let preferences = try LiveSessionPreferences.read(LiveSessionPreferences.saving(host, in: Data()))
+
+        let sections = LiveAgentWorkspaceGrouping.sections(snapshot.sessions(on: host), preferences: preferences,
+                                                            projects: [project])
+
+        XCTAssertEqual(sections.map(\.title), ["Other", "phren"])
+        XCTAssertEqual(sections.map { $0.sessions.count }, [1, 2])
+        XCTAssertEqual(sections[1].sessions.map(\.workspaceID), ["first", "second"])
+    }
+
+    func testWorkspaceSectionsDoNotMergeUnlabelledRealWorkspaces() throws {
+        let host = try LiveHost(name: "Mac", address: "mac.example", username: "dev")
+        let snapshot = try LiveWorkspaces.read(Data(#"{"kind":"herdr","groups":[{"id":"first","label":"","children":[{"id":"first:tab","label":"one"}]},{"id":"second","label":"","children":[{"id":"second:tab","label":"two"}]}]}"#.utf8))
+
+        let sections = LiveAgentWorkspaceGrouping.sections(snapshot.sessions(on: host), preferences: nil, projects: [])
+
+        XCTAssertEqual(sections.count, 2)
+        XCTAssertEqual(sections.flatMap(\.sessions).map(\.workspaceID), ["first", "second"])
+    }
 }
