@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { parseArgs, printHelp } from "./config.js";
+import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { loadPersistentAllowlist } from "./permissions/allowlist.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
@@ -122,6 +123,8 @@ export async function runAgentCli(raw: string[]) {
   }
 
   const args = parseArgs(raw);
+  resolveStartupPermissions(args);
+  loadPersistentAllowlist(process.cwd());
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
@@ -380,8 +383,8 @@ export async function runAgentCli(raw: string[]) {
       // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
       const { AgentSpawner } = await import("./multi/spawner.js");
       const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-      const spawner = new AgentSpawner();
-      registry.register(createSpawnAgentTool(spawner));
+      const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+      registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
       registry.register(createSendMessageTool(spawner));
       registry.register(createListAgentsTool(spawner));
       // Publish this process's agents so a phren graph in another terminal can
@@ -449,8 +452,8 @@ export async function runAgentCli(raw: string[]) {
   if (!args.noSubagents) {
     const { AgentSpawner } = await import("./multi/spawner.js");
     const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-    oneShotSpawner = new AgentSpawner();
-    registry.register(createSpawnAgentTool(oneShotSpawner));
+    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+    registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));
   }

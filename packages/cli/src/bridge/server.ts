@@ -225,7 +225,10 @@ export async function serve(version: string): Promise<void> {
             result = await repositoryDiff(cwd, paths, allowed);
           }
           else if (url.pathname === "/v1/approvals/answer") {
-            await agentHooks.answer(target, z.string().uuid().parse(data.actionId), data.decision, data.updatedInput); result = { ok: true };
+            const actionId = target.source === "opencode"
+              ? z.string().regex(/^[A-Za-z0-9_]{1,200}$/).parse(data.actionId)
+              : z.string().uuid().parse(data.actionId);
+            await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
           } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
           else throw new BridgeError(404, "Unknown Phren Hook route.");
           }
