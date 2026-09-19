@@ -159,6 +159,13 @@ export function childAgent(tree: ChildAgentRelation[], id: string): ChildAgentRe
 }
 
 const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground"]);
+/** The person's text inside Claude Code's paste wrapper, the text itself when unwrapped, or undefined for any other envelope. */
+export function pastedContent(content: string): string | undefined {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("<")) return content;
+  const match = /^<pasted_content id="([A-Za-z0-9_-]{1,32})">\n?([\s\S]*?)\n?<\/pasted_content id="\1">$/.exec(trimmed);
+  return match && match[0] === trimmed && !match[2].trimStart().startsWith("<") ? match[2] : undefined;
+}
 const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
 
 function taskNotification(content: string): string | undefined {
@@ -298,14 +305,18 @@ export function visibleEvent(raw: Json, source: Provider, includeSidechain = fal
     // the phone can draw the bubble it sent. Consumption exposes only a digest.
     if (raw.type === "queue-operation" && ["enqueue", "remove"].includes(String(raw.operation))
         && !raw.isMeta && !raw.isSidechain && typeof raw.content === "string"
-        && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")
-        && !raw.content.trimStart().startsWith("<")) {
+        && raw.content.length <= 65_536 && !raw.content.includes("<task-notification>")) {
+      // Text the phone sends arrives through the terminal as a paste, which
+      // Claude Code wraps in <pasted_content>; that is still the person's
+      // message. Other angle-bracket envelopes are the harness's own.
+      const text = pastedContent(raw.content);
+      if (text === undefined) return undefined;
       const key = createHash("sha256").update(raw.content).digest("hex");
       // Only the identity crosses the wire on consumption: no queue payload,
       // tool envelope, private metadata, or reasoning is exported.
       if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
       return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
-        message: { role: "user", content: raw.content } };
+        message: { role: "user", content: text } };
     }
     if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
     raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
