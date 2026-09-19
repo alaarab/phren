@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AccountUsageReader, claudeOAuthUsage, claudeScopedWindows, claudeUsage, codexUsage, fetchClaudeUsage, readClaudeToken, readCodexLimits, usageStatusLine } from "./usage.js";
 
 const now = new Date("2026-09-12T08:00:00Z");
@@ -78,7 +78,7 @@ describe("account usage", () => {
   });
   it("shares in-flight Codex requests and caches account reads for a minute", async () => {
     let calls = 0, time = 0;
-    const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time);
+    const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time, async () => undefined);
     await Promise.all([reader.read(), reader.read()]);
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
@@ -111,6 +111,9 @@ describe("account usage", () => {
       process.env.CLAUDE_CONFIG_DIR = dir;
       await writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() + 3_600_000 } }));
       expect(await readClaudeToken(noKeychain)).toBe("tok");
+      const keychain = (async () => ({ stdout: JSON.stringify({ claudeAiOauth: { accessToken: "fresh-keychain", expiresAt: Date.now() + 3_600_000 } }), stderr: "" })) as unknown as Parameters<typeof readClaudeToken>[0];
+      expect(await readClaudeToken(keychain, "darwin")).toBe("fresh-keychain");
+      expect(await readClaudeToken(keychain, "linux")).toBe("tok");
       await writeFile(file, JSON.stringify({ claudeAiOauth: { accessToken: "tok", expiresAt: Date.now() - 1 } }));
       expect(await readClaudeToken(noKeychain)).toBeUndefined();
       if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = previous;

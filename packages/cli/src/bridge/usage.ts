@@ -1,10 +1,10 @@
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { randomUUID } from "node:crypto";
-import { bridgeRoot, object, type Json } from "./protocol.js";
+import { bridgeRoot, type Json, object } from "./protocol.js";
 
 const exec = promisify(execFile);
 
@@ -146,7 +146,7 @@ export function claudeOAuthUsage(value: unknown, now = new Date()): AccountUsage
  * The file is authoritative off macOS; macOS keeps it in the login keychain,
  * with the file left stale after a refresh.
  */
-export async function readClaudeToken(execSecurity = exec): Promise<string | undefined> {
+export async function readClaudeToken(execSecurity = exec, platform = process.platform): Promise<string | undefined> {
   const parse = (raw: string): string | undefined => {
     if (raw.length > 16_384) return undefined;
     const oauth = object(object(JSON.parse(raw)).claudeAiOauth);
@@ -155,12 +155,14 @@ export async function readClaudeToken(execSecurity = exec): Promise<string | und
     if (!token || (expires !== undefined && expires <= Date.now() + 60_000)) return undefined;
     return token;
   };
-  try { const token = parse(await readFile(claudeCredentialsFile(), "utf8")); if (token) return token; } catch { /* fall through */ }
-  if (process.platform !== "darwin") return undefined;
-  try {
-    const { stdout } = await execSecurity("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]);
-    return parse(stdout.trim());
-  } catch { return undefined; }
+  if (platform === "darwin") {
+    try {
+      const { stdout } = await execSecurity("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], { timeout: 5_000, maxBuffer: 16_384 });
+      const token = parse(stdout.trim());
+      if (token) return token;
+    } catch { /* Headless installs can keep credentials in the file instead. */ }
+  }
+  try { return parse(await readFile(claudeCredentialsFile(), "utf8")); } catch { return undefined; }
 }
 
 /** Fetch live limits; any failure falls back to the local snapshot. */
@@ -170,6 +172,7 @@ export async function fetchClaudeUsage(token: string, fetchImpl: typeof fetch = 
   try {
     const response = await fetchImpl("https://api.anthropic.com/api/oauth/usage", {
       headers: { authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20", accept: "application/json" },
+      redirect: "error",
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Claude usage endpoint returned ${response.status}.`);
