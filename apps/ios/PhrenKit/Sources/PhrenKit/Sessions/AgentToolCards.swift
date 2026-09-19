@@ -52,6 +52,7 @@ public struct AgentSubagentPresentation: Equatable, Sendable {
     public let description: String
     public let model: String?
     public let prompt: String
+    public let promptAvailable: Bool
     public let background: Bool
     /// The agent's report, bounded for the card; "" until it is back.
     public let report: String
@@ -71,20 +72,24 @@ public struct AgentSubagentPresentation: Equatable, Sendable {
         func value(_ keys: String...) -> String {
             keys.map { AgentToolCardJSON.string(values[$0]) }.first(where: { !$0.isEmpty }) ?? ""
         }
-        let prompt = (values["prompt"] ?? values["message"] ?? values["task"] ?? values["input"]) as? String ?? ""
-        self.prompt = String(prompt.prefix(20_000))
+        let rawPrompt = (values["prompt"] ?? values["message"] ?? values["task"] ?? values["input"]) as? String ?? ""
+        promptAvailable = !Self.looksEncrypted(rawPrompt)
+        self.prompt = promptAvailable ? String(rawPrompt.prefix(20_000)) : ""
+        let taskName = value("task_name")
         let typed = value("name", "subagent_type", "agent_type", "role")
-        self.name = typed.isEmpty ? "Agent" : typed
+        self.name = taskName.isEmpty ? (typed.isEmpty ? "Agent" : typed) : Self.displayName(taskName)
         let described = value("description")
         description = described.isEmpty
-            ? String(prompt.split(whereSeparator: \.isNewline).first?.prefix(140) ?? "").trimmingCharacters(in: .whitespaces)
+            ? String(self.prompt.split(whereSeparator: \.isNewline).first?.prefix(140) ?? "").trimmingCharacters(in: .whitespaces)
             : String(described.prefix(140))
         let model = value("model")
         self.model = model.isEmpty ? nil : model
         let text = result.map { AgentToolCardJSON.resultText($0) } ?? ""
         // A background launch answers at once and only says the agent started;
         // the report never comes through the call, the notification does.
-        let launched = text.lowercased().hasPrefix("async agent launched") || (text.contains("agentId:") && text.contains("output_file"))
+        let spawnAcknowledgement = AgentToolCardJSON.tool(name) == "spawn_agent"
+            && (AgentToolCardJSON.object(text) as? [String: Any])?["task_name"] != nil
+        let launched = text.lowercased().hasPrefix("async agent launched") || (text.contains("agentId:") && text.contains("output_file")) || spawnAcknowledgement
         background = values["run_in_background"] as? Bool == true || launched
         let status = notification.flatMap { AgentToolCardJSON.tag("status", in: $0) }?.lowercased()
         summary = notification.flatMap { AgentToolCardJSON.tag("summary", in: $0) }.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
@@ -96,6 +101,19 @@ public struct AgentSubagentPresentation: Equatable, Sendable {
             state = .running
         }
         report = launched ? "" : Self.trimmed(text)
+    }
+
+    private static func looksEncrypted(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count > 80, value.hasPrefix("gAAAAA") else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_="))
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    private static func displayName(_ path: String) -> String {
+        let leaf = path.split(separator: "/").last.map(String.init) ?? path
+        let words = leaf.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        return words.split(whereSeparator: \.isWhitespace).map { $0.prefix(1).uppercased() + String($0.dropFirst()) }.joined(separator: " ")
     }
 
     /// The report without Claude Code's trailing bookkeeping: the `<usage>`

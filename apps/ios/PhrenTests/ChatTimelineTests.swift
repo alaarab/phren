@@ -214,6 +214,15 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(jobs[0].startedAt, started)
     }
 
+    func testForegroundCodexExecWithYieldTimeoutNeverBecomesABackgroundJob() throws {
+        let input = #"{"cmd":"find .. -name AGENTS.md -print","yield_time_ms":30000,"max_output_tokens":2000}"#
+        let messages = try read([
+            ["type": "custom_tool_call", "call_id": "exec-1", "name": "exec", "input": input],
+            ["type": "custom_tool_call_output", "call_id": "exec-1", "output": "Script completed\nWall time 27.1 seconds\nOutput:\n../AGENTS.md"]
+        ])
+        XCTAssertTrue(ChatBackgroundJobs.parse(messages, firstSeen: [:]).isEmpty)
+    }
+
     func testGroupingRetainsEveryMessageAndNeverCrossesAReply() throws {
         let messages = try read([
             ["type": "function_call_output", "output": "Older result"],

@@ -4,6 +4,12 @@ import PhrenKit
 
 @MainActor
 final class ChatStreamingTests: XCTestCase {
+    func testCancelledDeliveryExplainsUncertainReceiptWithoutSwiftJargon() {
+        let message = AgentDeliveryMessage.sendFailure(CancellationError(), rejected: false)
+        XCTAssertEqual(message, "The connection closed before Phren received confirmation. Check the conversation before sending again. Phren did not retry.")
+        XCTAssertFalse(message.contains("CancellationError"))
+    }
+
     @MainActor
     func testRejectedTranscriptDoesNotRetryAfterPanePollingFailure() throws {
         let model = AgentChatModel()

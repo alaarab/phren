@@ -37,6 +37,20 @@ final class AgentToolCardsTests: XCTestCase {
         XCTAssertEqual(AgentSubagentPresentation(name: "Task", input: input, result: launched, notification: failed)?.state, .failed)
     }
 
+    func testCodexSpawnUsesReadableTaskNameAndHidesEncryptedInstructions() throws {
+        let encrypted = "gAAAAA" + String(repeating: "opaque-token_", count: 12)
+        let input = try json(["task_name": "/root/task_agent_launch", "message": encrypted])
+        let result = try json(["task_name": "/root/task_agent_launch"])
+        let agent = try XCTUnwrap(AgentSubagentPresentation(name: "collaboration.spawn_agent", input: input, result: result))
+        XCTAssertEqual(agent.name, "Task Agent Launch")
+        XCTAssertEqual(agent.description, "")
+        XCTAssertEqual(agent.prompt, "")
+        XCTAssertFalse(agent.promptAvailable)
+        XCTAssertEqual(agent.report, "")
+        XCTAssertEqual(agent.state, .running, "The spawn acknowledgement is not the child agent's final report")
+        XCTAssertTrue(agent.background)
+    }
+
     func testTodoWriteAndUpdatePlanBecomeChecklists() throws {
         let todos = try json(["todos": [
             ["content": "Add the card", "status": "completed", "activeForm": "Adding the card"],

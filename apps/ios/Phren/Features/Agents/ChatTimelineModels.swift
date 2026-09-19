@@ -325,13 +325,11 @@ enum ChatBackgroundJobs {
         return value
     }
     private static func computeIsBackground(_ message: AgentChatMessage) -> Bool {
-        guard message.text.contains("background") || message.text.contains("yield_time") else { return false }
+        guard message.text.contains("background") else { return false }
         guard ["shell", "tools"].contains(ToolPresentationCache.value(message).title.lowercased()) else { return false }
         let text = message.text.lowercased()
         return text.range(of: #"[\"']?run_in_background[\"']?\s*[:=]\s*true"#, options: .regularExpression) != nil
             || text.range(of: #"[\"']?background[\"']?\s*[:=]\s*true"#, options: .regularExpression) != nil
-            || text.range(of: #"[\"']?yield_time-ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
-            || text.range(of: #"[\"']?yield_time_ms[\"']?\s*[:=]"#, options: .regularExpression) != nil
     }
     /// The call a `<task-notification>` answers.
     static func notificationCallID(_ text: String) -> String? { tag("tool-use-id", in: text) }

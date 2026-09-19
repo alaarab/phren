@@ -757,9 +757,7 @@ final class AgentChatModel {
             let rejected: Bool
             if case LiveConnectionError.gatewayRejection(let status, _) = error { rejected = (400..<500).contains(status) }
             else { rejected = error is PhrenKitError }
-            deliveryError = rejected
-                ? "Your message hasn't been sent. \(error.localizedDescription)"
-                : "Delivery wasn't confirmed. Check the conversation before trying again. \(error.localizedDescription)"
+            deliveryError = AgentDeliveryMessage.sendFailure(error, rejected: rejected)
             return (false, sent, rejected)
         }
     }
@@ -773,5 +771,15 @@ final class AgentChatModel {
         }
         #endif
         return try await PhrenConnection.chatPanes(host: session.host, privateKey: DeviceSSHKey.load(session.host.id), workspaceID: session.workspaceID, tabID: session.tab.id)
+    }
+}
+
+enum AgentDeliveryMessage {
+    static func sendFailure(_ error: Error, rejected: Bool) -> String {
+        if rejected { return "Your message wasn't sent. \(error.localizedDescription)" }
+        if error is CancellationError || (error as NSError).code == NSURLErrorCancelled {
+            return "The connection closed before Phren received confirmation. Check the conversation before sending again. Phren did not retry."
+        }
+        return "Delivery wasn't confirmed. Check the conversation before sending again. Phren did not retry."
     }
 }

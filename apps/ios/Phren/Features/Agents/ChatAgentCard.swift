@@ -26,6 +26,18 @@ struct ChatAgentCard: View {
         case .failed: return "failed"
         }
     }
+    private var details: String {
+        var sections = ["# \(agent.name)"]
+        if !agent.description.isEmpty { sections.append("## Task\n\(agent.description)") }
+        sections.append(agent.promptAvailable
+            ? "## Instructions\n\(agent.prompt.isEmpty ? "No instructions were recorded in the parent conversation." : agent.prompt)"
+            : "## Instructions\nCodex protected these instructions, so they are not readable from the parent conversation.")
+        if !agent.report.isEmpty { sections.append("## Report\n\(agent.report)") }
+        else if let summary = agent.summary { sections.append("## Status\n\(summary)") }
+        else { sections.append("## Status\nThe agent is still working or has not returned a report to this conversation.") }
+        sections.append("Phren can show the instructions and report recorded in this conversation. Codex does not currently expose the child agent's private reasoning or full tool transcript here.")
+        return sections.joined(separator: "\n\n")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PhrenTheme.Space.small) {
@@ -55,6 +67,9 @@ struct ChatAgentCard: View {
                 Text(agent.background ? "Working in the background…" : "Working…")
                     .font(.caption).foregroundStyle(PhrenTheme.textMuted)
             }
+            Button("Inspect agent") { openOutput(.init(title: agent.name, text: details)) }
+                .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.accent)
+                .accessibilityIdentifier("chat-agent-details:\(entry.callID)")
             if !agent.prompt.isEmpty {
                 Button(showPrompt ? "Hide prompt" : "Show prompt") {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { showPrompt.toggle() }
