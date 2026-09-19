@@ -1,5 +1,28 @@
 # @phren/agent (experimental)
 
+## Keyboard help and remote MCP
+
+Press `?` with an empty draft or `F1` to open keyboard help; Escape closes it
+without losing the draft. The help hint remains visible in every permission mode.
+Assistant text wraps beneath its first text column in both live and completed turns.
+
+MCP configuration accepts `stdio`, `http` (Streamable HTTP), and legacy `sse`.
+Remote transports use the MCP SDK, including responses delivered on a separate
+SSE stream after HTTP 202. To enable browser OAuth, set `oauth: true` on a server:
+
+```json
+{"mcpServers":{"example":{"type":"http","url":"https://example.com/mcp","oauth":true}}}
+```
+
+On first connection, open the authorization URL printed in the terminal. The
+loopback callback verifies state; the SDK handles discovery, PKCE and token
+refresh. OAuth requires HTTPS except for local loopback servers. For a registered
+client, `oauth` can instead be an object with `clientId`, optional `clientSecret`,
+`scope`, and `callbackPort` (default 14557). Credentials are stored per server in
+mode-0600 files under `~/.phren/agent/mcp-auth`; `PHREN_MCP_AUTH_DIR` overrides that
+directory. PKCE verifiers remain in memory. Authorization waits at most five
+minutes and closing a connection closes its callback listener.
+
 Experimental coding agent. **Not part of the shipped phren product** — source
 kept here for local iteration only. Low activity (see git history); do not
 assume this is maintained at the same bar as `packages/cli`.

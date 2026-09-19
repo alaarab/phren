@@ -1,24 +1,26 @@
-import { useState, useCallback, useEffect } from "react";
-import { Static, Box, Text, useApp, useInput } from "ink";
-import { Banner } from "./Banner.js";
-import { ToolCall, type ToolCallProps } from "./ToolCall.js";
-import { ToolSpinner } from "./ToolSpinner.js";
-import { ThinkingIndicator } from "./ThinkingIndicator.js";
-import { SteerQueue } from "./SteerQueue.js";
-import { InputArea, PermissionsLine, type AgentTab } from "./InputArea.js";
-import { StatusBar } from "./StatusBar.js";
-import { ApprovalPanel, type ApprovalInfo } from "./ApprovalPanel.js";
-import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
-import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
-import { PlanReview } from "./PlanReview.js";
-import type { PermissionMode } from "../../permissions/types.js";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
-import type { Theme } from "../themes.js";
-import { renderMarkdown } from "../../multi/markdown.js";
-import { getPlan } from "../../tools/update-plan.js";
-import { COMMAND_NAMES } from "../../commands.js";
 import * as fs from "node:fs";
-import { useSearch, highlightMatches } from "../hooks/useSearch.js";
+import { Box, Static, Text, useApp, useInput, useStdin } from "ink";
+import { useCallback, useEffect, useState } from "react";
+import { COMMAND_NAMES } from "../../commands.js";
+import { renderMarkdown } from "../../multi/markdown.js";
+import type { PermissionMode } from "../../permissions/types.js";
+import { getPlan } from "../../tools/update-plan.js";
+import { isHelpKey } from "../help.js";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import { highlightMatches, useSearch } from "../hooks/useSearch.js";
+import type { Theme } from "../themes.js";
+import { type ApprovalInfo, ApprovalPanel } from "./ApprovalPanel.js";
+import { Banner } from "./Banner.js";
+import { type AgentTab, InputArea, PermissionsLine } from "./InputArea.js";
+import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
+import { PlanReview } from "./PlanReview.js";
+import { ShortcutHelp } from "./ShortcutHelp.js";
+import { StatusBar } from "./StatusBar.js";
+import { SteerQueue } from "./SteerQueue.js";
+import { ThinkingIndicator } from "./ThinkingIndicator.js";
+import { ToolCall, type ToolCallProps } from "./ToolCall.js";
+import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
+import { ToolSpinner } from "./ToolSpinner.js";
 
 // ── Message types for Static history ─────────────────────────────────────────
 
@@ -154,6 +156,7 @@ export function App({
   planReview,
 }: AppProps) {
   const { exit } = useApp();
+  const { stdin } = useStdin();
   const [inputValue, setInputValue] = useState("");
   const [bashMode, setBashMode] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -167,6 +170,7 @@ export function App({
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
   const [completionIndex, setCompletionIndex] = useState(0);
+  const [showHelp, setShowHelp] = useState(false);
 
   // ── Ctrl+F content search ────────────────────────────────────────────────
   const search = useSearch();
@@ -319,6 +323,25 @@ export function App({
   }, [bashMode, onSubmit]);
 
   const isAnyModeActive = search.state.active || historySearchMode;
+  const helpEnabled = !isAnyModeActive && !modelPicker && !toolDetail && !approval;
+
+  useEffect(() => {
+    if (!helpEnabled) return;
+    const onData = (data: Buffer | string) => {
+      const input = data.toString();
+      if (input !== "?" && isHelpKey(input, inputValue)) setShowHelp(value => !value);
+    };
+    stdin.on("data", onData);
+    return () => { stdin.off("data", onData); };
+  }, [stdin, helpEnabled, inputValue]);
+
+  useInput((input, key) => {
+    if (showHelp) {
+      if (key.escape || input === "?" || isHelpKey(input, inputValue)) setShowHelp(false);
+    } else if (isHelpKey(input, inputValue)) {
+      setShowHelp(true);
+    }
+  }, { isActive: helpEnabled });
 
   useKeyboardShortcuts({
     isRunning: running,
@@ -395,7 +418,7 @@ export function App({
       onSelectAgent?.(nextId === "__main__" ? null : nextId);
     } : undefined,
     onToggleTaskList: () => setShowTaskList(v => !v),
-    enabled: !modelPicker && !toolDetail,
+    enabled: !isAnyModeActive && !showHelp && !modelPicker && !toolDetail,
     completionOpen: completions.length > 0,
     completionCount: completions.length,
     onCompletionMove: (delta) => setCompletionIndex((i) => (i + delta + completions.length) % completions.length),
@@ -438,8 +461,8 @@ export function App({
                 ))}
                 {renderedText ? (
                   <Box>
-                    <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-                    <Text wrap="wrap">{renderedText}</Text>
+                    <Box flexShrink={0}><Text color={theme.agent.color}>{theme.agent.label} </Text></Box>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{renderedText}</Text></Box>
                   </Box>
                 ) : null}
               </Box>
@@ -484,8 +507,8 @@ export function App({
       {/* Active streaming text — render markdown live during streaming */}
       {streamingText !== "" && (
         <Box marginTop={1}>
-          <Text color={theme.agent.color} wrap="truncate">{theme.agent.label} </Text>
-          <Text wrap="wrap">{renderMarkdown(streamingText, theme.markdown)}</Text>
+          <Box flexShrink={0}><Text color={theme.agent.color}>{theme.agent.label} </Text></Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{renderMarkdown(streamingText, theme.markdown)}</Text></Box>
         </Box>
       )}
 
@@ -556,6 +579,7 @@ export function App({
         )}
 
         {/* Input + permissions */}
+        {showHelp ? <ShortcutHelp theme={theme} /> : null}
         {planReview !== null && planReview !== undefined ? <PlanReview text={planReview} theme={theme} /> : null}
         {toolDetail ? (
           <ToolDetail
@@ -601,7 +625,7 @@ export function App({
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!isAnyModeActive && !modelPicker && !toolDetail}
+          focus={!isAnyModeActive && !showHelp && !modelPicker && !toolDetail}
           completionOpen={completions.length > 0}
           separatorColor={theme.separator}
           theme={theme}
