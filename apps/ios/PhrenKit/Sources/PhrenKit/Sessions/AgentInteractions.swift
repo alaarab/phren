@@ -84,6 +84,15 @@ public struct AgentQuestionPrompt: Decodable, Equatable, Sendable, Identifiable 
         public struct Option: Decodable, Equatable, Sendable {
             public let label: String
             public let description: String?
+            /// Claude Code's `preview`: a mockup, snippet or config rendered
+            /// monospaced beside the choice. Bounded so one option cannot
+            /// swallow the card.
+            public var preview: String? { rawPreview.flatMap { $0.isEmpty ? nil : String($0.prefix(4_000)) } }
+            private let rawPreview: String?
+            enum CodingKeys: String, CodingKey { case label, description, rawPreview = "preview" }
+            public init(label: String, description: String? = nil, preview: String? = nil) {
+                self.label = label; self.description = description; self.rawPreview = preview
+            }
         }
         public let id: String?
         public let header: String?

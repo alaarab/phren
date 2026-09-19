@@ -10,6 +10,14 @@ number counts up on its own.
 
 ### New
 
+- Agent questions are never cut off. The card above the composer shows each
+  question in full, fades where more follows, counts answers ("1 of 4"), and
+  **Expand** (or **Show all**) opens the whole set as a sheet — every
+  description and Claude's option previews included — that keeps the answers
+  you already picked and sends from there. Option previews render monospaced.
+- **Open a terminal instead** on the launch form when Herdr is not running:
+  the agent (or a shell) starts straight over SSH in the project folder.
+  Terminal only — no chat or approvals — and it ends with the connection.
 - Agent permission requests can reach the lock screen while Phren is suspended
   when direct APNs delivery is configured on the computer. Approve or deny from
   the notification; questions open in Phren for their full answer.

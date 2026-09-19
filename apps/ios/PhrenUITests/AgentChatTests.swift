@@ -747,6 +747,62 @@ final class AgentChatTests: XCTestCase {
         XCTAssertFalse(send.exists)
     }
 
+    /// A real AskUserQuestion is paragraphs long: nothing may be truncated,
+    /// the window above the composer says there is more, and Expand shows
+    /// every question, description and preview on one scrolling sheet that
+    /// keeps the draft answers.
+    @MainActor
+    func testLongClaudeQuestionExpandsToSheetWithoutLosingAnswers() {
+        let app = launch(extra: ["--chat-approval-question", "--chat-approval-question-long"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "The Hook currently resolves")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 8))
+        XCTAssertTrue(first.label.hasSuffix("Herdr is not running at all?"), "The question must be shown in full, not truncated")
+        XCTAssertTrue(app.staticTexts["0 of 4 answered"].exists)
+        XCTAssertTrue(app.buttons["chat-question-show-all"].waitForExistence(timeout: 4), "Four questions overflow the window and must offer the rest")
+        XCTAssertTrue(app.buttons["chat-question-expand"].exists)
+        capture(app, "Long Claude question card")
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Descriptors only")).firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["1 of 4 answered"].exists)
+        app.buttons["chat-question-expand"].tap()
+        XCTAssertTrue(app.buttons["chat-question-collapse"].waitForExistence(timeout: 4))
+        let preview = app.buttons.matching(NSPredicate(format: "value CONTAINS %@", "Open a terminal instead")).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 4), "Option previews are shown on the sheet")
+        capture(app, "Long Claude question sheet")
+        // The sheet carries the inline draft and keeps taking answers.
+        let send = app.buttons["Send answer"].firstMatch
+        XCTAssertFalse(send.isEnabled)
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Second button")).firstMatch.tap()
+        app.swipeUp()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Terminal header")).firstMatch.tap()
+        let notes = app.descendants(matching: .any).matching(identifier: "chat-question-typed-3").firstMatch
+        XCTAssertTrue(notes.waitForExistence(timeout: 4))
+        notes.tap(); notes.typeText("Keep the SSH key restricted")
+        capture(app, "Long Claude question sheet answered")
+        app.buttons["chat-question-collapse"].tap()
+        XCTAssertTrue(app.staticTexts["4 of 4 answered"].waitForExistence(timeout: 4), "Answers given on the sheet count on the card")
+        XCTAssertTrue(app.buttons["Send answer"].firstMatch.isEnabled)
+        app.buttons["Send answer"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "→ Descriptors only (Recommended)")).firstMatch.waitForExistence(timeout: 8))
+    }
+
+    /// At the largest accessibility size the window still shows the question
+    /// in full and keeps Send reachable; the sheet is the way to read the rest.
+    @MainActor
+    func testLongClaudeQuestionLaysOutAtAccessibilitySize() {
+        let app = launch(extra: ["--chat-approval-question", "--chat-approval-question-long",
+                                 "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        app.buttons["live-chat:w7:w7:t9"].tap()
+        XCTAssertTrue(app.buttons["chat-question-show-all"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["Send answer"].firstMatch.isHittable)
+        capture(app, "Long Claude question card XXXL")
+        app.buttons["chat-question-expand"].tap()
+        XCTAssertTrue(app.buttons["chat-question-collapse"].waitForExistence(timeout: 4))
+        capture(app, "Long Claude question sheet XXXL")
+        app.buttons["chat-question-collapse"].tap()
+        XCTAssertTrue(app.buttons["chat-question-show-all"].waitForExistence(timeout: 4))
+    }
+
     @MainActor
     func testApprovalStaysVisibleAboveHistoryAndCanBeDenied() {
         let app = launch(extra: ["--chat-approval", "--chat-long-history"])

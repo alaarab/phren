@@ -48,13 +48,30 @@ import UIKit
         ["question": "Which screens should change?", "header": "Scope", "multiSelect": true,
          "options": [["label": "Chat", "description": "The conversation"], ["label": "Agents", "description": "The overview"], ["label": "Settings"]]],
     ]]
+    /// The same request the way it really arrives: paragraph-long questions,
+    /// option descriptions that wrap, a `preview` mockup, four questions —
+    /// more than fits above the composer.
+    static let longQuestionInput: [String: Any] = ["questions": [
+        ["question": "The Hook currently resolves a pane's conversation from Herdr's explicit session id, falling back to transcript descriptors held by the pane's foreground processes. Which fallback should the phone prefer when Herdr is not running at all?", "header": "Identity",
+         "options": [["label": "Descriptors only (Recommended)", "description": "Keep the lsof-based binding and stop trusting folder or mtime heuristics; a fresh terminal never inherits another conversation."],
+                     ["label": "Lifecycle binding", "description": "Trust the agent hook's own registration of terminal id plus foreground pids, and accept that a restarted agent in the same pane looks new."],
+                     ["label": "Ask every time", "description": "Show the candidates and let the person pick, at the cost of one more tap per session."]]],
+        ["question": "How should the launch form present the no-Herdr terminal fallback?", "header": "Launch form",
+         "options": [["label": "Second button", "description": "Below the Herdr launch button, always visible.", "preview": "┌──────────────────────────────┐\n│  Open phren with Claude Code  │\n└──────────────────────────────┘\n┌──────────────────────────────┐\n│  ⌘ Open a terminal instead    │\n└──────────────────────────────┘"],
+                     ["label": "Only on failure", "description": "Offer it in the error alert after a Herdr launch fails.", "preview": "Couldn't reach Herdr.\n[ Open a terminal instead ]  [ OK ]"]]],
+        ["question": "Which screens should the change touch?", "header": "Scope", "multiSelect": true,
+         "options": [["label": "Launch form"], ["label": "Project sessions"], ["label": "Terminal header"], ["label": "Settings"]]],
+        ["question": "Should the shell route reconnect automatically after the link drops, the way a Herdr terminal does?", "header": "Reconnect",
+         "options": [["label": "No, end the session", "description": "Each connection is a fresh process; restarting silently would be surprising."], ["label": "Yes, restart the agent"]]],
+    ]]
     /// The plan Claude wrote in plan mode: more than a screenful, so the card
     /// cuts it and offers the rest.
     static let planMarkdown = "# Plan: subagent and todo cards\n\n## Steps\n\n1. Parse the Task tool in PhrenKit\n2. Draw the agent card\n3. Fold superseded todo lists\n4. Add fixture flags\n5. Write the UI tests\n6. Run the suite on the simulator\n7. Check the cards at accessibility sizes\n8. Verify the plan approval path\n9. Update the changelog\n10. Ask for review\n\n## Notes\n\n- Keep every card in the phren card family\n- No raw JSON on any card\n- Final step marker: run the full suite once more"
     static func approval(_ target: AgentChatTarget) throws -> AgentApproval? {
         guard !answered else { return nil }
         if flag("--chat-approval-question") {
-            let message = String(decoding: try JSONSerialization.data(withJSONObject: questionInput, options: .prettyPrinted), as: UTF8.self)
+            let input = flag("--chat-approval-question-long") ? longQuestionInput : questionInput
+            let message = String(decoding: try JSONSerialization.data(withJSONObject: input, options: .prettyPrinted), as: UTF8.self)
             return try AgentInteractionStatus.read(JSONSerialization.data(withJSONObject: ["agentStatus": ["source": target.source, "session": target.sessionID, "pendingApproval": ["actionId": "fixture-question-action", "toolName": "AskUserQuestion", "title": "Allow AskUserQuestion?", "message": message, "expiresAt": approvalExpiry]]]), target: target)?.approval
         }
         if flag("--chat-plan-mode") {

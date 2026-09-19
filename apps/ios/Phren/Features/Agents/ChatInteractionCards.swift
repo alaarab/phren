@@ -46,6 +46,10 @@ struct ChatApprovalCard<Terminal: View>: View {
 /// free-text answer, sent as the approval's `updatedInput`). Each question is
 /// its own section; one Send answers them all, since the agent takes them in
 /// a single reply.
+///
+/// Above the composer the card is a window: past the cap the questions scroll
+/// inside it and a fade shows there is more. "Expand" opens the same questions
+/// and the same draft answers as a full sheet, where nothing is cut.
 struct ChatQuestionCard: View {
     let prompt: AgentQuestionPrompt
     let busy: Bool
@@ -58,63 +62,133 @@ struct ChatQuestionCard: View {
     let answer: ([AgentQuestionAnswer]) -> Void
     @State private var answers: [Int: AgentQuestionAnswer] = [:]
     @State private var questionsHeight: CGFloat = 0
+    @State private var expanded = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @FocusState private var typing: Int?
     private static let scrollCap: CGFloat = 360
 
     private var current: [AgentQuestionAnswer] { prompt.questions.indices.map { answers[$0] ?? .init() } }
+    private var answeredCount: Int { zip(prompt.questions, current).filter { $0.0.isFreeText ? !$0.1.text.isEmpty : !$0.1.selections.isEmpty || !$0.1.text.isEmpty }.count }
+    private var overflows: Bool { questionsHeight > Self.scrollCap }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: allowsTyping ? "questionmark.bubble" : "bubble.left.and.text.bubble.right")
-                .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.cyan)
-            // Two questions with descriptions and an "Other…" row outgrow a
-            // phone above the composer: past the cap the questions scroll and
-            // the Send row stays put.
-            let questions = questionList.background(GeometryReader { geometry in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(title, systemImage: allowsTyping ? "questionmark.bubble" : "bubble.left.and.text.bubble.right")
+                    .font(.caption.weight(.semibold)).foregroundStyle(PhrenTheme.cyan).lineLimit(1)
+                Spacer(minLength: 0)
+                if prompt.questions.count > 1 {
+                    Text("\(answeredCount) of \(prompt.questions.count)").font(.caption2.monospacedDigit()).foregroundStyle(PhrenTheme.textMuted)
+                        .accessibilityLabel("\(answeredCount) of \(prompt.questions.count) answered")
+                }
+                Button { expanded = true } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.caption.weight(.semibold))
+                        .frame(width: 32, height: 32).contentShape(Rectangle())
+                }.buttonStyle(.plain).foregroundStyle(PhrenTheme.textMuted)
+                    .accessibilityLabel("Expand questions").accessibilityIdentifier("chat-question-expand")
+            }
+            let questions = questionList(inline: true).background(GeometryReader { geometry in
                 Color.clear.preference(key: ChatQuestionsHeight.self, value: geometry.size.height)
             })
             Group {
-                if questionsHeight > Self.scrollCap { ScrollView { questions }.frame(height: Self.scrollCap) } else { questions }
+                if overflows {
+                    ScrollView(showsIndicators: true) { questions }.frame(height: Self.scrollCap)
+                        .mask(
+                            // Fade the last rows out so the cut reads as "more below", not as the end.
+                            VStack(spacing: 0) {
+                                Color.black
+                                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 36)
+                            })
+                        .overlay(alignment: .bottom) {
+                            Button { expanded = true } label: {
+                                Label("Show all", systemImage: "chevron.down").font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(PhrenTheme.surfaceRaised, in: Capsule())
+                                    .overlay(Capsule().stroke(PhrenTheme.border, lineWidth: 1))
+                            }.buttonStyle(.plain).foregroundStyle(PhrenTheme.text).padding(.bottom, 4)
+                                .accessibilityIdentifier("chat-question-show-all")
+                        }
+                } else { questions }
             }.onPreferenceChange(ChatQuestionsHeight.self) { questionsHeight = $0 }
-            HStack(spacing: 12) {
-                if let skip {
-                    Button("Skip", action: skip).buttonStyle(.bordered).disabled(busy)
-                        .accessibilityIdentifier("chat-question-skip")
-                }
-                Button { answer(current) } label: {
-                    if busy { ProgressView().frame(maxWidth: .infinity) } else { Text("Send answer").frame(maxWidth: .infinity) }
-                }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan)
-                    .disabled(busy || !prompt.isAnswered(current))
-            }
+            sendRow
         }.padding(16).phrenCard()
             .overlay(alignment: .topLeading) {
                 Color.clear.frame(width: 1, height: 1).accessibilityElement()
                     .accessibilityLabel(title).accessibilityIdentifier("chat-question")
             }
+            .sheet(isPresented: $expanded) { expandedSheet }
     }
 
-    private var questionList: some View {
+    /// Skip beside Send; Send counts down what is still unanswered.
+    @ViewBuilder private var sendRow: some View {
+        // Accessibility sizes stack the two buttons so neither label is cut.
+        if typeSize.isAccessibilitySize { VStack(spacing: 10) { sendButton; skipButton } } else { HStack(spacing: 12) { skipButton; sendButton } }
+    }
+    @ViewBuilder private var skipButton: some View {
+        if let skip {
+            Button("Skip", action: skip).buttonStyle(.bordered).disabled(busy)
+                .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil)
+                .accessibilityIdentifier("chat-question-skip")
+        }
+    }
+    private var sendButton: some View {
+        Button { answer(current) } label: {
+            if busy { ProgressView().frame(maxWidth: .infinity) } else { Text("Send answer").frame(maxWidth: .infinity) }
+        }.buttonStyle(.borderedProminent).tint(PhrenTheme.cyan)
+            .disabled(busy || !prompt.isAnswered(current))
+    }
+
+    /// The whole question set with room to read: every question, description
+    /// and preview in full, the same draft answers, Send pinned at the bottom.
+    private var expandedSheet: some View {
+        PhrenNavigationStack {
+            VStack(spacing: 0) {
+                ScrollView {
+                    questionList(inline: false).padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
+                }
+                Divider().overlay(PhrenTheme.border)
+                sendRow.padding(16)
+            }
+            .background(PhrenTheme.bg)
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { expanded = false }.accessibilityIdentifier("chat-question-collapse") } }
+            .accessibilityIdentifier("chat-question-sheet")
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .onChange(of: busy) { _, now in if now { expanded = false } }
+    }
+
+    private func questionList(inline: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(prompt.questions.indices, id: \.self) { index in
                 let question = prompt.questions[index]
-                if index > 0 { Divider().overlay(PhrenTheme.border) }
-                if let header = question.header, !header.isEmpty {
-                    Text(header).font(.caption.weight(.medium)).lineLimit(1).foregroundStyle(PhrenTheme.sessionProject)
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+                if index > 0 { Divider().overlay(PhrenTheme.border).padding(.vertical, 2) }
+                HStack(spacing: 8) {
+                    if let header = question.header, !header.isEmpty {
+                        Text(header).font(.caption.weight(.medium)).lineLimit(1).foregroundStyle(PhrenTheme.sessionProject)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(PhrenTheme.sessionProject.opacity(0.1), in: Capsule())
+                    }
+                    if prompt.questions.count > 1 {
+                        Text("Question \(index + 1)").font(.caption2).foregroundStyle(PhrenTheme.textMuted)
+                    }
                 }
+                // Full text always: a question is never truncated, in either mode.
                 Text(question.question).font(.headline).foregroundStyle(PhrenTheme.text).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 if question.isFreeText {
                     typedRow(index, question: question, placeholder: question.kind == "number" ? "Enter a number" : "Type your answer")
                 } else {
-                    ForEach(question.options.indices, id: \.self) { option in optionRow(index, question: question, option: option) }
+                    ForEach(question.options.indices, id: \.self) { option in optionRow(index, question: question, option: option, inline: inline) }
                     if allowsTyping { typedRow(index, question: question, placeholder: "Other…") }
                 }
             }
         }
     }
-    private func optionRow(_ index: Int, question: AgentQuestionPrompt.Question, option: Int) -> some View {
+    private func optionRow(_ index: Int, question: AgentQuestionPrompt.Question, option: Int, inline: Bool) -> some View {
         let multi = question.multiSelect == true
         let selected = answers[index, default: .init()].selections.contains(option)
+        let choice = question.options[option]
         return Button {
             var answer = answers[index, default: .init()]
             if multi {
@@ -128,15 +202,32 @@ struct ChatQuestionCard: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: selected ? (multi ? "checkmark.square.fill" : "checkmark.circle.fill") : (multi ? "square" : "circle"))
                     .foregroundStyle(selected ? PhrenTheme.cyan : PhrenTheme.textDim)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(question.options[option].label).foregroundStyle(PhrenTheme.text)
-                    if let detail = question.options[option].description, !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(PhrenTheme.textMuted)
+                    Text(choice.label).foregroundStyle(PhrenTheme.text).fixedSize(horizontal: false, vertical: true)
+                    if let detail = choice.description, !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(PhrenTheme.textMuted).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let preview = choice.preview {
+                        // Inline: a glimpse; the sheet shows the whole preview and lets it scroll sideways.
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            Text(preview).font(.caption2.monospaced()).foregroundStyle(PhrenTheme.text)
+                                .lineLimit(inline ? 6 : nil).fixedSize(horizontal: true, vertical: true)
+                                .padding(8)
+                        }
+                        .background(PhrenTheme.bgSunken, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous).stroke(PhrenTheme.border, lineWidth: 1))
+                        .padding(.top, 2)
                     }
                 }
                 Spacer(minLength: 0)
             }.padding(12).background(selected ? PhrenTheme.cyan.opacity(0.1) : PhrenTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous).stroke(selected ? PhrenTheme.cyan.opacity(0.5) : .clear, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: PhrenTheme.Radius.small, style: .continuous))
         }.buttonStyle(.plain).disabled(busy)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            // The preview sits in a scroller, which drops it from the button's label.
+            .accessibilityValue(choice.preview ?? "")
     }
     private func typedRow(_ index: Int, question: AgentQuestionPrompt.Question, placeholder: String) -> some View {
         let text = Binding<String>(
