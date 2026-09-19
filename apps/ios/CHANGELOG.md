@@ -20,6 +20,8 @@ number counts up on its own.
 - **Open on a computer** can start the agent on a chosen model: codex, Claude
   Code, and opencode take a model field (opencode wants `provider/model`), and
   the last model you used per harness is remembered.
+- Paste a copied screenshot straight into the chat: when an image is on the
+  clipboard, a paste control appears beside the message box and attaches it.
 - Hold a paragraph to copy only it, or the whole reply; double-tap a word to
   select it with native handles and copy exactly as much as you want.
 - The agent's own bookkeeping has cards of its own in the chat. A subagent
