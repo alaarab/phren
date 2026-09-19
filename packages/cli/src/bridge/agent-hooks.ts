@@ -1,23 +1,68 @@
 import { request, createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile, readFile, rename, chmod, unlink, lstat } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, bridgeRoot, object, objects, provider, serverName, sessionId, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
-import { SHELL_TOOLS, ToolChanges } from "./changes.js";
+import { capturesChanges, ToolChanges } from "./changes.js";
+import { phrenStoreRoot } from "./transcripts.js";
+
+const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
+function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
+  if (!opencodeSession.test(session)) return undefined;
+  return path.join(phrenStoreRoot(), ".runtime", "approvals", `opencode-${session}.${kind}.json`);
+}
+function opencodeRequest(session: string): Json | undefined {
+  const file = opencodeApprovalFile(session, "request");
+  if (!file) return undefined;
+  try {
+    const value = object(JSON.parse(readFileSync(file, "utf8")));
+    if (typeof value.id !== "string" || !value.id || value.sessionID !== session) return undefined;
+    if (typeof value.expiresAt === "string" && Date.parse(value.expiresAt) <= Date.now()) return undefined;
+    return value;
+  } catch { return undefined; }
+}
 
 const localSocket = () => path.join(bridgeRoot(), "agent.sock");
-const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", server, encodeURIComponent(pane) + ".json");
+const bindingPath = (server: string, pane: string) => path.join(bridgeRoot(), "bindings", encodeURIComponent(serverName.parse(server)), encodeURIComponent(pane) + ".json");
 export async function recordedSession(server: string, pane: Json, pids: number[]): Promise<string | undefined> {
   try {
     const value = object(JSON.parse(await readFile(bindingPath(server, String(pane.pane_id)), "utf8")));
     if (value.terminal !== pane.terminal_id || value.source !== pane.agent || !Array.isArray(value.pids) || !value.pids.some(p => pids.includes(Number(p)))) return undefined;
-    return z.string().uuid().parse(value.session);
+    return sessionId.parse(value.session);
   } catch { return undefined; }
 }
 
-interface Pending { target: Target; response: ServerResponse; tool: string; message: string; expiresAt: string; timer: NodeJS.Timeout }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; expiresAt: string; timer: NodeJS.Timeout }
+
+/** Claude Code's AskUserQuestion is answered by allowing the call with its own
+ * input plus `answers` keyed by question text (a label, or labels when the
+ * question is multiSelect; any other string is a typed "Other"). The phone may
+ * add answers and a free-text `response`; it may not rewrite the questions. */
+const questionAnswers = z.looseObject({
+  answers: z.record(z.string().min(1).max(4000), z.union([z.string().max(4000), z.array(z.string().max(4000)).min(1).max(24)])).refine(a => Object.keys(a).length > 0),
+  response: z.string().max(4000).optional(),
+});
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value !== null && typeof value === "object") return "{" + Object.keys(value as Json).sort().map(k => JSON.stringify(k) + ":" + canonical((value as Json)[k])).join(",") + "}";
+  return JSON.stringify(value) ?? "null";
+}
+export function answeredQuestionInput(tool: string, input: unknown, updatedInput: unknown): Json {
+  if (tool !== "AskUserQuestion") throw new BridgeError(400, "Only a question can be answered with input.");
+  if (updatedInput === null || typeof updatedInput !== "object" || Array.isArray(updatedInput)) throw new BridgeError(400, "The answer is not an object.");
+  const raw = JSON.stringify(updatedInput);
+  if (Buffer.byteLength(raw) > 32_768) throw new BridgeError(400, "The answer is too large.");
+  const parsed = questionAnswers.safeParse(updatedInput);
+  if (!parsed.success) throw new BridgeError(400, "The answer must add an answers object.");
+  const { answers, response, ...rest } = parsed.data;
+  if (canonical(rest) !== canonical(object(input))) throw new BridgeError(400, "The answer must keep the original questions.");
+  const asked = new Set(objects(object(input).questions).map(q => q.question).filter(q => typeof q === "string"));
+  if (Object.keys(answers).some(q => !asked.has(q))) throw new BridgeError(400, "The answer names a question that was not asked.");
+  return { ...object(input), answers, ...(response === undefined ? {} : { response }) };
+}
 
 /** An explicit foreground overview poll renews interest for a bounded interval.
  * A disconnected phone never leaves future terminal prompts waiting forever. */
@@ -45,24 +90,49 @@ export class AgentHooks {
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    return pending ? { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt } : undefined;
+    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: `Allow ${pending[1].tool}?`, message: pending[1].message, expiresAt: pending[1].expiresAt };
+    if (target.source !== "opencode") return undefined;
+    const request = opencodeRequest(target.session);
+    return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message, expiresAt: request.expiresAt } : undefined;
   }
   pendingPanes(server: string, state: Json): Set<string> {
     const panes = objects(state.panes);
-    return new Set([...this.pending.values()].filter(p => p.target.server === server && panes.some(pane => {
+    const pending = new Set([...this.pending.values()].filter(p => p.target.server === server && panes.some(pane => {
       if (pane.pane_id !== p.target.pane || pane.workspace_id !== p.target.workspace || pane.tab_id !== p.target.tab || pane.agent !== p.target.source) return false;
       const reported = object(pane.agent_session);
       return reported.kind !== "id" || (reported.agent === p.target.source && reported.value === p.target.session);
     })).map(p => p.target.pane));
+    for (const pane of panes) {
+      if (pane.agent !== "opencode") continue;
+      const reported = object(pane.agent_session);
+      if (reported.kind === "id" && reported.agent === "opencode" && typeof reported.value === "string" && opencodeRequest(reported.value)) {
+        pending.add(String(pane.pane_id));
+      }
+    }
+    return pending;
   }
-  async answer(target: Target, id: string, decision: unknown) {
+  async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
+    if (target.source === "opencode") {
+      if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+      const file = opencodeApprovalFile(target.session, "answer");
+      if (!file) throw new BridgeError(400, "Invalid conversation identity.");
+      await validateTarget(target);
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      const temporary = file + "." + randomUUID();
+      await writeFile(temporary, JSON.stringify({ id, decision }), { mode: 0o600, flag: "wx" });
+      await rename(temporary, file);
+      return;
+    }
     const entry = this.pending.get(id);
     if (!entry || JSON.stringify(entry.target) !== JSON.stringify(target) || !["approve", "deny"].includes(String(decision))) throw new BridgeError(409, "This approval is no longer pending.");
+    if (updatedInput !== undefined && decision !== "approve") throw new BridgeError(400, "Answers go with an approval.");
+    const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
     await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     this.pending.delete(id); clearTimeout(entry.timer);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
       behavior: decision === "approve" ? "allow" : "deny", ...(decision === "deny" ? { message: "Declined in Phren." } : {}),
+      ...(answered ? { updatedInput: answered } : {}),
     } } }));
   }
   async start() {
@@ -90,12 +160,12 @@ export class AgentHooks {
         await writeFile(temporary, JSON.stringify({ terminal: pane.terminal_id, source: target.source, session: target.session, pids }), { mode: 0o600, flag: "wx" });
         await rename(temporary, file);
         // What a shell call changed on disk: snapshot before, diff after.
-        const input = object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
+        const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
         // Codex has renamed its shell tool more than once.
-        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && (SHELL_TOOLS.has(String(body.tool)) || command !== undefined)) {
+        if (["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
-          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "");
+          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
           else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
@@ -106,7 +176,7 @@ export class AgentHooks {
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
         const timer = setTimeout(() => { this.pending.delete(action); res.end("{}"); }, 55_000);
-        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200),
+        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt: new Date(Date.now() + 55_000).toISOString(), timer });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); });
       } catch { if (!res.headersSent) res.statusCode = 400; res.end("{}"); }
@@ -116,6 +186,7 @@ export class AgentHooks {
     await chmod(localSocket(), 0o600);
   }
   close() {
+    void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
   }

@@ -13,9 +13,10 @@ export interface InputAreaProps {
   focus: boolean;
   separatorColor?: string;
   theme?: Theme;
+  completionOpen?: boolean;
 }
 
-export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme }: InputAreaProps) {
+export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme, completionOpen }: InputAreaProps) {
   const { stdout } = useStdout();
   const columns = stdout?.columns || 80;
   const _sep = "\u2500".repeat(columns);
@@ -44,6 +45,7 @@ export function InputArea({ value, onChange, onSubmit, bashMode, focus, separato
         onChange={onChange}
         onSubmit={onSubmit}
         focus={focus}
+        completionOpen={completionOpen}
       />
     </Box>
   );
@@ -107,7 +109,7 @@ export function PermissionsLine({ mode, theme, running, agents, selectedAgentId,
       {showPerm ? (
         <Text>{"  "}<Text color={color}>{icon} {label}</Text><Text dimColor> (shift+tab to cycle){running ? " \u00b7 esc to interrupt" : ""}</Text></Text>
       ) : (
-        <Text>{"  "}{running ? <Text dimColor>esc to interrupt</Text> : null}</Text>
+        <Text>{"  "}<Text dimColor>shift+tab permissions · ctrl+o tools · ctrl+f find · ctrl+t plan{running ? " · esc to interrupt" : ""}</Text></Text>
       )}
       {hasAgents ? (
         <Text>

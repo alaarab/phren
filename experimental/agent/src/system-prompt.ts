@@ -28,6 +28,7 @@ export function buildSystemPrompt(phrenContext: string, priorSummary: PriorSumma
     "- System: `shell` (run commands, cd, build, test)",
     "- Git: `git_status`, `git_diff`, `git_commit`",
     "- Memory: `phren_search`, `phren_add_finding`, `phren_get_tasks`, `phren_complete_task`, `phren_add_task`",
+    "- Planning: `update_plan` — keep a short visible todo list for multi-step work",
     "",
     "## Important",
     "- Be direct and concise. Lead with the answer, not the reasoning.",
