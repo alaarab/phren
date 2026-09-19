@@ -19,6 +19,7 @@ import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import { bootedSimulators, simulatorScreenshot, simulatorAct, simulatorApps, type SimulatorAction } from "./simulators.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { AccountUsageReader } from "./usage.js";
+import { CodexQuestions } from "./questions.js";
 import { TabActivityStore } from "./tab-activity.js";
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
@@ -73,6 +74,7 @@ export async function serve(version: string): Promise<void> {
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
   const tabActivity = new TabActivityStore();
+  const codexQuestions = new CodexQuestions();
   const info = { product: "phren-hook", protocol: PROTOCOL, version, computer: { id: computerID, name: hostname() }, capabilities };
   const old = await lstat(socketPath()).catch(() => null);
   if (old) {
@@ -229,7 +231,9 @@ export async function serve(version: string): Promise<void> {
               ? z.string().regex(/^[A-Za-z0-9_]{1,200}$/).parse(data.actionId)
               : z.string().uuid().parse(data.actionId);
             await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
-          } else if (url.pathname === "/v1/questions/answer") throw new BridgeError(409, "Answer this agent's request in the Phren terminal.");
+          } else if (url.pathname === "/v1/questions/answer") {
+            await codexQuestions.answer(target, data); result = { ok: true };
+          }
           else throw new BridgeError(404, "Unknown Phren Hook route.");
           }
         }
@@ -283,10 +287,12 @@ export async function serve(version: string): Promise<void> {
               session: target.session });
           } else {
             const pendingApproval = agentHooks.approval(target);
+            const pendingQuestions = target.source === "codex" ? await codexQuestions.pending(target).catch(() => undefined) : undefined;
             const cwd = await trustedDirectory(pane).catch(() => undefined);
             const branch = cwd ? await repositoryBranch(cwd) : undefined;
             send(client, { agentStatus: { source: target.source, session: target.session,
-              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, capabilities, branch } });
+              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions,
+              capabilities: { ...capabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
           }
           first = false;
         }

@@ -81,7 +81,7 @@ WebSockets on the same socket.
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
 | `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). |
-| `POST /v1/questions/answer` | Existing unsupported-question response; answer in the terminal. |
+| `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. |
 
 Creation resolves `cwd` with `realpath`, requires an existing directory under the
 user's real home or within a `locateProject` candidate, and sends the resolved
@@ -199,3 +199,19 @@ binary 0700, and record `{ sourceSha, binarySha }` in its sidecar. The Hook hash
 the binary again immediately before each execution and rejects a mismatch.
 This check and PID confinement do not establish a security boundary against
 another process running as the same local user.
+
+### Codex asynchronous questions
+
+Status frames advertise `capabilities.asyncQuestions` only when the installed
+Codex exposes the exact-thread inbox command. `pendingQuestions` contains bounded,
+normalized async prompts (call ID, question text, options), including prompts
+older than the initial transcript page. Discovery scans at most 10,000 rows /
+8 MiB, caches unchanged transcripts, and never treats `{accepted:true}` as an
+answer. The terminal's later quoted user message resolves its matching question.
+The response endpoint accepts `toolUseId` and one `answers` entry per question,
+each with either an `optionIndexes` selection or typed `text`. It constructs the
+quoted reply from the trusted transcript and invokes Codex directly without a
+shell or terminal keystrokes. A successful response means Codex accepted the
+answer into its inbox; consumption can follow while an agent is working.
+Receipts live under `question-replies/` in the bridge directory. An ambiguous
+provider failure is never retried and leaves the question visible for inspection.
