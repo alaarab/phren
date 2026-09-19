@@ -26,7 +26,7 @@ import { AccountUsageReader } from "./usage.js";
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, simulators: process.platform === "darwin" };
+  files: true, repositoryFiles: true, approvalPush: "direct-apns", simulators: process.platform === "darwin" };
 
 /** A file from the phone: a plain name and base64 bytes, bounded. */
 function uploadBody(data: Json): { name: string; bytes: Buffer } {
@@ -122,6 +122,7 @@ export async function serve(version: string): Promise<void> {
           }
           case "/v1/simulators/apps": result = { apps: await simulatorApps(String(url.searchParams.get("udid") ?? "")) }; break;
           case "/v1/usage": result = await accountUsage.read(); break;
+          case "/v1/push/status": result = agentHooks.push.status; break;
           case "/v1/projects/locate": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             for (const candidate of candidates) {
@@ -172,7 +173,11 @@ export async function serve(version: string): Promise<void> {
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/files") {
+        if (url.pathname === "/v1/push/register") {
+          await agentHooks.push.register(data); result = { ok: true };
+        } else if (url.pathname === "/v1/push/answer") {
+          await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
+        } else if (url.pathname === "/v1/files") {
           // Files the phone keeps on this computer, outside any session.
           const { name, bytes } = uploadBody(data);
           result = { ok: true, path: await saveUpload("files", name, bytes) };

@@ -85,6 +85,8 @@ WebSockets on the same socket.
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
 | `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). |
+| `POST /v1/push/register` | Register this authenticated phone's APNs token for suspended approval delivery. Tokens are stored mode 0600 on the computer. |
+| `POST /v1/push/answer` | Consume a one-time, 55-second push binding with Approve or Deny. The APNs payload never carries the provider action or conversation identity. |
 | `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. |
 
 Creation resolves `cwd` with `realpath`, requires an existing directory under the

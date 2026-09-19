@@ -8,6 +8,7 @@ import { BridgeError, bridgeRoot, object, objects, provider, serverName, session
 import { herdrRoot, rpc, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { ApprovalPushService } from "./push.js";
 
 const opencodeSession = /^ses_[0-9A-Za-z]{1,64}$/;
 function opencodeApprovalFile(session: string, kind: "request" | "answer"): string | undefined {
@@ -36,6 +37,23 @@ export async function recordedSession(server: string, pane: Json, pids: number[]
 }
 
 interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; expiresAt: string; timer: NodeJS.Timeout }
+interface PushBinding { action: string; expiresAt: number }
+export class PushBindingStore {
+  private values = new Map<string, PushBinding>();
+  constructor(private now = Date.now, private limit = 128) {}
+  add(binding: string, value: PushBinding) {
+    for (const [key, item] of this.values) if (item.expiresAt <= this.now()) this.values.delete(key);
+    while (this.values.size >= this.limit) this.values.delete(this.values.keys().next().value!);
+    this.values.set(binding, value);
+  }
+  consume(binding: string): PushBinding | undefined {
+    const value = this.values.get(binding); this.values.delete(binding);
+    return value && value.expiresAt > this.now() ? value : undefined;
+  }
+  dropAction(action: string) { for (const [key, value] of this.values) if (value.action === action) this.values.delete(key); }
+  clear() { this.values.clear(); }
+  get size() { return this.values.size; }
+}
 
 /** Claude Code's AskUserQuestion is answered by allowing the call with its own
  * input plus `answers` keyed by question text (a label, or labels when the
@@ -83,6 +101,8 @@ export class AgentHooks {
   private watching = new Map<string, number>();
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
+  private pushBindings = new PushBindingStore();
+  constructor(readonly push = new ApprovalPushService()) {}
   watch(target: Target): () => void {
     const key = JSON.stringify(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
@@ -129,13 +149,25 @@ export class AgentHooks {
     const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
     await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
-    this.pending.delete(id); clearTimeout(entry.timer);
+    this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
       behavior: decision === "approve" ? "allow" : "deny", ...(decision === "deny" ? { message: "Declined in Phren." } : {}),
       ...(answered ? { updatedInput: answered } : {}),
     } } }));
   }
+  async answerPush(binding: string, decision: unknown) {
+    if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+    const linked = this.pushBindings.consume(binding);
+    if (!linked) throw new BridgeError(409, "This approval is no longer pending.");
+    const pending = this.pending.get(linked.action);
+    if (!pending) throw new BridgeError(409, "This approval is no longer pending.");
+    await this.answer(pending.target, linked.action, decision);
+  }
+  private dropPushBindings(action: string) {
+    this.pushBindings.dropAction(action);
+  }
   async start() {
+    await this.push.start();
     // The public helper singleton was already checked before this is called.
     const previous = await lstat(localSocket()).catch(() => undefined);
     if (previous) {
@@ -170,15 +202,28 @@ export class AgentHooks {
           res.end("{}"); return;
         }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
-          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server))) { res.end("{}"); return; }
-        // An exact chat watcher or explicit foreground overview lease is needed.
+          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) { res.end("{}"); return; }
+        // A foreground watcher or configured push device can hold the callback.
         // Timeouts always return control to the ordinary terminal prompt.
         if (this.pending.size >= 64) { res.end("{}"); return; }
         const action = randomUUID();
-        const timer = setTimeout(() => { this.pending.delete(action); res.end("{}"); }, 55_000);
+        const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
+        const timer = setTimeout(() => { this.pending.delete(action); this.dropPushBindings(action); res.end("{}"); }, 55_000);
+        const expiresAt = new Date(Date.now() + 55_000).toISOString();
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input,
-          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt: new Date(Date.now() + 55_000).toISOString(), timer });
-        res.on("close", () => { clearTimeout(timer); this.pending.delete(action); });
+          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), expiresAt, timer });
+        res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.dropPushBindings(action); });
+        if (this.push.available) {
+          const binding = randomUUID();
+          this.pushBindings.add(binding, { action, expiresAt: Date.parse(expiresAt) });
+          void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion", expiresAt }).then(delivered => {
+            if (!delivered) {
+              this.pushBindings.consume(binding);
+              const pending = this.pending.get(action);
+              if (!locallyWatched && pending) { clearTimeout(pending.timer); this.pending.delete(action); res.end("{}"); }
+            }
+          });
+        }
       } catch { if (!res.headersSent) res.statusCode = 400; res.end("{}"); }
     });
     this.server.requestTimeout = 65_000;
@@ -189,6 +234,7 @@ export class AgentHooks {
     void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
+    this.pushBindings.clear();
   }
 }
 

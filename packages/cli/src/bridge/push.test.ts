@@ -1,0 +1,58 @@
+import { describe, expect, it } from "vitest";
+import { approvalPushPayload, upsertPushDevice } from "./push.js";
+import { PushBindingStore } from "./agent-hooks.js";
+
+describe("approval push payload", () => {
+  it("contains only a generic alert and opaque expiring binding", () => {
+    const value = approvalPushPayload({
+      binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", provider: "codex", question: false,
+      expiresAt: "2026-09-19T20:00:55.000Z",
+    }, "73d445d1-4b31-43fc-9185-65b60c6f7125");
+    expect(value).toEqual({
+      aps: { alert: { title: "Codex needs approval", body: "Open Phren to review the request." }, sound: "default",
+        category: "PHREN_AGENT_APPROVAL", "interruption-level": "time-sensitive" },
+      phren: { version: 1, binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", expiresAt: "2026-09-19T20:00:55.000Z",
+        host: "73d445d1-4b31-43fc-9185-65b60c6f7125" },
+    });
+    const encoded = JSON.stringify(value);
+    expect(encoded).not.toContain("workspace"); expect(encoded).not.toContain("session");
+    expect(encoded).not.toContain("actionId"); expect(encoded).not.toContain("command");
+  });
+
+  it("requires questions to open Phren instead of offering blind approval", () => {
+    const value = approvalPushPayload({ binding: "a", provider: "claude", question: true, expiresAt: "2026-09-19T20:00:55.000Z" });
+    expect((value.aps as any).category).toBe("PHREN_AGENT_QUESTION");
+    expect(JSON.stringify(value)).not.toContain("Approve");
+  });
+
+  it("keeps separate phones registered and rotates only the matching phone token", () => {
+    const one = { deviceID: "11111111-1111-4111-8111-111111111111", hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", token: "a".repeat(64), environment: "production" };
+    const two = { deviceID: "22222222-2222-4222-8222-222222222222", hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", token: "b".repeat(64), environment: "production" };
+    let devices = upsertPushDevice([], one);
+    devices = upsertPushDevice(devices, two);
+    devices = upsertPushDevice(devices, { ...one, token: "c".repeat(64) });
+    expect(devices).toHaveLength(2);
+    expect(devices.find(device => device.deviceID === one.deviceID)?.token).toBe("c".repeat(64));
+  });
+});
+
+describe("push bindings", () => {
+  it("is one-time and rejects expired bindings", () => {
+    let now = 100;
+    const bindings = new PushBindingStore(() => now, 2);
+    bindings.add("first", { action: "a", expiresAt: 200 });
+    expect(bindings.consume("first")?.action).toBe("a");
+    expect(bindings.consume("first")).toBeUndefined();
+    bindings.add("expired", { action: "b", expiresAt: 150 }); now = 151;
+    expect(bindings.consume("expired")).toBeUndefined();
+  });
+
+  it("drops response bindings and remains bounded", () => {
+    const bindings = new PushBindingStore(() => 100, 2);
+    bindings.add("one", { action: "a", expiresAt: 200 }); bindings.add("two", { action: "a", expiresAt: 200 });
+    bindings.dropAction("a"); expect(bindings.size).toBe(0);
+    bindings.add("one", { action: "a", expiresAt: 200 }); bindings.add("two", { action: "b", expiresAt: 200 });
+    bindings.add("three", { action: "c", expiresAt: 200 });
+    expect(bindings.size).toBe(2); expect(bindings.consume("one")).toBeUndefined();
+  });
+});
