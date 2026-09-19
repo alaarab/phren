@@ -65,7 +65,7 @@ export class ToolRegistry {
     const hookOptions = { cwd: this.permissionConfig.projectRoot, executor: this.hookExecutor };
     const pre = await runPreToolUseHooks(this.hookConfig, name, input, hookOptions);
     if (pre.denied) {
-      return { output: pre.message, is_error: true };
+      return { output: pre.message, is_error: true, permissionDenied: true };
     }
 
     if (signal?.aborted) return { output: "Cancelled by user.", is_error: true };
@@ -73,12 +73,12 @@ export class ToolRegistry {
     // Permission check — always enforced
     const rule = checkPermission(this.permissionConfig, name, input);
     if (rule.verdict === "deny") {
-      return { output: `Permission denied: ${rule.reason}`, is_error: true };
+      return { output: `Permission denied: ${rule.reason}`, is_error: true, permissionDenied: true };
     }
     if (rule.verdict === "ask") {
       const allowed = await this.askUser(name, input, rule.reason);
       if (!allowed) {
-        return { output: "User denied permission.", is_error: true };
+        return { output: "User denied permission.", is_error: true, permissionDenied: true };
       }
     }
 
