@@ -32,13 +32,14 @@ function findWasmBinary(): Buffer | undefined {
   return undefined;
 }
 
-const _initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<unknown>;
-
 /**
  * Bootstrap sql.js-fts5: find the WASM binary and initialise the library.
  * Shared across shared-index.ts and embedding.ts to avoid duplication.
+ * The require is lazy so importing this module (the Hook bundle pulls it in
+ * through the CLI context) does not need the native package on disk.
  */
 export async function bootstrapSqlJs(): Promise<unknown> {
+  const initSqlJs = require("sql.js-fts5") as (config?: Record<string, unknown>) => Promise<unknown>;
   const wasmBinary = findWasmBinary();
-  return _initSqlJs(wasmBinary ? { wasmBinary } : {});
+  return initSqlJs(wasmBinary ? { wasmBinary } : {});
 }
