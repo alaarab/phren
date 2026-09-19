@@ -278,6 +278,8 @@ final class LiveHostMonitor {
     @ObservationIgnored private let pollInterval: Duration
     @ObservationIgnored var onSnapshotChanged: (() -> Void)?
     @ObservationIgnored private var publishing: Task<Void, Never>?
+    @ObservationIgnored private let approvals = OverviewApprovalMonitor()
+    @ObservationIgnored private var approvalRefresh: Task<Void, Never>?
 
     /// Fetch again now rather than at the end of the poll interval — after a
     /// close, a launch, anything the person just did to the computer.
@@ -313,7 +315,7 @@ final class LiveHostMonitor {
         generation = run
         polling = true
         var first = true
-        defer { if generation == run { polling = false; refreshing = false } }
+        defer { if generation == run { polling = false; refreshing = false; approvalRefresh?.cancel() } }
         while !Task.isCancelled {
             refreshing = true
             do {
@@ -321,6 +323,8 @@ final class LiveHostMonitor {
                 try Task.checkCancellation()
                 guard generation == run else { return }
                 snapshot = value
+                approvalRefresh?.cancel()
+                approvalRefresh = Task { await approvals.refresh(value.sessions(on: host)) }
                 lastUpdated = Date()
                 message = nil
                 fingerprint = nil

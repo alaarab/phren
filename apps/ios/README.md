@@ -462,9 +462,12 @@ existing conversations without restarting them. An ambiguous identity disables
 chat instead of selecting another agent.
 
 Codex and Claude PermissionRequest callbacks can show a native approval while
-Phren watches that conversation or the foreground session overview. Only an
-explicit answer resolves the pending request. If the phone is not watching,
-the normal terminal prompt appears
+Phren watches that conversation or the foreground session overview. The overview
+creates permission Live Activities without requiring you to open each chat first.
+An activity received while Phren is active stays available on the Lock Screen
+until its request expires; new requests after iOS suspends Phren still require a
+push relay, which is not configured. Only an explicit answer resolves the pending
+request. If the phone is not watching, the normal terminal prompt appears
 immediately; unanswered phone requests return to the terminal after 55 seconds.
 Question dialogs and unsupported provider interactions use Phren's native
 terminal. No agent is launched automatically.

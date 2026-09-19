@@ -215,10 +215,13 @@ to resume to load their provider's hook configuration.
 
 Pending tabs expose `approvalPending`; exact status frames include `expiresAt`.
 The chat keeps its permission explanation, Open terminal, and Deny/Approve
-controls above the composer. Requests received in chat can also create a Live
-Activity: actions authenticate and open the app before using its protected SSH
-key. The widget receives display text and an opaque local ID, while a private
-protected record binds the host, pane, conversation, action and expiry. Claims
+controls above the composer. The foreground overview also resolves pending tabs
+to every exact agent pane and reads their authenticated status, so a permission
+can create a Live Activity without first opening its chat. These bounded reads
+cancel when foreground polling stops and never answer a request.
+Requests received in chat or the overview can create a Live Activity: actions
+authenticate and open the app before using its protected SSH key. The widget
+receives display text and an opaque local ID, while a private protected record binds the host, pane, conversation, action and expiry. Claims
 are consumed before sending and never automatically retried. New requests while
 iOS suspends the app require a push relay; this integration does not supply one.
 
